@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book Event - SK Binge Galaxy</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/booking.css">
+    <link rel="stylesheet" href="../css/dashboard.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <h2>SK Binge Galaxy</h2>
+                <span>Book Your Event</span>
+            </div>
+            <div class="nav-menu">
+                <a href="dashboard" class="nav-link">Dashboard</a>
+                <a href="booking" class="nav-link active">New Booking</a>
+                <a href="my-bookings" class="nav-link">My Bookings</a>
+                <div class="nav-user">
+                    <span id="userName">Welcome, User</span>
+                    <div class="user-dropdown">
+                        <button class="user-btn" id="userMenuBtn">▼</button>
+                        <div class="dropdown-content" id="userDropdown">
+                            <a href="profile">Profile</a>
+                            <a href="#" id="logoutBtn">Logout</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="booking-container">
+        <div class="booking-steps">
+            <div class="step active" data-step="1">1. Event Details</div>
+            <div class="step" data-step="2">2. Date & Time</div>
+            <div class="step" data-step="3">3. Additional Services</div>
+            <div class="step" data-step="4">4. Review & Pay</div>
+        </div>
+
+        <!-- Step 1: Event Details -->
+        <div class="booking-step active" id="step1">
+            <h2>Event Details</h2>
+            <form id="eventDetailsForm">
+                <div class="form-group">
+                    <label for="eventType">Event Type *</label>
+                    <select class="form-control" id="eventType" required>
+                        <option value="">Select Event Type</option>
+                        <option value="birthday">Birthday Celebration</option>
+                        <option value="anniversary">Anniversary</option>
+                        <option value="surprise">Surprise Party</option>
+                        <option value="proposal">Marriage Proposal</option>
+                        <option value="screening">HD Movie Screening</option>
+                        <option value="other">Other Event</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="numberOfGuests">Number of Guests *</label>
+                    <input type="number" class="form-control" id="numberOfGuests" 
+                           min="1" max="20" value="10" required>
+                    <small>Maximum 20 guests allowed</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="specialRequests">Special Requests</label>
+                    <textarea class="form-control" id="specialRequests" 
+                              placeholder="Any special requirements or notes..." 
+                              rows="4" maxlength="500"></textarea>
+                    <small><span id="charCount">0</span>/500 characters</small>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="window.location.href='dashboard'">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="nextStep(2)">Next: Date & Time</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Step 2: Date & Time -->
+        <div class="booking-step" id="step2">
+            <h2>Select Date & Time</h2>
+            
+            <div class="availability-section">
+                <div class="form-group">
+                    <label for="bookingDate">Select Date *</label>
+                    <input type="date" class="form-control" id="bookingDate" 
+                           min="{{today}}" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="duration">Duration (Hours) *</label>
+                    <select class="form-control" id="duration" required>
+                        <option value="2">2 Hours</option>
+                        <option value="3" selected>3 Hours</option>
+                        <option value="4">4 Hours</option>
+                        <option value="5">5 Hours</option>
+                    </select>
+                </div>
+
+                <button type="button" class="btn btn-secondary" onclick="checkAvailability()">
+                    Check Availability
+                </button>
+            </div>
+
+            <div class="time-slots" id="timeSlots">
+                <div class="loading">Select a date and duration to see available time slots</div>
+            </div>
+
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="prevStep(1)">Previous</button>
+                <button type="button" class="btn btn-primary" id="nextStep2" disabled onclick="nextStep(3)">
+                    Next: Additional Services
+                </button>
+            </div>
+        </div>
+
+        <!-- Step 3: Additional Services -->
+        <div class="booking-step" id="step3">
+            <h2>Additional Services</h2>
+            <p>Enhance your experience with our premium services</p>
+
+            <div class="services-grid">
+                <div class="service-item">
+                    <input type="checkbox" id="decorations" class="service-checkbox" data-price="1500">
+                    <label for="decorations" class="service-label">
+                        <div class="service-icon">🎉</div>
+                        <div class="service-info">
+                            <h4>Special Decorations</h4>
+                            <p>Themed decorations with balloons, lights, and banners</p>
+                            <span class="service-price">+ ₹1,500</span>
+                        </div>
+                    </label>
+                </div>
+
+                <div class="service-item">
+                    <input type="checkbox" id="beverages" class="service-checkbox" data-price="800">
+                    <label for="beverages" class="service-label">
+                        <div class="service-icon">🥤</div>
+                        <div class="service-info">
+                            <h4>Beverages Package</h4>
+                            <p>Soft drinks, juices, and mocktails for all guests</p>
+                            <span class="service-price">+ ₹800</span>
+                        </div>
+                    </label>
+                </div>
+
+                <div class="service-item">
+                    <input type="checkbox" id="photoshoot" class="service-checkbox" data-price="1200">
+                    <label for="photoshoot" class="service-label">
+                        <div class="service-icon">📸</div>
+                        <div class="service-info">
+                            <h4>Professional Photoshoot</h4>
+                            <p>30-minute professional photoshoot with 10 edited photos</p>
+                            <span class="service-price">+ ₹1,200</span>
+                        </div>
+                    </label>
+                </div>
+
+                <div class="service-item">
+                    <input type="checkbox" id="fogEffects" class="service-checkbox" data-price="1000">
+                    <label for="fogEffects" class="service-label">
+                        <div class="service-icon">🌫️</div>
+                        <div class="service-info">
+                            <h4>Fog & Special Effects</h4>
+                            <p>Atmospheric fog effects and lighting for ambiance</p>
+                            <span class="service-price">+ ₹1,000</span>
+                        </div>
+                    </label>
+                </div>
+
+                <div class="service-item">
+                    <input type="checkbox" id="redCarpet" class="service-checkbox" data-price="500">
+                    <label for="redCarpet" class="service-label">
+                        <div class="service-icon">🎬</div>
+                        <div class="service-info">
+                            <h4>Red Carpet Entry</h4>
+                            <p>VIP red carpet entry with welcome ceremony</p>
+                            <span class="service-price">+ ₹500</span>
+                        </div>
+                    </label>
+                </div>
+
+                <div class="service-item">
+                    <input type="checkbox" id="cake" class="service-checkbox" data-price="600">
+                    <label for="cake" class="service-label">
+                        <div class="service-icon">🎂</div>
+                        <div class="service-info">
+                            <h4>Custom Cake</h4>
+                            <p>1kg custom-designed cake with message</p>
+                            <span class="service-price">+ ₹600</span>
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            <div class="price-summary" id="priceSummary">
+                <h3>Price Summary</h3>
+                <div class="price-breakdown">
+                    <div class="price-item">
+                        <span>Base Rate (3 hours)</span>
+                        <span>₹6,000</span>
+                    </div>
+                    <div class="price-item">
+                        <span>Additional Services</span>
+                        <span>₹0</span>
+                    </div>
+                    <div class="price-item total">
+                        <span><strong>Total Amount</strong></span>
+                        <span><strong>₹6,000</strong></span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="prevStep(2)">Previous</button>
+                <button type="button" class="btn btn-primary" onclick="nextStep(4)">
+                    Next: Review & Pay
+                </button>
+            </div>
+        </div>
+
+        <!-- Step 4: Review & Pay -->
+        <div class="booking-step" id="step4">
+            <h2>Review Your Booking</h2>
+            
+            <div class="booking-summary">
+                <div class="summary-section">
+                    <h3>Event Details</h3>
+                    <div id="reviewEventDetails"></div>
+                </div>
+                
+                <div class="summary-section">
+                    <h3>Date & Time</h3>
+                    <div id="reviewDateTime"></div>
+                </div>
+                
+                <div class="summary-section">
+                    <h3>Services</h3>
+                    <div id="reviewServices"></div>
+                </div>
+                
+                <div class="summary-section">
+                    <h3>Final Amount</h3>
+                    <div class="final-amount" id="finalAmount">₹6,000</div>
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="prevStep(3)">Previous</button>
+                <button type="button" class="btn btn-primary" id="confirmBookingBtn" onclick="confirmBooking()">
+                    Confirm & Proceed to Payment
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="../js/booking.js"></script>
+</body>
+</html>

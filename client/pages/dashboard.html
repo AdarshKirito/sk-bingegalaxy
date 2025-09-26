@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - SK Binge Galaxy</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/dashboard.css">
+</head>
+<body>
+    <!-- Navigation Header -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <h2>SK Binge Galaxy</h2>
+                <span>Customer Portal</span>
+            </div>
+            <div class="nav-menu">
+                <a href="dashboard" class="nav-link active">Dashboard</a>
+                <a href="booking" class="nav-link">New Booking</a>
+                <a href="my-bookings" class="nav-link">My Bookings</a>
+                <div class="nav-user">
+                    <span id="userName">Welcome, User</span>
+                    <div class="user-dropdown">
+                        <button class="user-btn" id="userMenuBtn">▼</button>
+                        <div class="dropdown-content" id="userDropdown">
+                            <a href="profile">Profile</a>
+                            <a href="#" id="logoutBtn">Logout</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="dashboard-container">
+        <!-- Welcome Section -->
+        <section class="welcome-section">
+            <div class="welcome-card">
+                <div class="welcome-content">
+                    <h1>Welcome to Your Dashboard</h1>
+                    <p>Book your perfect event experience with SK Binge Galaxy</p>
+                    <div class="welcome-stats">
+                        <div class="stat-card">
+                            <h3 id="totalBookings">0</h3>
+                            <p>Total Bookings</p>
+                        </div>
+                        <div class="stat-card">
+                            <h3 id="upcomingBookings">0</h3>
+                            <p>Upcoming Events</p>
+                        </div>
+                        <div class="stat-card">
+                            <h3 id="amountSpent">₹0</h3>
+                            <p>Total Spent</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="welcome-action">
+                    <a href="booking" class="btn btn-primary btn-large">Book New Event</a>
+                </div>
+            </div>
+        </section>
+
+        <!-- Quick Actions -->
+        <section class="quick-actions">
+            <h2>Quick Actions</h2>
+            <div class="action-grid">
+                <div class="action-card" onclick="window.location.href='booking'">
+                    <div class="action-icon">🎬</div>
+                    <h3>Book Event</h3>
+                    <p>Schedule a new birthday, anniversary, or special event</p>
+                </div>
+                <div class="action-card" onclick="window.location.href='my-bookings'">
+                    <div class="action-icon">📋</div>
+                    <h3>My Bookings</h3>
+                    <p>View and manage your existing bookings</p>
+                </div>
+                <div class="action-card" onclick="window.location.href='profile'">
+                    <div class="action-icon">👤</div>
+                    <h3>Profile</h3>
+                    <p>Update your personal information</p>
+                </div>
+                <div class="action-card" onclick="checkAvailability()">
+                    <div class="action-icon">📅</div>
+                    <h3>Check Availability</h3>
+                    <p>See available dates and times</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Upcoming Bookings -->
+        <section class="upcoming-bookings">
+            <div class="section-header">
+                <h2>Upcoming Bookings</h2>
+                <a href="my-bookings" class="view-all">View All →</a>
+            </div>
+            <div class="bookings-list" id="upcomingBookingsList">
+                <!-- Upcoming bookings will be loaded here -->
+                <div class="loading">Loading upcoming bookings...</div>
+            </div>
+        </section>
+
+        <!-- Recent Activity -->
+        <section class="recent-activity">
+            <div class="section-header">
+                <h2>Recent Activity</h2>
+            </div>
+            <div class="activity-list" id="recentActivityList">
+                <!-- Recent activity will be loaded here -->
+                <div class="loading">Loading recent activity...</div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-content">
+            <p>&copy; 2024 SK Binge Galaxy. All rights reserved.</p>
+            <p>Contact: info@skbingegalaxy.com | +91 9876543210</p>
+        </div>
+    </footer>
+
+    <script src="../js/dashboard.js"></script>
+</body>
+</html>

@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Bookings - SK Binge Galaxy</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/admin-bookings.css">
+        <link rel="stylesheet" href="../css/dashboard.css">
+
+</head>
+<body>
+    <nav class="navbar admin-navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <h2>SK Binge Galaxy</h2>
+                <span>Admin Portal</span>
+            </div>
+            <div class="nav-menu">
+                <a href="admin-dashboard" class="nav-link">Dashboard</a>
+                <a href="admin-bookings" class="nav-link active">All Bookings</a>
+                <a href="admin-block-dates" class="nav-link">Block Dates</a>
+                <a href="admin-checkin" class="nav-link">Check-in</a>
+                <a href="admin-reports" class="nav-link">Reports</a>
+                <div class="nav-user">
+                    <span id="adminName">Admin User</span>
+                    <div class="user-dropdown">
+                        <button class="user-btn" id="adminMenuBtn">▼</button>
+                        <div class="dropdown-content" id="adminDropdown">
+                            <a href="admin-profile">Admin Profile</a>
+                            <a href="#" id="adminLogoutBtn">Logout</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="admin-container">
+        <div class="admin-header">
+            <h1>Manage All Bookings</h1>
+            <p>View, edit, and manage all customer bookings</p>
+        </div>
+
+        <!-- Quick Stats -->
+        <div class="admin-stats">
+            <div class="stat-card">
+                <div class="stat-icon">📊</div>
+                <div class="stat-info">
+                    <h3 id="totalBookings">0</h3>
+                    <p>Total Bookings</p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">✅</div>
+                <div class="stat-info">
+                    <h3 id="todayBookings">0</h3>
+                    <p>Today's Bookings</p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">🏠</div>
+                <div class="stat-info">
+                    <h3 id="checkedIn">0</h3>
+                    <p>Checked-in</p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">💰</div>
+                <div class="stat-info">
+                    <h3 id="revenue">₹0</h3>
+                    <p>Today's Revenue</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filters and Search -->
+        <div class="admin-filters">
+            <div class="filter-group">
+                <input type="text" id="searchInput" class="form-control" placeholder="Search by booking ID, name, email, phone...">
+            </div>
+            
+            <div class="filter-group">
+                <select id="statusFilter" class="form-control">
+                    <option value="all">All Status</option>
+                    <option value="confirmed">Confirmed</option>
+                    <option value="checked-in">Checked-in</option>
+                    <option value="completed">Completed</option>
+                    <option value="cancelled">Cancelled</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <select id="dateFilter" class="form-control">
+                    <option value="all">All Dates</option>
+                    <option value="today">Today</option>
+                    <option value="tomorrow">Tomorrow</option>
+                    <option value="week">This Week</option>
+                    <option value="month">This Month</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <select id="eventFilter" class="form-control">
+                    <option value="all">All Events</option>
+                    <option value="birthday">Birthday</option>
+                    <option value="anniversary">Anniversary</option>
+                    <option value="surprise">Surprise</option>
+                    <option value="proposal">Proposal</option>
+                    <option value="screening">Screening</option>
+                </select>
+            </div>
+
+            <button class="btn btn-primary" onclick="refreshBookings()">Refresh</button>
+        </div>
+
+        <!-- Bookings Table -->
+        <div class="bookings-table-container">
+            <table class="bookings-table">
+                <thead>
+                    <tr>
+                        <th>Booking ID</th>
+                        <th>Customer</th>
+                        <th>Event Type</th>
+                        <th>Date & Time</th>
+                        <th>Guests</th>
+                        <th>Amount</th>
+                        <th>Status</th>
+                        <th>Payment</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="bookingsTableBody">
+                    <tr>
+                        <td colspan="9" class="loading">Loading bookings...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="pagination" id="pagination">
+            <!-- Pagination will be generated here -->
+        </div>
+    </div>
+
+    <!-- Edit Booking Modal -->
+    <div class="modal hidden" id="editModal">
+        <div class="modal-content large">
+            <div class="modal-header">
+                <h3>Edit Booking</h3>
+                <button class="close-btn" onclick="closeEditModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <form id="editBookingForm">
+                    <div id="editFormContent">
+                        <!-- Edit form will be loaded here -->
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeEditModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveBookingChanges()">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Actions Modal -->
+    <div class="modal hidden" id="actionsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Booking Actions</h3>
+                <button class="close-btn" onclick="closeActionsModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <div id="actionsContent">
+                    <!-- Actions content will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="../js/admin-bookings.js"></script>
+</body>
+</html>

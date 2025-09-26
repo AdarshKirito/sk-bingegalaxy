@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Booking Confirmed - SK Binge Galaxy</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/confirmation.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <h2>SK Binge Galaxy</h2>
+                <span>Booking Confirmation</span>
+            </div>
+            <div class="nav-menu">
+                <a href="dashboard" class="nav-link">Dashboard</a>
+                <a href="my-bookings" class="nav-link">My Bookings</a>
+                <div class="nav-user">
+                    <span id="userName">Welcome, User</span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="confirmation-container">
+        <div class="confirmation-header success">
+            <div class="confirmation-icon">
+                <i class="fas fa-check-circle"></i>
+            </div>
+            <h1>Booking Confirmed!</h1>
+            <p>Your event has been scheduled successfully</p>
+        </div>
+
+        <div class="confirmation-content">
+            <!-- Booking Summary -->
+            <div class="confirmation-card">
+                <h2><i class="fas fa-receipt"></i> Booking Summary</h2>
+                <div class="booking-summary" id="bookingSummary">
+                    <div class="loading">Loading booking details...</div>
+                </div>
+            </div>
+
+            <!-- Notification Status -->
+            <div class="confirmation-card">
+                <h2><i class="fas fa-bell"></i> Notifications Sent</h2>
+                <div class="notifications-status">
+                    <div class="notification-item">
+                        <div class="notification-icon email">
+                            <i class="fas fa-envelope"></i>
+                        </div>
+                        <div class="notification-info">
+                            <h4>Email Confirmation</h4>
+                            <p>Sent to your registered email address</p>
+                            <span class="notification-status sent" id="emailStatus">
+                                <i class="fas fa-check"></i> Sent
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="notification-item">
+                        <div class="notification-icon whatsapp">
+                            <i class="fab fa-whatsapp"></i>
+                        </div>
+                        <div class="notification-info">
+                            <h4>WhatsApp Message</h4>
+                            <p>Sent to your registered phone number</p>
+                            <span class="notification-status sent" id="whatsappStatus">
+                                <i class="fas fa-check"></i> Sent
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="notification-item">
+                        <div class="notification-icon sms">
+                            <i class="fas fa-comment-sms"></i>
+                        </div>
+                        <div class="notification-info">
+                            <h4>SMS Alert</h4>
+                            <p>Sent to your mobile number</p>
+                            <span class="notification-status sent" id="smsStatus">
+                                <i class="fas fa-check"></i> Sent
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="notification-actions">
+                    <button class="btn btn-secondary" onclick="resendNotifications()">
+                        <i class="fas fa-redo"></i> Resend All Notifications
+                    </button>
+                    <button class="btn btn-primary" onclick="downloadReceipt()">
+                        <i class="fas fa-download"></i> Download Receipt
+                    </button>
+                </div>
+            </div>
+
+            <!-- Next Steps -->
+            <div class="confirmation-card">
+                <h2><i class="fas fa-list-check"></i> What's Next?</h2>
+                <div class="next-steps">
+                    <div class="step-item">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <h4>Save Your Booking ID</h4>
+                            <p>Keep your Booking ID <strong id="displayBookingId">SKBG12345</strong> handy for reference</p>
+                        </div>
+                    </div>
+                    <div class="step-item">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <h4>Event Reminder</h4>
+                            <p>You'll receive a reminder 24 hours before your event</p>
+                        </div>
+                    </div>
+                    <div class="step-item">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <h4>Arrival Instructions</h4>
+                            <p>Please arrive 15 minutes before your scheduled time with a valid ID</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Support Information -->
+            <div class="support-section">
+                <h3><i class="fas fa-headset"></i> Need Help?</h3>
+                <div class="support-contacts">
+                    <div class="contact-item">
+                        <i class="fas fa-phone"></i>
+                        <span>+91 9876543210</span>
+                    </div>
+                    <div class="contact-item">
+                        <i class="fas fa-envelope"></i>
+                        <span>info@skbingegalaxy.com</span>
+                    </div>
+                    <div class="contact-item">
+                        <i class="fas fa-clock"></i>
+                        <span>Support Hours: 9 AM - 11 PM</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="confirmation-actions">
+            <button class="btn btn-secondary" onclick="viewBooking()">
+                <i class="fas fa-eye"></i> View Booking Details
+            </button>
+            <button class="btn btn-primary" onclick="goToDashboard()">
+                <i class="fas fa-tachometer-alt"></i> Go to Dashboard
+            </button>
+            <button class="btn btn-outline" onclick="bookAnotherEvent()">
+                <i class="fas fa-plus"></i> Book Another Event
+            </button>
+        </div>
+    </div>
+
+    <script src="../js/confirmation.js"></script>
+</body>
+</html>

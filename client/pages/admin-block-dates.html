@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Block Dates - SK Binge Galaxy</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/block-dates.css">
+    <link rel="stylesheet" href="../css/dashboard.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <nav class="navbar admin-navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <h2>SK Binge Galaxy</h2>
+                <span>Admin Portal</span>
+            </div>
+            <div class="nav-menu">
+                <a href="admin-dashboard" class="nav-link">Dashboard</a>
+                <a href="admin-bookings" class="nav-link">All Bookings</a>
+                <a href="admin-block-dates" class="nav-link active">Block Dates</a>
+                <a href="admin-checkin" class="nav-link">Check-in</a>
+                <a href="admin-reports" class="nav-link">Reports</a>
+                <div class="nav-user">
+                    <span id="adminName">Admin User</span>
+                    <div class="user-dropdown">
+                        <button class="user-btn" id="adminMenuBtn">▼</button>
+                        <div class="dropdown-content" id="adminDropdown">
+                            <a href="admin-profile">Admin Profile</a>
+                            <a href="#" id="adminLogoutBtn">Logout</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="admin-container">
+        <div class="admin-header">
+            <h1>Manage Blocked Dates</h1>
+            <p>Block specific dates or time slots to make them unavailable for bookings</p>
+        </div>
+
+        <!-- Block Date Form -->
+        <div class="block-form-section">
+            <div class="section-header">
+                <h2><i class="fas fa-calendar-times"></i> Block New Date/Time</h2>
+            </div>
+            
+            <form id="blockDateForm" class="block-form">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="blockDate">Date to Block *</label>
+                        <input type="date" class="form-control" id="blockDate" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="blockType">Block Type *</label>
+                        <select class="form-control" id="blockType" required>
+                            <option value="">Select Block Type</option>
+                            <option value="full">Full Day Block</option>
+                            <option value="partial">Partial Day (Specific Times)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group" id="timeSlotsGroup" style="display: none;">
+                        <label>Time Slots to Block</label>
+                        <div class="time-slots-selector">
+                            <div class="time-slot-option">
+                                <input type="checkbox" id="slot1" value="09:00-12:00">
+                                <label for="slot1">Morning (9:00 AM - 12:00 PM)</label>
+                            </div>
+                            <div class="time-slot-option">
+                                <input type="checkbox" id="slot2" value="12:00-15:00">
+                                <label for="slot2">Afternoon (12:00 PM - 3:00 PM)</label>
+                            </div>
+                            <div class="time-slot-option">
+                                <input type="checkbox" id="slot3" value="15:00-18:00">
+                                <label for="slot3">Evening (3:00 PM - 6:00 PM)</label>
+                            </div>
+                            <div class="time-slot-option">
+                                <input type="checkbox" id="slot4" value="18:00-21:00">
+                                <label for="slot4">Night (6:00 PM - 9:00 PM)</label>
+                            </div>
+                            <div class="time-slot-option">
+                                <input type="checkbox" id="slotCustom">
+                                <label for="slotCustom">Custom Time Range</label>
+                            </div>
+                        </div>
+
+                        <div class="custom-time-range" id="customTimeRange" style="display: none;">
+                            <div class="time-inputs">
+                                <input type="time" class="form-control" id="customStartTime">
+                                <span>to</span>
+                                <input type="time" class="form-control" id="customEndTime">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group full-width">
+                        <label for="blockReason">Reason for Blocking</label>
+                        <input type="text" class="form-control" id="blockReason" 
+                               placeholder="E.g., Maintenance, Private Event, Holiday...">
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="clearBlockForm()">Clear</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-lock"></i> Block Date
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Calendar View -->
+        <div class="calendar-section">
+            <div class="section-header">
+                <h2><i class="fas fa-calendar-alt"></i> Calendar View</h2>
+                <div class="calendar-controls">
+                    <button class="btn btn-secondary" onclick="previousMonth()">
+                        <i class="fas fa-chevron-left"></i>
+                    </button>
+                    <span id="currentMonth">Loading...</span>
+                    <button class="btn btn-secondary" onclick="nextMonth()">
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="calendar" id="calendar">
+                <div class="calendar-header">
+                    <div>Sun</div>
+                    <div>Mon</div>
+                    <div>Tue</div>
+                    <div>Wed</div>
+                    <div>Thu</div>
+                    <div>Fri</div>
+                    <div>Sat</div>
+                </div>
+                <div class="calendar-body" id="calendarBody">
+                    <!-- Calendar will be generated here -->
+                </div>
+            </div>
+
+            <div class="calendar-legend">
+                <div class="legend-item">
+                    <div class="legend-color available"></div>
+                    <span>Available</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color partially-blocked"></div>
+                    <span>Partially Blocked</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color fully-blocked"></div>
+                    <span>Fully Blocked</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color today"></div>
+                    <span>Today</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Blocked Dates List -->
+        <div class="blocked-list-section">
+            <div class="section-header">
+                <h2><i class="fas fa-list"></i> Currently Blocked Dates</h2>
+                <div class="list-controls">
+                    <select id="blockedFilter" class="form-control">
+                        <option value="all">All Blocked Dates</option>
+                        <option value="future">Future Dates Only</option>
+                        <option value="past">Past Dates Only</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="blocked-dates-list" id="blockedDatesList">
+                <div class="loading">Loading blocked dates...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Date Details Modal -->
+    <div class="modal hidden" id="dateDetailsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Date Availability Details</h3>
+                <button class="close-btn" onclick="closeDateModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <div id="dateDetailsContent">
+                    <!-- Date details will be loaded here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeDateModal()">Close</button>
+                <button class="btn btn-primary" id="blockDateBtn" style="display: none;">Block This Date</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Blocked Date Actions Modal -->
+    <div class="modal hidden" id="blockActionsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Manage Blocked Date</h3>
+                <button class="close-btn" onclick="closeBlockActionsModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <div id="blockActionsContent">
+                    <!-- Block actions content will be loaded here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeBlockActionsModal()">Cancel</button>
+                <button class="btn btn-danger" id="unblockBtn">Unblock Date</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="../js/block-dates.js"></script>
+</body>
+</html>

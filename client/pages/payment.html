@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment - SK Binge Galaxy</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/payment.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <h2>SK Binge Galaxy</h2>
+                <span>Secure Payment</span>
+            </div>
+            <div class="nav-menu">
+                <a href="dashboard" class="nav-link">Dashboard</a>
+                <a href="my-bookings" class="nav-link">My Bookings</a>
+                <div class="nav-user">
+                    <span id="userName">Welcome, User</span>
+                    <div class="user-dropdown">
+                        <button class="user-btn" id="userMenuBtn">▼</button>
+                        <div class="dropdown-content" id="userDropdown">
+                            <a href="profile">Profile</a>
+                            <a href="#" id="logoutBtn">Logout</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="payment-container">
+        <div class="payment-header">
+            <h1>Complete Your Payment</h1>
+            <p>Secure and encrypted payment processing</p>
+        </div>
+
+        <div class="payment-layout">
+            <!-- Booking Summary -->
+            <div class="payment-summary">
+                <h3>Booking Summary</h3>
+                <div class="summary-content" id="bookingSummary">
+                    <div class="loading">Loading booking details...</div>
+                </div>
+                
+                <div class="amount-breakdown">
+                    <h4>Amount Breakdown</h4>
+                    <div class="breakdown-list" id="amountBreakdown">
+                        <div class="breakdown-item">
+                            <span>Base Amount</span>
+                            <span>₹0</span>
+                        </div>
+                        <div class="breakdown-item">
+                            <span>Services</span>
+                            <span>₹0</span>
+                        </div>
+                        <div class="breakdown-item total">
+                            <span><strong>Total Amount</strong></span>
+                            <span><strong>₹0</strong></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Payment Methods -->
+            <div class="payment-methods">
+                <div class="payment-tabs">
+                    <button class="tab-button active" data-tab="upi">UPI</button>
+                    <button class="tab-button" data-tab="card">Card</button>
+                    <button class="tab-button" data-tab="netbanking">Net Banking</button>
+                    <button class="tab-button" data-tab="wallet">Wallet</button>
+                </div>
+
+                <!-- UPI Payment -->
+                <div class="payment-tab-content active" id="upi-tab">
+                    <div class="payment-method-header">
+                        <h3>Pay via UPI</h3>
+                        <div class="method-icon">📱</div>
+                    </div>
+                    
+                    <div class="upi-options">
+                        <div class="upi-option selected" data-type="qr">
+                            <div class="option-icon">📷</div>
+                            <span>Scan QR Code</span>
+                        </div>
+                        <div class="upi-option" data-type="id">
+                            <div class="option-icon">🔗</div>
+                            <span>Enter UPI ID</span>
+                        </div>
+                    </div>
+
+                    <div class="upi-content" id="upiQr">
+                        <div class="qr-container">
+                            <div class="qr-code" id="qrCode">QR Code will appear here</div>
+                            <p>Scan this QR code with any UPI app</p>
+                        </div>
+                    </div>
+
+                    <div class="upi-content hidden" id="upiId">
+                        <div class="form-group">
+                            <label for="upiIdInput">Enter your UPI ID</label>
+                            <input type="text" class="form-control" id="upiIdInput" 
+                                   placeholder="yourname@upi">
+                        </div>
+                        <button class="btn btn-primary" onclick="initiateUpiPayment()">
+                            Pay via UPI
+                        </button>
+                    </div>
+
+                    <div class="payment-action">
+                        <button class="btn btn-primary btn-large" onclick="processUpiPayment()">
+                            Pay Now ₹<span id="paymentAmount">0</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Card Payment -->
+                <div class="payment-tab-content" id="card-tab">
+                    <div class="payment-method-header">
+                        <h3>Credit/Debit Card</h3>
+                        <div class="method-icon">💳</div>
+                    </div>
+
+                    <form id="cardPaymentForm">
+                        <div class="form-group">
+                            <label for="cardNumber">Card Number</label>
+                            <input type="text" class="form-control" id="cardNumber" 
+                                   placeholder="1234 5678 9012 3456" maxlength="19">
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="expiryDate">Expiry Date</label>
+                                <input type="text" class="form-control" id="expiryDate" 
+                                       placeholder="MM/YY" maxlength="5">
+                            </div>
+                            <div class="form-group">
+                                <label for="cvv">CVV</label>
+                                <input type="text" class="form-control" id="cvv" 
+                                       placeholder="123" maxlength="3">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="cardHolder">Card Holder Name</label>
+                            <input type="text" class="form-control" id="cardHolder" 
+                                   placeholder="John Doe">
+                        </div>
+
+                        <div class="payment-action">
+                            <button type="button" class="btn btn-primary btn-large" onclick="processCardPayment()">
+                                Pay ₹<span id="cardAmount">0</span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Net Banking -->
+                <div class="payment-tab-content" id="netbanking-tab">
+                    <div class="payment-method-header">
+                        <h3>Net Banking</h3>
+                        <div class="method-icon">🏦</div>
+                    </div>
+
+                    <div class="bank-list">
+                        <div class="bank-option" data-bank="sbi">
+                            <div class="bank-logo">SBI</div>
+                            <span>State Bank of India</span>
+                        </div>
+                        <div class="bank-option" data-bank="hdfc">
+                            <div class="bank-logo">HDFC</div>
+                            <span>HDFC Bank</span>
+                        </div>
+                        <div class="bank-option" data-bank="icici">
+                            <div class="bank-logo">ICICI</div>
+                            <span>ICICI Bank</span>
+                        </div>
+                        <div class="bank-option" data-bank="axis">
+                            <div class="bank-logo">AXIS</div>
+                            <span>Axis Bank</span>
+                        </div>
+                    </div>
+
+                    <div class="payment-action">
+                        <button class="btn btn-primary btn-large" onclick="processNetBanking()">
+                            Continue to Bank
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Wallet Payment -->
+                <div class="payment-tab-content" id="wallet-tab">
+                    <div class="payment-method-header">
+                        <h3>Wallet</h3>
+                        <div class="method-icon">👛</div>
+                    </div>
+
+                    <div class="wallet-options">
+                        <div class="wallet-option" data-wallet="paytm">
+                            <div class="wallet-logo">Paytm</div>
+                        </div>
+                        <div class="wallet-option" data-wallet="phonepe">
+                            <div class="wallet-logo">PhonePe</div>
+                        </div>
+                        <div class="wallet-option" data-wallet="amazonpay">
+                            <div class="wallet-logo">Amazon Pay</div>
+                        </div>
+                        <div class="wallet-option" data-wallet="mobikwik">
+                            <div class="wallet-logo">MobiKwik</div>
+                        </div>
+                    </div>
+
+                    <div class="payment-action">
+                        <button class="btn btn-primary btn-large" onclick="processWalletPayment()">
+                            Pay with Wallet
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Security Badges -->
+        <div class="security-section">
+            <h4>Secure Payment Guaranteed</h4>
+            <div class="security-badges">
+                <div class="security-badge">🔒 SSL Encrypted</div>
+                <div class="security-badge">🛡️ PCI DSS Compliant</div>
+                <div class="security-badge">✅ 100% Secure</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Payment Processing Modal -->
+    <div class="modal hidden" id="paymentModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Processing Payment</h3>
+            </div>
+            <div class="modal-body">
+                <div class="processing-spinner"></div>
+                <p>Please wait while we process your payment...</p>
+                <p class="processing-status" id="processingStatus"></p>
+            </div>
+        </div>
+    </div>
+
+    <script src="../js/payment.js"></script>
+</body>
+</html>

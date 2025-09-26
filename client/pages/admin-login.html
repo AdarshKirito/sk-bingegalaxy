@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Login - SK Binge Galaxy</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/auth.css">
+    <style>
+        .auth-card {
+            max-width: 60%;
+            padding-left: 30px;
+            padding-right: 30px;
+            padding-top: 25px;
+            padding-bottom: 25px;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-card">
+            <div class="auth-header">
+                <h1>Admin Portal</h1>
+                <p>SK Binge Galaxy Management System</p>
+            </div>
+
+            <form id="adminLoginForm">
+                <div class="alert hidden" id="alertBox"></div>
+
+                <div class="form-group">
+                    <input type="email" class="form-control" id="email" placeholder="Admin Email" required>
+                </div>
+
+                <div class="form-group password-toggle">
+                    <input type="password" class="form-control" id="password" placeholder="Admin Password" required>
+                    <span class="toggle-icon" onclick="togglePassword('password')">👁️</span>
+                </div>
+
+                <button type="submit" class="btn btn-primary" style="width: 100%;">
+                    <span id="submitText">Admin Sign In</span>
+                    <div id="loadingSpinner" class="hidden">Loading...</div>
+                </button>
+            </form>
+
+            <div class="auth-footer">
+                <p><a href="login">Customer Login</a></p>
+                <p><a href="../pages/index.html">← Back to Home</a></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Admin login handler
+        document.getElementById('adminLoginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = {
+                email: document.getElementById('email').value.trim(),
+                password: document.getElementById('password').value
+            };
+
+            if (!formData.email || !formData.password) {
+                showAlert('Please fill in all fields');
+                return;
+            }
+
+            toggleLoading(true);
+
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(formData)
+                });
+
+                const result = await response.json();
+
+                if (result.success && result.user.role === 'admin') {
+                    showAlert('Admin login successful! Redirecting...', 'success');
+                    
+                    localStorage.setItem('token', result.token);
+                    localStorage.setItem('user', JSON.stringify(result.user));
+                    
+                    setTimeout(() => {
+                        window.location.href = 'admin-dashboard';
+                    }, 2000);
+                } else {
+                    showAlert('Access denied. Admin privileges required.');
+                }
+            } catch (error) {
+                console.error('Admin login error:', error);
+                showAlert('Network error. Please try again.');
+            } finally {
+                toggleLoading(false);
+            }
+        });
+
+        // Reuse utility functions from auth.js
+        const showAlert = (message, type = 'error') => {
+            const alertBox = document.getElementById('alertBox');
+            alertBox.textContent = message;
+            alertBox.className = `alert alert-${type === 'error' ? 'error' : 'success'}`;
+            alertBox.classList.remove('hidden');
+        };
+
+        const toggleLoading = (show) => {
+            const submitText = document.getElementById('submitText');
+            const loadingSpinner = document.getElementById('loadingSpinner');
+            
+            if (show) {
+                submitText.classList.add('hidden');
+                loadingSpinner.classList.remove('hidden');
+            } else {
+                submitText.classList.remove('hidden');
+                loadingSpinner.classList.add('hidden');
+            }
+        };
+
+        const togglePassword = (fieldId) => {
+            const field = document.getElementById(fieldId);
+            field.type = field.type === 'password' ? 'text' : 'password';
+        };
+    </script>
+</body>
+</html>

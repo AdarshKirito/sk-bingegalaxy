@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Bookings - SK Binge Galaxy</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/bookings.css">
+    <link rel="stylesheet" href="../css/dashboard.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <h2>SK Binge Galaxy</h2>
+                <span>My Bookings</span>
+            </div>
+            <div class="nav-menu">
+                <a href="dashboard" class="nav-link">Dashboard</a>
+                <a href="booking" class="nav-link">New Booking</a>
+                <a href="my-bookings" class="nav-link active">My Bookings</a>
+                <div class="nav-user">
+                    <span id="userName">Welcome, User</span>
+                    <div class="user-dropdown">
+                        <button class="user-btn" id="userMenuBtn">▼</button>
+                        <div class="dropdown-content" id="userDropdown">
+                            <a href="profile">Profile</a>
+                            <a href="#" id="logoutBtn">Logout</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="bookings-container">
+        <div class="bookings-header">
+            <h1>My Bookings</h1>
+            <p>Manage your event bookings and view booking history</p>
+        </div>
+
+        <!-- Filters and Search -->
+        <div class="bookings-filters">
+            <div class="filter-group">
+                <label for="statusFilter">Filter by Status:</label>
+                <select id="statusFilter" class="form-control">
+                    <option value="all">All Bookings</option>
+                    <option value="confirmed">Confirmed</option>
+                    <option value="cancelled">Cancelled</option>
+                    <option value="completed">Completed</option>
+                    <option value="checked-in">Checked-in</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label for="dateFilter">Filter by Date:</label>
+                <select id="dateFilter" class="form-control">
+                    <option value="all">All Dates</option>
+                    <option value="upcoming">Upcoming</option>
+                    <option value="past">Past Events</option>
+                    <option value="today">Today</option>
+                </select>
+            </div>
+
+            <div class="search-group">
+                <input type="text" id="searchBookings" class="form-control" placeholder="Search by booking ID or event type...">
+                <button class="btn btn-secondary" onclick="searchBookings()">Search</button>
+            </div>
+        </div>
+
+        <!-- Bookings List -->
+        <div class="bookings-list">
+            <div class="bookings-grid" id="bookingsGrid">
+                <div class="loading">Loading your bookings...</div>
+            </div>
+
+            <!-- Pagination -->
+            <div class="pagination" id="pagination">
+                <!-- Pagination will be generated here -->
+            </div>
+        </div>
+
+        <!-- Empty State -->
+        <div class="empty-state hidden" id="emptyState">
+            <div class="empty-icon">📋</div>
+            <h3>No Bookings Found</h3>
+            <p>You haven't made any bookings yet. Start by creating your first event booking!</p>
+            <a href="booking" class="btn btn-primary">Book Your First Event</a>
+        </div>
+    </div>
+
+    <!-- Booking Details Modal -->
+    <div class="modal hidden" id="bookingModal">
+        <div class="modal-content large">
+            <div class="modal-header">
+                <h3>Booking Details</h3>
+                <button class="close-btn" onclick="closeBookingModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <div id="bookingDetailsContent">
+                    <!-- Booking details will be loaded here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeBookingModal()">Close</button>
+                <button class="btn btn-primary" id="actionButton" style="display: none;">Action</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cancel Confirmation Modal -->
+    <div class="modal hidden" id="cancelModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Cancel Booking</h3>
+                <button class="close-btn" onclick="closeCancelModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to cancel this booking?</p>
+                <div class="cancel-warning">
+                    <strong>⚠️ Important:</strong> Bookings can only be cancelled at least 24 hours in advance.
+                </div>
+                <div id="cancelDetails"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeCancelModal()">Keep Booking</button>
+                <button class="btn btn-danger" id="confirmCancelBtn">Yes, Cancel Booking</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="../js/bookings.js"></script>
+</body>
+</html>

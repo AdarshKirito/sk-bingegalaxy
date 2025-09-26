@@ -1,0 +1,35 @@
+{
+  "name": "sk-binge-galaxy",
+  "version": "1.0.0",
+  "description": "Private theater booking system for events",
+  "main": "server/app.js",
+  "scripts": {
+    "start": "node server/app.js",
+    "dev": "nodemon server/app.js",
+    "client": "cd client && live-server --port=3000"
+  },
+  "dependencies": {
+    "axios": "^1.12.2",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "express-validator": "^7.2.1",
+    "jsonwebtoken": "^9.0.2",
+    "moment": "^2.30.1",
+    "mongoose": "^7.8.7",
+    "node-cron": "^4.2.1",
+    "nodemailer": "^6.10.1",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  },
+  "keywords": [
+    "booking",
+    "theater",
+    "events"
+  ],
+  "author": "SK Binge Galaxy",
+  "license": "ISC"
+}

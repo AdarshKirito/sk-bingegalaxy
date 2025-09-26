@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - SK Binge Galaxy</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/auth.css">
+    <style>
+        .auth-card {
+            max-width: 60%;
+            padding-left: 30px;
+            padding-right: 30px;
+            padding-top: 25px;
+            padding-bottom: 25px;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-card">
+            <div class="auth-header">
+                <h1>Create Account</h1>
+                <p>Join SK Binge Galaxy for amazing experiences</p>
+            </div>
+
+            <form id="registerForm">
+                <div class="alert hidden" id="alertBox"></div>
+
+                <div class="form-group">
+                    <input type="text" class="form-control" id="name" placeholder="Full Name" required>
+                </div>
+
+                <div class="form-group">
+                    <input type="email" class="form-control" id="email" placeholder="Email Address" required>
+                </div>
+
+                <div class="form-group">
+                    <input type="tel" class="form-control" id="phone" placeholder="Phone Number" required maxlength="10">
+                </div>
+
+                <div class="form-group password-toggle">
+                    <input type="password" class="form-control" id="password" placeholder="Password" required minlength="6">
+                    <span class="toggle-icon" onclick="togglePassword('password')">👁️</span>
+                </div>
+
+                <div class="form-group password-toggle">
+                    <input type="password" class="form-control" id="confirmPassword" placeholder="Confirm Password" required minlength="6">
+                    <span class="toggle-icon" onclick="togglePassword('confirmPassword')">👁️</span>
+                </div>
+
+                <button type="submit" class="btn btn-primary" style="width: 100%;">
+                    <span id="submitText">Create Account</span>
+                    <div id="loadingSpinner" class="hidden">Loading...</div>
+                </button>
+            </form>
+
+            <div class="auth-footer">
+                <p>Already have an account? <a href="login">Sign In</a></p>
+                <p><a href="../pages/index.html">← Back to Home</a></p>
+            </div>
+        </div>
+    </div>
+
+    <script src="../js/auth.js"></script>
+</body>
+</html>

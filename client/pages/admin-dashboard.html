@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - SK Binge Galaxy</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/admin.css">
+    <link rel="stylesheet" href="../css/dashboard.css">
+
+</head>
+<body>
+    <!-- Navigation Header -->
+    <nav class="navbar admin-navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <h2>SK Binge Galaxy</h2>
+                <span>Admin Portal</span>
+            </div>
+            <div class="nav-menu">
+                <a href="admin-dashboard" class="nav-link active">Dashboard</a>
+                <a href="admin-bookings" class="nav-link">All Bookings</a>
+                <a href="admin-block-dates" class="nav-link">Block Dates</a>
+                <a href="admin-reports" class="nav-link">Reports</a>
+                <div class="nav-user">
+                    <span id="adminName">Admin User</span>
+                    <div class="user-dropdown">
+                        <button class="user-btn" id="adminMenuBtn">▼</button>
+                        <div class="dropdown-content" id="adminDropdown">
+                            <a href="admin-profile">Admin Profile</a>
+                            <a href="#" id="adminLogoutBtn">Logout</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Admin Main Content -->
+    <div class="admin-container">
+        <!-- Admin Stats -->
+        <section class="admin-stats">
+            <div class="stats-grid">
+                <div class="stat-card admin-stat">
+                    <div class="stat-icon">📊</div>
+                    <div class="stat-info">
+                        <h3 id="totalRevenue">₹0</h3>
+                        <p>Total Revenue</p>
+                    </div>
+                </div>
+                <div class="stat-card admin-stat">
+                    <div class="stat-icon">📅</div>
+                    <div class="stat-info">
+                        <h3 id="todayBookings">0</h3>
+                        <p>Today's Bookings</p>
+                    </div>
+                </div>
+                <div class="stat-card admin-stat">
+                    <div class="stat-icon">👥</div>
+                    <div class="stat-info">
+                        <h3 id="totalCustomers">0</h3>
+                        <p>Total Customers</p>
+                    </div>
+                </div>
+                <div class="stat-card admin-stat">
+                    <div class="stat-icon">✅</div>
+                    <div class="stat-info">
+                        <h3 id="occupiedSlots">0%</h3>
+                        <p>Today's Occupancy</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Quick Actions -->
+        <section class="admin-actions">
+            <h2>Quick Management</h2>
+            <div class="action-grid admin-actions-grid">
+                <div class="action-card admin-action" onclick="window.location.href='admin-bookings'">
+                    <div class="action-icon">📋</div>
+                    <h3>Manage Bookings</h3>
+                    <p>View and manage all customer bookings</p>
+                </div>
+                <div class="action-card admin-action" onclick="window.location.href='admin-block-dates'">
+                    <div class="action-icon">🚫</div>
+                    <h3>Block Dates</h3>
+                    <p>Manage unavailable dates and times</p>
+                </div>
+                <div class="action-card admin-action" onclick="window.location.href='admin-checkin'">
+                    <div class="action-icon">🏠</div>
+                    <h3>Check-in Management</h3>
+                    <p>Manage in-house guests</p>
+                </div>
+                <div class="action-card admin-action" onclick="window.location.href='admin-reports'">
+                    <div class="action-icon">📈</div>
+                    <h3>Reports & Analytics</h3>
+                    <p>View business insights</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Today's Arrivals -->
+        <section class="todays-arrivals">
+            <div class="section-header">
+                <h2>Today's Arrivals</h2>
+                <span class="arrival-count" id="arrivalCount">0 arrivals</span>
+            </div>
+            <div class="arrivals-list" id="todaysArrivalsList">
+                <div class="loading">Loading today's arrivals...</div>
+            </div>
+        </section>
+
+        <!-- Recent Bookings -->
+        <section class="recent-bookings">
+            <div class="section-header">
+                <h2>Recent Bookings</h2>
+                <a href="admin-bookings" class="view-all">View All →</a>
+            </div>
+            <div class="bookings-table">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Booking ID</th>
+                            <th>Customer</th>
+                            <th>Event Type</th>
+                            <th>Date & Time</th>
+                            <th>Amount</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recentBookingsTable">
+                        <tr>
+                            <td colspan="7" class="loading">Loading recent bookings...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <script src="../js/admin.js"></script>
+</body>
+</html>

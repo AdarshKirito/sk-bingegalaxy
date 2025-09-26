@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - SK Binge Galaxy</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../css/auth.css">
+        <style>
+        .auth-card {
+            max-width: 60%;
+            padding-left: 30px;
+            padding-right: 30px;
+            padding-top: 25px;
+            padding-bottom: 25px;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-card">
+            <div class="auth-header">
+                <h1>Welcome Back</h1>
+                <p>Sign in to your SK Binge Galaxy account</p>
+            </div>
+
+            <form id="loginForm">
+                <div class="alert hidden" id="alertBox"></div>
+
+                <div class="form-group">
+                    <input type="email" class="form-control" id="email" placeholder="Email Address" required>
+                </div>
+
+                <div class="form-group password-toggle">
+                    <input type="password" class="form-control" id="password" placeholder="Password" required>
+                    <span class="toggle-icon" onclick="togglePassword('password')">👁️</span>
+                </div>
+
+                <div class="form-group text-center">
+                    <a href="forgot-password" style="color: var(--primary); text-decoration: none;">
+                        Forgot your password?
+                    </a>
+                </div>
+
+                <button type="submit" class="btn btn-primary" style="width: 100%;">
+                    <span id="submitText">Sign In</span>
+                    <div id="loadingSpinner" class="hidden">Loading...</div>
+                </button>
+            </form>
+
+            <div class="social-login">
+                <button class="social-btn" onclick="socialLogin('google')">
+                    Google
+                </button>
+                <button class="social-btn" onclick="socialLogin('facebook')">
+                    Facebook
+                </button>
+            </div>
+
+            <div class="auth-footer">
+                <p>Don't have an account? <a href="register">Sign Up</a></p>
+                <p><a href="admin-login">Admin Login</a></p>
+                <p><a href="../pages/index.html">← Back to Home</a></p>
+            </div>
+        </div>
+    </div>
+
+    <script src="../js/auth.js"></script>
+</body>
+</html>
