@@ -1,0 +1,310 @@
+package com.skbingegalaxy.booking.controller;
+
+import com.skbingegalaxy.booking.dto.*;
+import com.skbingegalaxy.booking.service.BookingService;
+import com.skbingegalaxy.booking.service.SystemSettingsService;
+import com.skbingegalaxy.common.dto.ApiResponse;
+import com.skbingegalaxy.common.dto.PagedResponse;
+import com.skbingegalaxy.common.enums.BookingStatus;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+
+@RestController
+@RequestMapping("/api/bookings/admin")
+@RequiredArgsConstructor
+public class AdminBookingController {
+
+    private final BookingService bookingService;
+    private final SystemSettingsService systemSettingsService;
+
+    @GetMapping
+    public ResponseEntity<ApiResponse<PagedResponse<BookingDto>>> getAllBookings(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "desc") String direction) {
+        Sort sort = direction.equalsIgnoreCase("asc") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
+        Page<BookingDto> result = bookingService.getAllBookings(PageRequest.of(page, size, sort));
+        return ResponseEntity.ok(ApiResponse.ok(toPagedResponse(result)));
+    }
+
+    @GetMapping("/today")
+    public ResponseEntity<ApiResponse<PagedResponse<BookingDto>>> getTodayBookings(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate) {
+        Page<BookingDto> result = bookingService.getTodayBookings(clientDate,
+            PageRequest.of(page, size, Sort.by("startTime").ascending()));
+        return ResponseEntity.ok(ApiResponse.ok(toPagedResponse(result)));
+    }
+
+    @GetMapping("/upcoming")
+    public ResponseEntity<ApiResponse<PagedResponse<BookingDto>>> getUpcomingBookings(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate) {
+        Page<BookingDto> result = bookingService.getUpcomingBookings(clientDate,
+            PageRequest.of(page, size, Sort.by("bookingDate").ascending().and(Sort.by("startTime").ascending())));
+        return ResponseEntity.ok(ApiResponse.ok(toPagedResponse(result)));
+    }
+
+    @GetMapping("/by-date")
+    public ResponseEntity<ApiResponse<PagedResponse<BookingDto>>> getBookingsByDate(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        Page<BookingDto> result = bookingService.getBookingsByDate(date,
+            PageRequest.of(page, size, Sort.by("startTime").ascending()));
+        return ResponseEntity.ok(ApiResponse.ok(toPagedResponse(result)));
+    }
+
+    @GetMapping("/by-status")
+    public ResponseEntity<ApiResponse<PagedResponse<BookingDto>>> getBookingsByStatus(
+            @RequestParam String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        Page<BookingDto> result = bookingService.getBookingsByStatus(
+            BookingStatus.valueOf(status.toUpperCase()),
+            PageRequest.of(page, size, Sort.by("bookingDate").descending()));
+        return ResponseEntity.ok(ApiResponse.ok(toPagedResponse(result)));
+    }
+
+    @GetMapping("/search")
+    public ResponseEntity<ApiResponse<PagedResponse<BookingDto>>> searchBookings(
+            @RequestParam String q,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        Page<BookingDto> result = bookingService.searchBookings(q, PageRequest.of(page, size));
+        return ResponseEntity.ok(ApiResponse.ok(toPagedResponse(result)));
+    }
+
+    @PatchMapping("/{bookingRef}")
+    public ResponseEntity<ApiResponse<BookingDto>> updateBooking(
+            @PathVariable String bookingRef,
+            @RequestBody UpdateBookingRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok("Booking updated", bookingService.updateBooking(bookingRef, request)));
+    }
+
+    @PostMapping("/{bookingRef}/cancel")
+    public ResponseEntity<ApiResponse<BookingDto>> cancelBooking(@PathVariable String bookingRef) {
+        return ResponseEntity.ok(ApiResponse.ok("Booking cancelled", bookingService.cancelBooking(bookingRef)));
+    }
+
+    @PostMapping("/{bookingRef}/confirm")
+    public ResponseEntity<ApiResponse<BookingDto>> confirmBooking(@PathVariable String bookingRef) {
+        UpdateBookingRequest req = new UpdateBookingRequest();
+        req.setStatus("CONFIRMED");
+        return ResponseEntity.ok(ApiResponse.ok("Booking confirmed", bookingService.updateBooking(bookingRef, req)));
+    }
+
+    @PostMapping("/{bookingRef}/check-in")
+    public ResponseEntity<ApiResponse<BookingDto>> checkIn(@PathVariable String bookingRef) {
+        var booking = bookingService.getBookingEntity(bookingRef);
+        if (booking.getStatus() != com.skbingegalaxy.common.enums.BookingStatus.CONFIRMED) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Cannot check in — booking must be CONFIRMED first. Current status: " + booking.getStatus());
+        }
+        UpdateBookingRequest req = new UpdateBookingRequest();
+        req.setCheckedIn(true);
+        return ResponseEntity.ok(ApiResponse.ok("Check-in recorded", bookingService.updateBooking(bookingRef, req)));
+    }
+
+    @PostMapping("/{bookingRef}/checkout")
+    public ResponseEntity<ApiResponse<BookingDto>> checkout(
+            @PathVariable String bookingRef,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate,
+            @RequestParam(required = false) String clientTime) {
+        LocalDateTime clientNow = null;
+        if (clientDate != null && clientTime != null) {
+            try { clientNow = LocalDateTime.of(clientDate, LocalTime.parse(clientTime)); } catch (Exception ignored) {}
+        }
+        return ResponseEntity.ok(ApiResponse.ok("Checkout completed", bookingService.earlyCheckout(bookingRef, clientNow)));
+    }
+
+    @PostMapping("/{bookingRef}/undo-check-in")
+    public ResponseEntity<ApiResponse<BookingDto>> undoCheckIn(@PathVariable String bookingRef) {
+        UpdateBookingRequest req = new UpdateBookingRequest();
+        req.setStatus("CONFIRMED");
+        req.setCheckedIn(false);
+        return ResponseEntity.ok(ApiResponse.ok("Check-in undone", bookingService.updateBooking(bookingRef, req)));
+    }
+
+    @GetMapping("/dashboard-stats")
+    public ResponseEntity<ApiResponse<DashboardStatsDto>> getDashboardStats(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate) {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.getDashboardStats(clientDate)));
+    }
+
+    // ── Operational date ─────────────────────────────────────
+    @GetMapping("/operational-date")
+    public ResponseEntity<ApiResponse<OperationalDateDto>> getOperationalDate(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate,
+            @RequestParam(required = false) String clientTime) {
+        LocalDate opDate = systemSettingsService.getOperationalDate(clientDate);
+        // Build client "now"; fall back to server clock if not provided
+        LocalDateTime clientNow = null;
+        if (clientDate != null && clientTime != null) {
+            try {
+                clientNow = LocalDateTime.of(clientDate, LocalTime.parse(clientTime));
+            } catch (Exception ignored) {}
+        }
+        if (clientNow == null) clientNow = LocalDateTime.now();
+        // Audit is available at or after 23:59 of the operational date (client local time)
+        boolean available = !opDate.isAfter(clientDate != null ? clientDate : LocalDate.now())
+            && clientNow.isAfter(opDate.atTime(LocalTime.of(23, 59)).minusSeconds(1));
+        String reason = null;
+        if (!available) {
+            LocalDate refToday = clientDate != null ? clientDate : LocalDate.now();
+            if (opDate.isAfter(refToday)) {
+                reason = "Operational date is already ahead of today.";
+            } else {
+                String hhmm = String.format("%02d:%02d", clientNow.getHour(), clientNow.getMinute());
+                reason = "Audit available after 11:59 PM. Your time: " + hhmm;
+            }
+        }
+        return ResponseEntity.ok(ApiResponse.ok(OperationalDateDto.builder()
+            .operationalDate(opDate)
+            .serverDateTime(clientNow)
+            .auditAvailable(available)
+            .auditUnavailableReason(reason)
+            .build()));
+    }
+
+    // ── Event Type management ────────────────────────────────
+
+    @GetMapping("/event-types")
+    public ResponseEntity<ApiResponse<java.util.List<EventTypeDto>>> getAllEventTypes() {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.getAllEventTypes()));
+    }
+
+    @PostMapping("/event-types")
+    public ResponseEntity<ApiResponse<EventTypeDto>> createEventType(@Valid @RequestBody EventTypeSaveRequest req) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+            .body(ApiResponse.ok("Event type created", bookingService.createEventType(req)));
+    }
+
+    @PutMapping("/event-types/{id}")
+    public ResponseEntity<ApiResponse<EventTypeDto>> updateEventType(
+            @PathVariable Long id, @Valid @RequestBody EventTypeSaveRequest req) {
+        return ResponseEntity.ok(ApiResponse.ok("Event type updated", bookingService.updateEventType(id, req)));
+    }
+
+    @DeleteMapping("/event-types/{id}")
+    public ResponseEntity<ApiResponse<Void>> toggleEventType(@PathVariable Long id) {
+        bookingService.deactivateEventType(id);
+        return ResponseEntity.ok(ApiResponse.ok("Event type toggled", null));
+    }
+
+    // ── Add-On management ────────────────────────────────────
+
+    @GetMapping("/add-ons")
+    public ResponseEntity<ApiResponse<java.util.List<AddOnDto>>> getAllAddOns() {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.getAllAddOns()));
+    }
+
+    @PostMapping("/add-ons")
+    public ResponseEntity<ApiResponse<AddOnDto>> createAddOn(@Valid @RequestBody AddOnSaveRequest req) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+            .body(ApiResponse.ok("Add-on created", bookingService.createAddOn(req)));
+    }
+
+    @PutMapping("/add-ons/{id}")
+    public ResponseEntity<ApiResponse<AddOnDto>> updateAddOn(
+            @PathVariable Long id, @Valid @RequestBody AddOnSaveRequest req) {
+        return ResponseEntity.ok(ApiResponse.ok("Add-on updated", bookingService.updateAddOn(id, req)));
+    }
+
+    @DeleteMapping("/add-ons/{id}")
+    public ResponseEntity<ApiResponse<Void>> toggleAddOn(@PathVariable Long id) {
+        bookingService.deactivateAddOn(id);
+        return ResponseEntity.ok(ApiResponse.ok("Add-on toggled", null));
+    }
+
+    // ── Reports ──────────────────────────────────────────────
+
+    @GetMapping("/reports")
+    public ResponseEntity<ApiResponse<ReportDto>> getReport(
+            @RequestParam(defaultValue = "DAY") String period,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate) {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.getReport(period, clientDate)));
+    }
+
+    @GetMapping("/reports/date-range")
+    public ResponseEntity<ApiResponse<ReportDto>> getReportByDateRange(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate) {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.getReportByDateRange(from, to, clientDate)));
+    }
+
+    // ── Audit: auto-resolve past bookings ────────────────────
+
+    @PostMapping("/audit")
+    public ResponseEntity<ApiResponse<AuditResultDto>> runAudit(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate,
+            @RequestParam(required = false) String clientTime) {
+        LocalDateTime clientNow = null;
+        if (clientDate != null && clientTime != null) {
+            try { clientNow = LocalDateTime.of(clientDate, LocalTime.parse(clientTime)); } catch (Exception ignored) {}
+        }
+        return ResponseEntity.ok(ApiResponse.ok("Audit completed",
+            bookingService.runAudit(clientDate, clientNow)));
+    }
+
+    // ── House Accounts: pending payment bookings ─────────────
+
+    @GetMapping("/house-accounts")
+    public ResponseEntity<ApiResponse<PagedResponse<BookingDto>>> getHouseAccounts(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        Page<BookingDto> result = bookingService.getPendingPaymentBookings(
+            PageRequest.of(page, size, Sort.by("createdAt").descending()));
+        return ResponseEntity.ok(ApiResponse.ok(toPagedResponse(result)));
+    }
+
+    // ── Admin: create booking (walk-in) ──────────────────────
+
+    @PostMapping("/create-booking")
+    public ResponseEntity<ApiResponse<BookingDto>> adminCreateBooking(
+            @Valid @RequestBody AdminCreateBookingRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+            .body(ApiResponse.ok("Booking created by admin", bookingService.adminCreateBooking(request)));
+    }
+
+    // ── Customer booking count ────────────────────────────────
+
+    @GetMapping("/customer-booking-count/{customerId}")
+    public ResponseEntity<ApiResponse<Long>> getCustomerBookingCount(@PathVariable Long customerId) {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.getCustomerBookingCount(customerId)));
+    }
+
+    // ── Booked slots for a date (double-booking prevention) ──
+
+    @GetMapping("/booked-slots")
+    public ResponseEntity<ApiResponse<java.util.List<BookedSlotDto>>> getBookedSlots(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.getBookedSlotsForDate(date)));
+    }
+
+    private <T> PagedResponse<T> toPagedResponse(Page<T> page) {
+        return PagedResponse.<T>builder()
+            .content(page.getContent())
+            .page(page.getNumber())
+            .size(page.getSize())
+            .totalElements(page.getTotalElements())
+            .totalPages(page.getTotalPages())
+            .last(page.isLast())
+            .build();
+    }
+}

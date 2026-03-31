@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sk-binge-galaxy
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: sk-binge-galaxy
+data:
+  EUREKA_SERVER: "http://discovery-server:8761/eureka/"
+  CONFIG_SERVER: "http://config-server:8888"
+  KAFKA_BOOTSTRAP: "kafka:9092"
+  POSTGRES_HOST: "postgres"
+  MONGO_HOST: "mongodb"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-secrets
+  namespace: sk-binge-galaxy
+type: Opaque
+stringData:
+  POSTGRES_USER: "postgres"
+  POSTGRES_PASSWORD: "postgres"
+  MONGO_USER: "admin"
+  MONGO_PASSWORD: "admin123"

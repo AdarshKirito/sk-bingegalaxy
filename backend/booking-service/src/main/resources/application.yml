@@ -1,0 +1,12 @@
+spring:
+  application:
+    name: booking-service
+  config:
+    import: optional:configserver:${SPRING_CLOUD_CONFIG_URI:http://localhost:8888}
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE:http://eureka:eureka_secret@localhost:8761/eureka/}
+  instance:
+    prefer-ip-address: true

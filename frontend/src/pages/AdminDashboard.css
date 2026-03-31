@@ -1,0 +1,43 @@
+.admin-dash {
+  padding-top: 1rem;
+}
+
+.stat-cards {
+  margin-bottom: 1rem;
+}
+
+.stat-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.5rem;
+}
+
+.stat-icon {
+  font-size: 2rem;
+}
+
+.stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.stat-label {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.admin-nav-card {
+  text-decoration: none;
+  color: var(--text);
+  padding: 2rem;
+}
+
+.admin-nav-card h3 {
+  margin-bottom: 0.5rem;
+}
+
+.admin-nav-card p {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}

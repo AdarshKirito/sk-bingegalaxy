@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #1a1a2e; color: #e0e0e0; margin: 0; padding: 0; }
+        .container { max-width: 600px; margin: 0 auto; background: #16213e; border-radius: 8px; overflow: hidden; }
+        .header { background: linear-gradient(135deg, #e94560, #533483); padding: 24px; text-align: center; }
+        .header h1 { color: #fff; margin: 0; font-size: 24px; }
+        .body { padding: 32px 24px; }
+        .body h2 { color: #e94560; }
+        .details { background: #0f3460; border-radius: 6px; padding: 16px; margin: 16px 0; }
+        .details p { margin: 6px 0; }
+        .label { color: #a0a0a0; }
+        .value { color: #fff; font-weight: 600; }
+        .footer { background: #0f3460; padding: 16px 24px; text-align: center; font-size: 12px; color: #a0a0a0; }
+        .btn { display: inline-block; background: #e94560; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: 600; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header"><h1>SK Binge Galaxy</h1></div>
+    <div class="body">
+        <h2>Booking Confirmed!</h2>
+        <p>Dear <span th:text="${customerName}">Customer</span>,</p>
+        <p>Your booking has been confirmed. Here are the details:</p>
+        <div class="details">
+            <p><span class="label">Booking Ref:</span> <span class="value" th:text="${bookingRef}">SKBG25XXXXXX</span></p>
+            <p><span class="label">Event Type:</span> <span class="value" th:text="${eventType}">Birthday Party</span></p>
+            <p><span class="label">Date:</span> <span class="value" th:text="${bookingDate}">2025-01-15</span></p>
+            <p><span class="label">Time:</span> <span class="value" th:text="${startTime}">14:00</span></p>
+            <p><span class="label">Duration:</span> <span class="value" th:text="${durationHours}">3</span> hours</p>
+            <p><span class="label">Total Amount:</span> <span class="value">&#x20B9;<span th:text="${totalAmount}">5000</span></span></p>
+        </div>
+        <p>Please complete payment to secure your reservation.</p>
+    </div>
+    <div class="footer">&copy; 2025 SK Binge Galaxy. All rights reserved.</div>
+</div>
+</body>
+</html>

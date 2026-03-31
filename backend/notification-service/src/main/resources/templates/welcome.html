@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #1a1a2e; color: #e0e0e0; margin: 0; padding: 0; }
+        .container { max-width: 600px; margin: 0 auto; background: #16213e; border-radius: 8px; overflow: hidden; }
+        .header { background: linear-gradient(135deg, #e94560, #533483); padding: 24px; text-align: center; }
+        .header h1 { color: #fff; margin: 0; font-size: 24px; }
+        .body { padding: 32px 24px; }
+        .body h2 { color: #e94560; }
+        .footer { background: #0f3460; padding: 16px 24px; text-align: center; font-size: 12px; color: #a0a0a0; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header"><h1>Welcome to SK Binge Galaxy!</h1></div>
+    <div class="body">
+        <h2 th:text="'Hi ' + ${recipientName} + '!'">Hi there!</h2>
+        <p>Thank you for registering with <strong>SK Binge Galaxy</strong> — your premier private theater experience.</p>
+        <p>You can now browse our event types, check availability, and book your private screening in just a few clicks.</p>
+        <p>If you have any questions, just reply to this email. Enjoy the show!</p>
+    </div>
+    <div class="footer">&copy; 2025 SK Binge Galaxy. All rights reserved.</div>
+</div>
+</body>
+</html>
