@@ -22,4 +22,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
            "LOWER(u.email) LIKE LOWER(CONCAT('%', :q, '%')) OR " +
            "u.phone LIKE CONCAT('%', :q, '%'))")
     List<User> searchCustomers(@Param("q") String query);
+
+    @Query("SELECT u FROM User u WHERE u.role = 'CUSTOMER' ORDER BY u.firstName, u.lastName")
+    List<User> findAllCustomers();
 }

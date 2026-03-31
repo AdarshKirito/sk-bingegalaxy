@@ -21,9 +21,7 @@ import AdminBlockedDates from './pages/AdminBlockedDates';
 import AdminEventTypes from './pages/AdminEventTypes';
 import AdminReports from './pages/AdminReports';
 import AdminBookingCreate from './pages/AdminBookingCreate';
-import AdminCustomerEdit from './pages/AdminCustomerEdit';
-import AdminRateCodes from './pages/AdminRateCodes';
-import AdminCustomerPricing from './pages/AdminCustomerPricing';
+import AdminUsersConfig from './pages/AdminUsersConfig';
 import NotFound from './pages/NotFound';
 
 function ProtectedRoute({ children }) {
@@ -66,9 +64,8 @@ function App() {
             <Route path="/admin/event-types" element={<AdminRoute><AdminEventTypes /></AdminRoute>} />
             <Route path="/admin/reports" element={<AdminRoute><AdminReports /></AdminRoute>} />
             <Route path="/admin/book" element={<AdminRoute><AdminBookingCreate /></AdminRoute>} />
-            <Route path="/admin/customer/:id" element={<AdminRoute><AdminCustomerEdit /></AdminRoute>} />
-            <Route path="/admin/rate-codes" element={<AdminRoute><AdminRateCodes /></AdminRoute>} />
-            <Route path="/admin/customer-pricing" element={<AdminRoute><AdminCustomerPricing /></AdminRoute>} />
+            <Route path="/admin/users-config" element={<AdminRoute><AdminUsersConfig /></AdminRoute>} />
+            <Route path="/admin/users-config/:userId" element={<AdminRoute><AdminUsersConfig /></AdminRoute>} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>

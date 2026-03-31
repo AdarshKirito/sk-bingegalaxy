@@ -796,7 +796,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
 
           {b.customerId && (
             <div style={{ marginTop: '0.8rem' }}>
-              <button className="btn btn-secondary btn-sm" onClick={() => { onClose(); navigate(`/admin/customer/${b.customerId}`); }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => { onClose(); navigate(`/admin/users-config/${b.customerId}`); }}>
                 ✏️ Edit Customer Details
               </button>
             </div>

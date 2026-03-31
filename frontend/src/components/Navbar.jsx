@@ -33,8 +33,7 @@ export default function Navbar() {
               <Link to="/admin/book" className="nav-link"><FiPlusCircle /> Book Now</Link>
               <Link to="/admin/blocked-dates" className="nav-link">Block Dates</Link>
               <Link to="/admin/event-types" className="nav-link">Events</Link>
-              <Link to="/admin/rate-codes" className="nav-link">Rate Codes</Link>
-              <Link to="/admin/customer-pricing" className="nav-link">Pricing</Link>
+              <Link to="/admin/users-config" className="nav-link">Users & Config</Link>
               <Link to="/admin/reports" className="nav-link"><FiBarChart2 /> Reports</Link>
               <button onClick={handleLogout} className="nav-link nav-btn"><FiLogOut /> Logout</button>
             </>

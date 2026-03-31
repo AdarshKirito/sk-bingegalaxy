@@ -201,6 +201,11 @@ public class AuthService {
         return userRepository.searchCustomers(query).stream().map(this::toDto).toList();
     }
 
+    // ── Admin: list all customers ────────────────────────────
+    public java.util.List<UserDto> getAllCustomers() {
+        return userRepository.findAllCustomers().stream().map(this::toDto).toList();
+    }
+
     // ── Admin: get customer by ID ────────────────────────────
     public UserDto getCustomerById(Long id) {
         User user = userRepository.findById(id)

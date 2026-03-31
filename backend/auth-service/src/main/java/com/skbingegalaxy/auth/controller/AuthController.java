@@ -70,6 +70,11 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.ok(authService.searchCustomers(q)));
     }
 
+    @GetMapping("/admin/customers")
+    public ResponseEntity<ApiResponse<java.util.List<UserDto>>> getAllCustomers() {
+        return ResponseEntity.ok(ApiResponse.ok(authService.getAllCustomers()));
+    }
+
     @GetMapping("/admin/customer/{id}")
     public ResponseEntity<ApiResponse<UserDto>> getCustomerById(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.ok(authService.getCustomerById(id)));

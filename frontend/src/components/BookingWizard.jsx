@@ -437,7 +437,7 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
                 {selectedCustomer.phone && <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}> | {selectedCustomer.phone}</span>}
               </div>
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/admin/customer/${selectedCustomer.id}`)} title="Edit customer details" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>✏️</button>
+                <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/admin/users-config/${selectedCustomer.id}`)} title="Edit customer details" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>✏️</button>
                 <button className="btn btn-secondary btn-sm" onClick={() => { setSelectedCustomer(null); setSelectedRateCodeId(''); setResolvedPricing(null); }}>Change</button>
               </div>
             </div>

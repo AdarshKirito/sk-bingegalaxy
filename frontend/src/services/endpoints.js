@@ -19,6 +19,7 @@ export const authService = {
   resetPassword: (data) => api.post('/auth/reset-password', data),
   verifyOtp: (data) => api.post('/auth/verify-otp', data),
   searchCustomers: (q) => api.get('/auth/admin/search-customers', { params: { q } }),
+  getAllCustomers: () => api.get('/auth/admin/customers'),
   adminCreateCustomer: (data) => api.post('/auth/admin/create-customer', data),
   getCustomerById: (id) => api.get(`/auth/admin/customer/${id}`),
   adminUpdateCustomer: (id, data) => api.put(`/auth/admin/customer/${id}`, data),
