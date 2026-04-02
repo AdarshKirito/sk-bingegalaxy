@@ -40,18 +40,30 @@ export function AuthProvider({ children }) {
     return userData;
   };
 
+  const adminRegister = async (data) => {
+    const res = await authService.adminRegister(data);
+    const { token, refreshToken, user: userData } = res.data.data;
+    localStorage.setItem('token', token);
+    localStorage.setItem('refreshToken', refreshToken);
+    localStorage.setItem('user', JSON.stringify(userData));
+    setUser(userData);
+    return userData;
+  };
+
   const logout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('refreshToken');
     localStorage.removeItem('user');
+    localStorage.removeItem('selectedBinge');
     setUser(null);
   };
 
-  const isAdmin = user?.role === 'ADMIN';
+  const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
   const isAuthenticated = !!user;
 
   return (
-    <AuthContext.Provider value={{ user, login, adminLogin, register, logout, isAdmin, isAuthenticated, loading }}>
+    <AuthContext.Provider value={{ user, login, adminLogin, register, adminRegister, logout, isAdmin, isSuperAdmin, isAuthenticated, loading }}>
       {children}
     </AuthContext.Provider>
   );

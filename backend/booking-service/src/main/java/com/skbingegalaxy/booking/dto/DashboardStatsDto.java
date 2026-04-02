@@ -20,6 +20,7 @@ public class DashboardStatsDto {
     private long todayCheckedIn;
     private long todayPending;
     private long todayCompleted;
+    private long todayCancelled;
     private BigDecimal todayRevenue;            // actual: COMPLETED + payment SUCCESS
     private BigDecimal todayEstimatedRevenue;   // all non-cancelled today's bookings
 }

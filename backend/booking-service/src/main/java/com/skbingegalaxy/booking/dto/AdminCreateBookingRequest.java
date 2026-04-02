@@ -29,10 +29,9 @@ public class AdminCreateBookingRequest {
     @NotNull(message = "Start time is required")
     private LocalTime startTime;
 
-    @Min(value = 1, message = "Duration must be at least 1 hour")
-    @Max(value = 24, message = "Duration cannot exceed 24 hours")
     private int durationHours;
 
+    @Min(value = 30, message = "Duration must be at least 30 minutes")
     private Integer durationMinutes;
 
     @Min(value = 1, message = "At least 1 guest required")

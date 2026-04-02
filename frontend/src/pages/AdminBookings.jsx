@@ -179,6 +179,9 @@ export default function AdminBookings() {
         name: a.name || '',
       })),
       paymentStatus: booking.paymentStatus,
+      status: booking.status,
+      totalAmount: booking.totalAmount || 0,
+      collectedAmount: booking.collectedAmount || 0,
     };
     navigate('/admin/book', { state: { editBooking: editData } });
   };
@@ -583,13 +586,10 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
   const handleAddPayment = async () => {
     const amt = parseFloat(addPaymentForm.amount);
     if (isNaN(amt) || amt <= 0) { toast.error('Enter a valid amount'); return; }
-    // Guard: do not allow collecting more than the booking's total amount
-    const alreadyCollected = payments
-      .filter(p => p.status === 'SUCCESS' || p.status === 'PARTIALLY_REFUNDED')
-      .reduce((sum, p) => sum + (p.remainingRefundable ?? p.amount), 0);
-    const remainingBalance = Math.max(0, (b.totalAmount || 0) - alreadyCollected);
-    if (amt > remainingBalance + 0.01) {
-      toast.error(`Amount ₹${amt.toLocaleString()} exceeds remaining balance ₹${remainingBalance.toLocaleString()}`);
+    // Guard: do not allow collecting more than the booking's balance due
+    const balance = (b.balanceDue != null) ? b.balanceDue : ((b.totalAmount || 0) - (b.collectedAmount || 0));
+    if (amt > balance + 0.01 && balance >= 0) {
+      toast.error(`Amount ₹${amt.toLocaleString()} exceeds remaining balance ₹${Math.max(0, balance).toLocaleString()}`);
       return;
     }
     setAddingPayment(true);
@@ -678,6 +678,13 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
   };
 
   const handleModalCheckout = async () => {
+    // Check for outstanding balance before checkout
+    const balance = (b.balanceDue != null) ? b.balanceDue : ((b.totalAmount || 0) - (b.collectedAmount || 0));
+    if (balance > 0.01) {
+      if (!confirm(`Outstanding balance of ₹${balance.toLocaleString()} on this booking.\nCheckout anyway? (You can collect the difference from the Payment tab)`)) return;
+    } else if (balance < -0.01) {
+      if (!confirm(`Customer overpaid by ₹${Math.abs(balance).toLocaleString()}.\nCheckout anyway? (You can issue a refund from the Payment tab)`)) return;
+    }
     setActionLoading(true);
     try {
       const res = await adminService.checkout(b.bookingRef);
@@ -844,6 +851,20 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                     ⚠️ Checkout blocked — payment status is {b.paymentStatus}. Collect payment before checking out.
                   </div>
                 )}
+                {(() => {
+                  const bal = (b.balanceDue != null) ? b.balanceDue : ((b.totalAmount || 0) - (b.collectedAmount || 0));
+                  if (bal > 0.01) return (
+                    <div style={{ width: '100%', padding: '0.5rem 0.75rem', background: 'rgba(255, 100, 0, 0.1)', border: '1px solid orange', borderRadius: 'var(--radius-sm)', fontSize: '0.82rem', color: 'orange', marginBottom: '0.3rem' }}>
+                      💰 Outstanding balance: <strong>₹{bal.toLocaleString()}</strong>. Collect from the <strong>Payment tab</strong> before checkout.
+                    </div>
+                  );
+                  if (bal < -0.01) return (
+                    <div style={{ width: '100%', padding: '0.5rem 0.75rem', background: 'rgba(0, 206, 201, 0.1)', border: '1px solid #00cec9', borderRadius: 'var(--radius-sm)', fontSize: '0.82rem', color: '#00cec9', marginBottom: '0.3rem' }}>
+                      💳 Customer overpaid by <strong>₹{Math.abs(bal).toLocaleString()}</strong>. Consider issuing a refund from the <strong>Payment tab</strong>.
+                    </div>
+                  );
+                  return null;
+                })()}
                 <button className="btn btn-primary" style={{ background: 'var(--success, #00b894)' }} onClick={handleModalCheckout} disabled={actionLoading}>
                   {actionLoading ? 'Processing...' : 'Checkout'}
                 </button>
@@ -909,7 +930,14 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
           <div style={rowStyle}><span style={labelStyle}>Booking Ref</span><span style={{ fontFamily: 'monospace' }}>{b.bookingRef}</span></div>
           <div style={rowStyle}><span style={labelStyle}>Event Type</span><span>{b.eventType?.name ?? b.eventType}</span></div>
           <div style={rowStyle}><span style={labelStyle}>Date</span><span>{b.bookingDate}</span></div>
-          <div style={rowStyle}><span style={labelStyle}>Time</span><span>{b.startTime}</span></div>
+          <div style={rowStyle}><span style={labelStyle}>Time</span><span>{(() => {
+            const parts = String(b.startTime).split(':');
+            const startMin = parseInt(parts[0],10)*60 + parseInt(parts[1]||'0',10);
+            const durMin = b.durationMinutes || (b.durationHours * 60);
+            const endMin = startMin + durMin;
+            const fmt = (m) => String(Math.floor(m/60)).padStart(2,'0') + ':' + String(m%60).padStart(2,'0');
+            return `${fmt(startMin)} – ${fmt(endMin)}`;
+          })()}</span></div>
           <div style={rowStyle}><span style={labelStyle}>Duration</span><span>{(() => { const m = b.durationMinutes || (b.durationHours * 60); const h = Math.floor(m/60); const min = m%60; return h > 0 && min > 0 ? `${h}hr ${min}m` : h > 0 ? `${h}hr` : `${min}m`; })()}</span></div>
           {b.numberOfGuests > 0 && (
             <div style={rowStyle}><span style={labelStyle}>Guests</span><span>{b.numberOfGuests}</span></div>
@@ -933,6 +961,23 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
             <div style={rowStyle}><span style={labelStyle}>Guest Charge</span><span>₹{b.guestAmount?.toLocaleString()}</span></div>
           )}
           <div style={{ ...rowStyle, fontWeight: 700, fontSize: '1rem' }}><span style={labelStyle}>Total Amount</span><span style={{ color: 'var(--primary-light)' }}>₹{b.totalAmount?.toLocaleString()}</span></div>
+          {(() => {
+            const bal = (b.balanceDue != null) ? b.balanceDue : ((b.totalAmount || 0) - (b.collectedAmount || 0));
+            if (b.collectedAmount != null && b.collectedAmount > 0) return (
+              <>
+                <div style={rowStyle}><span style={labelStyle}>Collected</span><span>₹{b.collectedAmount?.toLocaleString()}</span></div>
+                {Math.abs(bal) > 0.01 && (
+                  <div style={{ ...rowStyle, fontWeight: 600 }}>
+                    <span style={labelStyle}>{bal > 0 ? 'Balance Due' : 'Overpaid'}</span>
+                    <span style={{ color: bal > 0 ? 'var(--danger, #e74c3c)' : '#00cec9' }}>
+                      ₹{Math.abs(bal).toLocaleString()}
+                    </span>
+                  </div>
+                )}
+              </>
+            );
+            return null;
+          })()}
 
           <div style={rowStyle}>
             <span style={labelStyle}>Status</span>
@@ -1155,15 +1200,12 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                 <div style={{ padding: '0.75rem', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }}>
                   <h4 style={{ marginBottom: '0.4rem', fontSize: '0.9rem' }}>Add Additional Payment</h4>
                   {(() => {
-                    const alreadyColl = payments
-                      .filter(p => p.status === 'SUCCESS' || p.status === 'PARTIALLY_REFUNDED')
-                      .reduce((sum, p) => sum + (p.remainingRefundable ?? p.amount), 0);
-                    const remainBalance = Math.max(0, (b.totalAmount || 0) - alreadyColl);
+                    const remainBalance = Math.max(0, (b.balanceDue != null) ? b.balanceDue : ((b.totalAmount || 0) - (b.collectedAmount || 0)));
                     return (
                       <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '0.6rem', padding: '0.4rem 0.6rem', background: 'var(--bg)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
                         <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
                           Total: <strong>₹{(b.totalAmount || 0).toLocaleString()}</strong>
-                          {' ∙ '}Collected: <strong>₹{alreadyColl.toLocaleString()}</strong>
+                          {' ∙ '}Collected: <strong>₹{(b.collectedAmount || 0).toLocaleString()}</strong>
                           {' ∙ '}Remaining: <strong style={{ color: remainBalance > 0 ? 'var(--success, #00b894)' : 'var(--text-muted)' }}>₹{remainBalance.toLocaleString()}</strong>
                         </span>
                         <button className="btn btn-sm btn-secondary"

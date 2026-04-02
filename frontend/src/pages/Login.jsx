@@ -18,7 +18,7 @@ export default function Login() {
     try {
       await login(form);
       toast.success('Welcome back!');
-      navigate('/dashboard');
+      navigate('/binges');
     } catch (err) {
       const msg = err.userMessage || err.response?.data?.message || 'Login failed. Please check your credentials.';
       setError(msg);

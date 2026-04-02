@@ -33,6 +33,9 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         "/api/availability/dates",
         "/api/availability/slots",
         "/api/availability/event-types",
+        "/api/bookings/binges",
+        "/api/bookings/event-types",
+        "/api/bookings/add-ons",
         "/api/payments/callback",
         "/actuator",
         "/swagger-ui",
@@ -61,13 +64,20 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         try {
             String token = authHeader.substring(7);
             Claims claims = validateToken(token);
+            String role = claims.get("role", String.class);
+
+            // Enforce ADMIN or SUPER_ADMIN role on admin routes
+            if (isAdminPath(path) && !"ADMIN".equals(role) && !"SUPER_ADMIN".equals(role)) {
+                exchange.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
+                return exchange.getResponse().setComplete();
+            }
 
             // Forward user info as headers to downstream services
             String firstName = claims.get("firstName", String.class);
             ServerHttpRequest mutatedRequest = request.mutate()
                 .header("X-User-Id", claims.getSubject())
                 .header("X-User-Email", claims.get("email", String.class))
-                .header("X-User-Role", claims.get("role", String.class))
+                .header("X-User-Role", role)
                 .header("X-User-Name", firstName != null ? firstName : "Customer")
                 .build();
 
@@ -80,6 +90,15 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
 
     private boolean isPublicPath(String path) {
         return PUBLIC_PATHS.stream().anyMatch(path::startsWith);
+    }
+
+    /**
+     * Returns true for any /api/{service}/admin path segment.
+     */
+    private boolean isAdminPath(String path) {
+        String[] segments = path.split("/");
+        // /api/xxx/admin... => ["", "api", "xxx", "admin", ...]
+        return segments.length >= 4 && "admin".equals(segments[3]);
     }
 
     private Claims validateToken(String token) {

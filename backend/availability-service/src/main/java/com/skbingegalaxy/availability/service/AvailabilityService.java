@@ -5,6 +5,7 @@ import com.skbingegalaxy.availability.entity.BlockedDate;
 import com.skbingegalaxy.availability.entity.BlockedSlot;
 import com.skbingegalaxy.availability.repository.BlockedDateRepository;
 import com.skbingegalaxy.availability.repository.BlockedSlotRepository;
+import com.skbingegalaxy.common.context.BingeContext;
 import com.skbingegalaxy.common.exception.BusinessException;
 import com.skbingegalaxy.common.exception.DuplicateResourceException;
 import lombok.RequiredArgsConstructor;
@@ -26,10 +27,10 @@ public class AvailabilityService {
     private final BlockedDateRepository blockedDateRepository;
     private final BlockedSlotRepository blockedSlotRepository;
 
-    @Value("${app.theater.opening-hour:9}")
+    @Value("${app.theater.opening-hour:0}")
     private int openingHour;
 
-    @Value("${app.theater.closing-hour:23}")
+    @Value("${app.theater.closing-hour:24}")
     private int closingHour;
 
     // ── Public: get available dates in range ─────────────────
@@ -42,16 +43,20 @@ public class AvailabilityService {
             throw new BusinessException("End date must be after start date");
         }
 
-        Set<LocalDate> blockedDates = blockedDateRepository
-            .findByBlockedDateBetween(from, to)
-            .stream()
-            .map(BlockedDate::getBlockedDate)
-            .collect(Collectors.toSet());
-
-        Map<LocalDate, List<BlockedSlot>> blockedSlotsMap = blockedSlotRepository
-            .findBySlotDateBetween(from, to)
-            .stream()
-            .collect(Collectors.groupingBy(BlockedSlot::getSlotDate));
+        Set<LocalDate> blockedDates;
+        Map<LocalDate, List<BlockedSlot>> blockedSlotsMap;
+        Long bid = BingeContext.getBingeId();
+        if (bid != null) {
+            blockedDates = blockedDateRepository.findByBingeIdAndBlockedDateBetween(bid, from, to)
+                .stream().map(BlockedDate::getBlockedDate).collect(Collectors.toSet());
+            blockedSlotsMap = blockedSlotRepository.findByBingeIdAndSlotDateBetween(bid, from, to)
+                .stream().collect(Collectors.groupingBy(BlockedSlot::getSlotDate));
+        } else {
+            blockedDates = blockedDateRepository.findByBlockedDateBetween(from, to)
+                .stream().map(BlockedDate::getBlockedDate).collect(Collectors.toSet());
+            blockedSlotsMap = blockedSlotRepository.findBySlotDateBetween(from, to)
+                .stream().collect(Collectors.groupingBy(BlockedSlot::getSlotDate));
+        }
 
         List<DayAvailabilityDto> result = new ArrayList<>();
         for (LocalDate date = from; !date.isAfter(to); date = date.plusDays(1)) {
@@ -71,7 +76,11 @@ public class AvailabilityService {
 
     // ── Public: get slots for a single date ──────────────────
     public DayAvailabilityDto getSlotsForDate(LocalDate date) {
-        if (blockedDateRepository.existsByBlockedDate(date)) {
+        Long bid = BingeContext.getBingeId();
+        boolean dateBlocked = bid != null
+            ? blockedDateRepository.existsByBingeIdAndBlockedDate(bid, date)
+            : blockedDateRepository.existsByBlockedDate(date);
+        if (dateBlocked) {
             return DayAvailabilityDto.builder()
                 .date(date)
                 .fullyBlocked(true)
@@ -79,20 +88,27 @@ public class AvailabilityService {
                 .blockedSlots(Collections.emptyList())
                 .build();
         }
-        List<BlockedSlot> blocked = blockedSlotRepository.findBySlotDate(date);
+        List<BlockedSlot> blocked = bid != null
+            ? blockedSlotRepository.findByBingeIdAndSlotDate(bid, date)
+            : blockedSlotRepository.findBySlotDate(date);
         return buildDayAvailability(date, blocked);
     }
 
     // ── Admin: block full date ───────────────────────────────
     @Transactional
     public BlockedDateDto blockDate(BlockDateRequest request, Long adminId) {
-        if (blockedDateRepository.existsByBlockedDate(request.getDate())) {
+        Long bid = BingeContext.getBingeId();
+        boolean exists = bid != null
+            ? blockedDateRepository.existsByBingeIdAndBlockedDate(bid, request.getDate())
+            : blockedDateRepository.existsByBlockedDate(request.getDate());
+        if (exists) {
             throw new DuplicateResourceException("BlockedDate", "date", request.getDate());
         }
         BlockedDate entity = BlockedDate.builder()
             .blockedDate(request.getDate())
             .reason(request.getReason())
             .blockedBy(adminId)
+            .bingeId(bid)
             .build();
         entity = blockedDateRepository.save(entity);
         log.info("Admin {} blocked date {}", adminId, request.getDate());
@@ -102,14 +118,23 @@ public class AvailabilityService {
     // ── Admin: unblock date ──────────────────────────────────
     @Transactional
     public void unblockDate(LocalDate date) {
-        blockedDateRepository.deleteByBlockedDate(date);
+        Long bid = BingeContext.getBingeId();
+        if (bid != null) {
+            blockedDateRepository.deleteByBingeIdAndBlockedDate(bid, date);
+        } else {
+            blockedDateRepository.deleteByBlockedDate(date);
+        }
         log.info("Unblocked date {}", date);
     }
 
     // ── Admin: block slot ────────────────────────────────────
     @Transactional
     public BlockedSlotDto blockSlot(BlockSlotRequest request, Long adminId) {
-        if (blockedSlotRepository.existsBySlotDateAndStartHour(request.getDate(), request.getStartHour())) {
+        Long bid = BingeContext.getBingeId();
+        boolean exists = bid != null
+            ? blockedSlotRepository.existsByBingeIdAndSlotDateAndStartHour(bid, request.getDate(), request.getStartHour())
+            : blockedSlotRepository.existsBySlotDateAndStartHour(request.getDate(), request.getStartHour());
+        if (exists) {
             throw new DuplicateResourceException("BlockedSlot", "slot", request.getDate() + " " + request.getStartHour());
         }
         BlockedSlot entity = BlockedSlot.builder()
@@ -118,6 +143,7 @@ public class AvailabilityService {
             .endHour(request.getEndHour())
             .reason(request.getReason())
             .blockedBy(adminId)
+            .bingeId(bid)
             .build();
         entity = blockedSlotRepository.save(entity);
         log.info("Admin {} blocked slot {} on {}", adminId, request.getStartHour(), request.getDate());
@@ -127,24 +153,39 @@ public class AvailabilityService {
     // ── Admin: unblock slot ──────────────────────────────────
     @Transactional
     public void unblockSlot(LocalDate date, int startHour) {
-        blockedSlotRepository.deleteBySlotDateAndStartHour(date, startHour);
+        Long bid = BingeContext.getBingeId();
+        if (bid != null) {
+            blockedSlotRepository.deleteByBingeIdAndSlotDateAndStartHour(bid, date, startHour);
+        } else {
+            blockedSlotRepository.deleteBySlotDateAndStartHour(date, startHour);
+        }
         log.info("Unblocked slot {} on {}", startHour, date);
     }
 
     // ── Admin: list all blocked dates ────────────────────────
     public List<BlockedDateDto> getAllBlockedDates() {
-        return blockedDateRepository.findAll().stream().map(this::toBlockedDateDto).toList();
+        Long bid = BingeContext.getBingeId();
+        return (bid != null ? blockedDateRepository.findByBingeId(bid) : blockedDateRepository.findAll())
+            .stream().map(this::toBlockedDateDto).toList();
     }
 
     // ── Admin: list all blocked slots ────────────────────────
     public List<BlockedSlotDto> getAllBlockedSlots() {
-        return blockedSlotRepository.findAll().stream().map(this::toBlockedSlotDto).toList();
+        Long bid = BingeContext.getBingeId();
+        return (bid != null ? blockedSlotRepository.findByBingeIdAndSlotDateBetween(bid, LocalDate.now().minusYears(1), LocalDate.now().plusYears(1)) : blockedSlotRepository.findAll())
+            .stream().map(this::toBlockedSlotDto).toList();
     }
 
     // ── Internal: check if a date+slot range is available (minutes-based) ──
     public boolean isSlotAvailable(LocalDate date, int startMinute, int durationMinutes) {
-        if (blockedDateRepository.existsByBlockedDate(date)) return false;
-        List<BlockedSlot> blocked = blockedSlotRepository.findBySlotDate(date);
+        Long bid = BingeContext.getBingeId();
+        boolean dateBlocked = bid != null
+            ? blockedDateRepository.existsByBingeIdAndBlockedDate(bid, date)
+            : blockedDateRepository.existsByBlockedDate(date);
+        if (dateBlocked) return false;
+        List<BlockedSlot> blocked = bid != null
+            ? blockedSlotRepository.findByBingeIdAndSlotDate(bid, date)
+            : blockedSlotRepository.findBySlotDate(date);
         // Build set of blocked 30-min indices
         Set<Integer> blockedHalfHours = blocked.stream()
             .flatMap(s -> java.util.stream.IntStream.range(s.getStartHour() * 2, s.getEndHour() * 2).boxed())

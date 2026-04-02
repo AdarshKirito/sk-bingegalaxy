@@ -216,9 +216,14 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
       for (let m = start; m < start + dur; m += 30) bookedHalfHours.add(Math.floor(m / 30));
     });
     const slots = [];
+    // The currently-edited booking's start time (always include it)
+    const editStartMin = editBookingData?.startTime
+      ? (() => { const p = String(editBookingData.startTime).split(':'); return parseInt(p[0],10)*60 + parseInt(p[1]||'0',10); })()
+      : null;
     // Iterate in 30-min steps
     for (let startMin = 0; startMin + durMin <= 24 * 60; startMin += 30) {
-      if (isToday && startMin < nowMinutes + 30) continue; // must be at least 30 min from now
+      // Allow the edit booking's original time even if it's past
+      if (isToday && startMin < nowMinutes + 30 && startMin !== editStartMin) continue; // must be at least 30 min from now
       let allAvailable = true;
       for (let m = startMin; m < startMin + durMin; m += 30) {
         const slot = rawSlots.find(s => {

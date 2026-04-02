@@ -11,6 +11,14 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  // Auto-attach selected binge for multi-tenancy
+  const binge = localStorage.getItem('selectedBinge');
+  if (binge) {
+    try {
+      const { id } = JSON.parse(binge);
+      if (id) config.headers['X-Binge-Id'] = id;
+    } catch (_) { /* ignore parse errors */ }
+  }
   return config;
 });
 
@@ -30,15 +38,75 @@ function extractErrorMessage(err) {
   return data.message || data.error || 'Something went wrong. Please try again.';
 }
 
+// ── Silent refresh token logic ──────────────────────────────
+let isRefreshing = false;
+let failedQueue = [];
+
+function processQueue(error, token = null) {
+  failedQueue.forEach(({ resolve, reject }) => {
+    if (error) reject(error);
+    else resolve(token);
+  });
+  failedQueue = [];
+}
+
 api.interceptors.response.use(
   (res) => res,
-  (err) => {
-    if (err.response?.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      if (!window.location.pathname.includes('/login')) {
-        toast.error('Session expired. Please log in again.');
-        window.location.href = '/login';
+  async (err) => {
+    const originalRequest = err.config;
+
+    // If 401 and we haven't already retried this request
+    if (err.response?.status === 401 && !originalRequest._retry) {
+      // Don't try to refresh if we're already on a login/refresh call
+      if (originalRequest.url?.includes('/auth/login') ||
+          originalRequest.url?.includes('/auth/admin/login') ||
+          originalRequest.url?.includes('/auth/refresh')) {
+        return Promise.reject(err);
+      }
+
+      if (isRefreshing) {
+        // Queue this request until the refresh completes
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        }).then((token) => {
+          originalRequest.headers.Authorization = `Bearer ${token}`;
+          return api(originalRequest);
+        });
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+
+      const refreshToken = localStorage.getItem('refreshToken');
+      if (!refreshToken) {
+        isRefreshing = false;
+        forceLogout();
+        return Promise.reject(err);
+      }
+
+      try {
+        const { data } = await axios.post('/api/auth/refresh', { refreshToken }, {
+          headers: { 'Content-Type': 'application/json' },
+        });
+
+        const newToken = data.data.token;
+        const newRefresh = data.data.refreshToken;
+        localStorage.setItem('token', newToken);
+        localStorage.setItem('refreshToken', newRefresh);
+        if (data.data.user) {
+          localStorage.setItem('user', JSON.stringify(data.data.user));
+        }
+
+        isRefreshing = false;
+        processQueue(null, newToken);
+
+        originalRequest.headers.Authorization = `Bearer ${newToken}`;
+        return api(originalRequest);
+      } catch (refreshErr) {
+        isRefreshing = false;
+        processQueue(refreshErr, null);
+        forceLogout();
+        return Promise.reject(refreshErr);
       }
     } else if (err.response?.status === 403) {
       toast.error('You do not have permission to perform this action.');
@@ -48,10 +116,21 @@ api.interceptors.response.use(
       // Network error / timeout
       toast.error(extractErrorMessage(err));
     }
+
     // Attach the extracted message for callers to use
     err.userMessage = extractErrorMessage(err);
     return Promise.reject(err);
   }
 );
+
+function forceLogout() {
+  localStorage.removeItem('token');
+  localStorage.removeItem('refreshToken');
+  localStorage.removeItem('user');
+  if (!window.location.pathname.includes('/login')) {
+    toast.error('Session expired. Please log in again.');
+    window.location.href = '/login';
+  }
+}
 
 export default api;

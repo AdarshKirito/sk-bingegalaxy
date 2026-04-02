@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { adminService, authService } from '../services/endpoints';
+import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
 
 export default function AdminUsersConfig() {
   const { userId } = useParams();
   const navigate = useNavigate();
+  const { isSuperAdmin } = useAuth();
 
   /* ── shared reference data ── */
   const [eventTypes, setEventTypes] = useState([]);
@@ -14,13 +16,26 @@ export default function AdminUsersConfig() {
   const [loading, setLoading] = useState(true);
 
   /* ── section toggle ── */
-  const [section, setSection] = useState('users'); // users | rate-codes
+  const [section, setSection] = useState('users'); // users | admins | rate-codes
 
   /* ── users section ── */
   const [allCustomers, setAllCustomers] = useState([]);
   const [filterText, setFilterText] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [customerTab, setCustomerTab] = useState('details'); // details | pricing
+
+  /* ── admins section (super admin only) ── */
+  const [allAdmins, setAllAdmins] = useState([]);
+  const [adminFilterText, setAdminFilterText] = useState('');
+  const [selectedAdmin, setSelectedAdmin] = useState(null);
+  const [adminEditForm, setAdminEditForm] = useState({ firstName: '', lastName: '', email: '', phone: '', password: '' });
+  const [adminShowPassword, setAdminShowPassword] = useState(false);
+  const [adminSaving, setAdminSaving] = useState(false);
+  const [adminBinges, setAdminBinges] = useState([]);
+  const [adminTab, setAdminTab] = useState('details'); // details | binges
+
+  /* ── delete confirmation ── */
+  const [deleteConfirm, setDeleteConfirm] = useState(null); // { id, name, role }
 
   /* ── customer edit (details) ── */
   const [editForm, setEditForm] = useState({ firstName: '', lastName: '', email: '', phone: '', password: '' });
@@ -38,21 +53,24 @@ export default function AdminUsersConfig() {
 
   /* ── initial load ── */
   useEffect(() => {
-    Promise.all([
+    const promises = [
       adminService.getAllEventTypes(),
       adminService.getAllAddOns(),
       adminService.getRateCodes(),
       authService.getAllCustomers(),
-    ])
-      .then(([etRes, aoRes, rcRes, custRes]) => {
+    ];
+    if (isSuperAdmin) promises.push(authService.getAllAdmins());
+    Promise.all(promises)
+      .then(([etRes, aoRes, rcRes, custRes, adminRes]) => {
         setEventTypes(etRes.data.data || []);
         setAddOns(aoRes.data.data || []);
         setRateCodes(rcRes.data.data || []);
         setAllCustomers(custRes.data.data || custRes.data || []);
+        if (adminRes) setAllAdmins(adminRes.data.data || adminRes.data || []);
       })
       .catch(() => toast.error('Failed to load data'))
       .finally(() => setLoading(false));
-  }, []);
+  }, [isSuperAdmin]);
 
   /* ── if navigated with userId param, auto-select ── */
   useEffect(() => {
@@ -228,6 +246,69 @@ export default function AdminUsersConfig() {
     } catch { toast.error('Toggle failed'); }
   };
 
+  /* ── delete user (super admin) ── */
+  const handleDeleteUser = async () => {
+    if (!deleteConfirm) return;
+    try {
+      await authService.deleteUser(deleteConfirm.id);
+      toast.success(`${deleteConfirm.name} deleted`);
+      if (deleteConfirm.role === 'admin') {
+        setAllAdmins(prev => prev.filter(a => a.id !== deleteConfirm.id));
+        if (selectedAdmin?.id === deleteConfirm.id) { setSelectedAdmin(null); setAdminBinges([]); }
+      } else {
+        setAllCustomers(prev => prev.filter(c => c.id !== deleteConfirm.id));
+        if (selectedCustomer?.id === deleteConfirm.id) setSelectedCustomer(null);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Delete failed');
+    } finally {
+      setDeleteConfirm(null);
+    }
+  };
+
+  /* ── select admin ── */
+  const selectAdmin = async (admin) => {
+    setSelectedAdmin(admin);
+    setAdminTab('details');
+    setAdminEditForm({ firstName: admin.firstName || '', lastName: admin.lastName || '', email: admin.email || '', phone: admin.phone || '', password: '' });
+    setAdminShowPassword(false);
+    setAdminBinges([]);
+    // Pre-load binges
+    try {
+      const res = await adminService.getBingesByAdmin(admin.id);
+      setAdminBinges(res.data.data || res.data || []);
+    } catch { /* ignore – binges are optional */ }
+  };
+
+  /* ── save admin details ── */
+  const handleSaveAdmin = async () => {
+    if (!selectedAdmin) return;
+    setAdminSaving(true);
+    try {
+      const payload = { firstName: adminEditForm.firstName, lastName: adminEditForm.lastName, email: adminEditForm.email, phone: adminEditForm.phone };
+      if (adminEditForm.password?.trim()) payload.password = adminEditForm.password;
+      const res = await authService.updateAdmin(selectedAdmin.id, payload);
+      const updated = res.data.data || res.data;
+      setAllAdmins(prev => prev.map(a => a.id === updated.id ? updated : a));
+      setSelectedAdmin(updated);
+      toast.success('Admin updated');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Update failed');
+    } finally {
+      setAdminSaving(false);
+    }
+  };
+
+  /* ── filtered admin list ── */
+  const filteredAdmins = adminFilterText.trim()
+    ? allAdmins.filter(a => {
+        const q = adminFilterText.toLowerCase();
+        return (a.firstName + ' ' + a.lastName).toLowerCase().includes(q) ||
+          (a.email || '').toLowerCase().includes(q) ||
+          (a.phone || '').includes(q);
+      })
+    : allAdmins;
+
   /* ── filtered customer list ── */
   const filteredCustomers = filterText.trim()
     ? allCustomers.filter(c => {
@@ -253,6 +334,7 @@ export default function AdminUsersConfig() {
       {/* ── top-level section tabs ── */}
       <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', marginBottom: '1.25rem' }}>
         <button style={tabBtnStyle(section === 'users')} onClick={() => setSection('users')}>Users</button>
+        {isSuperAdmin && <button style={tabBtnStyle(section === 'admins')} onClick={() => setSection('admins')}>Admins</button>}
         <button style={tabBtnStyle(section === 'rate-codes')} onClick={() => setSection('rate-codes')}>Rate Codes</button>
       </div>
 
@@ -335,7 +417,13 @@ export default function AdminUsersConfig() {
                         </span>
                       </div>
                     </div>
-                    <div style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'flex-end' }}>
+                    <div style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                      {isSuperAdmin && (
+                        <button className="btn" style={{ background: '#ef4444', color: '#fff', marginRight: 'auto' }}
+                          onClick={() => setDeleteConfirm({ id: selectedCustomer.id, name: `${selectedCustomer.firstName} ${selectedCustomer.lastName}`, role: 'customer' })}>
+                          Delete Account
+                        </button>
+                      )}
                       <button className="btn btn-primary" onClick={handleSaveDetails} disabled={saving}>
                         {saving ? 'Saving...' : 'Save Changes'}
                       </button>
@@ -445,6 +533,149 @@ export default function AdminUsersConfig() {
                 )}
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ════════════════════  ADMINS SECTION (SUPER_ADMIN)  ════════════════════ */}
+      {section === 'admins' && isSuperAdmin && (
+        <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: '1rem' }}>
+          {/* ── Left: admin list ── */}
+          <div>
+            <div className="card" style={{ padding: '0.75rem', marginBottom: '0.75rem' }}>
+              <input style={{ ...inputStyle }} value={adminFilterText}
+                onChange={e => setAdminFilterText(e.target.value)} placeholder="Filter admins..." />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }}>
+              {filteredAdmins.length === 0 ? (
+                <div className="card" style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>No admins found.</div>
+              ) : filteredAdmins.map(a => (
+                <div key={a.id} className="card" style={{
+                  padding: '0.6rem 0.75rem', cursor: 'pointer',
+                  border: selectedAdmin?.id === a.id ? '1.5px solid var(--accent)' : '1.5px solid transparent',
+                  background: selectedAdmin?.id === a.id ? 'var(--bg-card-hover, var(--bg-card))' : undefined,
+                }} onClick={() => selectAdmin(a)}>
+                  <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{a.firstName} {a.lastName}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{a.email}</div>
+                  <div style={{ fontSize: '0.7rem', color: a.active ? '#22c55e' : '#ef4444', marginTop: '0.1rem' }}>
+                    {a.active ? 'Active' : 'Inactive'} • {a.role === 'SUPER_ADMIN' ? 'Super Admin' : 'Admin'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Right: admin detail ── */}
+          <div>
+            {!selectedAdmin ? (
+              <div className="card" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>Select an admin to view details</div>
+            ) : (
+              <>
+                <div className="card" style={{ padding: '0.75rem 1rem', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '1rem' }}>{selectedAdmin.firstName} {selectedAdmin.lastName}</h3>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{selectedAdmin.email} • Joined {selectedAdmin.createdAt ? new Date(selectedAdmin.createdAt).toLocaleDateString() : '—'}</span>
+                  </div>
+                  <button className="btn" style={{ background: '#ef4444', color: '#fff', fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
+                    onClick={() => setDeleteConfirm({ id: selectedAdmin.id, name: `${selectedAdmin.firstName} ${selectedAdmin.lastName}`, role: 'admin' })}>
+                    Delete
+                  </button>
+                </div>
+
+                {/* Sub-tabs: Details | Binges */}
+                <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', marginBottom: '1rem' }}>
+                  <button style={tabBtnStyle(adminTab === 'details')} onClick={() => setAdminTab('details')}>Details</button>
+                  <button style={tabBtnStyle(adminTab === 'binges')} onClick={() => setAdminTab('binges')}>
+                    Binges ({adminBinges.length})
+                  </button>
+                </div>
+
+                {/* ── Details tab ── */}
+                {adminTab === 'details' && (
+                  <div className="card" style={{ padding: '1.25rem' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+                      <div>
+                        <label style={labelStyle}>First Name</label>
+                        <input style={inputStyle} value={adminEditForm.firstName} onChange={e => setAdminEditForm({ ...adminEditForm, firstName: e.target.value })} />
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Last Name</label>
+                        <input style={inputStyle} value={adminEditForm.lastName} onChange={e => setAdminEditForm({ ...adminEditForm, lastName: e.target.value })} />
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Email</label>
+                        <input style={inputStyle} type="email" value={adminEditForm.email} onChange={e => setAdminEditForm({ ...adminEditForm, email: e.target.value })} />
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Phone</label>
+                        <input style={inputStyle} value={adminEditForm.phone} onChange={e => setAdminEditForm({ ...adminEditForm, phone: e.target.value })} />
+                      </div>
+                    </div>
+                    <div style={{ marginBottom: '1rem' }}>
+                      <label style={labelStyle}>Reset Password <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(leave blank to keep current)</span></label>
+                      <div style={{ position: 'relative' }}>
+                        <input style={inputStyle} type={adminShowPassword ? 'text' : 'password'} value={adminEditForm.password}
+                          onChange={e => setAdminEditForm({ ...adminEditForm, password: e.target.value })} placeholder="New password (optional)" />
+                        <button type="button" style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.8rem' }}
+                          onClick={() => setAdminShowPassword(!adminShowPassword)}>{adminShowPassword ? 'Hide' : 'Show'}</button>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <button className="btn btn-primary" onClick={handleSaveAdmin} disabled={adminSaving}>
+                        {adminSaving ? 'Saving...' : 'Save Changes'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Binges tab ── */}
+                {adminTab === 'binges' && (
+                  <div>
+                    {adminBinges.length === 0 ? (
+                      <div className="card" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>This admin has not created any binges yet.</div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        {adminBinges.map(b => (
+                          <div key={b.id} className="card" style={{ padding: '0.75rem 1rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div>
+                                <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{b.name}</div>
+                                {b.address && <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{b.address}</div>}
+                              </div>
+                              <span style={{
+                                fontSize: '0.7rem', padding: '0.15rem 0.5rem', borderRadius: '999px',
+                                background: b.active ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                                color: b.active ? '#22c55e' : '#ef4444',
+                              }}>{b.active ? 'Active' : 'Inactive'}</span>
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                              Created {b.createdAt ? new Date(b.createdAt).toLocaleDateString() : '—'}
+                              {b.operationalDate && <> • Op. Date: {b.operationalDate}</>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ════════════════════  DELETE CONFIRMATION MODAL  ════════════════════ */}
+      {deleteConfirm && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+          <div className="card" style={{ padding: '2rem', maxWidth: 420, textAlign: 'center' }}>
+            <h3 style={{ margin: '0 0 0.75rem', color: '#ef4444' }}>Delete Account</h3>
+            <p style={{ marginBottom: '1.5rem', fontSize: '0.9rem' }}>
+              Are you sure you want to permanently delete <strong>{deleteConfirm.name}</strong>'s {deleteConfirm.role} account? This action cannot be undone.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '0.75rem' }}>
+              <button className="btn btn-secondary" onClick={() => setDeleteConfirm(null)}>Cancel</button>
+              <button className="btn" style={{ background: '#ef4444', color: '#fff' }} onClick={handleDeleteUser}>Delete</button>
+            </div>
           </div>
         </div>
       )}

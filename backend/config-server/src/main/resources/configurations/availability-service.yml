@@ -28,8 +28,8 @@ spring:
 
 app:
   theater:
-    opening-hour: 9
-    closing-hour: 23
+    opening-hour: 0
+    closing-hour: 24
     slot-duration-minutes: 60
     max-concurrent-bookings: 1
 

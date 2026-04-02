@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
 import './Auth.css';
@@ -18,7 +18,7 @@ export default function AdminLogin() {
     try {
       await adminLogin(form);
       toast.success('Welcome, Admin!');
-      navigate('/admin/dashboard');
+      navigate('/admin/binges');
     } catch (err) {
       const msg = err.userMessage || err.response?.data?.message || 'Admin login failed. Please check your credentials.';
       setError(msg);
@@ -53,6 +53,9 @@ export default function AdminLogin() {
             {loading ? 'Signing in...' : 'Sign In as Admin'}
           </button>
         </form>
+        <p style={{ textAlign: 'center', marginTop: '1rem' }}>
+          Don't have an admin account? <Link to="/admin/register">Sign Up</Link>
+        </p>
       </div>
     </div>
   );

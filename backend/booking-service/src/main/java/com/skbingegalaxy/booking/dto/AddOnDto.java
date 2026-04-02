@@ -10,6 +10,7 @@ import java.util.List;
 @Builder
 public class AddOnDto {
     private Long id;
+    private Long bingeId;
     private String name;
     private String description;
     private BigDecimal price;

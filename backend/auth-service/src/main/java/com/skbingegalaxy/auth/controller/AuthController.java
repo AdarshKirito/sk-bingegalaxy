@@ -94,4 +94,30 @@ public class AuthController {
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(ApiResponse.ok("Customer created", user));
     }
+
+    @PostMapping("/admin/register")
+    public ResponseEntity<ApiResponse<AuthResponse>> adminRegister(@Valid @RequestBody RegisterRequest request) {
+        AuthResponse response = authService.adminRegister(request);
+        return ResponseEntity.status(HttpStatus.CREATED)
+            .body(ApiResponse.ok("Admin registration successful", response));
+    }
+
+    @GetMapping("/admin/admins")
+    public ResponseEntity<ApiResponse<java.util.List<UserDto>>> getAllAdmins() {
+        return ResponseEntity.ok(ApiResponse.ok(authService.getAllAdmins()));
+    }
+
+    @PutMapping("/admin/admins/{id}")
+    public ResponseEntity<ApiResponse<UserDto>> updateAdmin(
+            @PathVariable Long id,
+            @Valid @RequestBody UpdateCustomerRequest request) {
+        UserDto user = authService.updateAdmin(id, request);
+        return ResponseEntity.ok(ApiResponse.ok("Admin updated", user));
+    }
+
+    @DeleteMapping("/admin/user/{id}")
+    public ResponseEntity<ApiResponse<Void>> deleteUser(@PathVariable Long id) {
+        authService.deleteUser(id);
+        return ResponseEntity.ok(ApiResponse.ok("User deleted", null));
+    }
 }

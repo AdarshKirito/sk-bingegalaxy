@@ -20,6 +20,8 @@ public class BlockedDate {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    private Long bingeId;
+
     @Column(nullable = false)
     private LocalDate blockedDate;
 

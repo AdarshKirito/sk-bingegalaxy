@@ -3,6 +3,10 @@ package com.skbingegalaxy.booking.dto;
 import jakarta.validation.constraints.Size;
 import lombok.*;
 
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.util.List;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -24,4 +28,12 @@ public class UpdateBookingRequest {
 
     @Size(max = 1000)
     private String specialNotes;
+
+    // ── Pricing-relevant fields (triggers recalculation when set) ──
+    private Long eventTypeId;
+    private Integer durationMinutes;
+    private LocalTime startTime;
+    private LocalDate bookingDate;
+    private Integer numberOfGuests;
+    private List<AddOnSelection> addOns;
 }

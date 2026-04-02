@@ -32,7 +32,17 @@ public class AdminSeeder implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
-        if (userRepository.findByEmailAndRole(adminEmail, UserRole.ADMIN).isEmpty()) {
+        var existing = userRepository.findByEmail(adminEmail);
+        if (existing.isPresent()) {
+            User admin = existing.get();
+            if (admin.getRole() != UserRole.SUPER_ADMIN) {
+                admin.setRole(UserRole.SUPER_ADMIN);
+                userRepository.save(admin);
+                log.info("Admin user upgraded to SUPER_ADMIN: {}", adminEmail);
+            } else {
+                log.info("Super admin already exists: {}", adminEmail);
+            }
+        } else {
             String[] names = adminName.split(" ", 2);
             User admin = User.builder()
                 .firstName(names[0])
@@ -40,13 +50,11 @@ public class AdminSeeder implements CommandLineRunner {
                 .email(adminEmail)
                 .phone(adminPhone)
                 .password(passwordEncoder.encode(adminPassword))
-                .role(UserRole.ADMIN)
+                .role(UserRole.SUPER_ADMIN)
                 .active(true)
                 .build();
             userRepository.save(admin);
-            log.info("Admin user seeded: {}", adminEmail);
-        } else {
-            log.info("Admin user already exists: {}", adminEmail);
+            log.info("Super admin seeded: {}", adminEmail);
         }
     }
 }

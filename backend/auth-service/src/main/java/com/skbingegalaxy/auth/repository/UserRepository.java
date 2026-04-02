@@ -25,4 +25,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     @Query("SELECT u FROM User u WHERE u.role = 'CUSTOMER' ORDER BY u.firstName, u.lastName")
     List<User> findAllCustomers();
+
+    @Query("SELECT u FROM User u WHERE u.role = 'ADMIN' ORDER BY u.firstName, u.lastName")
+    List<User> findAllAdmins();
 }

@@ -32,6 +32,8 @@ public class Booking {
     @Column(nullable = false, unique = true, length = 20)
     private String bookingRef;
 
+    private Long bingeId;
+
     @Column(nullable = false)
     private Long customerId;
 

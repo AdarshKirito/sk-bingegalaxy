@@ -17,6 +17,7 @@ import java.util.List;
 public class BookingDto {
     private Long id;
     private String bookingRef;
+    private Long bingeId;
     private Long customerId;
     private String customerName;
     private String customerEmail;
@@ -34,6 +35,7 @@ public class BookingDto {
     private BigDecimal guestAmount;
     private BigDecimal totalAmount;
     private BigDecimal collectedAmount;
+    private BigDecimal balanceDue;      // totalAmount − collectedAmount
     private int numberOfGuests;
     private BookingStatus status;
     private PaymentStatus paymentStatus;

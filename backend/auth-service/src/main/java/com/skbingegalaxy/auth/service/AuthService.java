@@ -108,8 +108,12 @@ public class AuthService {
 
     // ── Admin login ──────────────────────────────────────────
     public AuthResponse adminLogin(LoginRequest request) {
-        User user = userRepository.findByEmailAndRole(request.getEmail().toLowerCase(), UserRole.ADMIN)
+        User user = userRepository.findByEmail(request.getEmail().toLowerCase())
             .orElseThrow(() -> new BusinessException("Invalid admin credentials", HttpStatus.UNAUTHORIZED));
+
+        if (user.getRole() != UserRole.ADMIN && user.getRole() != UserRole.SUPER_ADMIN) {
+            throw new BusinessException("Invalid admin credentials", HttpStatus.UNAUTHORIZED);
+        }
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             throw new BusinessException("Invalid admin credentials", HttpStatus.UNAUTHORIZED);
@@ -206,6 +210,23 @@ public class AuthService {
         return userRepository.findAllCustomers().stream().map(this::toDto).toList();
     }
 
+    // ── Super Admin: list all admins ─────────────────────────
+    public java.util.List<UserDto> getAllAdmins() {
+        return userRepository.findAllAdmins().stream().map(this::toDto).toList();
+    }
+
+    // ── Super Admin: delete user ─────────────────────────────
+    @Transactional
+    public void deleteUser(Long id) {
+        User user = userRepository.findById(id)
+            .orElseThrow(() -> new ResourceNotFoundException("User", "id", id));
+        if (user.getRole() == UserRole.SUPER_ADMIN) {
+            throw new BusinessException("Cannot delete the super admin account", HttpStatus.FORBIDDEN);
+        }
+        userRepository.delete(user);
+        log.info("Super admin deleted user: {} (ID: {}, role: {})", user.getEmail(), id, user.getRole());
+    }
+
     // ── Admin: get customer by ID ────────────────────────────
     public UserDto getCustomerById(Long id) {
         User user = userRepository.findById(id)
@@ -244,6 +265,38 @@ public class AuthService {
         return toDto(user);
     }
 
+    // ── Super-Admin: update admin ────────────────────────────
+    @Transactional
+    public UserDto updateAdmin(Long id, UpdateCustomerRequest request) {
+        User user = userRepository.findById(id)
+            .orElseThrow(() -> new ResourceNotFoundException("User", "id", id));
+
+        if (user.getRole() != UserRole.ADMIN && user.getRole() != UserRole.SUPER_ADMIN) {
+            throw new BusinessException("User is not an admin", HttpStatus.BAD_REQUEST);
+        }
+
+        if (!user.getEmail().equals(request.getEmail()) && userRepository.existsByEmail(request.getEmail())) {
+            throw new DuplicateResourceException("User", "email", request.getEmail());
+        }
+        if (!user.getPhone().equals(request.getPhone()) && userRepository.existsByPhone(request.getPhone())) {
+            throw new DuplicateResourceException("User", "phone", request.getPhone());
+        }
+
+        user.setFirstName(request.getFirstName());
+        user.setLastName(request.getLastName());
+        user.setEmail(request.getEmail());
+        user.setPhone(request.getPhone());
+
+        if (request.getPassword() != null && !request.getPassword().isBlank()) {
+            user.setPassword(passwordEncoder.encode(request.getPassword()));
+            log.info("Super-admin reset password for admin ID: {}", id);
+        }
+
+        user = userRepository.save(user);
+        log.info("Super-admin updated admin: {} (ID: {})", user.getEmail(), id);
+        return toDto(user);
+    }
+
     // ── Admin: create customer ───────────────────────────────
     @Transactional
     public UserDto adminCreateCustomer(RegisterRequest request) {
@@ -267,6 +320,31 @@ public class AuthService {
         user = userRepository.save(user);
         log.info("Admin created customer: {}", user.getEmail());
         return toDto(user);
+    }
+
+    // ── Admin register ────────────────────────────────────────
+    @Transactional
+    public AuthResponse adminRegister(RegisterRequest request) {
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new DuplicateResourceException("User", "email", request.getEmail());
+        }
+        if (userRepository.existsByPhone(request.getPhone())) {
+            throw new DuplicateResourceException("User", "phone", request.getPhone());
+        }
+
+        User user = User.builder()
+            .firstName(request.getFirstName())
+            .lastName(request.getLastName())
+            .email(request.getEmail().toLowerCase())
+            .phone(request.getPhone())
+            .password(passwordEncoder.encode(request.getPassword()))
+            .role(UserRole.ADMIN)
+            .active(true)
+            .build();
+
+        user = userRepository.save(user);
+        log.info("Admin registered: {}", user.getEmail());
+        return buildAuthResponse(user);
     }
 
     // ── Helpers ──────────────────────────────────────────────

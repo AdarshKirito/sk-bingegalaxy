@@ -115,4 +115,63 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     // Find active (non-cancelled) bookings for a given date to prevent double-booking
     @Query("SELECT b FROM Booking b WHERE b.bookingDate = :date AND b.status NOT IN ('CANCELLED', 'NO_SHOW')")
     List<Booking> findActiveBookingsByDate(@Param("date") LocalDate date);
+
+    // ═══════════════════════════════════════════════════════════
+    //  BINGE-SCOPED QUERIES
+    // ═══════════════════════════════════════════════════════════
+
+    Page<Booking> findByBingeId(Long bingeId, Pageable pageable);
+    Page<Booking> findByBingeIdAndBookingDate(Long bingeId, LocalDate date, Pageable pageable);
+    Page<Booking> findByBingeIdAndStatus(Long bingeId, BookingStatus status, Pageable pageable);
+
+    @Query("SELECT b FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate >= :date AND b.status IN ('PENDING', 'CONFIRMED')")
+    Page<Booking> findUpcomingBookingsByBinge(@Param("bid") Long bingeId, @Param("date") LocalDate date, Pageable pageable);
+
+    @Query("SELECT b FROM Booking b WHERE b.bingeId = :bid AND (" +
+           "LOWER(b.bookingRef) LIKE LOWER(CONCAT('%', :q, '%')) OR " +
+           "LOWER(b.customerName) LIKE LOWER(CONCAT('%', :q, '%')) OR " +
+           "LOWER(b.customerEmail) LIKE LOWER(CONCAT('%', :q, '%')) OR " +
+           "b.customerPhone LIKE CONCAT('%', :q, '%') OR " +
+           "LOWER(b.eventType.name) LIKE LOWER(CONCAT('%', :q, '%')))")
+    Page<Booking> searchBookingsByBinge(@Param("bid") Long bingeId, @Param("q") String query, Pageable pageable);
+
+    @Query("SELECT b FROM Booking b WHERE b.bingeId = :bid AND b.customerId = :cid AND b.bookingDate >= :today AND b.status IN ('PENDING', 'CONFIRMED') ORDER BY b.bookingDate ASC, b.startTime ASC")
+    List<Booking> findCustomerCurrentBookingsByBinge(@Param("bid") Long bingeId, @Param("cid") Long customerId, @Param("today") LocalDate today);
+
+    @Query("SELECT b FROM Booking b WHERE b.bingeId = :bid AND b.customerId = :cid AND (b.status IN ('COMPLETED', 'CANCELLED', 'NO_SHOW') OR b.bookingDate < :today) ORDER BY b.bookingDate DESC, b.startTime DESC")
+    List<Booking> findCustomerPastBookingsByBinge(@Param("bid") Long bingeId, @Param("cid") Long customerId, @Param("today") LocalDate today);
+
+    @Query("SELECT b FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate = :date AND b.status NOT IN ('CANCELLED', 'NO_SHOW')")
+    List<Booking> findActiveBookingsByBingeAndDate(@Param("bid") Long bingeId, @Param("date") LocalDate date);
+
+    // Dashboard counts (binge-scoped)
+    long countByBingeIdAndBookingDate(Long bingeId, LocalDate date);
+    long countByBingeIdAndBookingDateAndStatus(Long bingeId, LocalDate date, BookingStatus status);
+    long countByBingeIdAndStatus(Long bingeId, BookingStatus status);
+
+    @Query("SELECT COUNT(b) FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate = :date AND b.checkedIn = :ci")
+    long countByBingeAndDateAndCheckedIn(@Param("bid") Long bingeId, @Param("date") LocalDate date, @Param("ci") boolean checkedIn);
+
+    // Revenue (binge-scoped)
+    @Query("SELECT COALESCE(SUM(COALESCE(b.collectedAmount, 0)), 0) FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate = :date AND b.status = 'COMPLETED' AND b.paymentStatus = 'SUCCESS'")
+    java.math.BigDecimal actualRevenueByBingeAndDate(@Param("bid") Long bingeId, @Param("date") LocalDate date);
+
+    @Query("SELECT COALESCE(SUM(COALESCE(b.collectedAmount, 0)), 0) FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate = :date AND b.status <> 'CANCELLED' AND b.paymentStatus IN ('SUCCESS', 'PARTIALLY_REFUNDED')")
+    java.math.BigDecimal estimatedRevenueByBingeAndDate(@Param("bid") Long bingeId, @Param("date") LocalDate date);
+
+    @Query("SELECT COUNT(b) FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate = :date AND b.status <> 'CANCELLED'")
+    long countNonCancelledByBingeAndDate(@Param("bid") Long bingeId, @Param("date") LocalDate date);
+
+    @Query("SELECT COUNT(b) FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate BETWEEN :from AND :to AND b.status <> 'CANCELLED'")
+    long countNonCancelledByBingeAndDateRange(@Param("bid") Long bingeId, @Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    @Query("SELECT COALESCE(SUM(COALESCE(b.collectedAmount, 0)), 0) FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate BETWEEN :from AND :to AND b.status = 'COMPLETED' AND b.paymentStatus = 'SUCCESS'")
+    java.math.BigDecimal actualRevenueByBingeAndDateRange(@Param("bid") Long bingeId, @Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    @Query("SELECT COALESCE(SUM(COALESCE(b.collectedAmount, 0)), 0) FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate BETWEEN :from AND :to AND b.status <> 'CANCELLED' AND b.paymentStatus IN ('SUCCESS', 'PARTIALLY_REFUNDED')")
+    java.math.BigDecimal estimatedRevenueByBingeAndDateRange(@Param("bid") Long bingeId, @Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    List<Booking> findByBingeIdAndCustomerIdOrderByCreatedAtDesc(Long bingeId, Long customerId);
+    long countByBingeIdAndCustomerId(Long bingeId, Long customerId);
+    Page<Booking> findByBingeIdAndPaymentStatus(Long bingeId, PaymentStatus paymentStatus, Pageable pageable);
 }

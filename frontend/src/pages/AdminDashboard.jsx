@@ -72,7 +72,7 @@ export default function AdminDashboard() {
         <StatCard icon={<FiTrendingUp />} label="Estimated Today's Revenue" value={`₹${(stats?.todayEstimatedRevenue ?? 0).toLocaleString()}`} color="var(--primary)" to="/admin/reports" />
         <StatCard icon={<FiCalendar />} label="Checked In" value={stats?.todayCheckedIn || 0} color="var(--success)" to="/admin/bookings?tab=byStatus&status=CHECKED_IN" />
         <StatCard icon={<FiCalendar />} label="Completed Today" value={stats?.todayCompleted || 0} color="var(--info, #0984e3)" to="/admin/bookings?tab=byStatus&status=COMPLETED" />
-        <StatCard icon={<FiDollarSign />} label="Cancelled" value={stats?.cancelledBookings || 0} color="var(--danger)" to="/admin/bookings?tab=byStatus&status=CANCELLED" />
+        <StatCard icon={<FiDollarSign />} label="Cancelled Today" value={stats?.todayCancelled || 0} color="var(--danger)" to="/admin/bookings?tab=byStatus&status=CANCELLED" />
       </div>
 
       <div className="grid-3" style={{ marginTop: '1.5rem' }}>

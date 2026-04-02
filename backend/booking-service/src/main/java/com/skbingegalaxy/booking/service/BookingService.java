@@ -5,6 +5,7 @@ import com.skbingegalaxy.booking.dto.*;
 import com.skbingegalaxy.booking.entity.*;
 import com.skbingegalaxy.booking.repository.*;
 import com.skbingegalaxy.common.constants.KafkaTopics;
+import com.skbingegalaxy.common.context.BingeContext;
 import com.skbingegalaxy.common.enums.BookingStatus;
 import com.skbingegalaxy.common.enums.PaymentStatus;
 import com.skbingegalaxy.common.event.BookingEvent;
@@ -118,6 +119,7 @@ public class BookingService {
 
         Booking booking = Booking.builder()
             .bookingRef(bookingRef)
+            .bingeId(BingeContext.getBingeId())
             .customerId(customerId)
             .customerName(customerName)
             .customerEmail(customerEmail)
@@ -159,8 +161,11 @@ public class BookingService {
 
     // ── Customer: my bookings ────────────────────────────────
     public List<BookingDto> getCustomerBookings(Long customerId) {
-        return bookingRepository.findByCustomerIdOrderByCreatedAtDesc(customerId)
-            .stream().map(this::toDto).toList();
+        Long bid = BingeContext.getBingeId();
+        List<Booking> list = bid != null
+            ? bookingRepository.findByBingeIdAndCustomerIdOrderByCreatedAtDesc(bid, customerId)
+            : bookingRepository.findByCustomerIdOrderByCreatedAtDesc(customerId);
+        return list.stream().map(this::toDto).toList();
     }
 
     public List<BookingDto> getCustomerBookingsByStatus(Long customerId, BookingStatus status) {
@@ -170,41 +175,52 @@ public class BookingService {
 
     public List<BookingDto> getCustomerCurrentBookings(Long customerId, LocalDate clientToday) {
         LocalDate today = clientToday != null ? clientToday : LocalDate.now();
-        return bookingRepository.findCustomerCurrentBookings(customerId, today)
-            .stream().map(this::toDto).toList();
+        Long bid = BingeContext.getBingeId();
+        List<Booking> list = bid != null
+            ? bookingRepository.findCustomerCurrentBookingsByBinge(bid, customerId, today)
+            : bookingRepository.findCustomerCurrentBookings(customerId, today);
+        return list.stream().map(this::toDto).toList();
     }
 
     public List<BookingDto> getCustomerPastBookings(Long customerId, LocalDate clientToday) {
         LocalDate today = clientToday != null ? clientToday : LocalDate.now();
-        return bookingRepository.findCustomerPastBookings(customerId, today)
-            .stream().map(this::toDto).toList();
+        Long bid = BingeContext.getBingeId();
+        List<Booking> list = bid != null
+            ? bookingRepository.findCustomerPastBookingsByBinge(bid, customerId, today)
+            : bookingRepository.findCustomerPastBookings(customerId, today);
+        return list.stream().map(this::toDto).toList();
     }
 
     // ── Admin: all bookings (paginated) ──────────────────────
     public Page<BookingDto> getAllBookings(Pageable pageable) {
-        return bookingRepository.findAll(pageable).map(this::toDto);
+        Long bid = BingeContext.getBingeId();
+        return (bid != null ? bookingRepository.findByBingeId(bid, pageable) : bookingRepository.findAll(pageable)).map(this::toDto);
     }
 
     // ── Admin: today's bookings (paginated) ──────────────────
     public Page<BookingDto> getTodayBookings(LocalDate clientToday, Pageable pageable) {
-        return bookingRepository.findByBookingDate(
-            systemSettingsService.getOperationalDate(clientToday), pageable).map(this::toDto);
+        Long bid = BingeContext.getBingeId();
+        LocalDate today = systemSettingsService.getOperationalDate(bid, clientToday);
+        return (bid != null ? bookingRepository.findByBingeIdAndBookingDate(bid, today, pageable) : bookingRepository.findByBookingDate(today, pageable)).map(this::toDto);
     }
 
     // ── Admin: upcoming bookings (today+future, PENDING or CONFIRMED only) ─
     public Page<BookingDto> getUpcomingBookings(LocalDate clientToday, Pageable pageable) {
-        return bookingRepository.findUpcomingBookings(
-            systemSettingsService.getOperationalDate(clientToday), pageable).map(this::toDto);
+        Long bid = BingeContext.getBingeId();
+        LocalDate today = systemSettingsService.getOperationalDate(bid, clientToday);
+        return (bid != null ? bookingRepository.findUpcomingBookingsByBinge(bid, today, pageable) : bookingRepository.findUpcomingBookings(today, pageable)).map(this::toDto);
     }
 
     // ── Admin: by date ─────────────────────────────────────────
     public Page<BookingDto> getBookingsByDate(LocalDate date, Pageable pageable) {
-        return bookingRepository.findByBookingDate(date, pageable).map(this::toDto);
+        Long bid = BingeContext.getBingeId();
+        return (bid != null ? bookingRepository.findByBingeIdAndBookingDate(bid, date, pageable) : bookingRepository.findByBookingDate(date, pageable)).map(this::toDto);
     }
 
     // ── Admin: by status ───────────────────────────────────────
     public Page<BookingDto> getBookingsByStatus(BookingStatus status, Pageable pageable) {
-        return bookingRepository.findByStatus(status, pageable).map(this::toDto);
+        Long bid = BingeContext.getBingeId();
+        return (bid != null ? bookingRepository.findByBingeIdAndStatus(bid, status, pageable) : bookingRepository.findByStatus(status, pageable)).map(this::toDto);
     }
 
     // ── Admin: by date range ──────────────────────────────────
@@ -214,7 +230,8 @@ public class BookingService {
 
     // ── Admin: search ────────────────────────────────────────
     public Page<BookingDto> searchBookings(String query, Pageable pageable) {
-        return bookingRepository.searchBookings(query, pageable).map(this::toDto);
+        Long bid = BingeContext.getBingeId();
+        return (bid != null ? bookingRepository.searchBookingsByBinge(bid, query, pageable) : bookingRepository.searchBookings(query, pageable)).map(this::toDto);
     }
 
     // ── Admin: update booking ────────────────────────────────
@@ -250,6 +267,137 @@ public class BookingService {
         }
         if (request.getSpecialNotes() != null) {
             booking.setSpecialNotes(request.getSpecialNotes());
+        }
+
+        // ── Pricing-relevant field updates ───────────────────
+        boolean pricingChanged = false;
+
+        // Event type change
+        if (request.getEventTypeId() != null
+                && !request.getEventTypeId().equals(booking.getEventType().getId())) {
+            EventType newEventType = eventTypeRepository.findById(request.getEventTypeId())
+                .orElseThrow(() -> new ResourceNotFoundException("EventType", "id", request.getEventTypeId()));
+            booking.setEventType(newEventType);
+            pricingChanged = true;
+        }
+
+        // Duration change
+        if (request.getDurationMinutes() != null) {
+            int newDur = request.getDurationMinutes();
+            int oldDur = resolveDurationMinutes(booking.getDurationMinutes(), booking.getDurationHours());
+            if (newDur != oldDur) {
+                if (newDur < 30 || newDur > 720) {
+                    throw new BusinessException("Duration must be between 30 minutes and 12 hours");
+                }
+                if (newDur % 30 != 0) {
+                    throw new BusinessException("Duration must be in 30-minute increments");
+                }
+                booking.setDurationMinutes(newDur);
+                booking.setDurationHours(newDur / 60);
+                pricingChanged = true;
+            }
+        }
+
+        // Date/time change — check availability
+        if (request.getBookingDate() != null) {
+            booking.setBookingDate(request.getBookingDate());
+        }
+        if (request.getStartTime() != null) {
+            booking.setStartTime(request.getStartTime());
+        }
+
+        // Guest count change
+        if (request.getNumberOfGuests() != null
+                && request.getNumberOfGuests() != booking.getNumberOfGuests()) {
+            booking.setNumberOfGuests(request.getNumberOfGuests());
+            pricingChanged = true;
+        }
+
+        // Add-on changes
+        if (request.getAddOns() != null) {
+            pricingChanged = true;
+        }
+
+        // ── Recalculate pricing when relevant fields changed ──
+        if (pricingChanged) {
+            Long custId = booking.getCustomerId() != null ? booking.getCustomerId() : 0L;
+
+            // Resolve event pricing
+            PricingService.ResolvedEventPrice eventPrice;
+            if (custId > 0) {
+                eventPrice = pricingService.resolveEventPrice(custId, booking.getEventType().getId());
+            } else {
+                EventType et = booking.getEventType();
+                eventPrice = new PricingService.ResolvedEventPrice(
+                    et.getBasePrice(), et.getHourlyRate(), et.getPricePerGuest(), "DEFAULT", null);
+            }
+
+            int durMin = resolveDurationMinutes(booking.getDurationMinutes(), booking.getDurationHours());
+            BigDecimal durationDecimalHours = BigDecimal.valueOf(durMin)
+                .divide(BigDecimal.valueOf(60), 4, RoundingMode.HALF_UP);
+            BigDecimal baseAmount = eventPrice.basePrice()
+                .add(eventPrice.hourlyRate().multiply(durationDecimalHours).setScale(2, RoundingMode.HALF_UP));
+
+            // Recalculate add-ons
+            BigDecimal addOnTotal = BigDecimal.ZERO;
+            if (request.getAddOns() != null) {
+                // Replace all add-ons with the new list
+                booking.getAddOns().clear();
+                for (AddOnSelection sel : request.getAddOns()) {
+                    AddOn addOn = addOnRepository.findById(sel.getAddOnId())
+                        .orElseThrow(() -> new ResourceNotFoundException("AddOn", "id", sel.getAddOnId()));
+                    int qty = Math.max(sel.getQuantity(), 1);
+                    BigDecimal resolvedPrice;
+                    if (custId > 0) {
+                        PricingService.ResolvedAddonPrice ap = pricingService.resolveAddonPrice(custId, sel.getAddOnId());
+                        resolvedPrice = ap.price();
+                    } else {
+                        resolvedPrice = addOn.getPrice();
+                    }
+                    BigDecimal linePrice = resolvedPrice.multiply(BigDecimal.valueOf(qty));
+                    addOnTotal = addOnTotal.add(linePrice);
+                    BookingAddOn ba = BookingAddOn.builder()
+                        .booking(booking)
+                        .addOn(addOn)
+                        .quantity(qty)
+                        .price(linePrice)
+                        .build();
+                    booking.getAddOns().add(ba);
+                }
+            } else {
+                // Keep existing add-ons, but recalculate prices
+                for (BookingAddOn ba : booking.getAddOns()) {
+                    addOnTotal = addOnTotal.add(ba.getPrice());
+                }
+            }
+
+            // Guest charge
+            int guests = booking.getNumberOfGuests();
+            BigDecimal guestAmount = eventPrice.pricePerGuest()
+                .multiply(BigDecimal.valueOf(Math.max(guests - 1, 0)));
+
+            BigDecimal newTotal = baseAmount.add(addOnTotal).add(guestAmount);
+
+            // Build modification note
+            BigDecimal oldTotal = booking.getTotalAmount();
+            BigDecimal diff = newTotal.subtract(oldTotal);
+            if (diff.compareTo(BigDecimal.ZERO) != 0) {
+                String diffNote = String.format("Price updated: ₹%s → ₹%s (%s₹%s)",
+                    oldTotal.toPlainString(), newTotal.toPlainString(),
+                    diff.compareTo(BigDecimal.ZERO) > 0 ? "+" : "-",
+                    diff.abs().toPlainString());
+                String existing = booking.getAdminNotes() != null ? booking.getAdminNotes() + " | " : "";
+                booking.setAdminNotes(existing + diffNote);
+            }
+
+            booking.setBaseAmount(baseAmount);
+            booking.setAddOnAmount(addOnTotal);
+            booking.setGuestAmount(guestAmount);
+            booking.setTotalAmount(newTotal);
+            booking.setPricingSource(eventPrice.source());
+            booking.setRateCodeName(eventPrice.rateCodeName());
+
+            log.info("Booking {} pricing recalculated: {} → {}", bookingRef, oldTotal, newTotal);
         }
 
         return toDto(bookingRepository.save(booking));
@@ -318,7 +466,26 @@ public class BookingService {
 
     // ── Dashboard stats ──────────────────────────────────────
     public DashboardStatsDto getDashboardStats(LocalDate clientToday) {
-        LocalDate today = systemSettingsService.getOperationalDate(clientToday);
+        Long bid = BingeContext.getBingeId();
+        LocalDate today = systemSettingsService.getOperationalDate(bid, clientToday);
+        if (bid != null) {
+            return DashboardStatsDto.builder()
+                .totalBookings(bookingRepository.countByBingeIdAndBookingDate(bid, today))
+                .pendingBookings(bookingRepository.countByBingeIdAndStatus(bid, BookingStatus.PENDING))
+                .confirmedBookings(bookingRepository.countByBingeIdAndStatus(bid, BookingStatus.CONFIRMED))
+                .cancelledBookings(bookingRepository.countByBingeIdAndStatus(bid, BookingStatus.CANCELLED))
+                .completedBookings(bookingRepository.countByBingeIdAndStatus(bid, BookingStatus.COMPLETED))
+                .totalRevenue(bookingRepository.actualRevenueByBingeAndDate(bid, today))
+                .todayTotal(bookingRepository.countByBingeIdAndBookingDate(bid, today))
+                .todayConfirmed(bookingRepository.countByBingeIdAndBookingDateAndStatus(bid, today, BookingStatus.CONFIRMED))
+                .todayCheckedIn(bookingRepository.countByBingeAndDateAndCheckedIn(bid, today, true))
+                .todayPending(bookingRepository.countByBingeIdAndBookingDateAndStatus(bid, today, BookingStatus.PENDING))
+                .todayCompleted(bookingRepository.countByBingeIdAndBookingDateAndStatus(bid, today, BookingStatus.COMPLETED))
+                .todayCancelled(bookingRepository.countByBingeIdAndBookingDateAndStatus(bid, today, BookingStatus.CANCELLED))
+                .todayRevenue(bookingRepository.actualRevenueByBingeAndDate(bid, today))
+                .todayEstimatedRevenue(bookingRepository.estimatedRevenueByBingeAndDate(bid, today))
+                .build();
+        }
         return DashboardStatsDto.builder()
             .totalBookings(bookingRepository.countByBookingDate(today))
             .pendingBookings(bookingRepository.countByStatus(BookingStatus.PENDING))
@@ -332,6 +499,7 @@ public class BookingService {
             .todayCheckedIn(bookingRepository.countByBookingDateAndCheckedIn(today, true))
             .todayPending(bookingRepository.countByBookingDateAndStatus(today, BookingStatus.PENDING))
             .todayCompleted(bookingRepository.countByBookingDateAndStatus(today, BookingStatus.COMPLETED))
+            .todayCancelled(bookingRepository.countByBookingDateAndStatus(today, BookingStatus.CANCELLED))
             .todayRevenue(bookingRepository.actualRevenueByDate(today))
             .todayEstimatedRevenue(bookingRepository.estimatedRevenueByDate(today))
             .build();
@@ -344,7 +512,8 @@ public class BookingService {
         LocalDate refToday = clientToday != null ? clientToday : LocalDate.now();
         LocalDateTime refNow  = clientNow  != null ? clientNow  : LocalDateTime.now();
 
-        LocalDate operationalDate = systemSettingsService.getOperationalDate(refToday);
+        Long bid = BingeContext.getBingeId();
+        LocalDate operationalDate = systemSettingsService.getOperationalDate(bid, refToday);
 
         // Guard: operational date must not be ahead of client's today
         if (operationalDate.isAfter(refToday)) {
@@ -364,7 +533,9 @@ public class BookingService {
             }
         }
 
-        List<Booking> pastBookings = bookingRepository.findActiveBookingsByDate(operationalDate);
+        List<Booking> pastBookings = bid != null
+            ? bookingRepository.findActiveBookingsByBingeAndDate(bid, operationalDate)
+            : bookingRepository.findActiveBookingsByDate(operationalDate);
         int markedNoShow = 0;
         int markedCompleted = 0;
         List<String> affectedRefs = new ArrayList<>();
@@ -383,10 +554,10 @@ public class BookingService {
             }
         }
 
-        log.info("Audit for {}: {} no-shows, {} completed", operationalDate, markedNoShow, markedCompleted);
+        log.info("Audit for binge {} date {}: {} no-shows, {} completed", bid, operationalDate, markedNoShow, markedCompleted);
 
-        // Advance operational date to the next business day
-        LocalDate newOpDate = systemSettingsService.advanceOperationalDate(refToday);
+        // Advance operational date for this binge (or global fallback)
+        LocalDate newOpDate = systemSettingsService.advanceOperationalDate(bid, refToday);
 
         return AuditResultDto.builder()
             .auditDate(operationalDate)
@@ -416,16 +587,20 @@ public class BookingService {
                 from = today;
                 break;
         }
+        Long bid = BingeContext.getBingeId();
         return ReportDto.builder()
             .fromDate(from)
             .toDate(today)
             .period(period.toUpperCase())
-            .totalBookings(from.equals(today) ? bookingRepository.countNonCancelledByDate(today)
-                : bookingRepository.countNonCancelledByDateRange(from, today))
-            .totalRevenue(from.equals(today) ? bookingRepository.actualRevenueByDate(today)
-                : bookingRepository.actualRevenueByDateRange(from, today))
-            .estimatedRevenue(from.equals(today) ? bookingRepository.estimatedRevenueByDate(today)
-                : bookingRepository.estimatedRevenueByDateRange(from, today))
+            .totalBookings(from.equals(today)
+                ? (bid != null ? bookingRepository.countNonCancelledByBingeAndDate(bid, today) : bookingRepository.countNonCancelledByDate(today))
+                : (bid != null ? bookingRepository.countNonCancelledByBingeAndDateRange(bid, from, today) : bookingRepository.countNonCancelledByDateRange(from, today)))
+            .totalRevenue(from.equals(today)
+                ? (bid != null ? bookingRepository.actualRevenueByBingeAndDate(bid, today) : bookingRepository.actualRevenueByDate(today))
+                : (bid != null ? bookingRepository.actualRevenueByBingeAndDateRange(bid, from, today) : bookingRepository.actualRevenueByDateRange(from, today)))
+            .estimatedRevenue(from.equals(today)
+                ? (bid != null ? bookingRepository.estimatedRevenueByBingeAndDate(bid, today) : bookingRepository.estimatedRevenueByDate(today))
+                : (bid != null ? bookingRepository.estimatedRevenueByBingeAndDateRange(bid, from, today) : bookingRepository.estimatedRevenueByDateRange(from, today)))
             .build();
     }
 
@@ -436,32 +611,42 @@ public class BookingService {
         if (from.isAfter(to)) from = to;
         LocalDate finalFrom = from;
         LocalDate finalTo = to;
+        Long bid = BingeContext.getBingeId();
         return ReportDto.builder()
             .fromDate(finalFrom)
             .toDate(finalTo)
             .period("CUSTOM")
-            .totalBookings(finalFrom.equals(finalTo) ? bookingRepository.countNonCancelledByDate(finalFrom)
-                : bookingRepository.countNonCancelledByDateRange(finalFrom, finalTo))
-            .totalRevenue(finalFrom.equals(finalTo) ? bookingRepository.actualRevenueByDate(finalFrom)
-                : bookingRepository.actualRevenueByDateRange(finalFrom, finalTo))
-            .estimatedRevenue(finalFrom.equals(finalTo) ? bookingRepository.estimatedRevenueByDate(finalFrom)
-                : bookingRepository.estimatedRevenueByDateRange(finalFrom, finalTo))
+            .totalBookings(finalFrom.equals(finalTo)
+                ? (bid != null ? bookingRepository.countNonCancelledByBingeAndDate(bid, finalFrom) : bookingRepository.countNonCancelledByDate(finalFrom))
+                : (bid != null ? bookingRepository.countNonCancelledByBingeAndDateRange(bid, finalFrom, finalTo) : bookingRepository.countNonCancelledByDateRange(finalFrom, finalTo)))
+            .totalRevenue(finalFrom.equals(finalTo)
+                ? (bid != null ? bookingRepository.actualRevenueByBingeAndDate(bid, finalFrom) : bookingRepository.actualRevenueByDate(finalFrom))
+                : (bid != null ? bookingRepository.actualRevenueByBingeAndDateRange(bid, finalFrom, finalTo) : bookingRepository.actualRevenueByDateRange(finalFrom, finalTo)))
+            .estimatedRevenue(finalFrom.equals(finalTo)
+                ? (bid != null ? bookingRepository.estimatedRevenueByBingeAndDate(bid, finalFrom) : bookingRepository.estimatedRevenueByDate(finalFrom))
+                : (bid != null ? bookingRepository.estimatedRevenueByBingeAndDateRange(bid, finalFrom, finalTo) : bookingRepository.estimatedRevenueByDateRange(finalFrom, finalTo)))
             .build();
     }
 
     // ── House accounts: pending payments ──────────────────────
     public Page<BookingDto> getPendingPaymentBookings(Pageable pageable) {
-        return bookingRepository.findByPaymentStatus(PaymentStatus.PENDING, pageable).map(this::toDto);
+        Long bid = BingeContext.getBingeId();
+        return (bid != null ? bookingRepository.findByBingeIdAndPaymentStatus(bid, PaymentStatus.PENDING, pageable) : bookingRepository.findByPaymentStatus(PaymentStatus.PENDING, pageable)).map(this::toDto);
     }
 
-    // ── Customer booking count ────────────────────────────────
+    // ── Customer booking count ────────────────────────────
     public long getCustomerBookingCount(Long customerId) {
-        return bookingRepository.countByCustomerId(customerId);
+        Long bid = BingeContext.getBingeId();
+        return bid != null ? bookingRepository.countByBingeIdAndCustomerId(bid, customerId) : bookingRepository.countByCustomerId(customerId);
     }
 
     // ── Booked slots for a date (for double-booking prevention) ──
     public List<BookedSlotDto> getBookedSlotsForDate(LocalDate date) {
-        return bookingRepository.findActiveBookingsByDate(date).stream()
+        Long bid = BingeContext.getBingeId();
+        List<Booking> active = bid != null
+            ? bookingRepository.findActiveBookingsByBingeAndDate(bid, date)
+            : bookingRepository.findActiveBookingsByDate(date);
+        return active.stream()
             .map(b -> {
                 int startMin = b.getStartTime().getHour() * 60 + b.getStartTime().getMinute();
                 int effMin = getEffectiveDurationMinutes(b);
@@ -479,7 +664,10 @@ public class BookingService {
 
     // ── Check for time overlap with existing bookings (minutes-based) ──
     public boolean hasTimeConflict(LocalDate date, int startMinute, int durationMinutes) {
-        List<Booking> activeBookings = bookingRepository.findActiveBookingsByDate(date);
+        Long bid = BingeContext.getBingeId();
+        List<Booking> activeBookings = bid != null
+            ? bookingRepository.findActiveBookingsByBingeAndDate(bid, date)
+            : bookingRepository.findActiveBookingsByDate(date);
         int newEnd = startMinute + durationMinutes;
         for (Booking b : activeBookings) {
             int effectiveDuration = getEffectiveDurationMinutes(b);
@@ -669,6 +857,7 @@ public class BookingService {
 
             Booking booking = Booking.builder()
                 .bookingRef(bookingRef)
+                .bingeId(BingeContext.getBingeId())
                 .customerId(custId)
                 .customerName(request.getCustomerName())
                 .customerEmail(request.getCustomerEmail())
@@ -709,7 +898,8 @@ public class BookingService {
 
         Booking booking = Booking.builder()
             .bookingRef(bookingRef)
-            .customerId(request.getCustomerId() != null ? request.getCustomerId() : 0L)
+            .bingeId(BingeContext.getBingeId())
+            .customerId(custId)
             .customerName(request.getCustomerName())
             .customerEmail(request.getCustomerEmail())
             .customerPhone(request.getCustomerPhone() != null ? request.getCustomerPhone() : "")
@@ -747,16 +937,22 @@ public class BookingService {
 
     // ── Event types & add-ons (public) ──────────────────────
     public List<EventTypeDto> getActiveEventTypes() {
-        return eventTypeRepository.findByActiveTrue().stream().map(this::toEventTypeDto).toList();
+        Long bid = BingeContext.getBingeId();
+        return (bid != null ? eventTypeRepository.findByBingeIdOrGlobalAndActiveTrue(bid) : eventTypeRepository.findByActiveTrue())
+            .stream().map(this::toEventTypeDto).toList();
     }
 
     public List<AddOnDto> getActiveAddOns() {
-        return addOnRepository.findByActiveTrue().stream().map(this::toAddOnDto).toList();
+        Long bid = BingeContext.getBingeId();
+        return (bid != null ? addOnRepository.findByBingeIdOrGlobalAndActiveTrue(bid) : addOnRepository.findByActiveTrue())
+            .stream().map(this::toAddOnDto).toList();
     }
 
-    // ── Admin: Event type CRUD ───────────────────────────────
+    // ── Admin: Event type CRUD ─────────────────────────────
     public List<EventTypeDto> getAllEventTypes() {
-        return eventTypeRepository.findAll().stream().map(this::toEventTypeDto).toList();
+        Long bid = BingeContext.getBingeId();
+        return (bid != null ? eventTypeRepository.findByBingeIdOrGlobal(bid) : eventTypeRepository.findAll())
+            .stream().map(this::toEventTypeDto).toList();
     }
 
     @Transactional
@@ -771,6 +967,7 @@ public class BookingService {
             .maxHours(req.getMaxHours())
             .imageUrls(req.getImageUrls() != null ? req.getImageUrls() : new ArrayList<>())
             .active(true)
+            .bingeId(BingeContext.getBingeId())
             .build();
         return toEventTypeDto(eventTypeRepository.save(et));
     }
@@ -801,7 +998,9 @@ public class BookingService {
 
     // ── Admin: Add-on CRUD ───────────────────────────────────
     public List<AddOnDto> getAllAddOns() {
-        return addOnRepository.findAll().stream().map(this::toAddOnDto).toList();
+        Long bid = BingeContext.getBingeId();
+        return (bid != null ? addOnRepository.findByBingeIdOrGlobal(bid) : addOnRepository.findAll())
+            .stream().map(this::toAddOnDto).toList();
     }
 
     @Transactional
@@ -813,6 +1012,7 @@ public class BookingService {
             .category(req.getCategory().toUpperCase())
             .imageUrls(req.getImageUrls() != null ? req.getImageUrls() : new ArrayList<>())
             .active(true)
+            .bingeId(BingeContext.getBingeId())
             .build();
         return toAddOnDto(addOnRepository.save(a));
     }
@@ -872,6 +1072,7 @@ public class BookingService {
         return BookingDto.builder()
             .id(b.getId())
             .bookingRef(b.getBookingRef())
+            .bingeId(b.getBingeId())
             .customerId(b.getCustomerId())
             .customerName(b.getCustomerName())
             .customerEmail(b.getCustomerEmail())
@@ -896,6 +1097,8 @@ public class BookingService {
             .numberOfGuests(b.getNumberOfGuests())
             .totalAmount(b.getTotalAmount())
             .collectedAmount(b.getCollectedAmount())
+            .balanceDue(b.getTotalAmount().subtract(
+                b.getCollectedAmount() != null ? b.getCollectedAmount() : BigDecimal.ZERO))
             .status(b.getStatus())
             .paymentStatus(b.getPaymentStatus())
             .checkedIn(b.isCheckedIn())
@@ -912,6 +1115,7 @@ public class BookingService {
     private EventTypeDto toEventTypeDto(EventType et) {
         return EventTypeDto.builder()
             .id(et.getId())
+            .bingeId(et.getBingeId())
             .name(et.getName())
             .description(et.getDescription())
             .basePrice(et.getBasePrice())
@@ -927,6 +1131,7 @@ public class BookingService {
     private AddOnDto toAddOnDto(AddOn a) {
         return AddOnDto.builder()
             .id(a.getId())
+            .bingeId(a.getBingeId())
             .name(a.getName())
             .description(a.getDescription())
             .price(a.getPrice())

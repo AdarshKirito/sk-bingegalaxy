@@ -14,6 +14,7 @@ export const authService = {
   register: (data) => api.post('/auth/register', data),
   login: (data) => api.post('/auth/login', data),
   adminLogin: (data) => api.post('/auth/admin/login', data),
+  adminRegister: (data) => api.post('/auth/admin/register', data),
   getProfile: () => api.get('/auth/profile'),
   forgotPassword: (data) => api.post('/auth/forgot-password', data),
   resetPassword: (data) => api.post('/auth/reset-password', data),
@@ -23,6 +24,9 @@ export const authService = {
   adminCreateCustomer: (data) => api.post('/auth/admin/create-customer', data),
   getCustomerById: (id) => api.get(`/auth/admin/customer/${id}`),
   adminUpdateCustomer: (id, data) => api.put(`/auth/admin/customer/${id}`, data),
+  getAllAdmins: () => api.get('/auth/admin/admins'),
+  updateAdmin: (id, data) => api.put(`/auth/admin/admins/${id}`, data),
+  deleteUser: (id) => api.delete(`/auth/admin/user/${id}`),
 };
 
 export const bookingService = {
@@ -35,6 +39,9 @@ export const bookingService = {
   getPastBookings: () => api.get('/bookings/my/past', { params: { clientDate: clientDate() } }),
   getBookedSlots: (date) => api.get('/bookings/booked-slots', { params: { date } }),
   getMyPricing: () => api.get('/bookings/my-pricing'),
+  // Binge (public)
+  getAllActiveBinges: () => api.get('/bookings/binges'),
+  getBingeById: (id) => api.get(`/bookings/binges/${id}`),
 };
 
 export const availabilityService = {
@@ -112,4 +119,10 @@ export const adminService = {
   bulkAssignRateCode: (data) => api.post('/bookings/admin/pricing/bulk-assign-rate-code', data),
   resolveCustomerPricing: (customerId) => api.get(`/bookings/admin/pricing/resolve/${customerId}`),
   resolveRateCodePricing: (rateCodeId) => api.get(`/bookings/admin/pricing/resolve-rate-code/${rateCodeId}`),
+  // Binge management (admin)
+  getAdminBinges: () => api.get('/bookings/admin/binges'),
+  getBingesByAdmin: (adminId) => api.get(`/bookings/admin/binges/by-admin/${adminId}`),
+  createBinge: (data) => api.post('/bookings/admin/binges', data),
+  updateBinge: (id, data) => api.put(`/bookings/admin/binges/${id}`, data),
+  toggleBinge: (id) => api.delete(`/bookings/admin/binges/${id}`),
 };

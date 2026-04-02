@@ -3,6 +3,7 @@ package com.skbingegalaxy.booking.controller;
 import com.skbingegalaxy.booking.dto.*;
 import com.skbingegalaxy.booking.service.BookingService;
 import com.skbingegalaxy.booking.service.SystemSettingsService;
+import com.skbingegalaxy.common.context.BingeContext;
 import com.skbingegalaxy.common.dto.ApiResponse;
 import com.skbingegalaxy.common.dto.PagedResponse;
 import com.skbingegalaxy.common.enums.BookingStatus;
@@ -151,7 +152,8 @@ public class AdminBookingController {
     public ResponseEntity<ApiResponse<OperationalDateDto>> getOperationalDate(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate,
             @RequestParam(required = false) String clientTime) {
-        LocalDate opDate = systemSettingsService.getOperationalDate(clientDate);
+        Long bid = BingeContext.getBingeId();
+        LocalDate opDate = systemSettingsService.getOperationalDate(bid, clientDate);
         // Build client "now"; fall back to server clock if not provided
         LocalDateTime clientNow = null;
         if (clientDate != null && clientTime != null) {
