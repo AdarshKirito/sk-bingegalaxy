@@ -53,6 +53,15 @@ public class AuthService {
     @Value("${app.google.client-id:}")
     private String googleClientId;
 
+    @Value("${app.admin.email:admin@skbingegalaxy.com}")
+    private String supportEmail;
+
+    @Value("${app.admin.phone:9876543210}")
+    private String supportPhone;
+
+    @Value("${app.support.hours:9:00 AM to 10:00 PM IST}")
+    private String supportHours;
+
     // ── Google OAuth login ───────────────────────────────────
     @Transactional
     public AuthResponse googleLogin(String credential) {
@@ -266,6 +275,38 @@ public class AuthService {
         return toDto(user);
     }
 
+    public SupportContactDto getSupportContact() {
+        String digits = digitsOnly(supportPhone);
+        String phoneRaw = toPhoneRaw(digits);
+        return SupportContactDto.builder()
+            .email(supportEmail)
+            .phoneDisplay(formatPhoneDisplay(digits))
+            .phoneRaw(phoneRaw)
+            .whatsappRaw(toWhatsAppRaw(digits))
+            .hours(supportHours)
+            .build();
+    }
+
+    @Transactional
+    public UserDto updateAccountPreferences(Long userId, UpdateAccountPreferencesRequest request) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+
+        user.setPreferredExperience(trimToNull(request.getPreferredExperience()));
+        user.setVibePreference(trimToNull(request.getVibePreference()));
+        user.setReminderLeadDays(request.getReminderLeadDays() != null ? request.getReminderLeadDays() : 14);
+        user.setBirthdayMonth(trimToNull(request.getBirthdayMonth()));
+        user.setAnniversaryMonth(trimToNull(request.getAnniversaryMonth()));
+        user.setNotificationChannel(request.getNotificationChannel() != null ? request.getNotificationChannel() : "WHATSAPP");
+        user.setReceivesOffers(request.getReceivesOffers() != null ? request.getReceivesOffers() : Boolean.TRUE);
+        user.setWeekendAlerts(request.getWeekendAlerts() != null ? request.getWeekendAlerts() : Boolean.TRUE);
+        user.setConciergeSupport(request.getConciergeSupport() != null ? request.getConciergeSupport() : Boolean.TRUE);
+
+        user = userRepository.save(user);
+        log.info("Customer account preferences updated for: {}", user.getEmail());
+        return toDto(user);
+    }
+
     // ── Complete profile (add phone after Google sign-in) ─────
     @Transactional
     public UserDto completeProfile(Long userId, String phone) {
@@ -443,10 +484,65 @@ public class AuthService {
             .lastName(user.getLastName())
             .email(user.getEmail())
             .phone(user.getPhone())
+            .preferredExperience(user.getPreferredExperience())
+            .vibePreference(user.getVibePreference())
+            .reminderLeadDays(user.getReminderLeadDays() != null ? user.getReminderLeadDays() : 14)
+            .birthdayMonth(user.getBirthdayMonth())
+            .anniversaryMonth(user.getAnniversaryMonth())
+            .notificationChannel(user.getNotificationChannel() != null ? user.getNotificationChannel() : "WHATSAPP")
+            .receivesOffers(user.getReceivesOffers() != null ? user.getReceivesOffers() : true)
+            .weekendAlerts(user.getWeekendAlerts() != null ? user.getWeekendAlerts() : true)
+            .conciergeSupport(user.getConciergeSupport() != null ? user.getConciergeSupport() : true)
             .role(user.getRole())
             .active(user.isActive())
             .createdAt(user.getCreatedAt())
             .build();
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String digitsOnly(String value) {
+        return value == null ? "" : value.replaceAll("\\D", "");
+    }
+
+    private String toPhoneRaw(String digits) {
+        if (digits.isBlank()) {
+            return "";
+        }
+        if (digits.length() == 10) {
+            return "+91" + digits;
+        }
+        return digits.startsWith("+") ? digits : "+" + digits;
+    }
+
+    private String toWhatsAppRaw(String digits) {
+        if (digits.isBlank()) {
+            return "";
+        }
+        if (digits.length() == 10) {
+            return "91" + digits;
+        }
+        return digits;
+    }
+
+    private String formatPhoneDisplay(String digits) {
+        if (digits.length() == 10) {
+            return String.format("+91 %s %s", digits.substring(0, 5), digits.substring(5));
+        }
+        if (digits.length() == 12 && digits.startsWith("91")) {
+            String local = digits.substring(2);
+            return String.format("+91 %s %s", local.substring(0, 5), local.substring(5));
+        }
+        if (digits.isBlank()) {
+            return "";
+        }
+        return supportPhone;
     }
 
     private String generateOtp() {

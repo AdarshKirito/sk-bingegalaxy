@@ -1,8 +1,8 @@
 export const CUSTOMER_SUPPORT = {
-  email: 'admin@skbingegalaxy.com',
-  phoneDisplay: '+91 98765 43210',
-  phoneRaw: '+919876543210',
-  whatsappRaw: '919876543210',
+  email: '',
+  phoneDisplay: '',
+  phoneRaw: '',
+  whatsappRaw: '',
   hours: '9:00 AM to 10:00 PM IST',
 };
 
@@ -62,8 +62,6 @@ export const ACCOUNT_PREFERENCES_DEFAULTS = {
   conciergeSupport: true,
 };
 
-const ACCOUNT_PREFERENCES_STORAGE_KEY = 'skbg.customer.account.preferences';
-
 export function getMemberTier(completedBookings = 0, totalSpend = 0) {
   if (completedBookings >= 8 || totalSpend >= 40000) {
     return 'Galaxy Circle';
@@ -74,39 +72,48 @@ export function getMemberTier(completedBookings = 0, totalSpend = 0) {
   return 'Private Guest';
 }
 
-export function loadAccountPreferences(userId) {
-  if (typeof window === 'undefined') {
-    return { ...ACCOUNT_PREFERENCES_DEFAULTS };
-  }
-
-  try {
-    const raw = window.localStorage.getItem(ACCOUNT_PREFERENCES_STORAGE_KEY);
-    const allPreferences = raw ? JSON.parse(raw) : {};
-    return {
-      ...ACCOUNT_PREFERENCES_DEFAULTS,
-      ...(allPreferences[userId] || {}),
-    };
-  } catch (error) {
-    return { ...ACCOUNT_PREFERENCES_DEFAULTS };
-  }
+export function getAccountPreferences(user = {}) {
+  return {
+    ...ACCOUNT_PREFERENCES_DEFAULTS,
+    preferredExperience: user.preferredExperience || ACCOUNT_PREFERENCES_DEFAULTS.preferredExperience,
+    vibePreference: user.vibePreference || ACCOUNT_PREFERENCES_DEFAULTS.vibePreference,
+    reminderLeadDays: String(user.reminderLeadDays ?? ACCOUNT_PREFERENCES_DEFAULTS.reminderLeadDays),
+    birthdayMonth: user.birthdayMonth || '',
+    anniversaryMonth: user.anniversaryMonth || '',
+    notificationChannel: user.notificationChannel || ACCOUNT_PREFERENCES_DEFAULTS.notificationChannel,
+    receivesOffers: user.receivesOffers ?? ACCOUNT_PREFERENCES_DEFAULTS.receivesOffers,
+    weekendAlerts: user.weekendAlerts ?? ACCOUNT_PREFERENCES_DEFAULTS.weekendAlerts,
+    conciergeSupport: user.conciergeSupport ?? ACCOUNT_PREFERENCES_DEFAULTS.conciergeSupport,
+  };
 }
 
-export function saveAccountPreferences(userId, preferences) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  try {
-    const raw = window.localStorage.getItem(ACCOUNT_PREFERENCES_STORAGE_KEY);
-    const allPreferences = raw ? JSON.parse(raw) : {};
-    allPreferences[userId] = preferences;
-    window.localStorage.setItem(ACCOUNT_PREFERENCES_STORAGE_KEY, JSON.stringify(allPreferences));
-  } catch (error) {
-    // Ignore localStorage errors so the page still works.
-  }
+export function buildAccountPreferencesPayload(preferences) {
+  return {
+    preferredExperience: preferences.preferredExperience?.trim() || '',
+    vibePreference: preferences.vibePreference?.trim() || '',
+    reminderLeadDays: Number(preferences.reminderLeadDays || ACCOUNT_PREFERENCES_DEFAULTS.reminderLeadDays),
+    birthdayMonth: preferences.birthdayMonth || '',
+    anniversaryMonth: preferences.anniversaryMonth || '',
+    notificationChannel: preferences.notificationChannel || ACCOUNT_PREFERENCES_DEFAULTS.notificationChannel,
+    receivesOffers: Boolean(preferences.receivesOffers),
+    weekendAlerts: Boolean(preferences.weekendAlerts),
+    conciergeSupport: Boolean(preferences.conciergeSupport),
+  };
 }
 
-export function buildSupportEmailHref({ bookingRef, customerName, topic = 'Booking support' } = {}) {
+export function mergeSupportContact(supportContact) {
+  return {
+    ...CUSTOMER_SUPPORT,
+    ...(supportContact || {}),
+  };
+}
+
+export function buildSupportEmailHref({ supportContact, bookingRef, customerName, topic = 'Booking support' } = {}) {
+  const contact = mergeSupportContact(supportContact);
+  if (!contact.email) {
+    return '';
+  }
+
   const subject = encodeURIComponent(bookingRef ? `${topic} - ${bookingRef}` : topic);
   const body = encodeURIComponent([
     `Hello SK Binge Galaxy team,`,
@@ -118,10 +125,15 @@ export function buildSupportEmailHref({ bookingRef, customerName, topic = 'Booki
     '- ',
   ].filter(Boolean).join('\n'));
 
-  return `mailto:${CUSTOMER_SUPPORT.email}?subject=${subject}&body=${body}`;
+  return `mailto:${contact.email}?subject=${subject}&body=${body}`;
 }
 
-export function buildSupportWhatsAppHref({ bookingRef, customerName, topic = 'booking support' } = {}) {
+export function buildSupportWhatsAppHref({ supportContact, bookingRef, customerName, topic = 'booking support' } = {}) {
+  const contact = mergeSupportContact(supportContact);
+  if (!contact.whatsappRaw) {
+    return '';
+  }
+
   const message = encodeURIComponent([
     'Hello SK Binge Galaxy team,',
     bookingRef ? `Booking reference: ${bookingRef}` : 'Booking reference: not yet available',
@@ -129,11 +141,16 @@ export function buildSupportWhatsAppHref({ bookingRef, customerName, topic = 'bo
     `I need help with ${topic}.`,
   ].filter(Boolean).join('\n'));
 
-  return `https://wa.me/${CUSTOMER_SUPPORT.whatsappRaw}?text=${message}`;
+  return `https://wa.me/${contact.whatsappRaw}?text=${message}`;
 }
 
-export function getCallSupportHref() {
-  return `tel:${CUSTOMER_SUPPORT.phoneRaw}`;
+export function getCallSupportHref(supportContact) {
+  const contact = mergeSupportContact(supportContact);
+  if (!contact.phoneRaw) {
+    return '';
+  }
+
+  return `tel:${contact.phoneRaw}`;
 }
 
 export function downloadBookingSummary(booking, { customerName, venueName } = {}) {

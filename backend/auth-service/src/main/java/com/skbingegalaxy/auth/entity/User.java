@@ -34,6 +34,38 @@ public class User {
     @Column(unique = true, length = 15)
     private String phone;
 
+    @Column(length = 100)
+    private String preferredExperience;
+
+    @Column(length = 120)
+    private String vibePreference;
+
+    @Column
+    @Builder.Default
+    private Integer reminderLeadDays = 14;
+
+    @Column(length = 20)
+    private String birthdayMonth;
+
+    @Column(length = 20)
+    private String anniversaryMonth;
+
+    @Column(length = 20)
+    @Builder.Default
+    private String notificationChannel = "WHATSAPP";
+
+    @Column
+    @Builder.Default
+    private Boolean receivesOffers = true;
+
+    @Column
+    @Builder.Default
+    private Boolean weekendAlerts = true;
+
+    @Column
+    @Builder.Default
+    private Boolean conciergeSupport = true;
+
     @Column(nullable = false)
     private String password;
 

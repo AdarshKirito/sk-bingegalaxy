@@ -6,8 +6,25 @@ export interface User {
   lastName?: string;
   email: string;
   phone?: string;
+  preferredExperience?: string;
+  vibePreference?: string;
+  reminderLeadDays?: number;
+  birthdayMonth?: string;
+  anniversaryMonth?: string;
+  notificationChannel?: 'WHATSAPP' | 'EMAIL' | 'CALLBACK';
+  receivesOffers?: boolean;
+  weekendAlerts?: boolean;
+  conciergeSupport?: boolean;
   role: 'USER' | 'ADMIN' | 'SUPER_ADMIN';
   isActive?: boolean;
+}
+
+export interface SupportContact {
+  email: string;
+  phoneDisplay: string;
+  phoneRaw: string;
+  whatsappRaw: string;
+  hours: string;
 }
 
 export interface AuthResponse {

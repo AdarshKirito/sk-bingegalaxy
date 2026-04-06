@@ -110,6 +110,19 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.ok(profile));
     }
 
+    @PutMapping("/profile/preferences")
+    public ResponseEntity<ApiResponse<UserDto>> updateAccountPreferences(
+            @RequestHeader("X-User-Id") Long userId,
+            @Valid @RequestBody UpdateAccountPreferencesRequest request) {
+        UserDto updated = authService.updateAccountPreferences(userId, request);
+        return ResponseEntity.ok(ApiResponse.ok("Account preferences updated", updated));
+    }
+
+    @GetMapping("/support-contact")
+    public ResponseEntity<ApiResponse<SupportContactDto>> getSupportContact() {
+        return ResponseEntity.ok(ApiResponse.ok(authService.getSupportContact()));
+    }
+
     @PutMapping("/complete-profile")
     public ResponseEntity<ApiResponse<UserDto>> completeProfile(
             @RequestHeader("X-User-Id") Long userId,

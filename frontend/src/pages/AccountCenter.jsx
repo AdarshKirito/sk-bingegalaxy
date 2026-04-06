@@ -3,29 +3,32 @@ import { Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { useAuth } from '../context/AuthContext';
 import { useBinge } from '../context/BingeContext';
-import { bookingService, paymentService } from '../services/endpoints';
+import { authService, bookingService, paymentService } from '../services/endpoints';
 import SEO from '../components/SEO';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import {
   ACCOUNT_PREFERENCES_DEFAULTS,
+  buildAccountPreferencesPayload,
   buildSupportEmailHref,
   buildSupportWhatsAppHref,
   CUSTOMER_SUPPORT,
   EXPERIENCE_STEPS,
+  getAccountPreferences,
   getCallSupportHref,
   getMemberTier,
   HELP_FAQS,
-  loadAccountPreferences,
+  mergeSupportContact,
   MEMBER_OFFERS,
-  saveAccountPreferences,
 } from '../services/customerExperience';
 import { FiArrowRight, FiBell, FiCalendar, FiCheckCircle, FiClock, FiCreditCard, FiGift, FiHeart, FiLifeBuoy, FiMail, FiMessageCircle, FiPhoneCall, FiSettings, FiShield, FiStar, FiUser } from 'react-icons/fi';
 import './CustomerHub.css';
 
 export default function AccountCenter() {
-  const { user } = useAuth();
+  const { user, setUser } = useAuth();
   const { selectedBinge } = useBinge();
   const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState(user);
+  const [supportContact, setSupportContact] = useState(CUSTOMER_SUPPORT);
   const [currentBookings, setCurrentBookings] = useState([]);
   const [pastBookings, setPastBookings] = useState([]);
   const [payments, setPayments] = useState([]);
@@ -33,25 +36,41 @@ export default function AccountCenter() {
   const [preferences, setPreferences] = useState({ ...ACCOUNT_PREFERENCES_DEFAULTS });
 
   useEffect(() => {
-    if (user?.id) {
-      setPreferences(loadAccountPreferences(String(user.id)));
-    }
-  }, [user?.id]);
+    setProfile(user);
+    setPreferences(getAccountPreferences(user || {}));
+  }, [user]);
 
   useEffect(() => {
     setLoading(true);
     Promise.allSettled([
-      bookingService.getCurrentBookings(),
-      bookingService.getPastBookings(),
-      paymentService.getMyPayments(),
-      bookingService.getMyPricing(),
-    ]).then(([currentRes, pastRes, paymentRes, pricingRes]) => {
+      authService.getProfile(),
+      authService.getSupportContact(),
+      selectedBinge ? bookingService.getCurrentBookings() : Promise.resolve({ data: { data: [] } }),
+      selectedBinge ? bookingService.getPastBookings() : Promise.resolve({ data: { data: [] } }),
+      selectedBinge ? paymentService.getMyPayments() : Promise.resolve({ data: { data: [] } }),
+      selectedBinge ? bookingService.getMyPricing() : Promise.resolve({ data: { data: null } }),
+    ]).then(([profileRes, supportRes, currentRes, pastRes, paymentRes, pricingRes]) => {
+      const profileData = profileRes.status === 'fulfilled' ? (profileRes.value.data.data || null) : null;
+      if (profileData) {
+        setProfile(profileData);
+        setPreferences(getAccountPreferences(profileData));
+      }
+
+      setSupportContact(supportRes.status === 'fulfilled' ? mergeSupportContact(supportRes.value.data.data) : CUSTOMER_SUPPORT);
       setCurrentBookings(currentRes.status === 'fulfilled' ? (currentRes.value.data.data || []) : []);
       setPastBookings(pastRes.status === 'fulfilled' ? (pastRes.value.data.data || []) : []);
       setPayments(paymentRes.status === 'fulfilled' ? (paymentRes.value.data.data || []) : []);
       setMyPricing(pricingRes.status === 'fulfilled' ? (pricingRes.value.data.data || null) : null);
     }).finally(() => setLoading(false));
-  }, []);
+  }, [selectedBinge, setUser, user]);
+
+  const customer = profile || user || {};
+  const support = mergeSupportContact(supportContact);
+  const hasVenueSelected = Boolean(selectedBinge);
+  const primaryLink = hasVenueSelected ? '/my-bookings' : '/binges';
+  const primaryLabel = hasVenueSelected ? 'Open Booking Control Center' : 'Choose Venue';
+  const secondaryLink = hasVenueSelected ? '/payments' : '/binges';
+  const secondaryLabel = hasVenueSelected ? 'Review Payments' : 'Browse Venues';
 
   const completedCount = pastBookings.length;
   const successfulPayments = payments.filter((payment) => payment.status === 'SUCCESS');
@@ -65,13 +84,22 @@ export default function AccountCenter() {
     setPreferences((current) => ({ ...current, [key]: value }));
   };
 
-  const handleSavePreferences = () => {
-    if (!user?.id) {
+  const savePreferences = async () => {
+    if (!customer?.id) {
       return;
     }
 
-    saveAccountPreferences(String(user.id), preferences);
-    toast.success('Preferences saved to your account area');
+    try {
+      const response = await authService.updateAccountPreferences(buildAccountPreferencesPayload(preferences));
+      const updatedUser = response.data.data;
+      setProfile(updatedUser);
+      setPreferences(getAccountPreferences(updatedUser));
+      setUser({ ...(user || {}), ...updatedUser });
+      toast.success('Account preferences saved');
+    } catch (error) {
+      const message = error.userMessage || error.response?.data?.message || 'Failed to save account preferences';
+      toast.error(message);
+    }
   };
 
   if (loading) {
@@ -96,23 +124,23 @@ export default function AccountCenter() {
             {selectedBinge ? ` You are currently planning around ${selectedBinge.name}.` : ''}
           </p>
           <div className="customer-hub-actions">
-            <Link to="/my-bookings" className="btn btn-primary">Open Booking Control Center</Link>
-            <Link to="/payments" className="btn btn-secondary">Review Payments</Link>
+            <Link to={primaryLink} className="btn btn-primary">{primaryLabel}</Link>
+            <Link to={secondaryLink} className="btn btn-secondary">{secondaryLabel}</Link>
           </div>
         </div>
 
         <aside className="customer-hub-highlight card">
           <span className="customer-hub-panel-label">Member snapshot</span>
           <h2>{memberTier}</h2>
-          <p>{pricingLabel} pricing is currently the best available plan on your account.</p>
+          <p>{hasVenueSelected ? `${pricingLabel} pricing is currently the best available plan on your account.` : 'Choose a venue to unlock your booking timeline, payments, and venue-specific pricing view.'}</p>
           <div className="customer-hub-highlight-meta">
             <span className="badge badge-success">{completedCount} completed visits</span>
             <span className="badge badge-info">{pendingPayments.length} active booking items</span>
           </div>
           <strong>Rs {Number(totalSpend || 0).toLocaleString()}</strong>
           <div className="customer-hub-inline-actions">
-            <a href={buildSupportWhatsAppHref({ customerName: `${user?.firstName || ''} ${user?.lastName || ''}`.trim(), topic: 'account help' })} target="_blank" rel="noreferrer" className="btn btn-primary btn-sm">WhatsApp Support</a>
-            <a href={buildSupportEmailHref({ customerName: `${user?.firstName || ''} ${user?.lastName || ''}`.trim(), topic: 'Account support' })} className="btn btn-secondary btn-sm">Email Support</a>
+            {support.whatsappRaw && <a href={buildSupportWhatsAppHref({ supportContact: support, customerName: `${customer?.firstName || ''} ${customer?.lastName || ''}`.trim(), topic: 'account help' })} target="_blank" rel="noreferrer" className="btn btn-primary btn-sm">WhatsApp Support</a>}
+            {support.email && <a href={buildSupportEmailHref({ supportContact: support, customerName: `${customer?.firstName || ''} ${customer?.lastName || ''}`.trim(), topic: 'Account support' })} className="btn btn-secondary btn-sm">Email Support</a>}
           </div>
         </aside>
       </section>
@@ -129,15 +157,15 @@ export default function AccountCenter() {
           <div className="customer-account-list">
             <div>
               <span>Name</span>
-              <strong>{[user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'Customer'}</strong>
+              <strong>{[customer?.firstName, customer?.lastName].filter(Boolean).join(' ') || 'Customer'}</strong>
             </div>
             <div>
               <span>Email</span>
-              <strong>{user?.email || 'Not available'}</strong>
+              <strong>{customer?.email || 'Not available'}</strong>
             </div>
             <div>
               <span>Phone</span>
-              <strong>{user?.phone || 'Add a phone number to get faster help'}</strong>
+              <strong>{customer?.phone || 'Add a phone number to get faster help'}</strong>
             </div>
             <div>
               <span>Current venue</span>
@@ -156,32 +184,32 @@ export default function AccountCenter() {
             <span className="customer-account-avatar"><FiLifeBuoy /></span>
           </div>
           <div className="customer-account-support-grid">
-            <a href={buildSupportEmailHref({ customerName: `${user?.firstName || ''} ${user?.lastName || ''}`.trim(), topic: 'Customer support' })} className="customer-account-support-link">
+            {support.email && <a href={buildSupportEmailHref({ supportContact: support, customerName: `${customer?.firstName || ''} ${customer?.lastName || ''}`.trim(), topic: 'Customer support' })} className="customer-account-support-link">
               <FiMail />
               <div>
                 <strong>Email support</strong>
-                <span>{CUSTOMER_SUPPORT.email}</span>
+                <span>{support.email}</span>
               </div>
-            </a>
-            <a href={buildSupportWhatsAppHref({ customerName: `${user?.firstName || ''} ${user?.lastName || ''}`.trim(), topic: 'support' })} target="_blank" rel="noreferrer" className="customer-account-support-link">
+            </a>}
+            {support.whatsappRaw && <a href={buildSupportWhatsAppHref({ supportContact: support, customerName: `${customer?.firstName || ''} ${customer?.lastName || ''}`.trim(), topic: 'support' })} target="_blank" rel="noreferrer" className="customer-account-support-link">
               <FiMessageCircle />
               <div>
                 <strong>WhatsApp</strong>
                 <span>Fastest path for booking changes and payment help</span>
               </div>
-            </a>
-            <a href={getCallSupportHref()} className="customer-account-support-link">
+            </a>}
+            {support.phoneRaw && <a href={getCallSupportHref(support)} className="customer-account-support-link">
               <FiPhoneCall />
               <div>
                 <strong>Call support</strong>
-                <span>{CUSTOMER_SUPPORT.phoneDisplay}</span>
+                <span>{support.phoneDisplay || support.phoneRaw}</span>
               </div>
-            </a>
+            </a>}
           </div>
           <div className="customer-account-policy-list">
             <p><FiShield /> Cancellation requests are easiest to resolve before the event date and before payment disputes start.</p>
             <p><FiCreditCard /> Payment help is available for pending, failed, and refund-follow-up scenarios.</p>
-            <p><FiClock /> Support window: {CUSTOMER_SUPPORT.hours}</p>
+            <p><FiClock /> Support window: {support.hours}</p>
           </div>
         </article>
       </section>
@@ -238,8 +266,8 @@ export default function AccountCenter() {
           </div>
 
           <div className="customer-hub-inline-actions">
-            <button type="button" className="btn btn-primary btn-sm" onClick={handleSavePreferences}>Save Preferences</button>
-            <span className="customer-account-note">Saved locally for quick access inside your account center.</span>
+            <button type="button" className="btn btn-primary btn-sm" onClick={savePreferences}>Save Preferences</button>
+            <span className="customer-account-note">Saved to your account so reminders and preferences follow you across sessions.</span>
           </div>
         </article>
 
@@ -327,7 +355,7 @@ export default function AccountCenter() {
             ))}
           </ol>
           <div className="customer-hub-inline-actions">
-            <Link to="/book" className="btn btn-primary btn-sm">Plan the next one <FiArrowRight /></Link>
+            <Link to={hasVenueSelected ? '/book' : '/binges'} className="btn btn-primary btn-sm">{hasVenueSelected ? 'Plan the next one' : 'Choose a venue first'} <FiArrowRight /></Link>
           </div>
         </article>
       </section>

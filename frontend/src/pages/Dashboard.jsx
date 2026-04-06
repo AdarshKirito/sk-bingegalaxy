@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { bookingService, paymentService } from '../services/endpoints';
+import { authService, bookingService, paymentService } from '../services/endpoints';
 import useBingeStore from '../stores/bingeStore';
 import {
-  CUSTOMER_SUPPORT,
   EXPERIENCE_STEPS,
   getMemberTier,
   HELP_FAQS,
+  mergeSupportContact,
   MEMBER_OFFERS,
 } from '../services/customerExperience';
 import { FiCalendar, FiClock, FiArrowRight, FiCreditCard, FiMapPin, FiDollarSign, FiTag, FiGift, FiHeart, FiStar, FiFilm, FiBriefcase, FiSmile, FiRepeat, FiShield, FiUser, FiMessageCircle } from 'react-icons/fi';
@@ -25,12 +25,14 @@ export default function Dashboard() {
   const [payments, setPayments] = useState([]);
   const [eventTypes, setEventTypes] = useState([]);
   const [myPricing, setMyPricing] = useState(null);
+  const [supportContact, setSupportContact] = useState(null);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const perPage = 4;
 
   useEffect(() => {
     const loads = [
+      authService.getSupportContact().then(r => setSupportContact(r.data.data || null)).catch(() => {}),
       bookingService.getCurrentBookings().then(r => setCurrentBookings(r.data.data || [])).catch(() => {}),
       bookingService.getPastBookings().then(r => setPastBookings(r.data.data || [])).catch(() => {}),
       paymentService.getMyPayments().then(r => setPayments(r.data.data || [])).catch(() => {}),
@@ -53,6 +55,7 @@ export default function Dashboard() {
   const totalSpend = pastBookings
     .filter(b => b.paymentStatus === 'SUCCESS')
     .reduce((sum, b) => sum + (b.totalAmount || 0), 0);
+  const support = mergeSupportContact(supportContact);
   const memberTier = useMemo(() => getMemberTier(pastCount, totalSpend), [pastCount, totalSpend]);
   const pricingLabel = myPricing?.rateCodeName || 'Standard';
   const pricingSourceLabel = myPricing?.pricingSource === 'RATE_CODE'
@@ -338,7 +341,7 @@ export default function Dashboard() {
           </div>
           <div className="dash-help-points">
             <p><FiShield /> Payment, cancellation, and schedule questions are easiest to resolve before the booking date.</p>
-            <p><FiMessageCircle /> WhatsApp support is the fastest route for booking changes during {CUSTOMER_SUPPORT.hours}.</p>
+            <p><FiMessageCircle /> WhatsApp support is the fastest route for booking changes during {support.hours}.</p>
             <p><FiUser /> Account preferences and celebration reminders now live in one dedicated account area.</p>
           </div>
           <div className="dash-inline-actions">

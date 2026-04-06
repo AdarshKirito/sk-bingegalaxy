@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useBinge } from '../context/BingeContext';
-import { bookingService } from '../services/endpoints';
+import { authService, bookingService } from '../services/endpoints';
 import {
   buildSupportEmailHref,
   buildSupportWhatsAppHref,
@@ -11,6 +11,7 @@ import {
   EXPERIENCE_STEPS,
   getCallSupportHref,
   HELP_FAQS,
+  mergeSupportContact,
 } from '../services/customerExperience';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import Pagination from '../components/ui/Pagination';
@@ -39,6 +40,7 @@ export default function MyBookings() {
   const [tab, setTab] = useState('upcoming');
   const [currentBookings, setCurrentBookings] = useState([]);
   const [pastBookings, setPastBookings] = useState([]);
+  const [supportContact, setSupportContact] = useState(CUSTOMER_SUPPORT);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -51,8 +53,9 @@ export default function MyBookings() {
 
   useEffect(() => {
     setLoading(true);
-    Promise.allSettled([bookingService.getCurrentBookings(), bookingService.getPastBookings()])
-      .then(([currentRes, pastRes]) => {
+    Promise.allSettled([authService.getSupportContact(), bookingService.getCurrentBookings(), bookingService.getPastBookings()])
+      .then(([supportRes, currentRes, pastRes]) => {
+        setSupportContact(supportRes.status === 'fulfilled' ? mergeSupportContact(supportRes.value.data.data) : CUSTOMER_SUPPORT);
         setCurrentBookings(currentRes.status === 'fulfilled' ? (currentRes.value.data.data || []) : []);
         setPastBookings(pastRes.status === 'fulfilled' ? (pastRes.value.data.data || []) : []);
       })
@@ -90,6 +93,7 @@ export default function MyBookings() {
   const sortedUpcoming = [...currentBookings].sort((left, right) => new Date(`${left.bookingDate}T${left.startTime || '00:00'}`) - new Date(`${right.bookingDate}T${right.startTime || '00:00'}`));
   const sortedPast = [...pastBookings].sort((left, right) => new Date(`${right.bookingDate}T${right.startTime || '00:00'}`) - new Date(`${left.bookingDate}T${left.startTime || '00:00'}`));
   const allBookings = [...sortedUpcoming, ...sortedPast];
+  const support = mergeSupportContact(supportContact);
   const baseBookings = tab === 'upcoming' ? sortedUpcoming : tab === 'past' ? sortedPast : allBookings;
   const filteredBookings = useMemo(() => {
     const today = new Date();
@@ -249,7 +253,7 @@ export default function MyBookings() {
               <p>Reach the team with your booking reference already attached.</p>
             </div>
             <div className="customer-mini-card-actions">
-              <a href={buildSupportWhatsAppHref({ customerName: `${user?.firstName || ''} ${user?.lastName || ''}`.trim(), topic: 'booking support' })} target="_blank" rel="noreferrer" className="btn btn-primary btn-sm">WhatsApp</a>
+              {support.whatsappRaw ? <a href={buildSupportWhatsAppHref({ supportContact: support, customerName: `${user?.firstName || ''} ${user?.lastName || ''}`.trim(), topic: 'booking support' })} target="_blank" rel="noreferrer" className="btn btn-primary btn-sm">WhatsApp</a> : support.email ? <a href={buildSupportEmailHref({ supportContact: support, customerName: `${user?.firstName || ''} ${user?.lastName || ''}`.trim(), topic: 'booking support' })} className="btn btn-primary btn-sm">Email Support</a> : <span className="customer-account-note">Support contact unavailable</span>}
             </div>
           </article>
           <article className="customer-mini-card">
@@ -400,15 +404,15 @@ export default function MyBookings() {
                   <button type="button" className="btn btn-secondary btn-sm" onClick={() => downloadBookingSummary(booking, { customerName, venueName: selectedBinge?.name })}>
                     <FiDownload /> Download Summary
                   </button>
-                  <a href={buildSupportEmailHref({ bookingRef: booking.bookingRef, customerName, topic: 'Booking help' })} className="btn btn-secondary btn-sm">
+                  {support.email && <a href={buildSupportEmailHref({ supportContact: support, bookingRef: booking.bookingRef, customerName, topic: 'Booking help' })} className="btn btn-secondary btn-sm">
                     <FiMail /> Email Support
-                  </a>
-                  <a href={buildSupportWhatsAppHref({ bookingRef: booking.bookingRef, customerName, topic: 'booking help' })} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm">
+                  </a>}
+                  {support.whatsappRaw && <a href={buildSupportWhatsAppHref({ supportContact: support, bookingRef: booking.bookingRef, customerName, topic: 'booking help' })} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm">
                     <FiMessageCircle /> WhatsApp
-                  </a>
-                  <a href={getCallSupportHref()} className="btn btn-secondary btn-sm">
+                  </a>}
+                  {support.phoneRaw && <a href={getCallSupportHref(support)} className="btn btn-secondary btn-sm">
                     <FiPhoneCall /> Call
-                  </a>
+                  </a>}
                 </div>
 
                 <div className="customer-booking-support-note">
@@ -451,7 +455,7 @@ export default function MyBookings() {
           <div className="customer-account-policy-list">
             <p><FiShield /> Cancellation and reschedule help is fastest before the booking date and before refund disputes begin.</p>
             <p><FiCreditCard /> Payment support covers pending balances, failed attempts, and refund follow-up questions.</p>
-            <p><FiPhoneCall /> Call or WhatsApp support during {CUSTOMER_SUPPORT.hours} for urgent booking issues.</p>
+            <p><FiPhoneCall /> Call or WhatsApp support during {support.hours} for urgent booking issues.</p>
           </div>
         </article>
 

@@ -224,6 +224,60 @@ class AuthControllerTest {
                 .andExpect(status().isInternalServerError());
     }
 
+    @Test
+    void updateAccountPreferences_success() throws Exception {
+        UserDto profile = UserDto.builder()
+                .id(1L)
+                .firstName("John")
+                .lastName("Doe")
+                .email("john@example.com")
+                .preferredExperience("Birthday celebration")
+                .reminderLeadDays(14)
+                .notificationChannel("WHATSAPP")
+                .receivesOffers(true)
+                .weekendAlerts(true)
+                .conciergeSupport(true)
+                .role(UserRole.CUSTOMER)
+                .active(true)
+                .build();
+
+        when(authService.updateAccountPreferences(eq(1L), any(UpdateAccountPreferencesRequest.class))).thenReturn(profile);
+
+        mockMvc.perform(put("/api/v1/auth/profile/preferences")
+                        .header("X-User-Id", "1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  \"preferredExperience\": \"Birthday celebration\",
+                                  \"reminderLeadDays\": 14,
+                                  \"notificationChannel\": \"WHATSAPP\",
+                                  \"receivesOffers\": true,
+                                  \"weekendAlerts\": true,
+                                  \"conciergeSupport\": true
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.preferredExperience").value("Birthday celebration"));
+    }
+
+    @Test
+    void getSupportContact_success() throws Exception {
+        SupportContactDto supportContact = SupportContactDto.builder()
+                .email("support@example.com")
+                .phoneDisplay("+91 98765 43210")
+                .phoneRaw("+919876543210")
+                .whatsappRaw("919876543210")
+                .hours("10 AM to 8 PM IST")
+                .build();
+
+        when(authService.getSupportContact()).thenReturn(supportContact);
+
+        mockMvc.perform(get("/api/v1/auth/support-contact"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.email").value("support@example.com"))
+                .andExpect(jsonPath("$.data.phoneDisplay").value("+91 98765 43210"));
+    }
+
     // ── Reset password endpoint ──────────────────────────
 
     @Test

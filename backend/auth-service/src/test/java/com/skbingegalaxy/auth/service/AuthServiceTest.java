@@ -44,6 +44,9 @@ class AuthServiceTest {
     void setUp() {
         ReflectionTestUtils.setField(authService, "otpExpirationMinutes", 10);
         ReflectionTestUtils.setField(authService, "otpLength", 6);
+                ReflectionTestUtils.setField(authService, "supportEmail", "support@example.com");
+                ReflectionTestUtils.setField(authService, "supportPhone", "9876543210");
+                ReflectionTestUtils.setField(authService, "supportHours", "10 AM to 8 PM IST");
 
         testUser = User.builder()
                 .id(1L)
@@ -230,6 +233,24 @@ class AuthServiceTest {
         assertThat(dto.getFirstName()).isEqualTo("John");
     }
 
+        @Test
+        void getUserProfile_legacyPreferenceNulls_defaultsApplied() {
+                testUser.setReminderLeadDays(null);
+                testUser.setNotificationChannel(null);
+                testUser.setReceivesOffers(null);
+                testUser.setWeekendAlerts(null);
+                testUser.setConciergeSupport(null);
+                when(userRepository.findById(1L)).thenReturn(Optional.of(testUser));
+
+                UserDto dto = authService.getUserProfile(1L);
+
+                assertThat(dto.getReminderLeadDays()).isEqualTo(14);
+                assertThat(dto.getNotificationChannel()).isEqualTo("WHATSAPP");
+                assertThat(dto.isReceivesOffers()).isTrue();
+                assertThat(dto.isWeekendAlerts()).isTrue();
+                assertThat(dto.isConciergeSupport()).isTrue();
+        }
+
     @Test
     void getUserProfile_notFound_throwsException() {
         when(userRepository.findById(99L)).thenReturn(Optional.empty());
@@ -237,4 +258,45 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.getUserProfile(99L))
                 .isInstanceOf(ResourceNotFoundException.class);
     }
+
+        @Test
+        void getSupportContact_returnsConfiguredSupportDetails() {
+                SupportContactDto supportContact = authService.getSupportContact();
+
+                assertThat(supportContact.getEmail()).isEqualTo("support@example.com");
+                assertThat(supportContact.getPhoneDisplay()).isEqualTo("+91 98765 43210");
+                assertThat(supportContact.getPhoneRaw()).isEqualTo("+919876543210");
+                assertThat(supportContact.getWhatsappRaw()).isEqualTo("919876543210");
+                assertThat(supportContact.getHours()).isEqualTo("10 AM to 8 PM IST");
+        }
+
+        @Test
+        void updateAccountPreferences_success() {
+                UpdateAccountPreferencesRequest request = UpdateAccountPreferencesRequest.builder()
+                                .preferredExperience("Anniversary")
+                                .vibePreference("Quiet and romantic")
+                                .reminderLeadDays(21)
+                                .birthdayMonth("March")
+                                .anniversaryMonth("December")
+                                .notificationChannel("EMAIL")
+                                .receivesOffers(false)
+                                .weekendAlerts(true)
+                                .conciergeSupport(false)
+                                .build();
+
+                when(userRepository.findById(1L)).thenReturn(Optional.of(testUser));
+                when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+                UserDto dto = authService.updateAccountPreferences(1L, request);
+
+                assertThat(dto.getPreferredExperience()).isEqualTo("Anniversary");
+                assertThat(dto.getVibePreference()).isEqualTo("Quiet and romantic");
+                assertThat(dto.getReminderLeadDays()).isEqualTo(21);
+                assertThat(dto.getBirthdayMonth()).isEqualTo("March");
+                assertThat(dto.getAnniversaryMonth()).isEqualTo("December");
+                assertThat(dto.getNotificationChannel()).isEqualTo("EMAIL");
+                assertThat(dto.isReceivesOffers()).isFalse();
+                assertThat(dto.isWeekendAlerts()).isTrue();
+                assertThat(dto.isConciergeSupport()).isFalse();
+        }
 }
