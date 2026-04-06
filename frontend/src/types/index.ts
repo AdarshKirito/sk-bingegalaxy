@@ -10,7 +10,9 @@ export interface User {
   vibePreference?: string;
   reminderLeadDays?: number;
   birthdayMonth?: string;
+  birthdayDay?: number;
   anniversaryMonth?: string;
+  anniversaryDay?: number;
   notificationChannel?: 'WHATSAPP' | 'EMAIL' | 'CALLBACK';
   receivesOffers?: boolean;
   weekendAlerts?: boolean;

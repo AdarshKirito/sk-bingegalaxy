@@ -7,7 +7,7 @@ spring:
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/payment_db}
     username: ${SPRING_DATASOURCE_USERNAME:skbg_admin}
-    password: ${SPRING_DATASOURCE_PASSWORD}
+    password: ${SPRING_DATASOURCE_PASSWORD:skbg_secret}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
@@ -34,8 +34,8 @@ app:
     currency: INR
     callback-url: ${PAYMENT_CALLBACK_URL:http://localhost:8080/api/payments/callback}
   razorpay:
-    key-id: ${RAZORPAY_KEY_ID:}
-    key-secret: ${RAZORPAY_KEY_SECRET:}
+    key-id: ${RAZORPAY_KEY_ID:rzp_test_placeholder}
+    key-secret: ${RAZORPAY_KEY_SECRET:placeholder_secret}
 
 logging:
   level:
@@ -46,13 +46,6 @@ eureka:
     prefer-ip-address: true
 
 management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info,prometheus,metrics
-  endpoint:
-    health:
-      show-details: when-authorized
   tracing:
     sampling:
       probability: 1.0

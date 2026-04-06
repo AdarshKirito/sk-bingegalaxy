@@ -19,7 +19,9 @@ public class UserDto {
     private String vibePreference;
     private Integer reminderLeadDays;
     private String birthdayMonth;
+    private Integer birthdayDay;
     private String anniversaryMonth;
+    private Integer anniversaryDay;
     private String notificationChannel;
     private boolean receivesOffers;
     private boolean weekendAlerts;

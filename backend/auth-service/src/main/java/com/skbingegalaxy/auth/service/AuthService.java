@@ -23,9 +23,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
+import java.time.Month;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.time.format.TextStyle;
+import java.time.temporal.ChronoField;
 import java.util.Collections;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
@@ -37,6 +44,11 @@ import com.google.api.client.json.gson.GsonFactory;
 @RequiredArgsConstructor
 @Slf4j
 public class AuthService {
+
+    private static final DateTimeFormatter MONTH_FORMATTER = new DateTimeFormatterBuilder()
+        .parseCaseInsensitive()
+        .appendText(ChronoField.MONTH_OF_YEAR, TextStyle.FULL)
+        .toFormatter(Locale.ENGLISH);
 
     private final UserRepository userRepository;
     private final PasswordResetTokenRepository resetTokenRepository;
@@ -292,12 +304,29 @@ public class AuthService {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
 
+        String birthdayMonth = normalizeCelebrationMonth(trimToNull(request.getBirthdayMonth()));
+        Integer birthdayDay = request.getBirthdayDay();
+        validateCelebrationDate("Birthday", birthdayMonth, birthdayDay);
+
+        String anniversaryMonth = normalizeCelebrationMonth(trimToNull(request.getAnniversaryMonth()));
+        Integer anniversaryDay = request.getAnniversaryDay();
+        validateCelebrationDate("Anniversary", anniversaryMonth, anniversaryDay);
+
+        if (!Objects.equals(user.getBirthdayMonth(), birthdayMonth) || !Objects.equals(user.getBirthdayDay(), birthdayDay)) {
+            user.setBirthdayReminderSentYear(null);
+        }
+        if (!Objects.equals(user.getAnniversaryMonth(), anniversaryMonth) || !Objects.equals(user.getAnniversaryDay(), anniversaryDay)) {
+            user.setAnniversaryReminderSentYear(null);
+        }
+
         user.setPreferredExperience(trimToNull(request.getPreferredExperience()));
         user.setVibePreference(trimToNull(request.getVibePreference()));
         user.setReminderLeadDays(request.getReminderLeadDays() != null ? request.getReminderLeadDays() : 14);
-        user.setBirthdayMonth(trimToNull(request.getBirthdayMonth()));
-        user.setAnniversaryMonth(trimToNull(request.getAnniversaryMonth()));
-        user.setNotificationChannel(request.getNotificationChannel() != null ? request.getNotificationChannel() : "WHATSAPP");
+        user.setBirthdayMonth(birthdayMonth);
+        user.setBirthdayDay(birthdayDay);
+        user.setAnniversaryMonth(anniversaryMonth);
+        user.setAnniversaryDay(anniversaryDay);
+        user.setNotificationChannel(request.getNotificationChannel() != null ? request.getNotificationChannel().trim().toUpperCase(Locale.ENGLISH) : "WHATSAPP");
         user.setReceivesOffers(request.getReceivesOffers() != null ? request.getReceivesOffers() : Boolean.TRUE);
         user.setWeekendAlerts(request.getWeekendAlerts() != null ? request.getWeekendAlerts() : Boolean.TRUE);
         user.setConciergeSupport(request.getConciergeSupport() != null ? request.getConciergeSupport() : Boolean.TRUE);
@@ -488,7 +517,9 @@ public class AuthService {
             .vibePreference(user.getVibePreference())
             .reminderLeadDays(user.getReminderLeadDays() != null ? user.getReminderLeadDays() : 14)
             .birthdayMonth(user.getBirthdayMonth())
+            .birthdayDay(user.getBirthdayDay())
             .anniversaryMonth(user.getAnniversaryMonth())
+            .anniversaryDay(user.getAnniversaryDay())
             .notificationChannel(user.getNotificationChannel() != null ? user.getNotificationChannel() : "WHATSAPP")
             .receivesOffers(user.getReceivesOffers() != null ? user.getReceivesOffers() : true)
             .weekendAlerts(user.getWeekendAlerts() != null ? user.getWeekendAlerts() : true)
@@ -505,6 +536,36 @@ public class AuthService {
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String normalizeCelebrationMonth(String month) {
+        if (month == null) {
+            return null;
+        }
+        return parseMonth(month).getDisplayName(TextStyle.FULL, Locale.ENGLISH);
+    }
+
+    private void validateCelebrationDate(String label, String month, Integer day) {
+        if (month == null && day == null) {
+            return;
+        }
+        if (month == null || day == null) {
+            throw new BusinessException(label + " reminders need both month and day", HttpStatus.BAD_REQUEST);
+        }
+
+        Month parsedMonth = parseMonth(month);
+        int maxDay = parsedMonth == Month.FEBRUARY ? 29 : parsedMonth.maxLength();
+        if (day < 1 || day > maxDay) {
+            throw new BusinessException(label + " date is invalid for " + parsedMonth.getDisplayName(TextStyle.FULL, Locale.ENGLISH), HttpStatus.BAD_REQUEST);
+        }
+    }
+
+    private Month parseMonth(String month) {
+        try {
+            return Month.from(MONTH_FORMATTER.parse(month));
+        } catch (Exception exception) {
+            throw new BusinessException("Month must be a full month name", HttpStatus.BAD_REQUEST);
+        }
     }
 
     private String digitsOnly(String value) {

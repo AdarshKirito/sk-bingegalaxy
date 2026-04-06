@@ -27,8 +27,16 @@ public class UpdateAccountPreferencesRequest {
     @Size(max = 20, message = "Birthday month must be at most 20 characters")
     private String birthdayMonth;
 
+    @Min(value = 1, message = "Birthday day must be at least 1")
+    @Max(value = 31, message = "Birthday day cannot exceed 31")
+    private Integer birthdayDay;
+
     @Size(max = 20, message = "Anniversary month must be at most 20 characters")
     private String anniversaryMonth;
+
+    @Min(value = 1, message = "Anniversary day must be at least 1")
+    @Max(value = 31, message = "Anniversary day cannot exceed 31")
+    private Integer anniversaryDay;
 
     @Pattern(regexp = "WHATSAPP|EMAIL|CALLBACK", message = "Notification channel must be WHATSAPP, EMAIL, or CALLBACK")
     private String notificationChannel;

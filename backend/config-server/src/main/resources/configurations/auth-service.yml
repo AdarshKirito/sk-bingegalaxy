@@ -7,7 +7,7 @@ spring:
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/auth_db}
     username: ${SPRING_DATASOURCE_USERNAME:skbg_admin}
-    password: ${SPRING_DATASOURCE_PASSWORD}
+    password: ${SPRING_DATASOURCE_PASSWORD:skbg_secret}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
@@ -25,19 +25,16 @@ spring:
 
 app:
   jwt:
-    secret: ${JWT_SECRET}
+    secret: ${JWT_SECRET:c2tiLWJpbmdlLWdhbGF4eS1zdXBlci1zZWNyZXQta2V5LXByb2R1Y3Rpb24tY2hhbmdlLXRoaXM=}
     expiration-ms: 900000  # 15 minutes
     refresh-expiration-ms: 604800000  # 7 days
-  cookie:
-    secure: ${COOKIE_SECURE:false}
-    domain: ${COOKIE_DOMAIN:}
   admin:
     email: ${ADMIN_EMAIL:admin@skbingegalaxy.com}
-    password: ${ADMIN_PASSWORD}
+    password: ${ADMIN_PASSWORD:Admin@123}
     name: ${ADMIN_NAME:System Administrator}
     phone: ${ADMIN_PHONE:9876543210}
   google:
-    client-id: ${GOOGLE_CLIENT_ID}
+    client-id: ${GOOGLE_CLIENT_ID:437058573375-97f1e70umbnqqn6anlp4pn7c2h2h3v1o.apps.googleusercontent.com}
   otp:
     expiration-minutes: 10
     length: 6
@@ -51,13 +48,6 @@ eureka:
     prefer-ip-address: true
 
 management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info,prometheus,metrics
-  endpoint:
-    health:
-      show-details: when-authorized
   tracing:
     sampling:
       probability: 1.0

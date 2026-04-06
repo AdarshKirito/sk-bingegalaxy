@@ -28,4 +28,9 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     @Query("SELECT u FROM User u WHERE u.role = 'ADMIN' ORDER BY u.firstName, u.lastName")
     List<User> findAllAdmins();
+
+    @Query("SELECT u FROM User u WHERE u.role = com.skbingegalaxy.common.enums.UserRole.CUSTOMER " +
+           "AND u.active = true AND ((u.birthdayMonth IS NOT NULL AND u.birthdayDay IS NOT NULL) " +
+           "OR (u.anniversaryMonth IS NOT NULL AND u.anniversaryDay IS NOT NULL))")
+    List<User> findCustomersWithCelebrationReminders();
 }

@@ -260,6 +260,19 @@ class AuthServiceTest {
     }
 
         @Test
+        void updateAccountPreferences_missingDayForMonth_throwsException() {
+                UpdateAccountPreferencesRequest request = UpdateAccountPreferencesRequest.builder()
+                                .birthdayMonth("July")
+                                .build();
+
+                when(userRepository.findById(1L)).thenReturn(Optional.of(testUser));
+
+                assertThatThrownBy(() -> authService.updateAccountPreferences(1L, request))
+                                .isInstanceOf(BusinessException.class)
+                                .hasMessageContaining("Birthday reminders need both month and day");
+        }
+
+        @Test
         void getSupportContact_returnsConfiguredSupportDetails() {
                 SupportContactDto supportContact = authService.getSupportContact();
 
@@ -277,7 +290,9 @@ class AuthServiceTest {
                                 .vibePreference("Quiet and romantic")
                                 .reminderLeadDays(21)
                                 .birthdayMonth("March")
+                                .birthdayDay(19)
                                 .anniversaryMonth("December")
+                                .anniversaryDay(9)
                                 .notificationChannel("EMAIL")
                                 .receivesOffers(false)
                                 .weekendAlerts(true)
@@ -293,7 +308,9 @@ class AuthServiceTest {
                 assertThat(dto.getVibePreference()).isEqualTo("Quiet and romantic");
                 assertThat(dto.getReminderLeadDays()).isEqualTo(21);
                 assertThat(dto.getBirthdayMonth()).isEqualTo("March");
+                assertThat(dto.getBirthdayDay()).isEqualTo(19);
                 assertThat(dto.getAnniversaryMonth()).isEqualTo("December");
+                assertThat(dto.getAnniversaryDay()).isEqualTo(9);
                 assertThat(dto.getNotificationChannel()).isEqualTo("EMAIL");
                 assertThat(dto.isReceivesOffers()).isFalse();
                 assertThat(dto.isWeekendAlerts()).isTrue();

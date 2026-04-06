@@ -47,8 +47,20 @@ public class User {
     @Column(length = 20)
     private String birthdayMonth;
 
+    @Column
+    private Integer birthdayDay;
+
     @Column(length = 20)
     private String anniversaryMonth;
+
+    @Column
+    private Integer anniversaryDay;
+
+    @Column
+    private Integer birthdayReminderSentYear;
+
+    @Column
+    private Integer anniversaryReminderSentYear;
 
     @Column(length = 20)
     @Builder.Default

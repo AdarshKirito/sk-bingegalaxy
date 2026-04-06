@@ -78,7 +78,7 @@ export default function AccountCenter() {
   const pendingPayments = currentBookings.filter((booking) => booking.paymentStatus !== 'SUCCESS' && booking.status !== 'CANCELLED');
   const memberTier = useMemo(() => getMemberTier(completedCount, totalSpend), [completedCount, totalSpend]);
   const pricingLabel = myPricing?.rateCodeName || memberTier;
-  const reminderSummary = `${preferences.notificationChannel.toLowerCase()} reminders ${preferences.reminderLeadDays} day(s) before each celebration`;
+  const reminderSummary = buildReminderSummary(preferences);
 
   const updatePreference = (key, value) => {
     setPreferences((current) => ({ ...current, [key]: value }));
@@ -267,7 +267,7 @@ export default function AccountCenter() {
 
           <div className="customer-hub-inline-actions">
             <button type="button" className="btn btn-primary btn-sm" onClick={savePreferences}>Save Preferences</button>
-            <span className="customer-account-note">Saved to your account so reminders and preferences follow you across sessions.</span>
+            <span className="customer-account-note">Saved to your account and used by the reminder scheduler once a celebration date is complete.</span>
           </div>
         </article>
 
@@ -288,10 +288,24 @@ export default function AccountCenter() {
               </select>
             </label>
             <label className="customer-account-field">
+              <span>Birthday day</span>
+              <select value={preferences.birthdayDay} onChange={(event) => updatePreference('birthdayDay', event.target.value)}>
+                <option value="">Select day</option>
+                {DAY_OPTIONS.map((day) => <option key={day} value={String(day)}>{day}</option>)}
+              </select>
+            </label>
+            <label className="customer-account-field">
               <span>Anniversary month</span>
               <select value={preferences.anniversaryMonth} onChange={(event) => updatePreference('anniversaryMonth', event.target.value)}>
                 <option value="">Select month</option>
                 {MONTH_OPTIONS.map((month) => <option key={month} value={month}>{month}</option>)}
+              </select>
+            </label>
+            <label className="customer-account-field">
+              <span>Anniversary day</span>
+              <select value={preferences.anniversaryDay} onChange={(event) => updatePreference('anniversaryDay', event.target.value)}>
+                <option value="">Select day</option>
+                {DAY_OPTIONS.map((day) => <option key={day} value={String(day)}>{day}</option>)}
               </select>
             </label>
           </div>
@@ -299,8 +313,9 @@ export default function AccountCenter() {
           <div className="customer-account-reminder-box">
             <strong><FiCheckCircle /> Reminder plan</strong>
             <p>{reminderSummary}</p>
-            <p>{preferences.birthdayMonth ? `Birthday offer watch: ${preferences.birthdayMonth}` : 'Add your birthday month to unlock occasion-first reminders.'}</p>
-            <p>{preferences.anniversaryMonth ? `Anniversary reminder watch: ${preferences.anniversaryMonth}` : 'Use the anniversary field for recurring milestone planning.'}</p>
+            <p>{hasCelebrationDate(preferences.birthdayMonth, preferences.birthdayDay) ? `Birthday automation: ${formatCelebrationDate(preferences.birthdayMonth, preferences.birthdayDay)}` : 'Add both birthday month and day to activate automatic birthday reminders.'}</p>
+            <p>{hasCelebrationDate(preferences.anniversaryMonth, preferences.anniversaryDay) ? `Anniversary automation: ${formatCelebrationDate(preferences.anniversaryMonth, preferences.anniversaryDay)}` : 'Add both anniversary month and day to activate recurring anniversary reminders.'}</p>
+            {preferences.notificationChannel === 'CALLBACK' && <p>The team receives a callback follow-up request instead of an automated customer reminder.</p>}
           </div>
         </article>
       </section>
@@ -377,3 +392,33 @@ const MONTH_OPTIONS = [
   'November',
   'December',
 ];
+
+const DAY_OPTIONS = Array.from({ length: 31 }, (_, index) => index + 1);
+
+function hasCelebrationDate(month, day) {
+  return Boolean(month && day);
+}
+
+function formatCelebrationDate(month, day) {
+  if (!hasCelebrationDate(month, day)) {
+    return 'Date incomplete';
+  }
+  return `${month} ${day}`;
+}
+
+function buildReminderSummary(preferences) {
+  const channelLabel = preferences.notificationChannel === 'CALLBACK'
+    ? 'callback coordination'
+    : `${preferences.notificationChannel.toLowerCase()} reminders`;
+
+  const activeCount = [
+    hasCelebrationDate(preferences.birthdayMonth, preferences.birthdayDay),
+    hasCelebrationDate(preferences.anniversaryMonth, preferences.anniversaryDay),
+  ].filter(Boolean).length;
+
+  if (!activeCount) {
+    return 'Automatic reminders activate after you set the exact day for at least one celebration.';
+  }
+
+  return `${channelLabel} ${preferences.reminderLeadDays} day(s) before each saved celebration.`;
+}
