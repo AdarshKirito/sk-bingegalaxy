@@ -1,6 +1,7 @@
 package com.skbingegalaxy.booking.service;
 
 import com.skbingegalaxy.booking.client.AvailabilityClient;
+import com.skbingegalaxy.booking.client.AvailabilityClientFallback;
 import com.skbingegalaxy.booking.dto.*;
 import com.skbingegalaxy.booking.entity.*;
 import com.skbingegalaxy.booking.repository.*;
@@ -34,7 +35,14 @@ class BookingServiceTest {
     @Mock private EventTypeRepository eventTypeRepository;
     @Mock private AddOnRepository addOnRepository;
     @Mock private AvailabilityClient availabilityClient;
+    @Mock private AvailabilityClientFallback availabilityFallback;
     @Mock private KafkaTemplate<String, Object> kafkaTemplate;
+    @Mock private OutboxEventRepository outboxEventRepository;
+    @Mock private com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    @Mock private SystemSettingsService systemSettingsService;
+    @Mock private PricingService pricingService;
+    @Mock private BookingEventLogService eventLogService;
+    @Mock private SagaOrchestrator sagaOrchestrator;
 
     @InjectMocks private BookingService bookingService;
 
@@ -44,6 +52,8 @@ class BookingServiceTest {
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(bookingService, "refPrefix", "SKBG");
+                ReflectionTestUtils.setField(bookingService, "maxPendingPerCustomer", 2);
+                ReflectionTestUtils.setField(bookingService, "cooldownMinutesAfterTimeout", 10);
 
         eventType = EventType.builder()
                 .id(1L).name("Birthday Party")
@@ -84,7 +94,10 @@ class BookingServiceTest {
                 .build();
 
         when(eventTypeRepository.findById(1L)).thenReturn(Optional.of(eventType));
-        when(availabilityClient.checkSlotAvailable(any(), eq(14), eq(3))).thenReturn(true);
+        when(availabilityClient.checkSlotAvailable(request.getBookingDate(), 840, 180)).thenReturn(Boolean.TRUE);
+        when(pricingService.resolveEventPrice(anyLong(), eq(1L)))
+                .thenReturn(new PricingService.ResolvedEventPrice(
+                        BigDecimal.valueOf(2000), BigDecimal.valueOf(500), BigDecimal.ZERO, "DEFAULT", null));
         when(bookingRepository.save(any(Booking.class))).thenReturn(testBooking);
 
         BookingDto result = bookingService.createBooking(
@@ -101,7 +114,7 @@ class BookingServiceTest {
                 .eventTypeId(1L)
                 .bookingDate(LocalDate.now().plusDays(7))
                 .startTime(LocalTime.of(14, 0))
-                .durationHours(1) // below min (2)
+                .durationMinutes(15) // below 30-min minimum
                 .build();
 
         when(eventTypeRepository.findById(1L)).thenReturn(Optional.of(eventType));
@@ -122,7 +135,6 @@ class BookingServiceTest {
                 .build();
 
         when(eventTypeRepository.findById(1L)).thenReturn(Optional.of(eventType));
-        when(availabilityClient.checkSlotAvailable(any(), eq(14), eq(3))).thenReturn(false);
 
         assertThatThrownBy(() -> bookingService.createBooking(
                 request, 1L, "John", "john@example.com", "9876543210"))
@@ -193,7 +205,7 @@ class BookingServiceTest {
         when(bookingRepository.findByBookingRef("SKBG25123456"))
                 .thenReturn(Optional.of(testBooking));
 
-        bookingService.updatePaymentStatus("SKBG25123456", PaymentStatus.SUCCESS);
+        bookingService.updatePaymentStatus("SKBG25123456", PaymentStatus.SUCCESS, "UPI");
 
         assertThat(testBooking.getPaymentStatus()).isEqualTo(PaymentStatus.SUCCESS);
         assertThat(testBooking.getStatus()).isEqualTo(BookingStatus.CONFIRMED);

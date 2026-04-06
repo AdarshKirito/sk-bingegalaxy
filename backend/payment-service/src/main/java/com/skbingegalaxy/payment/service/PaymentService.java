@@ -24,6 +24,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -36,6 +39,9 @@ public class PaymentService {
     private final PaymentRepository paymentRepository;
     private final RefundRepository refundRepository;
     private final KafkaTemplate<String, Object> kafkaTemplate;
+
+    @org.springframework.beans.factory.annotation.Value("${app.razorpay.key-secret}")
+    private String razorpayKeySecret;
 
     @Transactional
     public PaymentDto initiatePayment(InitiatePaymentRequest request, Long customerId) {
@@ -80,6 +86,15 @@ public class PaymentService {
     @Transactional
     public PaymentDto handleCallback(PaymentCallbackRequest request) {
         log.info("Handling payment callback for gatewayOrderId: {}", request.getGatewayOrderId());
+
+        // Verify Razorpay signature to prevent forged callbacks
+        if (request.getGatewayPaymentId() != null && request.getGatewaySignature() != null) {
+            String payload = request.getGatewayOrderId() + "|" + request.getGatewayPaymentId();
+            if (!verifySignature(payload, request.getGatewaySignature())) {
+                log.warn("Invalid payment callback signature for gatewayOrderId: {}", request.getGatewayOrderId());
+                throw new BusinessException("Invalid payment signature", HttpStatus.FORBIDDEN);
+            }
+        }
 
         Payment payment = paymentRepository.findByGatewayOrderId(request.getGatewayOrderId())
             .orElseThrow(() -> new ResourceNotFoundException("Payment", "gatewayOrderId", request.getGatewayOrderId()));
@@ -470,5 +485,31 @@ public class PaymentService {
             .refundedAt(r.getRefundedAt())
             .createdAt(r.getCreatedAt())
             .build();
+    }
+
+    /**
+     * Verify HMAC-SHA256 signature from Razorpay webhook/callback.
+     */
+    private boolean verifySignature(String payload, String expectedSignature) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(razorpayKeySecret.getBytes(java.nio.charset.StandardCharsets.UTF_8), "HmacSHA256"));
+            byte[] hash = mac.doFinal(payload.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            String generated = bytesToHex(hash);
+            return java.security.MessageDigest.isEqual(
+                generated.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                expectedSignature.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            log.error("Signature verification failed", e);
+            return false;
+        }
+    }
+
+    private static String bytesToHex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
     }
 }

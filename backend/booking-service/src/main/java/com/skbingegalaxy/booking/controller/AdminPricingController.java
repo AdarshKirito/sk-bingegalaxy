@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/bookings/admin/pricing")
+@RequestMapping("/api/v1/bookings/admin/pricing")
 @RequiredArgsConstructor
 public class AdminPricingController {
 

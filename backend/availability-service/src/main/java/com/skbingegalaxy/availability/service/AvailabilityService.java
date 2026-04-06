@@ -130,6 +130,9 @@ public class AvailabilityService {
     // ── Admin: block slot ────────────────────────────────────
     @Transactional
     public BlockedSlotDto blockSlot(BlockSlotRequest request, Long adminId) {
+        if (request.getEndHour() <= request.getStartHour()) {
+            throw new BusinessException("End time must be after start time");
+        }
         Long bid = BingeContext.getBingeId();
         boolean exists = bid != null
             ? blockedSlotRepository.existsByBingeIdAndSlotDateAndStartHour(bid, request.getDate(), request.getStartHour())
@@ -188,7 +191,7 @@ public class AvailabilityService {
             : blockedSlotRepository.findBySlotDate(date);
         // Build set of blocked 30-min indices
         Set<Integer> blockedHalfHours = blocked.stream()
-            .flatMap(s -> java.util.stream.IntStream.range(s.getStartHour() * 2, s.getEndHour() * 2).boxed())
+            .flatMap(s -> java.util.stream.IntStream.range(s.getStartHour() / 30, s.getEndHour() / 30).boxed())
             .collect(Collectors.toSet());
 
         int endMinute = startMinute + durationMinutes;
@@ -201,9 +204,9 @@ public class AvailabilityService {
 
     // ── Helpers ──────────────────────────────────────────────
     private DayAvailabilityDto buildDayAvailability(LocalDate date, List<BlockedSlot> blockedSlots) {
-        // Build set of blocked half-hour indices (e.g. hour 10 blocks indices 20 and 21)
+        // Build set of blocked half-hour indices from minute-based startHour/endHour
         Set<Integer> blockedHalfHours = blockedSlots.stream()
-            .flatMap(s -> java.util.stream.IntStream.range(s.getStartHour() * 2, s.getEndHour() * 2).boxed())
+            .flatMap(s -> java.util.stream.IntStream.range(s.getStartHour() / 30, s.getEndHour() / 30).boxed())
             .collect(Collectors.toSet());
 
         List<SlotDto> available = new ArrayList<>();

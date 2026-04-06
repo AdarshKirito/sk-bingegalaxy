@@ -1,13 +1,17 @@
 server:
   port: 8082
 
+internal:
+  api:
+    secret: ${INTERNAL_API_SECRET:}
+
 spring:
   application:
     name: availability-service
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/availability_db}
     username: ${SPRING_DATASOURCE_USERNAME:skbg_admin}
-    password: ${SPRING_DATASOURCE_PASSWORD:skbg_secret}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
@@ -42,6 +46,13 @@ eureka:
     prefer-ip-address: true
 
 management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
   tracing:
     sampling:
       probability: 1.0

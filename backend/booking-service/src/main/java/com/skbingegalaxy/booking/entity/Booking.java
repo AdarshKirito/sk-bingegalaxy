@@ -102,6 +102,9 @@ public class Booking {
     @Builder.Default
     private PaymentStatus paymentStatus = PaymentStatus.PENDING;
 
+    @Column(length = 30)
+    private String paymentMethod;
+
     @Column(nullable = false)
     @Builder.Default
     private boolean checkedIn = false;

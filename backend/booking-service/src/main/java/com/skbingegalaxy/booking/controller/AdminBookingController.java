@@ -1,6 +1,8 @@
 package com.skbingegalaxy.booking.controller;
 
 import com.skbingegalaxy.booking.dto.*;
+import com.skbingegalaxy.booking.entity.BookingEventLog;
+import com.skbingegalaxy.booking.service.BookingEventLogService;
 import com.skbingegalaxy.booking.service.BookingService;
 import com.skbingegalaxy.booking.service.SystemSettingsService;
 import com.skbingegalaxy.common.context.BingeContext;
@@ -9,6 +11,7 @@ import com.skbingegalaxy.common.dto.PagedResponse;
 import com.skbingegalaxy.common.enums.BookingStatus;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -22,12 +25,16 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 
 @RestController
-@RequestMapping("/api/bookings/admin")
+@RequestMapping("/api/v1/bookings/admin")
 @RequiredArgsConstructor
+@Slf4j
 public class AdminBookingController {
 
     private final BookingService bookingService;
     private final SystemSettingsService systemSettingsService;
+    private final BookingEventLogService eventLogService;
+    private final com.skbingegalaxy.booking.service.BookingProjectionService projectionService;
+    private final com.skbingegalaxy.booking.service.SagaOrchestrator sagaOrchestrator;
 
     @GetMapping
     public ResponseEntity<ApiResponse<PagedResponse<BookingDto>>> getAllBookings(
@@ -74,10 +81,11 @@ public class AdminBookingController {
     public ResponseEntity<ApiResponse<PagedResponse<BookingDto>>> getBookingsByStatus(
             @RequestParam String status,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
-        Page<BookingDto> result = bookingService.getBookingsByStatus(
-            BookingStatus.valueOf(status.toUpperCase()),
-            PageRequest.of(page, size, Sort.by("bookingDate").descending()));
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate) {
+        Page<BookingDto> result = bookingService.getBookingsByStatusForToday(
+            BookingStatus.valueOf(status.toUpperCase()), clientDate,
+            PageRequest.of(page, size, Sort.by("startTime").ascending()));
         return ResponseEntity.ok(ApiResponse.ok(toPagedResponse(result)));
     }
 
@@ -85,8 +93,9 @@ public class AdminBookingController {
     public ResponseEntity<ApiResponse<PagedResponse<BookingDto>>> searchBookings(
             @RequestParam String q,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
-        Page<BookingDto> result = bookingService.searchBookings(q, PageRequest.of(page, size));
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate) {
+        Page<BookingDto> result = bookingService.searchBookingsForToday(q, clientDate, PageRequest.of(page, size));
         return ResponseEntity.ok(ApiResponse.ok(toPagedResponse(result)));
     }
 
@@ -110,8 +119,15 @@ public class AdminBookingController {
     }
 
     @PostMapping("/{bookingRef}/check-in")
-    public ResponseEntity<ApiResponse<BookingDto>> checkIn(@PathVariable String bookingRef) {
+    public ResponseEntity<ApiResponse<BookingDto>> checkIn(
+            @PathVariable String bookingRef,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate) {
         var booking = bookingService.getBookingEntity(bookingRef);
+        LocalDate opDate = systemSettingsService.getOperationalDate(BingeContext.getBingeId(), clientDate);
+        if (!booking.getBookingDate().equals(opDate)) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Can only check in bookings for the current operational day (" + opDate + "). This booking is for " + booking.getBookingDate());
+        }
         if (booking.getStatus() != com.skbingegalaxy.common.enums.BookingStatus.CONFIRMED) {
             throw new com.skbingegalaxy.common.exception.BusinessException(
                 "Cannot check in — booking must be CONFIRMED first. Current status: " + booking.getStatus());
@@ -126,15 +142,31 @@ public class AdminBookingController {
             @PathVariable String bookingRef,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate,
             @RequestParam(required = false) String clientTime) {
+        var booking = bookingService.getBookingEntity(bookingRef);
+        LocalDate opDate = systemSettingsService.getOperationalDate(BingeContext.getBingeId(), clientDate);
+        if (!booking.getBookingDate().equals(opDate)) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Can only checkout bookings for the current operational day (" + opDate + "). This booking is for " + booking.getBookingDate());
+        }
         LocalDateTime clientNow = null;
         if (clientDate != null && clientTime != null) {
-            try { clientNow = LocalDateTime.of(clientDate, LocalTime.parse(clientTime)); } catch (Exception ignored) {}
+            try { clientNow = LocalDateTime.of(clientDate, LocalTime.parse(clientTime)); } catch (Exception e) {
+                log.warn("Failed to parse clientTime '{}' for checkout: {}", clientTime, e.getMessage());
+            }
         }
         return ResponseEntity.ok(ApiResponse.ok("Checkout completed", bookingService.earlyCheckout(bookingRef, clientNow)));
     }
 
     @PostMapping("/{bookingRef}/undo-check-in")
-    public ResponseEntity<ApiResponse<BookingDto>> undoCheckIn(@PathVariable String bookingRef) {
+    public ResponseEntity<ApiResponse<BookingDto>> undoCheckIn(
+            @PathVariable String bookingRef,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate) {
+        var booking = bookingService.getBookingEntity(bookingRef);
+        LocalDate opDate = systemSettingsService.getOperationalDate(BingeContext.getBingeId(), clientDate);
+        if (!booking.getBookingDate().equals(opDate)) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Can only undo check-in for bookings on the current operational day (" + opDate + ").");
+        }
         UpdateBookingRequest req = new UpdateBookingRequest();
         req.setStatus("CONFIRMED");
         req.setCheckedIn(false);
@@ -159,7 +191,9 @@ public class AdminBookingController {
         if (clientDate != null && clientTime != null) {
             try {
                 clientNow = LocalDateTime.of(clientDate, LocalTime.parse(clientTime));
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                log.warn("Failed to parse clientTime '{}' for operational-date: {}", clientTime, e.getMessage());
+            }
         }
         if (clientNow == null) clientNow = LocalDateTime.now();
         // Audit is available at or after 23:59 of the operational date (client local time)
@@ -258,7 +292,9 @@ public class AdminBookingController {
             @RequestParam(required = false) String clientTime) {
         LocalDateTime clientNow = null;
         if (clientDate != null && clientTime != null) {
-            try { clientNow = LocalDateTime.of(clientDate, LocalTime.parse(clientTime)); } catch (Exception ignored) {}
+            try { clientNow = LocalDateTime.of(clientDate, LocalTime.parse(clientTime)); } catch (Exception e) {
+                log.warn("Failed to parse clientTime '{}' for audit: {}", clientTime, e.getMessage());
+            }
         }
         return ResponseEntity.ok(ApiResponse.ok("Audit completed",
             bookingService.runAudit(clientDate, clientNow)));
@@ -297,6 +333,57 @@ public class AdminBookingController {
     public ResponseEntity<ApiResponse<java.util.List<BookedSlotDto>>> getBookedSlots(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
         return ResponseEntity.ok(ApiResponse.ok(bookingService.getBookedSlotsForDate(date)));
+    }
+
+    // ── Event history (audit trail) ──────────────────────────
+
+    @GetMapping("/{bookingRef}/events")
+    public ResponseEntity<ApiResponse<PagedResponse<BookingEventLogDto>>> getBookingEvents(
+            @PathVariable String bookingRef,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        Page<BookingEventLogDto> events = eventLogService
+            .getEventHistory(bookingRef, PageRequest.of(page, size))
+            .map(e -> BookingEventLogDto.builder()
+                .id(e.getId())
+                .bookingRef(e.getBookingRef())
+                .eventType(e.getEventType().name())
+                .previousStatus(e.getPreviousStatus())
+                .newStatus(e.getNewStatus())
+                .triggeredBy(e.getTriggeredBy())
+                .triggeredByRole(e.getTriggeredByRole())
+                .description(e.getDescription())
+                .snapshot(e.getSnapshot())
+                .eventVersion(e.getEventVersion())
+                .createdAt(e.getCreatedAt())
+                .build());
+        return ResponseEntity.ok(ApiResponse.ok(toPagedResponse(events)));
+    }
+
+    // ── CQRS projection replay ─────────────────────────────
+
+    @PostMapping("/{bookingRef}/replay")
+    public ResponseEntity<ApiResponse<String>> replayBooking(@PathVariable String bookingRef) {
+        projectionService.replayBooking(bookingRef);
+        return ResponseEntity.ok(ApiResponse.ok("Projection rebuilt for " + bookingRef));
+    }
+
+    @PostMapping("/replay-all")
+    public ResponseEntity<ApiResponse<String>> replayAll() {
+        int count = projectionService.replayAll();
+        return ResponseEntity.ok(ApiResponse.ok("Projection rebuilt for " + count + " bookings"));
+    }
+
+    // ── Saga monitoring ──────────────────────────────────────
+
+    @GetMapping("/sagas/failed")
+    public ResponseEntity<ApiResponse<java.util.List<com.skbingegalaxy.booking.entity.SagaState>>> getFailedSagas() {
+        return ResponseEntity.ok(ApiResponse.ok(sagaOrchestrator.getFailedSagas()));
+    }
+
+    @GetMapping("/sagas/compensating")
+    public ResponseEntity<ApiResponse<java.util.List<com.skbingegalaxy.booking.entity.SagaState>>> getCompensatingSagas() {
+        return ResponseEntity.ok(ApiResponse.ok(sagaOrchestrator.getCompensatingSagas()));
     }
 
     private <T> PagedResponse<T> toPagedResponse(Page<T> page) {

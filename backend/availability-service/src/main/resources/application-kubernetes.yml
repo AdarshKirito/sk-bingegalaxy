@@ -1,0 +1,19 @@
+# ── Kubernetes profile: replaces Eureka with K8s-native service discovery ──
+# Activate with: SPRING_PROFILES_ACTIVE=kubernetes
+
+eureka:
+  client:
+    enabled: false
+
+spring:
+  cloud:
+    discovery:
+      enabled: true
+    kubernetes:
+      discovery:
+        enabled: true
+        all-namespaces: false
+      config:
+        enabled: false
+      reload:
+        enabled: false

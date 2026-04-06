@@ -16,6 +16,7 @@ spec:
       containers:
         - name: discovery-server
           image: skbingegalaxy/discovery-server:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8761
           resources:
@@ -62,6 +63,7 @@ spec:
       containers:
         - name: config-server
           image: skbingegalaxy/config-server:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8888
           env:
@@ -111,11 +113,15 @@ spec:
       containers:
         - name: api-gateway
           image: skbingegalaxy/api-gateway:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
           envFrom:
             - configMapRef:
                 name: app-config
+          env:
+            - name: JAVA_TOOL_OPTIONS
+              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
           resources:
             requests:
               memory: "256Mi"
@@ -123,12 +129,26 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
-          readinessProbe:
+          startupProbe:
             httpGet:
               path: /actuator/health
               port: 8080
-            initialDelaySeconds: 40
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            failureThreshold: 20
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 5
             periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
 ---
 apiVersion: v1
 kind: Service

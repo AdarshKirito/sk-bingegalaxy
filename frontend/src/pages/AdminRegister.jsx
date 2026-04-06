@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { authService } from '../services/endpoints';
 import { toast } from 'react-toastify';
+import './Auth.css';
 
 export default function AdminRegister() {
   const navigate = useNavigate();
@@ -30,38 +31,38 @@ export default function AdminRegister() {
   };
 
   return (
-    <div className="container" style={{ maxWidth: 480, margin: '3rem auto' }}>
-      <div className="card">
-        <h2 style={{ textAlign: 'center', marginBottom: '0.5rem' }}>Add New Admin</h2>
-        <p style={{ textAlign: 'center', color: 'var(--text-secondary)', marginBottom: '1.5rem', fontSize: '0.9rem' }}>Create a new administrator account</p>
+    <div className="auth-page">
+      <div className="auth-card card">
+        <h1>Add New Admin</h1>
+        <p className="auth-subtitle">Create a new administrator account</p>
         <form onSubmit={handleSubmit}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-            <div className="form-group">
+          <div className="grid-2">
+            <div className="input-group">
               <label>First Name</label>
-              <input name="firstName" value={form.firstName} onChange={handleChange} required className="form-control" />
+              <input name="firstName" value={form.firstName} onChange={handleChange} required placeholder="John" />
             </div>
-            <div className="form-group">
+            <div className="input-group">
               <label>Last Name</label>
-              <input name="lastName" value={form.lastName} onChange={handleChange} required className="form-control" />
+              <input name="lastName" value={form.lastName} onChange={handleChange} required placeholder="Doe" />
             </div>
           </div>
-          <div className="form-group">
+          <div className="input-group">
             <label>Email</label>
-            <input type="email" name="email" value={form.email} onChange={handleChange} required className="form-control" />
+            <input type="email" name="email" value={form.email} onChange={handleChange} required placeholder="admin@example.com" />
           </div>
-          <div className="form-group">
+          <div className="input-group">
             <label>Phone</label>
-            <input name="phone" value={form.phone} onChange={handleChange} required className="form-control" />
+            <input name="phone" value={form.phone} onChange={handleChange} required placeholder="9876543210" />
           </div>
-          <div className="form-group">
+          <div className="input-group">
             <label>Password</label>
-            <input type="password" name="password" value={form.password} onChange={handleChange} required className="form-control" minLength={6} />
+            <input type="password" name="password" value={form.password} onChange={handleChange} required placeholder="••••••••" minLength={6} />
           </div>
-          <div className="form-group">
+          <div className="input-group">
             <label>Confirm Password</label>
-            <input type="password" name="confirmPassword" value={form.confirmPassword} onChange={handleChange} required className="form-control" />
+            <input type="password" name="confirmPassword" value={form.confirmPassword} onChange={handleChange} required placeholder="••••••••" />
           </div>
-          <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '1rem' }} disabled={loading}>
+          <button type="submit" className="btn btn-primary auth-btn" disabled={loading}>
             {loading ? 'Creating...' : 'Create Admin Account'}
           </button>
         </form>

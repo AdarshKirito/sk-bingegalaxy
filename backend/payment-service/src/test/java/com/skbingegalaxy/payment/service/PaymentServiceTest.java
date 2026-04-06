@@ -428,5 +428,232 @@ class PaymentServiceTest {
         List<PaymentDto> result = paymentService.getCustomerPayments(1L);
         assertThat(result).hasSize(1);
     }
+
+    @Test
+    void getPaymentsByBookingRef_returnsList() {
+        when(paymentRepository.findByBookingRefOrderByCreatedAtDesc("SKBG25123456"))
+                .thenReturn(List.of(testPayment));
+        stubNoRefunds(1L);
+
+        List<PaymentDto> result = paymentService.getPaymentsByBookingRef("SKBG25123456");
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getBookingRef()).isEqualTo("SKBG25123456");
+    }
+
+    // ── Record cash payment ─────────────────────────────────────────────────
+
+    @Test
+    void recordCashPayment_success() {
+        RecordCashPaymentRequest request = RecordCashPaymentRequest.builder()
+                .bookingRef("SKBG25999999")
+                .amount(BigDecimal.valueOf(8000))
+                .customerId(2L)
+                .notes("Paid at counter")
+                .build();
+
+        when(paymentRepository.findByBookingRefAndStatus("SKBG25999999", PaymentStatus.SUCCESS))
+                .thenReturn(Optional.empty());
+
+        Payment cashPayment = Payment.builder()
+                .id(10L)
+                .bookingRef("SKBG25999999")
+                .customerId(2L)
+                .transactionId("CASH-ABC123")
+                .gatewayOrderId("CASH-ORD-XYZ")
+                .amount(BigDecimal.valueOf(8000))
+                .paymentMethod(PaymentMethod.CASH)
+                .status(PaymentStatus.SUCCESS)
+                .currency("INR")
+                .paidAt(LocalDateTime.now())
+                .build();
+
+        when(paymentRepository.save(any(Payment.class))).thenReturn(cashPayment);
+        stubNoRefunds(10L);
+
+        PaymentDto result = paymentService.recordCashPayment(request, "admin@test.com");
+
+        assertThat(result.getBookingRef()).isEqualTo("SKBG25999999");
+        assertThat(result.getPaymentMethod()).isEqualTo(PaymentMethod.CASH);
+        assertThat(result.getStatus()).isEqualTo(PaymentStatus.SUCCESS);
+        verify(kafkaTemplate).send(anyString(), anyString(), any());
+    }
+
+    @Test
+    void recordCashPayment_idempotent_returnsExisting() {
+        RecordCashPaymentRequest request = RecordCashPaymentRequest.builder()
+                .bookingRef("SKBG25999999")
+                .amount(BigDecimal.valueOf(8000))
+                .customerId(2L)
+                .build();
+
+        testPayment.setStatus(PaymentStatus.SUCCESS);
+        when(paymentRepository.findByBookingRefAndStatus("SKBG25999999", PaymentStatus.SUCCESS))
+                .thenReturn(Optional.of(testPayment));
+        stubNoRefunds(1L);
+
+        PaymentDto result = paymentService.recordCashPayment(request, "admin@test.com");
+
+        assertThat(result.getTransactionId()).isEqualTo("TXN-ABCD1234");
+        verify(paymentRepository, never()).save(any());
+    }
+
+    // ── Add payment ─────────────────────────────────────────────────────────
+
+    @Test
+    void addPayment_success() {
+        AddPaymentRequest request = AddPaymentRequest.builder()
+                .bookingRef("SKBG25123456")
+                .amount(BigDecimal.valueOf(3000))
+                .customerId(1L)
+                .paymentMethod(PaymentMethod.UPI)
+                .notes("Split payment")
+                .build();
+
+        Payment additionalPayment = Payment.builder()
+                .id(20L)
+                .bookingRef("SKBG25123456")
+                .customerId(1L)
+                .transactionId("UPI-SPLIT123")
+                .gatewayOrderId("ADM-ORD-SPLIT")
+                .amount(BigDecimal.valueOf(3000))
+                .paymentMethod(PaymentMethod.UPI)
+                .status(PaymentStatus.SUCCESS)
+                .currency("INR")
+                .paidAt(LocalDateTime.now())
+                .build();
+
+        when(paymentRepository.save(any(Payment.class))).thenReturn(additionalPayment);
+        stubNoRefunds(20L);
+
+        PaymentDto result = paymentService.addPayment(request, "admin@test.com");
+
+        assertThat(result.getAmount()).isEqualByComparingTo(BigDecimal.valueOf(3000));
+        assertThat(result.getStatus()).isEqualTo(PaymentStatus.SUCCESS);
+        verify(kafkaTemplate).send(anyString(), anyString(), any());
+    }
+
+    @Test
+    void addPayment_withNullCustomerId_defaultsToZero() {
+        AddPaymentRequest request = AddPaymentRequest.builder()
+                .bookingRef("SKBG25123456")
+                .amount(BigDecimal.valueOf(1000))
+                .customerId(null)
+                .paymentMethod(PaymentMethod.CASH)
+                .build();
+
+        Payment saved = Payment.builder()
+                .id(21L)
+                .bookingRef("SKBG25123456")
+                .customerId(0L)
+                .transactionId("CASH-NULL")
+                .gatewayOrderId("ADM-ORD-NULL")
+                .amount(BigDecimal.valueOf(1000))
+                .paymentMethod(PaymentMethod.CASH)
+                .status(PaymentStatus.SUCCESS)
+                .currency("INR")
+                .paidAt(LocalDateTime.now())
+                .build();
+
+        when(paymentRepository.save(any(Payment.class))).thenReturn(saved);
+        stubNoRefunds(21L);
+
+        PaymentDto result = paymentService.addPayment(request, "admin@test.com");
+
+        assertThat(result.getCustomerId()).isEqualTo(0L);
+    }
+
+    // ── Get refunds for payment ─────────────────────────────────────────────
+
+    @Test
+    void getRefundsForPayment_success() {
+        Refund refund = Refund.builder()
+                .id(1L)
+                .payment(testPayment)
+                .amount(BigDecimal.valueOf(2000))
+                .reason("Customer request")
+                .gatewayRefundId("RFD-123")
+                .status(PaymentStatus.REFUNDED)
+                .initiatedBy("admin")
+                .refundedAt(LocalDateTime.now())
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        when(paymentRepository.findById(1L)).thenReturn(Optional.of(testPayment));
+        when(refundRepository.findByPaymentIdOrderByCreatedAtDesc(1L))
+                .thenReturn(List.of(refund));
+
+        List<RefundDto> result = paymentService.getRefundsForPayment(1L);
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getGatewayRefundId()).isEqualTo("RFD-123");
+    }
+
+    @Test
+    void getRefundsForPayment_paymentNotFound_throwsException() {
+        when(paymentRepository.findById(999L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> paymentService.getRefundsForPayment(999L))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    // ── Payment stats ───────────────────────────────────────────────────────
+
+    @Test
+    void getPaymentStats_returnsAllFields() {
+        when(paymentRepository.getTotalSuccessfulPayments()).thenReturn(BigDecimal.valueOf(50000));
+        when(refundRepository.sumAllCompletedRefunds(anyList())).thenReturn(BigDecimal.valueOf(5000));
+        when(paymentRepository.countByStatus(PaymentStatus.SUCCESS)).thenReturn(10L);
+        when(paymentRepository.countByStatus(PaymentStatus.FAILED)).thenReturn(2L);
+        when(paymentRepository.countByStatus(PaymentStatus.INITIATED)).thenReturn(1L);
+        when(paymentRepository.countByStatus(PaymentStatus.REFUNDED)).thenReturn(3L);
+        when(paymentRepository.countByStatus(PaymentStatus.PARTIALLY_REFUNDED)).thenReturn(1L);
+
+        var stats = paymentService.getPaymentStats();
+
+        assertThat(stats.get("totalRevenue")).isEqualTo(BigDecimal.valueOf(50000));
+        assertThat(stats.get("totalRefunded")).isEqualTo(BigDecimal.valueOf(5000));
+        assertThat(stats.get("netRevenue")).isEqualTo(BigDecimal.valueOf(45000));
+        assertThat(stats.get("successCount")).isEqualTo(10L);
+        assertThat(stats.get("failedCount")).isEqualTo(2L);
+        assertThat(stats.get("initiatedCount")).isEqualTo(1L);
+        assertThat(stats.get("refundedCount")).isEqualTo(3L);
+        assertThat(stats.get("partiallyRefundedCount")).isEqualTo(1L);
+    }
+
+    // ── Simulate payment – failed retry ─────────────────────────────────────
+
+    @Test
+    void simulatePayment_failedStatus_retries() {
+        testPayment.setStatus(PaymentStatus.FAILED);
+        when(paymentRepository.findByTransactionId("TXN-ABCD1234"))
+                .thenReturn(Optional.of(testPayment));
+        when(paymentRepository.save(any(Payment.class))).thenReturn(testPayment);
+        stubNoRefunds(1L);
+
+        paymentService.simulatePayment("TXN-ABCD1234");
+
+        assertThat(testPayment.getStatus()).isEqualTo(PaymentStatus.SUCCESS);
+        verify(kafkaTemplate).send(anyString(), anyString(), any());
+    }
+
+    // ── handleCallback with "captured" status ───────────────────────────────
+
+    @Test
+    void handleCallback_capturedStatus_success() {
+        PaymentCallbackRequest request = PaymentCallbackRequest.builder()
+                .gatewayOrderId("ORD-EFGH5678")
+                .gatewayPaymentId("PAY-CAP-1")
+                .status("captured")
+                .build();
+
+        when(paymentRepository.findByGatewayOrderId("ORD-EFGH5678"))
+                .thenReturn(Optional.of(testPayment));
+        when(paymentRepository.save(any(Payment.class))).thenReturn(testPayment);
+        stubNoRefunds(1L);
+
+        paymentService.handleCallback(request);
+
+        assertThat(testPayment.getStatus()).isEqualTo(PaymentStatus.SUCCESS);
+        verify(kafkaTemplate).send(anyString(), anyString(), any());
+    }
 }
 

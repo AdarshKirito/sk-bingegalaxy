@@ -168,7 +168,7 @@ class AuthServiceTest {
         LoginRequest request = LoginRequest.builder()
                 .email("admin@example.com").password("AdminPass").build();
 
-        when(userRepository.findByEmailAndRole("admin@example.com", UserRole.ADMIN))
+        when(userRepository.findByEmail("admin@example.com"))
                 .thenReturn(Optional.of(testUser));
         when(passwordEncoder.matches("AdminPass", "encodedPassword")).thenReturn(true);
         when(jwtProvider.generateToken(testUser)).thenReturn("admin-token");
@@ -180,11 +180,12 @@ class AuthServiceTest {
 
     @Test
     void adminLogin_notAdmin_throwsException() {
+        testUser.setRole(UserRole.CUSTOMER);
         LoginRequest request = LoginRequest.builder()
                 .email("user@example.com").password("pass").build();
 
-        when(userRepository.findByEmailAndRole("user@example.com", UserRole.ADMIN))
-                .thenReturn(Optional.empty());
+        when(userRepository.findByEmail("user@example.com"))
+                .thenReturn(Optional.of(testUser));
 
         assertThatThrownBy(() -> authService.adminLogin(request))
                 .isInstanceOf(BusinessException.class);

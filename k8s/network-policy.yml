@@ -1,0 +1,104 @@
+# Default deny all ingress traffic in the namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: sk-binge-galaxy
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Allow ingress controller → frontend & api-gateway
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-gateway-and-frontend
+  namespace: sk-binge-galaxy
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [api-gateway, frontend]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - port: 8080
+        - port: 80
+---
+# Allow api-gateway → all backend services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gateway-to-backends
+  namespace: sk-binge-galaxy
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [auth-service, availability-service, booking-service, payment-service, notification-service]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: api-gateway
+---
+# Allow booking-service → availability-service (Feign)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-booking-to-availability
+  namespace: sk-binge-galaxy
+spec:
+  podSelector:
+    matchLabels:
+      app: availability-service
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: booking-service
+      ports:
+        - port: 8082
+---
+# Allow all pods → Kafka & PostgreSQL & MongoDB
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-infra-access
+  namespace: sk-binge-galaxy
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [kafka, postgres, mongodb]
+  ingress:
+    - from:
+        - podSelector: {}
+---
+# Allow Prometheus scraping on all pods (/actuator/prometheus)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: sk-binge-galaxy
+spec:
+  podSelector: {}
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+      ports:
+        - port: 8080
+        - port: 8081
+        - port: 8082
+        - port: 8083
+        - port: 8084
+        - port: 8085

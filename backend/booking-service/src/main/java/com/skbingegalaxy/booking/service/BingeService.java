@@ -48,17 +48,18 @@ public class BingeService {
     }
 
     @Transactional
-    public BingeDto createBinge(BingeSaveRequest request, Long adminId) {
+    public BingeDto createBinge(BingeSaveRequest request, Long adminId, LocalDate clientDate) {
         if (bingeRepository.existsByNameAndAdminId(request.getName(), adminId)) {
             throw new DuplicateResourceException("Binge", "name", request.getName());
         }
 
+        LocalDate opDate = clientDate != null ? clientDate : LocalDate.now();
         Binge binge = Binge.builder()
             .name(request.getName())
             .address(request.getAddress())
             .adminId(adminId)
             .active(true)
-            .operationalDate(LocalDate.now())
+            .operationalDate(opDate)
             .build();
 
         binge = bingeRepository.save(binge);

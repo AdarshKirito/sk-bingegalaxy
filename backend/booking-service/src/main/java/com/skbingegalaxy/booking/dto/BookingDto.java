@@ -39,6 +39,7 @@ public class BookingDto {
     private int numberOfGuests;
     private BookingStatus status;
     private PaymentStatus paymentStatus;
+    private String paymentMethod;
     private boolean checkedIn;
     private LocalDateTime actualCheckoutTime;
     private Integer actualUsedMinutes;

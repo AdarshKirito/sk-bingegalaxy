@@ -58,7 +58,7 @@ export default function BookingConfirmation() {
           )}
           {booking.specialNotes && <Row label="Notes" value={booking.specialNotes} />}
           {booking.earlyCheckoutNote && (
-            <div style={{ padding: '0.5rem 0.75rem', background: 'rgba(0,206,201,0.1)', border: '1px solid #00cec9', borderRadius: '6px', fontSize: '0.88rem', color: '#00cec9', marginTop: '0.25rem' }}>
+            <div style={{ padding: '0.6rem 0.85rem', background: 'rgba(16,185,129,0.08)', border: '1px solid var(--success)', borderRadius: '8px', fontSize: '0.88rem', color: 'var(--success)', marginTop: '0.25rem' }}>
               ⏱️ {booking.earlyCheckoutNote}
             </div>
           )}
@@ -67,7 +67,7 @@ export default function BookingConfirmation() {
           <Row label="Add-On Amount" value={`₹${booking.addOnAmount?.toLocaleString()}`} />
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.2rem', fontWeight: '700' }}>
             <span>Total</span>
-            <span style={{ color: 'var(--primary-light)' }}>₹{booking.totalAmount?.toLocaleString()}</span>
+            <span style={{ color: 'var(--primary)' }}>₹{booking.totalAmount?.toLocaleString()}</span>
           </div>
         </div>
       </div>

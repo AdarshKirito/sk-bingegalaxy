@@ -26,19 +26,28 @@ public class SystemSettingsService {
 
     @Transactional
     public LocalDate getOperationalDate(LocalDate clientToday) {
-        LocalDate cap = clientToday != null ? clientToday : LocalDate.now();
+        LocalDate today = clientToday != null ? clientToday : LocalDate.now();
         return repo.findById(1L)
                 .map(s -> {
-                    if (s.getOperationalDate().isAfter(cap)) {
-                        s.setOperationalDate(cap);
+                    LocalDate stored = s.getOperationalDate();
+                    // Operational date advances only through audit.
+                    // Initialize when missing and cap impossible future values,
+                    // but never auto-advance just because wall-clock date changed.
+                    if (stored == null) {
+                        s.setOperationalDate(today);
                         repo.save(s);
-                        return cap;
+                        return today;
                     }
-                    return s.getOperationalDate();
+                    if (stored.isAfter(today)) {
+                        s.setOperationalDate(today);
+                        repo.save(s);
+                        return today;
+                    }
+                    return stored;
                 })
                 .orElseGet(() -> {
-                    repo.save(SystemSettings.builder().id(1L).operationalDate(cap).build());
-                    return cap;
+                    repo.save(SystemSettings.builder().id(1L).operationalDate(today).build());
+                    return today;
                 });
     }
 
@@ -54,7 +63,9 @@ public class SystemSettingsService {
     // ── Per-binge operational date ───────────────────────────
 
     /**
-     * Returns the operational date for a specific binge, capped at clientToday.
+     * Returns the operational date for a specific binge.
+     * Initializes when missing and caps impossible future values to clientToday,
+     * but does not auto-advance merely because the wall-clock date changed.
      * Falls back to global if bingeId is null.
      */
     @Transactional
@@ -66,7 +77,12 @@ public class SystemSettingsService {
                 .orElseThrow(() -> new ResourceNotFoundException("Binge", "id", bingeId));
 
         LocalDate opDate = binge.getOperationalDate();
-        if (opDate == null || opDate.isAfter(cap)) {
+        if (opDate == null) {
+            binge.setOperationalDate(cap);
+            bingeRepository.save(binge);
+            return cap;
+        }
+        if (opDate.isAfter(cap)) {
             binge.setOperationalDate(cap);
             bingeRepository.save(binge);
             return cap;

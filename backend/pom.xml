@@ -138,4 +138,21 @@
             </plugin>
         </plugins>
     </build>
+
+    <!-- K8s profile: replaces Eureka with native Kubernetes service discovery -->
+    <profiles>
+        <profile>
+            <id>kubernetes</id>
+            <dependencies>
+                <dependency>
+                    <groupId>org.springframework.cloud</groupId>
+                    <artifactId>spring-cloud-starter-kubernetes-client</artifactId>
+                </dependency>
+                <dependency>
+                    <groupId>org.springframework.cloud</groupId>
+                    <artifactId>spring-cloud-starter-kubernetes-client-config</artifactId>
+                </dependency>
+            </dependencies>
+        </profile>
+    </profiles>
 </project>

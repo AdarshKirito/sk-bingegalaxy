@@ -1,25 +1,12 @@
-import { createContext, useContext, useState, useCallback } from 'react';
+import { createContext, useContext } from 'react';
+import useBingeStore from '../stores/bingeStore';
 
 const BingeContext = createContext(null);
 
 export function BingeProvider({ children }) {
-  const [selectedBinge, setSelectedBinge] = useState(() => {
-    const stored = localStorage.getItem('selectedBinge');
-    return stored ? JSON.parse(stored) : null;
-  });
-
-  const selectBinge = useCallback((binge) => {
-    localStorage.setItem('selectedBinge', JSON.stringify(binge));
-    setSelectedBinge(binge);
-  }, []);
-
-  const clearBinge = useCallback(() => {
-    localStorage.removeItem('selectedBinge');
-    setSelectedBinge(null);
-  }, []);
-
+  const store = useBingeStore();
   return (
-    <BingeContext.Provider value={{ selectedBinge, selectBinge, clearBinge }}>
+    <BingeContext.Provider value={store}>
       {children}
     </BingeContext.Provider>
   );

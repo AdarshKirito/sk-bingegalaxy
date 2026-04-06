@@ -4,7 +4,7 @@ import { adminService, bookingService, paymentService } from '../services/endpoi
 import { toast } from 'react-toastify';
 
 const TABS = [
-  { key: 'today', label: "Today's Arrivals" },
+  { key: 'today', label: "Operational Day" },
   { key: 'upcoming', label: 'Upcoming' },
   { key: 'all', label: 'All Bookings' },
   { key: 'byDate', label: 'By Date' },
@@ -12,11 +12,14 @@ const TABS = [
 ];
 
 const TODAY_SUB_TABS = [
+  { key: 'all', label: 'All Today' },
+  { key: 'pending', label: 'Pending' },
+  { key: 'confirmed', label: 'Confirmed' },
   { key: 'ready', label: 'Ready to Check-in' },
   { key: 'checkedIn', label: 'Checked In' },
+  { key: 'completed', label: 'Completed' },
   { key: 'cancelled', label: 'Cancelled' },
   { key: 'pendingPayment', label: 'Pending Payment' },
-  { key: 'all', label: 'All Today' },
 ];
 
 const STATUSES = ['PENDING', 'CONFIRMED', 'CHECKED_IN', 'COMPLETED', 'CANCELLED', 'NO_SHOW'];
@@ -93,12 +96,20 @@ export default function AdminBookings() {
 
   useEffect(() => { fetchStats(); }, [fetchStats]);
   useEffect(() => {
-    adminService.getOperationalDate()
-      .then(res => {
-        const d = res.data.data || res.data;
-        if (d?.operationalDate) setOperationalDate(d.operationalDate);
-      })
-      .catch(() => {});
+    const refreshOpDate = () => {
+      adminService.getOperationalDate()
+        .then(res => {
+          const d = res.data.data || res.data;
+          if (d?.operationalDate) setOperationalDate(d.operationalDate);
+        })
+        .catch(() => {});
+    };
+    refreshOpDate();
+    // Refresh operational date every 60 seconds and on tab visibility change
+    const interval = setInterval(refreshOpDate, 60000);
+    const onVisibility = () => { if (document.visibilityState === 'visible') refreshOpDate(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => { clearInterval(interval); document.removeEventListener('visibilitychange', onVisibility); };
   }, []);
   useEffect(() => {
     if (!isSearchActive) fetchBookings();
@@ -109,7 +120,7 @@ export default function AdminBookings() {
     setPage(0);
     setSearch('');
     setIsSearchActive(false);
-    if (key === 'today') setTodaySubTab('ready');
+    if (key === 'today') setTodaySubTab('all');
   };
 
   const handleSearch = async () => {
@@ -218,8 +229,11 @@ export default function AdminBookings() {
   const filteredBookings = (() => {
     if (activeTab !== 'today') return bookings;
     switch (todaySubTab) {
+      case 'pending': return bookings.filter(b => b.status === 'PENDING');
+      case 'confirmed': return bookings.filter(b => b.status === 'CONFIRMED');
       case 'ready': return bookings.filter(b => b.status === 'CONFIRMED' || b.status === 'PENDING');
       case 'checkedIn': return bookings.filter(b => b.status === 'CHECKED_IN');
+      case 'completed': return bookings.filter(b => b.status === 'COMPLETED');
       case 'cancelled': return bookings.filter(b => b.status === 'CANCELLED');
       case 'pendingPayment': return bookings.filter(b => b.paymentStatus === 'PENDING');
       default: return bookings;
@@ -254,21 +268,29 @@ export default function AdminBookings() {
         <h1>Manage Bookings</h1>
       </div>
 
-      {/* Today Stats Cards */}
+      {/* Operational Date Banner + Today Stats Cards */}
       {stats && (
-        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
+        <div style={{ marginBottom: '1.25rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem', padding: '0.6rem 1rem', borderRadius: 'var(--radius-sm, 6px)', background: 'rgba(99,102,241,0.08)', border: '1px solid var(--primary)' }}>
+            <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Operational Day:</span>
+            <span style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--primary)' }}>{operationalDate}</span>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>All stats below are for this date</span>
+          </div>
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
           {[
-            { label: "Today's Total",     val: stats.todayTotal ?? '-',     color: 'var(--primary, #6c5ce7)' },
-            { label: 'Confirmed',          val: stats.todayConfirmed ?? '-', color: 'var(--success, #00b894)' },
-            { label: 'Checked In',         val: stats.todayCheckedIn ?? '-', color: '#0984e3' },
-            { label: 'Pending',            val: stats.todayPending ?? '-',   color: 'var(--warning, #fdcb6e)' },
-            { label: 'Completed',          val: stats.todayCompleted ?? '-', color: '#00cec9' },
+            { label: "Total",             val: stats.todayTotal ?? '-',     color: 'var(--primary)' },
+            { label: 'Confirmed',          val: stats.todayConfirmed ?? '-', color: 'var(--success)' },
+            { label: 'Checked In',         val: stats.todayCheckedIn ?? '-', color: '#3b82f6' },
+            { label: 'Pending',            val: stats.todayPending ?? '-',   color: 'var(--warning)' },
+            { label: 'Completed',          val: stats.todayCompleted ?? '-', color: '#06b6d4' },
+            { label: 'Cancelled',          val: stats.todayCancelled ?? '-', color: 'var(--danger, #e74c3c)' },
           ].map(c => (
             <div key={c.label} style={cardStyle(c.color)}>
               <div style={{ fontSize: '1.6rem', fontWeight: 700, color: c.color }}>{c.val}</div>
               <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>{c.label}</div>
             </div>
           ))}
+          </div>
         </div>
       )}
 
@@ -319,7 +341,7 @@ export default function AdminBookings() {
       ) : filteredBookings.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: '2rem' }}>
           <p style={{ color: 'var(--text-muted)' }}>
-            {activeTab === 'today' ? "No arrivals for today" :
+            {activeTab === 'today' ? `No bookings for operational day (${operationalDate})` :
              activeTab === 'upcoming' ? "No upcoming bookings" :
              "No bookings found"}
           </p>
@@ -342,7 +364,7 @@ export default function AdminBookings() {
                     onMouseEnter={e => e.currentTarget.style.background = 'var(--primary-transparent, rgba(108,92,231,0.08))'}
                     onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                     <td style={{ padding: '0.75rem' }}>
-                      <span style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--primary-light)' }}>{b.bookingRef}</span>
+                      <span style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--primary)' }}>{b.bookingRef}</span>
                     </td>
                     <td style={{ padding: '0.75rem' }}>
                       <span style={{ fontWeight: 600 }}>{b.customerName || b.customerEmail || 'N/A'}</span><br/>
@@ -846,11 +868,6 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
             )}
             {b.status === 'CHECKED_IN' && (
               <>
-                {(b.paymentStatus === 'PENDING' || b.paymentStatus === 'FAILED' || b.paymentStatus === 'REFUNDED') && (
-                  <div style={{ width: '100%', padding: '0.5rem 0.75rem', background: 'rgba(255,165,0,0.1)', border: '1px solid var(--warning, orange)', borderRadius: 'var(--radius-sm)', fontSize: '0.82rem', color: 'var(--warning, orange)', marginBottom: '0.3rem' }}>
-                    ⚠️ Checkout blocked — payment status is {b.paymentStatus}. Collect payment before checking out.
-                  </div>
-                )}
                 {(() => {
                   const bal = (b.balanceDue != null) ? b.balanceDue : ((b.totalAmount || 0) - (b.collectedAmount || 0));
                   if (bal > 0.01) return (
@@ -960,7 +977,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
           {b.guestAmount > 0 && (
             <div style={rowStyle}><span style={labelStyle}>Guest Charge</span><span>₹{b.guestAmount?.toLocaleString()}</span></div>
           )}
-          <div style={{ ...rowStyle, fontWeight: 700, fontSize: '1rem' }}><span style={labelStyle}>Total Amount</span><span style={{ color: 'var(--primary-light)' }}>₹{b.totalAmount?.toLocaleString()}</span></div>
+          <div style={{ ...rowStyle, fontWeight: 700, fontSize: '1rem' }}><span style={labelStyle}>Total Amount</span><span style={{ color: 'var(--primary)' }}>₹{b.totalAmount?.toLocaleString()}</span></div>
           {(() => {
             const bal = (b.balanceDue != null) ? b.balanceDue : ((b.totalAmount || 0) - (b.collectedAmount || 0));
             if (b.collectedAmount != null && b.collectedAmount > 0) return (

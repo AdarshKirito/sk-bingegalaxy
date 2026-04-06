@@ -1,0 +1,72 @@
+# Prometheus ServiceMonitor for auto-discovery of Spring Boot actuator endpoints.
+# Requires: prometheus-operator (kube-prometheus-stack) installed in the cluster.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: spring-boot-services
+  namespace: sk-binge-galaxy
+  labels:
+    release: prometheus  # must match Prometheus Operator's serviceMonitorSelector
+spec:
+  selector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - auth-service
+          - availability-service
+          - booking-service
+          - payment-service
+          - notification-service
+          - api-gateway
+  namespaceSelector:
+    matchNames:
+      - sk-binge-galaxy
+  endpoints:
+    - port: http
+      path: /actuator/prometheus
+      interval: 15s
+      scrapeTimeout: 10s
+---
+# PodMonitor alternative (scrapes pods directly without needing Service port names)
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: spring-boot-pods
+  namespace: sk-binge-galaxy
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - auth-service
+          - availability-service
+          - booking-service
+          - payment-service
+          - notification-service
+          - api-gateway
+  namespaceSelector:
+    matchNames:
+      - sk-binge-galaxy
+  podMetricsEndpoints:
+    - port: "8081"
+      path: /actuator/prometheus
+      interval: 15s
+    - port: "8082"
+      path: /actuator/prometheus
+      interval: 15s
+    - port: "8083"
+      path: /actuator/prometheus
+      interval: 15s
+    - port: "8084"
+      path: /actuator/prometheus
+      interval: 15s
+    - port: "8085"
+      path: /actuator/prometheus
+      interval: 15s
+    - port: "8080"
+      path: /actuator/prometheus
+      interval: 15s

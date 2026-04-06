@@ -24,8 +24,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.Map;
 import java.util.UUID;
+
+import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
+import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
+import com.google.api.client.http.javanet.NetHttpTransport;
+import com.google.api.client.json.gson.GsonFactory;
 
 @Service
 @RequiredArgsConstructor
@@ -43,6 +49,66 @@ public class AuthService {
 
     @Value("${app.otp.length:6}")
     private int otpLength;
+
+    @Value("${app.google.client-id:}")
+    private String googleClientId;
+
+    // ── Google OAuth login ───────────────────────────────────
+    @Transactional
+    public AuthResponse googleLogin(String credential) {
+        try {
+            GoogleIdTokenVerifier verifier = new GoogleIdTokenVerifier.Builder(
+                    new NetHttpTransport(), GsonFactory.getDefaultInstance())
+                .setAudience(Collections.singletonList(googleClientId))
+                .build();
+
+            GoogleIdToken idToken = verifier.verify(credential);
+            if (idToken == null) {
+                throw new BusinessException("Invalid Google token", HttpStatus.UNAUTHORIZED);
+            }
+
+            GoogleIdToken.Payload payload = idToken.getPayload();
+            String email = payload.getEmail().toLowerCase();
+            String firstName = (String) payload.get("given_name");
+            String lastName = (String) payload.get("family_name");
+
+            if (firstName == null) firstName = "User";
+            if (lastName == null) lastName = "";
+
+            var existingUser = userRepository.findByEmail(email);
+            if (existingUser.isPresent()) {
+                User user = existingUser.get();
+                if (!user.isActive()) {
+                    throw new BusinessException("Account is deactivated. Contact support.", HttpStatus.FORBIDDEN);
+                }
+                log.info("Google login (existing user): {}", email);
+                return buildAuthResponse(user);
+            }
+
+            // New user via Google — create account
+            User user = User.builder()
+                .firstName(firstName)
+                .lastName(lastName)
+                .email(email)
+                .phone(null)
+                .password(passwordEncoder.encode(UUID.randomUUID().toString()))
+                .role(UserRole.CUSTOMER)
+                .active(true)
+                .build();
+
+            user = userRepository.save(user);
+            log.info("Google login (new user created): {}", email);
+
+            sendNotification(user, "WELCOME", Map.of("name", user.getFirstName()));
+
+            return buildAuthResponse(user);
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Google login failed", e);
+            throw new BusinessException("Google login failed: " + e.getMessage(), HttpStatus.UNAUTHORIZED);
+        }
+    }
 
     // ── Register ─────────────────────────────────────────────
     @Transactional
@@ -197,6 +263,20 @@ public class AuthService {
     public UserDto getUserProfile(Long userId) {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+        return toDto(user);
+    }
+
+    // ── Complete profile (add phone after Google sign-in) ─────
+    @Transactional
+    public UserDto completeProfile(Long userId, String phone) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+        if (userRepository.existsByPhone(phone)) {
+            throw new DuplicateResourceException("User", "phone", phone);
+        }
+        user.setPhone(phone);
+        user = userRepository.save(user);
+        log.info("Profile completed for: {}", user.getEmail());
         return toDto(user);
     }
 

@@ -14,41 +14,41 @@ spring:
         - id: auth-service
           uri: lb://auth-service
           predicates:
-            - Path=/api/auth/**
+            - Path=/api/v1/auth/**
           filters:
             - StripPrefix=0
 
         - id: availability-service
           uri: lb://availability-service
           predicates:
-            - Path=/api/availability/**
+            - Path=/api/v1/availability/**
           filters:
             - StripPrefix=0
 
         - id: booking-service
           uri: lb://booking-service
           predicates:
-            - Path=/api/bookings/**
+            - Path=/api/v1/bookings/**
           filters:
             - StripPrefix=0
 
         - id: payment-service
           uri: lb://payment-service
           predicates:
-            - Path=/api/payments/**
+            - Path=/api/v1/payments/**
           filters:
             - StripPrefix=0
 
         - id: notification-service
           uri: lb://notification-service
           predicates:
-            - Path=/api/notifications/**
+            - Path=/api/v1/notifications/**
           filters:
             - StripPrefix=0
 
   security:
     jwt:
-      secret: ${JWT_SECRET:c2tiLWJpbmdlLWdhbGF4eS1zdXBlci1zZWNyZXQta2V5LXByb2R1Y3Rpb24tY2hhbmdlLXRoaXM=}
+      secret: ${JWT_SECRET}
 
 app:
   cors:
@@ -63,6 +63,13 @@ eureka:
     prefer-ip-address: true
 
 management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
   tracing:
     sampling:
       probability: 1.0

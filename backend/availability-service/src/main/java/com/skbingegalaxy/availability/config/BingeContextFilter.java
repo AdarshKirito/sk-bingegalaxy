@@ -3,6 +3,7 @@ package com.skbingegalaxy.availability.config;
 import com.skbingegalaxy.common.context.BingeContext;
 import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
@@ -14,6 +15,7 @@ import java.io.IOException;
  */
 @Component
 @Order(1)
+@Slf4j
 public class BingeContextFilter implements Filter {
 
     @Override
@@ -28,7 +30,9 @@ public class BingeContextFilter implements Filter {
             if (bingeIdStr != null && !bingeIdStr.isBlank()) {
                 try {
                     BingeContext.setBingeId(Long.parseLong(bingeIdStr));
-                } catch (NumberFormatException ignored) { }
+                } catch (NumberFormatException e) {
+                    log.warn("Invalid bingeId '{}': {}", bingeIdStr, e.getMessage());
+                }
             }
             chain.doFilter(request, response);
         } finally {

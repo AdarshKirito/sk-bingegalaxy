@@ -1,13 +1,17 @@
 server:
   port: 8083
 
+internal:
+  api:
+    secret: ${INTERNAL_API_SECRET:}
+
 spring:
   application:
     name: booking-service
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/booking_db}
     username: ${SPRING_DATASOURCE_USERNAME:skbg_admin}
-    password: ${SPRING_DATASOURCE_PASSWORD:skbg_secret}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
@@ -36,6 +40,53 @@ app:
     max-hours: 8
     advance-booking-days: 90
     cancellation-hours-before: 24
+    max-pending-per-customer: 2
+    cooldown-minutes-after-timeout: 10
+  saga:
+    pending-timeout-minutes: 15
+    check-interval-ms: 300000
+
+# ── Resilience4j Circuit Breaker ─────────────────────────
+spring.cloud.openfeign.circuitbreaker.enabled: true
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        slow-call-duration-threshold: 3s
+        slow-call-rate-threshold: 80
+        register-health-indicator: true
+    instances:
+      availability-service:
+        base-config: default
+  retry:
+    configs:
+      default:
+        max-attempts: 3
+        wait-duration: 500ms
+        retry-exceptions:
+          - java.io.IOException
+          - java.net.SocketTimeoutException
+          - feign.RetryableException
+    instances:
+      availability-service:
+        base-config: default
+  bulkhead:
+    configs:
+      default:
+        max-concurrent-calls: 20
+        max-wait-duration: 500ms
+    instances:
+      availability-service:
+        base-config: default
+  timelimiter:
+    configs:
+      default:
+        timeout-duration: 5s
 
 logging:
   level:
@@ -46,6 +97,16 @@ eureka:
     prefer-ip-address: true
 
 management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics,circuitbreakers
+  endpoint:
+    health:
+      show-details: when-authorized
+  health:
+    circuitbreakers:
+      enabled: true
   tracing:
     sampling:
       probability: 1.0

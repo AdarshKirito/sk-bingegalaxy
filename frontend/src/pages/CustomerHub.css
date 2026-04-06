@@ -1,0 +1,363 @@
+.customer-hub {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.customer-hub-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.95fr);
+  gap: 1.2rem;
+}
+
+.customer-hub-copy,
+.customer-hub-highlight {
+  border-radius: 28px;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  background: linear-gradient(150deg, rgba(37, 99, 235, 0.08), rgba(14, 165, 233, 0.04) 52%, var(--bg-card));
+  box-shadow: var(--shadow-sm);
+}
+
+[data-theme="dark"] .customer-hub-copy,
+[data-theme="dark"] .customer-hub-highlight {
+  background: linear-gradient(150deg, rgba(37, 99, 235, 0.12), rgba(14, 165, 233, 0.08) 55%, var(--bg-card));
+}
+
+.customer-hub-kicker,
+.customer-hub-panel-label,
+.customer-hub-stat-label {
+  display: inline-flex;
+  margin-bottom: 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--primary);
+}
+
+.customer-hub-copy h1,
+.customer-hub-highlight h2,
+.customer-hub-panel h2 {
+  margin-bottom: 0.65rem;
+}
+
+.customer-hub-copy p,
+.customer-hub-highlight p,
+.customer-hub-stat p,
+.customer-hub-empty p,
+.customer-booking-card p,
+.customer-payment-card p,
+.customer-mini-card p {
+  color: var(--text-secondary);
+}
+
+.customer-hub-actions,
+.customer-hub-inline-actions,
+.customer-booking-actions,
+.customer-mini-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.customer-hub-highlight {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.customer-hub-highlight strong,
+.customer-hub-stat strong,
+.customer-mini-card-actions strong,
+.customer-booking-head strong,
+.customer-payment-head strong {
+  font-size: 1.25rem;
+  color: var(--primary);
+}
+
+.customer-hub-highlight-meta,
+.customer-booking-topline,
+.customer-payment-meta,
+.customer-booking-meta,
+.customer-booking-tags,
+.customer-hub-panel-head,
+.customer-hub-tabs,
+.customer-hub-filters,
+.customer-hub-stat,
+.customer-hub-stats,
+.customer-mini-grid {
+  display: flex;
+}
+
+.customer-hub-highlight-meta,
+.customer-booking-topline,
+.customer-booking-meta,
+.customer-booking-tags,
+.customer-hub-tabs,
+.customer-hub-filters,
+.customer-mini-grid {
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.customer-hub-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.customer-hub-stat {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 1.25rem;
+}
+
+.customer-hub-stat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background: rgba(37, 99, 235, 0.1);
+  color: var(--primary);
+}
+
+.customer-hub-toolbar,
+.customer-hub-panel,
+.customer-booking-card,
+.customer-payment-card {
+  border-radius: 24px;
+}
+
+.customer-hub-toolbar {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.customer-hub-panel {
+  padding: 1.25rem;
+}
+
+.customer-hub-panel-head {
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.customer-hub-inline-link {
+  color: var(--primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.customer-hub-filters {
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.customer-hub-filters-wide {
+  justify-content: flex-start;
+}
+
+.customer-hub-tabs {
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.customer-hub-search,
+.customer-hub-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-height: 44px;
+  padding: 0 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+}
+
+.customer-hub-search {
+  min-width: 0;
+  max-width: 360px;
+  flex: 1 1 300px;
+}
+
+.customer-hub-select {
+  flex: 0 1 220px;
+}
+
+.customer-hub-search input,
+.customer-hub-select select {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  outline: none;
+}
+
+.customer-booking-grid,
+.customer-payment-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.customer-booking-card,
+.customer-payment-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.95rem;
+  padding: 1.2rem;
+}
+
+.customer-booking-topline,
+.customer-booking-head,
+.customer-payment-head,
+.customer-mini-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.customer-booking-head h3,
+.customer-payment-head h3,
+.customer-mini-card h3 {
+  margin-bottom: 0.25rem;
+}
+
+.customer-booking-head > div,
+.customer-payment-head > div,
+.customer-mini-card > div:first-child {
+  min-width: 0;
+}
+
+.customer-booking-head strong,
+.customer-payment-head strong {
+  flex-shrink: 0;
+}
+
+.customer-booking-ref {
+  display: inline-flex;
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: var(--bg-input);
+}
+
+.customer-booking-meta,
+.customer-payment-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  font-size: 0.92rem;
+}
+
+.customer-booking-meta span,
+.customer-booking-tags,
+.customer-payment-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.customer-booking-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.34rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.customer-payment-error {
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border-radius: 16px;
+  background: rgba(220, 38, 38, 0.08);
+  color: var(--danger);
+}
+
+.customer-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.customer-mini-card {
+  align-items: center;
+  padding: 1rem;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.customer-mini-card-actions {
+  align-items: flex-end;
+  flex-direction: column;
+}
+
+.customer-hub-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.8rem;
+  padding: 3rem 1.5rem;
+  text-align: center;
+  border-radius: 24px;
+}
+
+@media (max-width: 1024px) {
+  .customer-hub-hero,
+  .customer-hub-stats,
+  .customer-booking-grid,
+  .customer-payment-grid,
+  .customer-mini-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .customer-hub-toolbar,
+  .customer-booking-card,
+  .customer-payment-card,
+  .customer-mini-card,
+  .customer-hub-copy,
+  .customer-hub-highlight {
+    padding: 1rem;
+  }
+
+  .customer-hub-panel-head,
+  .customer-booking-head,
+  .customer-payment-head,
+  .customer-mini-card,
+  .customer-hub-filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .customer-mini-card-actions {
+    align-items: stretch;
+  }
+
+  .customer-hub-search,
+  .customer-hub-select {
+    width: 100%;
+    max-width: none;
+  }
+
+  .customer-booking-head strong,
+  .customer-payment-head strong {
+    align-self: flex-start;
+  }
+}

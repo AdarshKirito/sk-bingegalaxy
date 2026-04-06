@@ -71,48 +71,54 @@ export default function BingeManagement() {
 
   return (
     <div className="container" style={{ maxWidth: 800, margin: '2rem auto' }}>
-      <h2>My Binges</h2>
-      <p style={{ color: '#aaa', marginBottom: '1.5rem' }}>Create and manage your venues. Select one to enter its dashboard.</p>
-
-      <button className="btn btn-primary" onClick={() => { setShowForm(!showForm); setEditId(null); setForm({ name: '', address: '' }); }} style={{ marginBottom: '1.5rem' }}>
-        {showForm ? 'Cancel' : '+ Create Binge'}
-      </button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+        <div>
+          <h2 style={{ margin: 0 }}>My Binges</h2>
+          <p style={{ color: 'var(--text-secondary)', margin: '0.25rem 0 0', fontSize: '0.9rem' }}>Create and manage your venues. Select one to enter its dashboard.</p>
+        </div>
+        <button className="btn btn-primary" onClick={() => { setShowForm(!showForm); setEditId(null); setForm({ name: '', address: '' }); }}>
+          {showForm ? 'Cancel' : '+ Create Binge'}
+        </button>
+      </div>
 
       {showForm && (
-        <div className="card" style={{ marginBottom: '1.5rem' }}>
+        <div className="card" style={{ marginBottom: '1.5rem', padding: '1.5rem' }}>
+          <h3 style={{ margin: '0 0 1rem' }}>{editId ? 'Edit Binge' : 'Create New Binge'}</h3>
           <form onSubmit={handleSubmit}>
-            <div className="form-group">
+            <div className="input-group">
               <label>Binge Name *</label>
-              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required className="form-control" placeholder="e.g., Downtown Arena" />
+              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required placeholder="e.g., Downtown Arena" />
             </div>
-            <div className="form-group">
+            <div className="input-group">
               <label>Address</label>
-              <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} className="form-control" placeholder="123 Main St, City" />
+              <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="123 Main St, City" />
             </div>
-            <button type="submit" className="btn btn-primary">{editId ? 'Update' : 'Create'}</button>
+            <button type="submit" className="btn btn-primary" style={{ marginTop: '0.5rem' }}>{editId ? 'Update Binge' : 'Create Binge'}</button>
           </form>
         </div>
       )}
 
       {binges.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
-          <p style={{ fontSize: '1.2rem', color: '#aaa' }}>No binges yet. Create your first venue above!</p>
+          <p style={{ fontSize: '1.2rem', color: 'var(--text-muted)' }}>No binges yet. Create your first venue above!</p>
         </div>
       ) : (
         <div style={{ display: 'grid', gap: '1rem' }}>
           {binges.map((b) => (
-            <div key={b.id} className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', opacity: b.active ? 1 : 0.5 }}>
+            <div key={b.id} className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1.25rem 1.5rem', opacity: b.active ? 1 : 0.6 }}>
               <div>
-                <h3 style={{ margin: 0 }}>{b.name}</h3>
-                {b.address && <p style={{ margin: '0.25rem 0 0', color: '#aaa', fontSize: '0.9rem' }}>{b.address}</p>}
-                <span style={{ fontSize: '0.8rem', color: b.active ? '#4caf50' : '#f44336' }}>{b.active ? 'Active' : 'Inactive'}</span>
+                <h3 style={{ margin: 0, fontSize: '1.1rem' }}>{b.name}</h3>
+                {b.address && <p style={{ margin: '0.25rem 0 0', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{b.address}</p>}
+                <span className="badge" style={{ marginTop: '0.5rem', background: b.active ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', color: b.active ? 'var(--success)' : 'var(--danger)' }}>
+                  {b.active ? 'Active' : 'Inactive'}
+                </span>
               </div>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
                 {b.active && (
                   <button className="btn btn-primary btn-sm" onClick={() => handleSelect(b)}>Enter</button>
                 )}
                 <button className="btn btn-secondary btn-sm" onClick={() => handleEdit(b)}>Edit</button>
-                <button className="btn btn-sm" style={{ background: b.active ? '#f44336' : '#4caf50', color: '#fff' }} onClick={() => handleToggle(b.id)}>
+                <button className="btn btn-sm" style={{ background: b.active ? 'var(--danger)' : 'var(--success)', color: '#fff' }} onClick={() => handleToggle(b.id)}>
                   {b.active ? 'Deactivate' : 'Activate'}
                 </button>
               </div>

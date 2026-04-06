@@ -1,49 +1,98 @@
 .hero {
   text-align: center;
-  padding: 5rem 1rem 4rem;
-  background: linear-gradient(135deg, rgba(108, 99, 255, 0.08), rgba(255, 101, 132, 0.05));
+  padding: 6rem 1rem 5rem;
+  background: var(--bg-hero);
+  position: relative;
+  overflow: hidden;
+}
+
+.hero::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: radial-gradient(circle at 20% 50%, rgba(255, 255, 255, 0.1) 0%, transparent 50%),
+              radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.08) 0%, transparent 40%);
+  pointer-events: none;
 }
 
 .hero h1 {
-  font-size: 3rem;
+  font-size: 3.2rem;
   font-weight: 800;
-  line-height: 1.2;
+  line-height: 1.15;
   margin-bottom: 1rem;
+  color: #ffffff;
+  position: relative;
 }
 
 .highlight {
-  background: linear-gradient(135deg, var(--primary), var(--secondary));
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
 .hero p {
-  color: var(--text-secondary);
-  font-size: 1.15rem;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 1.2rem;
   max-width: 600px;
-  margin: 0 auto 2rem;
+  margin: 0 auto 2.5rem;
+  position: relative;
 }
 
 .hero-actions {
   display: flex;
   gap: 1rem;
   justify-content: center;
+  position: relative;
+}
+
+.hero-actions .btn-primary {
+  background: #ffffff;
+  color: var(--primary);
+  font-weight: 700;
+  padding: 0.85rem 2rem;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+}
+
+.hero-actions .btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+  background: #ffffff;
+}
+
+.hero-actions .btn-secondary {
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+  border: 1.5px solid rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(4px);
+  padding: 0.85rem 2rem;
+}
+
+.hero-actions .btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+  box-shadow: none;
 }
 
 .features {
-  padding: 4rem 1.5rem;
+  padding: 5rem 1.5rem 4rem;
+  background: var(--bg);
 }
 
 .features h2, .pricing h2 {
   text-align: center;
   font-size: 2rem;
   margin-bottom: 0.5rem;
+  color: var(--text);
 }
 
 .section-subtitle {
   text-align: center;
   color: var(--text-secondary);
+  margin-bottom: 2.5rem;
 }
 
 .features-grid {
@@ -52,52 +101,108 @@
 
 .feature-card {
   text-align: center;
-  padding: 2rem 1.5rem;
+  padding: 2.5rem 1.5rem;
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  transition: var(--transition);
+  box-shadow: var(--shadow-sm);
+}
+
+.feature-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--primary-light);
 }
 
 .feature-icon {
   font-size: 2.5rem;
   color: var(--primary);
   margin-bottom: 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  background: var(--primary-bg);
+  border-radius: 16px;
 }
 
 .feature-card h3 {
   font-size: 1.1rem;
   margin-bottom: 0.5rem;
+  color: var(--text);
 }
 
 .feature-card p {
   color: var(--text-secondary);
   font-size: 0.9rem;
+  line-height: 1.5;
 }
 
 .pricing {
-  padding: 2rem 1.5rem 5rem;
+  padding: 3rem 1.5rem 6rem;
+  background: var(--bg);
 }
 
 .pricing-card {
   text-align: center;
   padding: 2rem 1.5rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: var(--transition);
+  box-shadow: var(--shadow-sm);
+}
+
+.pricing-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow);
+  border-color: var(--border-hover);
 }
 
 .pricing-icon {
-  font-size: 2.5rem;
-  display: block;
-  margin-bottom: 0.75rem;
+  font-size: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 0.75rem;
+  background: var(--primary-bg);
+  color: var(--primary);
+  border-radius: 14px;
 }
 
 .pricing-card h3 {
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   margin-bottom: 0.5rem;
+  color: var(--text);
 }
 
 .pricing-amount {
-  color: var(--primary-light);
-  font-weight: 600;
-  font-size: 1.1rem;
+  color: var(--primary);
+  font-weight: 700;
+  font-size: 1.2rem;
 }
 
 @media (max-width: 768px) {
+  .hero { padding: 4rem 1rem 3rem; }
   .hero h1 { font-size: 2rem; }
   .hero p { font-size: 1rem; }
+  .hero-actions { flex-direction: column; align-items: center; }
+}
+
+@media (max-width: 480px) {
+  .hero { padding: 3rem 0.75rem 2rem; }
+  .hero h1 { font-size: 1.6rem; }
+  .hero p { font-size: 0.9rem; margin-bottom: 1.5rem; }
+  .hero-actions .btn { width: 100%; padding: 0.75rem 1.25rem; font-size: 0.9rem; }
+  .features { padding: 3rem 0.75rem 2rem; }
+  .features h2, .pricing h2 { font-size: 1.5rem; }
+  .feature-card { padding: 1.5rem 1rem; }
+  .feature-icon { width: 48px; height: 48px; font-size: 1.8rem; }
+  .pricing { padding: 2rem 0.75rem 3rem; }
+  .pricing-card { padding: 1.25rem 1rem; }
+  .pricing-icon { font-size: 2rem; }
 }

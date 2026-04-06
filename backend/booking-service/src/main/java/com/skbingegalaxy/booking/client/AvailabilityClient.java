@@ -7,10 +7,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 
 import java.time.LocalDate;
 
-@FeignClient(name = "availability-service")
+@FeignClient(name = "availability-service", fallback = AvailabilityClientFallback.class)
 public interface AvailabilityClient {
 
-    @GetMapping("/api/availability/internal/check")
+    @GetMapping("/api/v1/availability/internal/check")
     Boolean checkSlotAvailable(
         @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
         @RequestParam("date") LocalDate date,

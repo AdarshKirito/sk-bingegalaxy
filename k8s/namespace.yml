@@ -9,20 +9,17 @@ metadata:
   name: app-config
   namespace: sk-binge-galaxy
 data:
+  SPRING_PROFILES_ACTIVE: "kubernetes"
   EUREKA_SERVER: "http://discovery-server:8761/eureka/"
   CONFIG_SERVER: "http://config-server:8888"
   KAFKA_BOOTSTRAP: "kafka:9092"
   POSTGRES_HOST: "postgres"
   MONGO_HOST: "mongodb"
 ---
-apiVersion: v1
-kind: Secret
-metadata:
-  name: db-secrets
-  namespace: sk-binge-galaxy
-type: Opaque
-stringData:
-  POSTGRES_USER: "postgres"
-  POSTGRES_PASSWORD: "postgres"
-  MONGO_USER: "admin"
-  MONGO_PASSWORD: "admin123"
+# db-secrets managed by ExternalSecret or sealed-secrets in production.
+# For local dev, create manually: kubectl create secret generic db-secrets \
+#   --from-literal=POSTGRES_USER=skbg_admin \
+#   --from-literal=POSTGRES_PASSWORD=<generated> \
+#   --from-literal=MONGO_USER=skbg_admin \
+#   --from-literal=MONGO_PASSWORD=<generated> \
+#   -n sk-binge-galaxy

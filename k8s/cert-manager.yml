@@ -1,0 +1,41 @@
+# ============================================================
+# cert-manager — TLS certificate provisioning via Let's Encrypt
+# ============================================================
+# Prerequisites:
+#   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.5/cert-manager.yaml
+#
+# After deploying cert-manager CRDs, apply this file:
+#   kubectl apply -f k8s/cert-manager.yml
+# ============================================================
+
+# ── Let's Encrypt Staging (test first) ────────────────────────
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: admin@skbingegalaxy.com      # Change to your email
+    privateKeySecretRef:
+      name: letsencrypt-staging-key
+    solvers:
+      - http01:
+          ingress:
+            class: nginx
+---
+# ── Let's Encrypt Production ─────────────────────────────────
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: admin@skbingegalaxy.com      # Change to your email
+    privateKeySecretRef:
+      name: letsencrypt-prod-key
+    solvers:
+      - http01:
+          ingress:
+            class: nginx

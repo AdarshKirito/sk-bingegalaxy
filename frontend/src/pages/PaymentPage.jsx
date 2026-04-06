@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import { bookingService, paymentService } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import { FiCreditCard } from 'react-icons/fi';
@@ -96,6 +96,10 @@ export default function PaymentPage() {
         <FiCreditCard style={{ fontSize: '2.5rem', color: 'var(--primary)', marginBottom: '0.5rem' }} />
         <h1>Payment</h1>
         <p>Booking: {ref}</p>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '0.75rem', marginTop: '1rem' }}>
+          <Link to="/payments" className="btn btn-secondary btn-sm">Payment History</Link>
+          <Link to="/my-bookings" className="btn btn-secondary btn-sm">Booking Timeline</Link>
+        </div>
       </div>
 
       {/* Booking summary */}
@@ -111,7 +115,7 @@ export default function PaymentPage() {
         <hr style={{ borderColor: 'var(--border)', margin: '0.75rem 0' }} />
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.3rem', fontWeight: 700 }}>
           <span>Total</span>
-          <span style={{ color: 'var(--primary-light)' }}>₹{booking.totalAmount?.toLocaleString()}</span>
+          <span style={{ color: 'var(--primary)' }}>₹{booking.totalAmount?.toLocaleString()}</span>
         </div>
       </div>
 
@@ -119,7 +123,7 @@ export default function PaymentPage() {
       {isSuccess ? (
         <div className="card" style={{ textAlign: 'center', padding: '1.5rem' }}>
           <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>✓</div>
-          <p style={{ color: 'var(--success, #00b894)', fontWeight: 600, fontSize: '1.15rem', marginBottom: '0.5rem' }}>
+          <p style={{ color: 'var(--success)', fontWeight: 600, fontSize: '1.15rem', marginBottom: '0.5rem' }}>
             Payment {payment.status === 'SUCCESS' ? 'Successful' : payment.status.replace(/_/g, ' ')}
           </p>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1rem' }}>
@@ -133,7 +137,7 @@ export default function PaymentPage() {
       ) : isInitiated ? (
         <div className="card" style={{ textAlign: 'center', padding: '1.5rem' }}>
           <div style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>⏳</div>
-          <p style={{ color: 'var(--warning, #fdcb6e)', fontWeight: 600, fontSize: '1.05rem', marginBottom: '0.5rem' }}>
+          <p style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '1.05rem', marginBottom: '0.5rem' }}>
             Payment Already Initiated
           </p>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1rem' }}>
@@ -150,9 +154,9 @@ export default function PaymentPage() {
 
       ) : isFailed ? (
         <div>
-          <div className="card" style={{ textAlign: 'center', padding: '1rem', marginBottom: '1.5rem', borderColor: 'var(--danger, #e74c3c)' }}>
+          <div className="card" style={{ textAlign: 'center', padding: '1rem', marginBottom: '1.5rem', borderColor: 'var(--danger)' }}>
             <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>❌</div>
-            <p style={{ color: 'var(--danger, #e74c3c)', fontWeight: 600, marginBottom: '0.25rem' }}>Previous Payment Failed</p>
+            <p style={{ color: 'var(--danger)', fontWeight: 600, marginBottom: '0.25rem' }}>Previous Payment Failed</p>
             {payment.failureReason && (
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{payment.failureReason}</p>
             )}

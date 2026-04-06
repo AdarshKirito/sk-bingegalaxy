@@ -5,7 +5,7 @@ services:
     container_name: skbg-postgres
     environment:
       POSTGRES_USER: skbg_admin
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-skbg_secret}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/init-databases.sql:/docker-entrypoint-initdb.d/01-init.sql
@@ -22,7 +22,7 @@ services:
     container_name: skbg-mongodb
     environment:
       MONGO_INITDB_ROOT_USERNAME: skbg_admin
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-skbg_secret}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
     volumes:
       - mongo-data:/data/db
     ports:
@@ -66,7 +66,7 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
     healthcheck:
       test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
       interval: 15s
@@ -86,8 +86,10 @@ services:
     container_name: skbg-discovery
     ports:
       - "8761:8761"
+    environment:
+      EUREKA_PASSWORD: ${EUREKA_PASSWORD}
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://eureka:eureka_secret@localhost:8761/actuator/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8761/actuator/health"]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -101,7 +103,9 @@ services:
     ports:
       - "8888:8888"
     environment:
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:eureka_secret@discovery-server:8761/eureka/
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:${EUREKA_PASSWORD}@discovery-server:8761/eureka/
+      CONFIG_SERVER_USER: ${CONFIG_SERVER_USER:-configuser}
+      CONFIG_SERVER_PASSWORD: ${CONFIG_SERVER_PASSWORD}
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8888/actuator/health"]
       interval: 15s
@@ -117,8 +121,11 @@ services:
     ports:
       - "8080:8080"
     environment:
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:eureka_secret@discovery-server:8761/eureka/
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:${EUREKA_PASSWORD}@discovery-server:8761/eureka/
       SPRING_CLOUD_CONFIG_URI: http://config-server:8888
+      SPRING_CLOUD_CONFIG_USERNAME: ${CONFIG_SERVER_USER:-configuser}
+      SPRING_CLOUD_CONFIG_PASSWORD: ${CONFIG_SERVER_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
 
   # ── Application Services ───────────────────────────────────
   auth-service:
@@ -136,10 +143,15 @@ services:
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/auth_db
       SPRING_DATASOURCE_USERNAME: skbg_admin
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-skbg_secret}
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:eureka_secret@discovery-server:8761/eureka/
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:${EUREKA_PASSWORD}@discovery-server:8761/eureka/
       SPRING_CLOUD_CONFIG_URI: http://config-server:8888
+      SPRING_CLOUD_CONFIG_USERNAME: ${CONFIG_SERVER_USER:-configuser}
+      SPRING_CLOUD_CONFIG_PASSWORD: ${CONFIG_SERVER_PASSWORD}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      JWT_SECRET: ${JWT_SECRET}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
 
   availability-service:
     build: ./backend/availability-service
@@ -154,9 +166,12 @@ services:
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/availability_db
       SPRING_DATASOURCE_USERNAME: skbg_admin
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-skbg_secret}
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:eureka_secret@discovery-server:8761/eureka/
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:${EUREKA_PASSWORD}@discovery-server:8761/eureka/
       SPRING_CLOUD_CONFIG_URI: http://config-server:8888
+      SPRING_CLOUD_CONFIG_USERNAME: ${CONFIG_SERVER_USER:-configuser}
+      SPRING_CLOUD_CONFIG_PASSWORD: ${CONFIG_SERVER_PASSWORD}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
 
   booking-service:
     build: ./backend/booking-service
@@ -173,10 +188,13 @@ services:
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/booking_db
       SPRING_DATASOURCE_USERNAME: skbg_admin
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-skbg_secret}
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:eureka_secret@discovery-server:8761/eureka/
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:${EUREKA_PASSWORD}@discovery-server:8761/eureka/
       SPRING_CLOUD_CONFIG_URI: http://config-server:8888
+      SPRING_CLOUD_CONFIG_USERNAME: ${CONFIG_SERVER_USER:-configuser}
+      SPRING_CLOUD_CONFIG_PASSWORD: ${CONFIG_SERVER_PASSWORD}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
 
   payment-service:
     build: ./backend/payment-service
@@ -193,9 +211,11 @@ services:
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/payment_db
       SPRING_DATASOURCE_USERNAME: skbg_admin
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-skbg_secret}
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:eureka_secret@discovery-server:8761/eureka/
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:${EUREKA_PASSWORD}@discovery-server:8761/eureka/
       SPRING_CLOUD_CONFIG_URI: http://config-server:8888
+      SPRING_CLOUD_CONFIG_USERNAME: ${CONFIG_SERVER_USER:-configuser}
+      SPRING_CLOUD_CONFIG_PASSWORD: ${CONFIG_SERVER_PASSWORD}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
 
   notification-service:
@@ -211,9 +231,11 @@ services:
     ports:
       - "8085:8085"
     environment:
-      SPRING_DATA_MONGODB_URI: mongodb://skbg_admin:${MONGO_PASSWORD:-skbg_secret}@mongodb:27017/notification_db?authSource=admin
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:eureka_secret@discovery-server:8761/eureka/
+      SPRING_DATA_MONGODB_URI: mongodb://skbg_admin:${MONGO_PASSWORD}@mongodb:27017/notification_db?authSource=admin
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:${EUREKA_PASSWORD}@discovery-server:8761/eureka/
       SPRING_CLOUD_CONFIG_URI: http://config-server:8888
+      SPRING_CLOUD_CONFIG_USERNAME: ${CONFIG_SERVER_USER:-configuser}
+      SPRING_CLOUD_CONFIG_PASSWORD: ${CONFIG_SERVER_PASSWORD}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
 
   # ── Frontend ───────────────────────────────────────────────

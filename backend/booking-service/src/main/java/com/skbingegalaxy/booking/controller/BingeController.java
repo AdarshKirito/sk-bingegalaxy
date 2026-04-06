@@ -6,14 +6,17 @@ import com.skbingegalaxy.booking.service.BingeService;
 import com.skbingegalaxy.common.dto.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
+
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/bookings")
+@RequestMapping("/api/v1/bookings")
 @RequiredArgsConstructor
 public class BingeController {
 
@@ -49,9 +52,10 @@ public class BingeController {
     @PostMapping("/admin/binges")
     public ResponseEntity<ApiResponse<BingeDto>> createBinge(
             @Valid @RequestBody BingeSaveRequest request,
-            @RequestHeader("X-User-Id") Long adminId) {
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate) {
         return ResponseEntity.status(HttpStatus.CREATED)
-            .body(ApiResponse.ok("Binge created", bingeService.createBinge(request, adminId)));
+            .body(ApiResponse.ok("Binge created", bingeService.createBinge(request, adminId, clientDate)));
     }
 
     // ── Admin: update binge ──────────────────────────────────

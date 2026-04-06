@@ -2,15 +2,12 @@ import axios from 'axios';
 import { toast } from 'react-toastify';
 
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: '/api/v1',
   headers: { 'Content-Type': 'application/json' },
+  withCredentials: true,  // Send httpOnly cookies automatically
 });
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
   // Auto-attach selected binge for multi-tenancy
   const binge = localStorage.getItem('selectedBinge');
   if (binge) {
@@ -68,8 +65,7 @@ api.interceptors.response.use(
         // Queue this request until the refresh completes
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });
-        }).then((token) => {
-          originalRequest.headers.Authorization = `Bearer ${token}`;
+        }).then(() => {
           return api(originalRequest);
         });
       }
@@ -77,30 +73,20 @@ api.interceptors.response.use(
       originalRequest._retry = true;
       isRefreshing = true;
 
-      const refreshToken = localStorage.getItem('refreshToken');
-      if (!refreshToken) {
-        isRefreshing = false;
-        forceLogout();
-        return Promise.reject(err);
-      }
-
       try {
-        const { data } = await axios.post('/api/auth/refresh', { refreshToken }, {
+        // Refresh token is sent automatically via httpOnly cookie
+        const { data } = await axios.post('/api/v1/auth/refresh', {}, {
           headers: { 'Content-Type': 'application/json' },
+          withCredentials: true,
         });
 
-        const newToken = data.data.token;
-        const newRefresh = data.data.refreshToken;
-        localStorage.setItem('token', newToken);
-        localStorage.setItem('refreshToken', newRefresh);
-        if (data.data.user) {
+        if (data.data?.user) {
           localStorage.setItem('user', JSON.stringify(data.data.user));
         }
 
         isRefreshing = false;
-        processQueue(null, newToken);
+        processQueue(null);
 
-        originalRequest.headers.Authorization = `Bearer ${newToken}`;
         return api(originalRequest);
       } catch (refreshErr) {
         isRefreshing = false;
@@ -124,9 +110,10 @@ api.interceptors.response.use(
 );
 
 function forceLogout() {
-  localStorage.removeItem('token');
-  localStorage.removeItem('refreshToken');
   localStorage.removeItem('user');
+  localStorage.removeItem('selectedBinge');
+  // Call backend logout to clear httpOnly cookies
+  axios.post('/api/v1/auth/logout', {}, { withCredentials: true }).catch(() => {});
   if (!window.location.pathname.includes('/login')) {
     toast.error('Session expired. Please log in again.');
     window.location.href = '/login';

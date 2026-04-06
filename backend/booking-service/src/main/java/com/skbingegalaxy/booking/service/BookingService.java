@@ -1,6 +1,7 @@
 package com.skbingegalaxy.booking.service;
 
 import com.skbingegalaxy.booking.client.AvailabilityClient;
+import com.skbingegalaxy.booking.client.AvailabilityClientFallback;
 import com.skbingegalaxy.booking.dto.*;
 import com.skbingegalaxy.booking.entity.*;
 import com.skbingegalaxy.booking.repository.*;
@@ -39,18 +40,44 @@ public class BookingService {
     private final EventTypeRepository eventTypeRepository;
     private final AddOnRepository addOnRepository;
     private final AvailabilityClient availabilityClient;
+    private final AvailabilityClientFallback availabilityFallback;
     private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final OutboxEventRepository outboxEventRepository;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private final SystemSettingsService systemSettingsService;
     private final PricingService pricingService;
+    private final BookingEventLogService eventLogService;
+    private final SagaOrchestrator sagaOrchestrator;
 
     @Value("${app.booking.ref-prefix:SKBG}")
     private String refPrefix;
+
+    @Value("${app.booking.max-pending-per-customer:2}")
+    private int maxPendingPerCustomer;
+
+    @Value("${app.booking.cooldown-minutes-after-timeout:10}")
+    private int cooldownMinutesAfterTimeout;
 
     // ── Create booking ───────────────────────────────────────
     @Transactional
     public BookingDto createBooking(CreateBookingRequest request,
                                     Long customerId, String customerName,
                                     String customerEmail, String customerPhone) {
+
+        // Anti-abuse: limit concurrent PENDING bookings per customer
+        long pendingCount = bookingRepository.countPendingByCustomerId(customerId);
+        if (pendingCount >= maxPendingPerCustomer) {
+            throw new BusinessException(
+                "You already have " + pendingCount + " pending booking(s). Please complete or cancel them before creating new ones.");
+        }
+
+        // Anti-abuse: cooldown after auto-cancelled (timed-out) bookings
+        LocalDateTime cooldownSince = LocalDateTime.now().minusMinutes(cooldownMinutesAfterTimeout);
+        long recentTimeouts = bookingRepository.countRecentTimeoutCancellations(customerId, cooldownSince);
+        if (recentTimeouts >= 2) {
+            throw new BusinessException(
+                "Too many unpaid bookings were auto-cancelled recently. Please wait a few minutes before trying again.");
+        }
 
         EventType eventType = eventTypeRepository.findById(request.getEventTypeId())
             .orElseThrow(() -> new ResourceNotFoundException("EventType", "id", request.getEventTypeId()));
@@ -64,10 +91,16 @@ public class BookingService {
             throw new BusinessException("Duration must be in 30-minute increments");
         }
 
-        // Check availability via Feign (using minutes)
+        // Check availability via Feign (with circuit breaker fallback)
         int startMinute = request.getStartTime().getHour() * 60 + request.getStartTime().getMinute();
         Boolean available = availabilityClient.checkSlotAvailable(
             request.getBookingDate(), startMinute, durMin);
+        if (available != null) {
+            availabilityFallback.cacheResult(request.getBookingDate(), startMinute, durMin, available);
+        }
+        if (available == null) {
+            throw new BusinessException("Availability service is temporarily unavailable. Please try again.");
+        }
         if (Boolean.FALSE.equals(available)) {
             throw new BusinessException("Selected date/time slot is not available");
         }
@@ -147,6 +180,13 @@ public class BookingService {
         Booking saved = bookingRepository.save(booking);
         log.info("Booking created: {} for customer {}", bookingRef, customerId);
 
+        // Event log
+        eventLogService.logEvent(saved, BookingEventType.CREATED, null, customerId, "CUSTOMER",
+            "Booking created via customer portal");
+
+        // Start saga
+        sagaOrchestrator.startSaga(saved.getBookingRef());
+
         // Publish Kafka event
         publishBookingEvent(saved, KafkaTopics.BOOKING_CREATED);
 
@@ -223,6 +263,15 @@ public class BookingService {
         return (bid != null ? bookingRepository.findByBingeIdAndStatus(bid, status, pageable) : bookingRepository.findByStatus(status, pageable)).map(this::toDto);
     }
 
+    // ── Admin: by status scoped to operational day ────────────
+    public Page<BookingDto> getBookingsByStatusForToday(BookingStatus status, LocalDate clientToday, Pageable pageable) {
+        Long bid = BingeContext.getBingeId();
+        LocalDate today = systemSettingsService.getOperationalDate(bid, clientToday);
+        return (bid != null
+            ? bookingRepository.findByBingeIdAndBookingDateAndStatus(bid, today, status, pageable)
+            : bookingRepository.findByBookingDateAndStatus(today, status, pageable)).map(this::toDto);
+    }
+
     // ── Admin: by date range ──────────────────────────────────
     public Page<BookingDto> getBookingsByDateRange(LocalDate from, LocalDate to, Pageable pageable) {
         return bookingRepository.findByBookingDateBetween(from, to, pageable).map(this::toDto);
@@ -234,11 +283,21 @@ public class BookingService {
         return (bid != null ? bookingRepository.searchBookingsByBinge(bid, query, pageable) : bookingRepository.searchBookings(query, pageable)).map(this::toDto);
     }
 
+    // ── Admin: search scoped to operational day ───────────────
+    public Page<BookingDto> searchBookingsForToday(String query, LocalDate clientToday, Pageable pageable) {
+        Long bid = BingeContext.getBingeId();
+        LocalDate today = systemSettingsService.getOperationalDate(bid, clientToday);
+        return (bid != null
+            ? bookingRepository.searchBookingsByBingeAndDate(bid, today, query, pageable)
+            : bookingRepository.searchBookingsByDate(today, query, pageable)).map(this::toDto);
+    }
+
     // ── Admin: update booking ────────────────────────────────
     @Transactional
     public BookingDto updateBooking(String bookingRef, UpdateBookingRequest request) {
         Booking booking = bookingRepository.findByBookingRef(bookingRef)
             .orElseThrow(() -> new ResourceNotFoundException("Booking", "ref", bookingRef));
+        String previousStatus = booking.getStatus().name();
 
         if (request.getStatus() != null) {
             BookingStatus newStatus = BookingStatus.valueOf(request.getStatus());
@@ -400,7 +459,13 @@ public class BookingService {
             log.info("Booking {} pricing recalculated: {} → {}", bookingRef, oldTotal, newTotal);
         }
 
-        return toDto(bookingRepository.save(booking));
+        Booking updated = bookingRepository.save(booking);
+        BookingEventType eventType = booking.getStatus().name().equals(previousStatus)
+            ? BookingEventType.MODIFIED
+            : BookingEventType.valueOf(booking.getStatus().name());
+        eventLogService.logEvent(updated, eventType, previousStatus, null, "ADMIN",
+            "Booking updated by admin");
+        return toDto(updated);
     }
 
     // ── Get raw booking entity (for controller-level checks) ──
@@ -419,8 +484,11 @@ public class BookingService {
             throw new BusinessException("Booking is already cancelled");
         }
 
+        String prevStatus = booking.getStatus().name();
         booking.setStatus(BookingStatus.CANCELLED);
         Booking saved = bookingRepository.save(booking);
+        eventLogService.logEvent(saved, BookingEventType.CANCELLED, prevStatus, null, "ADMIN",
+            "Booking cancelled by admin");
         publishBookingEvent(saved, KafkaTopics.BOOKING_CANCELLED);
         log.info("Booking cancelled: {}", bookingRef);
 
@@ -429,16 +497,22 @@ public class BookingService {
 
     // ── Update payment status (called by payment-service via Kafka) ──
     @Transactional
-    public void updatePaymentStatus(String bookingRef, PaymentStatus paymentStatus) {
+    public void updatePaymentStatus(String bookingRef, PaymentStatus paymentStatus, String paymentMethod) {
         Booking booking = bookingRepository.findByBookingRef(bookingRef)
             .orElseThrow(() -> new ResourceNotFoundException("Booking", "ref", bookingRef));
+        String prevStatus = booking.getStatus().name();
         booking.setPaymentStatus(paymentStatus);
+        if (paymentMethod != null && !paymentMethod.isBlank()) {
+            booking.setPaymentMethod(paymentMethod);
+        }
         // Only auto-confirm PENDING bookings; don't overwrite CHECKED_IN or COMPLETED
         if (paymentStatus == PaymentStatus.SUCCESS
                 && booking.getStatus() == BookingStatus.PENDING) {
             booking.setStatus(BookingStatus.CONFIRMED);
         }
         bookingRepository.save(booking);
+        eventLogService.logEvent(booking, BookingEventType.PAYMENT_UPDATED, prevStatus, null, "SYSTEM",
+            "Payment status changed to " + paymentStatus.name());
         log.info("Payment status updated for {}: {}", bookingRef, paymentStatus);
     }
 
@@ -448,7 +522,12 @@ public class BookingService {
         if (amount == null) return;
         bookingRepository.findByBookingRef(bookingRef).ifPresent(b -> {
             java.math.BigDecimal current = b.getCollectedAmount() != null ? b.getCollectedAmount() : java.math.BigDecimal.ZERO;
-            b.setCollectedAmount(current.add(amount));
+            java.math.BigDecimal updated = current.add(amount);
+            if (b.getTotalAmount() != null && updated.compareTo(b.getTotalAmount()) != 0) {
+                log.warn("Payment mismatch for {}: collectedAmount={} vs totalAmount={}",
+                    bookingRef, updated, b.getTotalAmount());
+            }
+            b.setCollectedAmount(updated);
             bookingRepository.save(b);
         });
     }
@@ -471,10 +550,10 @@ public class BookingService {
         if (bid != null) {
             return DashboardStatsDto.builder()
                 .totalBookings(bookingRepository.countByBingeIdAndBookingDate(bid, today))
-                .pendingBookings(bookingRepository.countByBingeIdAndStatus(bid, BookingStatus.PENDING))
-                .confirmedBookings(bookingRepository.countByBingeIdAndStatus(bid, BookingStatus.CONFIRMED))
-                .cancelledBookings(bookingRepository.countByBingeIdAndStatus(bid, BookingStatus.CANCELLED))
-                .completedBookings(bookingRepository.countByBingeIdAndStatus(bid, BookingStatus.COMPLETED))
+                .pendingBookings(bookingRepository.countByBingeIdAndBookingDateAndStatus(bid, today, BookingStatus.PENDING))
+                .confirmedBookings(bookingRepository.countByBingeIdAndBookingDateAndStatus(bid, today, BookingStatus.CONFIRMED))
+                .cancelledBookings(bookingRepository.countByBingeIdAndBookingDateAndStatus(bid, today, BookingStatus.CANCELLED))
+                .completedBookings(bookingRepository.countByBingeIdAndBookingDateAndStatus(bid, today, BookingStatus.COMPLETED))
                 .totalRevenue(bookingRepository.actualRevenueByBingeAndDate(bid, today))
                 .todayTotal(bookingRepository.countByBingeIdAndBookingDate(bid, today))
                 .todayConfirmed(bookingRepository.countByBingeIdAndBookingDateAndStatus(bid, today, BookingStatus.CONFIRMED))
@@ -488,10 +567,10 @@ public class BookingService {
         }
         return DashboardStatsDto.builder()
             .totalBookings(bookingRepository.countByBookingDate(today))
-            .pendingBookings(bookingRepository.countByStatus(BookingStatus.PENDING))
-            .confirmedBookings(bookingRepository.countByStatus(BookingStatus.CONFIRMED))
-            .cancelledBookings(bookingRepository.countByStatus(BookingStatus.CANCELLED))
-            .completedBookings(bookingRepository.countByStatus(BookingStatus.COMPLETED))
+            .pendingBookings(bookingRepository.countByBookingDateAndStatus(today, BookingStatus.PENDING))
+            .confirmedBookings(bookingRepository.countByBookingDateAndStatus(today, BookingStatus.CONFIRMED))
+            .cancelledBookings(bookingRepository.countByBookingDateAndStatus(today, BookingStatus.CANCELLED))
+            .completedBookings(bookingRepository.countByBookingDateAndStatus(today, BookingStatus.COMPLETED))
             .totalRevenue(bookingRepository.actualRevenueByDate(today))
             // Today
             .todayTotal(bookingRepository.countByBookingDate(today))
@@ -542,13 +621,19 @@ public class BookingService {
 
         for (Booking b : pastBookings) {
             if (b.getStatus() == BookingStatus.CONFIRMED || b.getStatus() == BookingStatus.PENDING) {
+                String prev = b.getStatus().name();
                 b.setStatus(BookingStatus.NO_SHOW);
                 bookingRepository.save(b);
+                eventLogService.logEvent(b, BookingEventType.NO_SHOW, prev, null, "SYSTEM",
+                    "Marked no-show by end-of-day audit");
                 markedNoShow++;
                 affectedRefs.add(b.getBookingRef());
             } else if (b.getStatus() == BookingStatus.CHECKED_IN) {
                 b.setStatus(BookingStatus.COMPLETED);
+                b.setCheckedIn(false);
                 bookingRepository.save(b);
+                eventLogService.logEvent(b, BookingEventType.COMPLETED, "CHECKED_IN", null, "SYSTEM",
+                    "Auto-completed by end-of-day audit");
                 markedCompleted++;
                 affectedRefs.add(b.getBookingRef());
             }
@@ -727,6 +812,7 @@ public class BookingService {
         if (!now.isBefore(scheduledEnd)) {
             // Not early — do a normal checkout
             booking.setStatus(BookingStatus.COMPLETED);
+            booking.setCheckedIn(false);
             booking.setActualCheckoutTime(now);
             return toDto(bookingRepository.save(booking));
         }
@@ -764,6 +850,7 @@ public class BookingService {
             usedStr, bookedStr, roundedUsed, remStr);
 
         booking.setStatus(BookingStatus.COMPLETED);
+        booking.setCheckedIn(false);
         booking.setActualCheckoutTime(now);
         booking.setActualUsedMinutes((int) usedMinutes);
         booking.setEarlyCheckoutNote(note);
@@ -773,6 +860,8 @@ public class BookingService {
         booking.setAdminNotes(existing + note);
 
         Booking saved = bookingRepository.save(booking);
+        eventLogService.logEvent(saved, BookingEventType.CHECKED_OUT, "CHECKED_IN", null, "ADMIN",
+            note);
         log.info("Early checkout for {}: {}", bookingRef, note);
 
         return toDto(saved);
@@ -878,11 +967,14 @@ public class BookingService {
                 .rateCodeName(rateCodeName)
                 .status(status)
                 .paymentStatus(payStatus)
+                .paymentMethod(request.getPaymentMethod())
                 .build();
             bookingAddOns.forEach(ba -> ba.setBooking(booking));
             booking.setAddOns(bookingAddOns);
             Booking saved = bookingRepository.save(booking);
             log.info("Admin booking created (override): {} for customer {}", bookingRef, request.getCustomerName());
+            eventLogService.logEvent(saved, BookingEventType.CREATED, null, null, "ADMIN",
+                "Admin booking created with price override");
             publishBookingEvent(saved, KafkaTopics.BOOKING_CREATED);
             if (isCash) publishBookingEvent(saved, KafkaTopics.BOOKING_CONFIRMED);
             return toDto(saved);
@@ -919,6 +1011,7 @@ public class BookingService {
             .rateCodeName(rateCodeName)
             .status(status)
             .paymentStatus(payStatus)
+            .paymentMethod(request.getPaymentMethod())
             .build();
 
         bookingAddOns.forEach(ba -> ba.setBooking(booking));
@@ -926,6 +1019,8 @@ public class BookingService {
 
         Booking saved = bookingRepository.save(booking);
         log.info("Admin booking created: {} for customer {}", bookingRef, request.getCustomerName());
+        eventLogService.logEvent(saved, BookingEventType.CREATED, null, null, "ADMIN",
+            "Admin booking created (walk-in)");
 
         publishBookingEvent(saved, KafkaTopics.BOOKING_CREATED);
         if (isCash) {
@@ -1062,9 +1157,17 @@ public class BookingService {
                 .status(b.getStatus().name())
                 .specialNotes(b.getSpecialNotes())
                 .build();
-            kafkaTemplate.send(topic, b.getBookingRef(), event);
+
+            // Write to outbox table (same DB transaction) instead of directly to Kafka.
+            // The OutboxPublisher scheduler picks these up and actually sends them.
+            OutboxEvent outbox = OutboxEvent.builder()
+                .topic(topic)
+                .aggregateKey(b.getBookingRef())
+                .payload(objectMapper.writeValueAsString(event))
+                .build();
+            outboxEventRepository.save(outbox);
         } catch (Exception e) {
-            log.warn("Failed to publish event to {}: {}", topic, e.getMessage());
+            log.warn("Failed to write outbox event for topic {}: {}", topic, e.getMessage());
         }
     }
 
@@ -1101,6 +1204,7 @@ public class BookingService {
                 b.getCollectedAmount() != null ? b.getCollectedAmount() : BigDecimal.ZERO))
             .status(b.getStatus())
             .paymentStatus(b.getPaymentStatus())
+            .paymentMethod(b.getPaymentMethod())
             .checkedIn(b.isCheckedIn())
             .actualCheckoutTime(b.getActualCheckoutTime())
             .actualUsedMinutes(b.getActualUsedMinutes())

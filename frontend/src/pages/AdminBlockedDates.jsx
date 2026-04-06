@@ -1,7 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { adminService } from '../services/endpoints';
 import { toast } from 'react-toastify';
-import { format, addDays } from 'date-fns';
+import { format } from 'date-fns';
+
+/** Format total minutes → "HH:MM" */
+const fmtMin = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+
+/**
+ * Display helper: old data stored hours (0-23), new data stores minutes (0-1440).
+ * If value < 48, treat it as an hour and multiply by 60.
+ */
+const toMinutes = (v) => (v != null && v < 48) ? v * 60 : (v || 0);
+
+// 30-min intervals: 08:00 (480) to 22:30 (1350)
+const ALL_TIMES = Array.from({ length: 30 }, (_, i) => 480 + i * 30);
 
 export default function AdminBlockedDates() {
   const [blockedDates, setBlockedDates] = useState([]);
@@ -10,7 +22,45 @@ export default function AdminBlockedDates() {
   const [loading, setLoading] = useState(true);
 
   const [dateForm, setDateForm] = useState({ date: '', reason: '' });
-  const [slotForm, setSlotForm] = useState({ date: '', startHour: '10', endHour: '11', reason: '' });
+  const [slotForm, setSlotForm] = useState({ date: '', startMinute: '', endMinute: '', reason: '' });
+
+  // Compute available start times (filter past for today)
+  const startOptions = useMemo(() => {
+    if (!slotForm.date) return ALL_TIMES;
+    const isToday = slotForm.date === format(new Date(), 'yyyy-MM-dd');
+    if (!isToday) return ALL_TIMES;
+    const now = new Date().getHours() * 60 + new Date().getMinutes();
+    return ALL_TIMES.filter(m => m > now);
+  }, [slotForm.date]);
+
+  // Compute available end times (must be after selected start, at least 30 min gap)
+  const endOptions = useMemo(() => {
+    const start = Number(slotForm.startMinute);
+    if (!start) return [];
+    return ALL_TIMES.filter(m => m > start);
+  }, [slotForm.startMinute]);
+
+  // Auto-sync startMinute when date changes or options change
+  useEffect(() => {
+    if (startOptions.length > 0) {
+      const cur = Number(slotForm.startMinute);
+      if (!cur || !startOptions.includes(cur)) {
+        const now = new Date().getHours() * 60 + new Date().getMinutes();
+        const nearest = startOptions.find(m => m >= now) || startOptions[startOptions.length - 1];
+        setSlotForm(f => ({ ...f, startMinute: String(nearest), endMinute: '' }));
+      }
+    }
+  }, [startOptions]);
+
+  // Auto-sync endMinute when startMinute changes or endOptions change
+  useEffect(() => {
+    if (endOptions.length > 0) {
+      const cur = Number(slotForm.endMinute);
+      if (!cur || !endOptions.includes(cur)) {
+        setSlotForm(f => ({ ...f, endMinute: String(endOptions[0]) }));
+      }
+    }
+  }, [endOptions]);
 
   const fetchData = () => {
     setLoading(true);
@@ -50,21 +100,22 @@ export default function AdminBlockedDates() {
 
   const handleBlockSlot = async (e) => {
     e.preventDefault();
-    if (Number(slotForm.startHour) >= Number(slotForm.endHour)) {
-      toast.error('End hour must be after start hour.'); return;
-    }
+    const start = Number(slotForm.startMinute);
+    const end = Number(slotForm.endMinute);
+    if (!slotForm.date) { toast.error('Please select a date.'); return; }
+    if (end <= start) { toast.error('End time must be after start time.'); return; }
     try {
       await adminService.blockSlot({
         date: slotForm.date,
-        startHour: Number(slotForm.startHour),
-        endHour: Number(slotForm.endHour),
+        startHour: start,
+        endHour: end,
         reason: slotForm.reason,
       });
-      toast.success('Slot blocked');
-      setSlotForm({ date: '', startHour: '10', endHour: '11', reason: '' });
+      toast.success(`Blocked ${fmtMin(start)} – ${fmtMin(end)} on ${slotForm.date}`);
+      setSlotForm({ date: '', startMinute: '', endMinute: '', reason: '' });
       fetchData();
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed');
+      toast.error(err.response?.data?.message || 'Failed to block slot.');
     }
   };
 
@@ -113,13 +164,18 @@ export default function AdminBlockedDates() {
           {loading ? <div className="loading"><div className="spinner"></div></div> : (
             <div className="grid-3">
               {blockedDates.map(d => (
-                <div key={d.id} className="card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div key={d.id} className="card" style={{ padding: '1rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
                     <div>
-                      <p style={{ fontWeight: 600 }}>{d.date}</p>
-                      <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{d.reason || 'No reason'}</p>
+                      <p style={{ fontWeight: 600, fontSize: '0.95rem' }}>
+                        {format(new Date(d.date + 'T00:00:00'), 'MMM dd, yyyy (EEE)')}
+                      </p>
+                      <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>
+                        {d.reason || 'No reason provided'}
+                      </p>
                     </div>
-                    <button className="btn btn-danger btn-sm" onClick={() => handleUnblockDate(d.date)}>Remove</button>
+                    <button className="btn btn-danger btn-sm" onClick={() => handleUnblockDate(d.date)}
+                      style={{ flexShrink: 0 }}>Remove</button>
                   </div>
                 </div>
               ))}
@@ -141,18 +197,20 @@ export default function AdminBlockedDates() {
             </div>
             <div className="grid-2">
               <div className="input-group">
-                <label>Start Hour</label>
-                <select value={slotForm.startHour} onChange={(e) => setSlotForm({ ...slotForm, startHour: e.target.value })}>
-                  {Array.from({ length: 15 }, (_, i) => i + 8).map(h => (
-                    <option key={h} value={h}>{h}:00</option>
+                <label>Start Time</label>
+                <select value={slotForm.startMinute} onChange={(e) => {
+                  setSlotForm(f => ({ ...f, startMinute: e.target.value, endMinute: '' }));
+                }}>
+                  {startOptions.map(m => (
+                    <option key={m} value={m}>{fmtMin(m)}</option>
                   ))}
                 </select>
               </div>
               <div className="input-group">
-                <label>End Hour</label>
-                <select value={slotForm.endHour} onChange={(e) => setSlotForm({ ...slotForm, endHour: e.target.value })}>
-                  {Array.from({ length: 15 }, (_, i) => i + 9).map(h => (
-                    <option key={h} value={h}>{h}:00</option>
+                <label>End Time</label>
+                <select value={slotForm.endMinute} onChange={(e) => setSlotForm({ ...slotForm, endMinute: e.target.value })}>
+                  {endOptions.map(m => (
+                    <option key={m} value={m}>{fmtMin(m)}</option>
                   ))}
                 </select>
               </div>
@@ -167,18 +225,32 @@ export default function AdminBlockedDates() {
 
           {loading ? <div className="loading"><div className="spinner"></div></div> : (
             <div className="grid-3">
-              {blockedSlots.map(s => (
-                <div key={s.id} className="card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <p style={{ fontWeight: 600 }}>{s.date} • {s.startHour}:00 - {s.endHour}:00</p>
-                      <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{s.reason || 'No reason'}</p>
+              {blockedSlots.map(s => {
+                const startM = toMinutes(s.startHour);
+                const endM = toMinutes(s.endHour);
+                const durMin = endM - startM;
+                return (
+                  <div key={s.id} className="card" style={{ padding: '1rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+                      <div>
+                        <p style={{ fontWeight: 600, fontSize: '0.95rem', marginBottom: '0.25rem' }}>
+                          {format(new Date(s.date + 'T00:00:00'), 'MMM dd, EEE')}
+                        </p>
+                        <p style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--primary)' }}>
+                          {fmtMin(startM)} – {fmtMin(endM)}
+                        </p>
+                        <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                          {durMin >= 60 ? `${Math.floor(durMin / 60)}h${durMin % 60 ? ` ${durMin % 60}m` : ''}` : `${durMin}m`}
+                          {s.reason ? ` • ${s.reason}` : ''}
+                        </p>
+                      </div>
+                      <button className="btn btn-danger btn-sm" onClick={() => handleUnblockSlot(s.date, s.startHour)}
+                        style={{ flexShrink: 0 }}>Remove</button>
                     </div>
-                    <button className="btn btn-danger btn-sm" onClick={() => handleUnblockSlot(s.date, s.startHour)}>Remove</button>
                   </div>
-                </div>
-              ))}
-              {blockedSlots.length === 0 && <p style={{ color: 'var(--text-muted)' }}>No blocked slots</p>}
+                );
+              })}
+              {blockedSlots.length === 0 && <p style={{ color: 'var(--text-muted)' }}>No blocked time slots</p>}
             </div>
           )}
         </>
