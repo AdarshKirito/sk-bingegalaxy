@@ -29,7 +29,7 @@ app:
     expiration-ms: 900000  # 15 minutes
     refresh-expiration-ms: 604800000  # 7 days
   cookie:
-    secure: ${COOKIE_SECURE:true}
+    secure: ${COOKIE_SECURE:false}
     domain: ${COOKIE_DOMAIN:}
   admin:
     email: ${ADMIN_EMAIL:admin@skbingegalaxy.com}

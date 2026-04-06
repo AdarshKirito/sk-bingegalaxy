@@ -58,6 +58,10 @@ CONFIG_SERVER_PASSWORD=$configPassword
 # -- JWT -------------------------------------------------------
 JWT_SECRET=$jwtSecret
 
+# -- Auth Cookies ----------------------------------------------
+COOKIE_SECURE=false
+COOKIE_DOMAIN=
+
 # -- Admin Seeding ---------------------------------------------
 ADMIN_EMAIL=admin@skbingegalaxy.com
 ADMIN_PASSWORD=$adminPassword

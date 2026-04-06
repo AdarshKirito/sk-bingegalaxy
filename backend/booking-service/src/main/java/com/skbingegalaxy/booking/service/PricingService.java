@@ -19,6 +19,7 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 @Slf4j
+@Transactional(readOnly = true)
 public class PricingService {
 
     private final RateCodeRepository rateCodeRepository;
@@ -111,9 +112,7 @@ public class PricingService {
 
     public CustomerPricingDto getCustomerPricing(Long customerId) {
         Long bid = BingeContext.getBingeId();
-        Optional<CustomerPricingProfile> profile = bid != null
-            ? customerPricingProfileRepository.findByCustomerIdAndBingeId(customerId, bid)
-            : customerPricingProfileRepository.findByCustomerId(customerId);
+        Optional<CustomerPricingProfile> profile = findReadableCustomerProfile(customerId, bid);
         if (profile.isEmpty()) {
             return CustomerPricingDto.builder()
                 .customerId(customerId)
@@ -127,9 +126,7 @@ public class PricingService {
     @Transactional
     public CustomerPricingDto saveCustomerPricing(CustomerPricingSaveRequest request) {
         Long bid = BingeContext.getBingeId();
-        CustomerPricingProfile profile = (bid != null
-            ? customerPricingProfileRepository.findByCustomerIdAndBingeId(request.getCustomerId(), bid)
-            : customerPricingProfileRepository.findByCustomerId(request.getCustomerId()))
+        CustomerPricingProfile profile = findWritableCustomerProfile(request.getCustomerId(), bid)
             .orElseGet(() -> {
                 CustomerPricingProfile p = CustomerPricingProfile.builder()
                     .customerId(request.getCustomerId())
@@ -185,6 +182,7 @@ public class PricingService {
 
     @Transactional
     public int bulkAssignRateCode(BulkRateCodeAssignRequest request) {
+        Long bid = BingeContext.getBingeId();
         RateCode rateCode = null;
         if (request.getRateCodeId() != null) {
             rateCode = rateCodeRepository.findById(request.getRateCodeId())
@@ -193,11 +191,11 @@ public class PricingService {
 
         int count = 0;
         for (Long customerId : request.getCustomerIds()) {
-            CustomerPricingProfile profile = customerPricingProfileRepository
-                .findByCustomerId(customerId)
+            CustomerPricingProfile profile = findWritableCustomerProfile(customerId, bid)
                 .orElseGet(() -> {
                     CustomerPricingProfile p = CustomerPricingProfile.builder()
                         .customerId(customerId)
+                        .bingeId(bid)
                         .build();
                     return customerPricingProfileRepository.save(p);
                 });
@@ -223,9 +221,7 @@ public class PricingService {
         List<EventType> allEvents = bid != null ? eventTypeRepository.findByBingeIdOrGlobalAndActiveTrue(bid) : eventTypeRepository.findByActiveTrue();
         List<AddOn> allAddOns = bid != null ? addOnRepository.findByBingeIdOrGlobalAndActiveTrue(bid) : addOnRepository.findByActiveTrue();
 
-        Optional<CustomerPricingProfile> profileOpt = bid != null
-            ? customerPricingProfileRepository.findByCustomerIdAndBingeId(customerId, bid)
-            : customerPricingProfileRepository.findByCustomerId(customerId);
+        Optional<CustomerPricingProfile> profileOpt = findReadableCustomerProfile(customerId, bid);
 
         // Build maps for customer-specific overrides
         Map<Long, CustomerEventPricing> custEventMap = new HashMap<>();
@@ -317,9 +313,7 @@ public class PricingService {
             .orElseThrow(() -> new ResourceNotFoundException("EventType", "id", eventTypeId));
 
         Long bid = BingeContext.getBingeId();
-        Optional<CustomerPricingProfile> profileOpt = bid != null
-            ? customerPricingProfileRepository.findByCustomerIdAndBingeId(customerId, bid)
-            : customerPricingProfileRepository.findByCustomerId(customerId);
+        Optional<CustomerPricingProfile> profileOpt = findReadableCustomerProfile(customerId, bid);
 
         if (profileOpt.isPresent()) {
             CustomerPricingProfile profile = profileOpt.get();
@@ -356,9 +350,7 @@ public class PricingService {
             .orElseThrow(() -> new ResourceNotFoundException("AddOn", "id", addOnId));
 
         Long bid = BingeContext.getBingeId();
-        Optional<CustomerPricingProfile> profileOpt = bid != null
-            ? customerPricingProfileRepository.findByCustomerIdAndBingeId(customerId, bid)
-            : customerPricingProfileRepository.findByCustomerId(customerId);
+        Optional<CustomerPricingProfile> profileOpt = findReadableCustomerProfile(customerId, bid);
 
         if (profileOpt.isPresent()) {
             CustomerPricingProfile profile = profileOpt.get();
@@ -380,6 +372,23 @@ public class PricingService {
         }
 
         return new ResolvedAddonPrice(addon.getPrice(), "DEFAULT", null);
+    }
+
+    private Optional<CustomerPricingProfile> findReadableCustomerProfile(Long customerId, Long bingeId) {
+        if (bingeId != null) {
+            return customerPricingProfileRepository.findByCustomerIdAndBingeId(customerId, bingeId)
+                .or(() -> customerPricingProfileRepository.findByCustomerIdAndBingeIdIsNull(customerId));
+        }
+
+        return customerPricingProfileRepository.findByCustomerIdAndBingeIdIsNull(customerId);
+    }
+
+    private Optional<CustomerPricingProfile> findWritableCustomerProfile(Long customerId, Long bingeId) {
+        if (bingeId != null) {
+            return customerPricingProfileRepository.findByCustomerIdAndBingeId(customerId, bingeId);
+        }
+
+        return customerPricingProfileRepository.findByCustomerIdAndBingeIdIsNull(customerId);
     }
 
     // ═══════════════════════════════════════════════════════════

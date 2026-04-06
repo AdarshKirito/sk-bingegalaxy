@@ -32,6 +32,10 @@ function extractErrorMessage(err) {
   }
   // Our ApiResponse wrapper: { message: '...' } or Spring's { error: '...', message: '...' }
   if (typeof data === 'string') return data;
+  const validationDetails = data.data && typeof data.data === 'object'
+    ? Object.values(data.data).find((value) => typeof value === 'string' && value.trim())
+    : null;
+  if (validationDetails) return validationDetails;
   return data.message || data.error || 'Something went wrong. Please try again.';
 }
 

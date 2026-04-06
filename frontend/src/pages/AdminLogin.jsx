@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
 import './Auth.css';
@@ -54,7 +54,7 @@ export default function AdminLogin() {
           </button>
         </form>
         <p style={{ textAlign: 'center', marginTop: '1rem' }}>
-          Don't have an admin account? <Link to="/admin/register">Sign Up</Link>
+          Need admin access? Ask a super admin to create your account.
         </p>
       </div>
     </div>
