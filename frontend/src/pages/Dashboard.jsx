@@ -1,9 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { bookingService, paymentService } from '../services/endpoints';
 import useBingeStore from '../stores/bingeStore';
-import { FiCalendar, FiClock, FiArrowRight, FiCreditCard, FiMapPin, FiDollarSign, FiTag, FiGift, FiHeart, FiStar, FiFilm, FiBriefcase, FiSmile, FiRepeat } from 'react-icons/fi';
+import {
+  CUSTOMER_SUPPORT,
+  EXPERIENCE_STEPS,
+  getMemberTier,
+  HELP_FAQS,
+  MEMBER_OFFERS,
+} from '../services/customerExperience';
+import { FiCalendar, FiClock, FiArrowRight, FiCreditCard, FiMapPin, FiDollarSign, FiTag, FiGift, FiHeart, FiStar, FiFilm, FiBriefcase, FiSmile, FiRepeat, FiShield, FiUser, FiMessageCircle } from 'react-icons/fi';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import Pagination from '../components/ui/Pagination';
 import SEO from '../components/SEO';
@@ -46,6 +53,7 @@ export default function Dashboard() {
   const totalSpend = pastBookings
     .filter(b => b.paymentStatus === 'SUCCESS')
     .reduce((sum, b) => sum + (b.totalAmount || 0), 0);
+  const memberTier = useMemo(() => getMemberTier(pastCount, totalSpend), [pastCount, totalSpend]);
   const pricingLabel = myPricing?.rateCodeName || 'Standard';
   const pricingSourceLabel = myPricing?.pricingSource === 'RATE_CODE'
     ? 'Rate code pricing is active on your account.'
@@ -77,7 +85,7 @@ export default function Dashboard() {
     if (lowerName.includes('hd') || lowerName.includes('screen')) return { tag: 'Movie Night', blurb: 'Keep it simple and cinematic with a focused private-screening setup.' };
     return { tag: 'Private Event', blurb: 'Shape the room around your plan instead of fitting into a public showtime.' };
   };
-  const formatAmount = (amount) => `₹${Number(amount || 0).toLocaleString()}`;
+  const formatAmount = (amount) => `Rs ${Number(amount || 0).toLocaleString()}`;
   const formatDuration = (booking) => {
     const totalMinutes = booking?.durationMinutes || ((booking?.durationHours || 0) * 60);
     if (!totalMinutes) return 'Flexible duration';
@@ -103,6 +111,7 @@ export default function Dashboard() {
           <div className="dash-hero-actions">
             <Link to="/book" className="btn btn-primary">Start a New Booking</Link>
             <Link to="/my-bookings" className="btn btn-secondary">Review My Bookings</Link>
+            <Link to="/account" className="btn btn-secondary">Open Account</Link>
           </div>
         </div>
 
@@ -211,7 +220,7 @@ export default function Dashboard() {
           <div className="dash-icon"><FiClock /></div>
           <span className="dash-card-kicker">Timeline</span>
           <h3>My Bookings</h3>
-          <p>See upcoming plans, past visits, and booking references in one place.</p>
+          <p>See upcoming plans, past visits, booking downloads, and support shortcuts in one place.</p>
           <FiArrowRight className="dash-arrow" />
         </Link>
 
@@ -285,8 +294,8 @@ export default function Dashboard() {
 
         <article className="dash-member-card card">
           <span className="dash-card-kicker">Pricing Snapshot</span>
-          <h3>{loading ? 'Checking your plan...' : pricingLabel}</h3>
-          <p>{loading ? 'We are resolving your current customer pricing.' : pricingSourceLabel}</p>
+          <h3>{loading ? 'Checking your plan...' : `${memberTier} tier`}</h3>
+          <p>{loading ? 'We are resolving your current customer pricing.' : `${pricingLabel} pricing is paired with your ${memberTier.toLowerCase()} member status.`}</p>
           <div className="dash-member-metrics">
             <div>
               <span>Completed visits</span>
@@ -296,6 +305,45 @@ export default function Dashboard() {
               <span>Paid bookings</span>
               <strong>{loading ? '–' : pastBookings.filter(b => b.paymentStatus === 'SUCCESS').length}</strong>
             </div>
+          </div>
+        </article>
+      </section>
+
+      <section className="dash-retention-grid">
+        <article className="dash-loyalty-card card">
+          <div className="dash-section-header">
+            <div>
+              <span className="dash-section-kicker">Loyalty</span>
+              <h2>Reasons to keep booking through your account</h2>
+            </div>
+            <Link to="/account" className="dash-inline-link">Account center</Link>
+          </div>
+          <div className="dash-loyalty-offers">
+            {MEMBER_OFFERS.map((offer) => (
+              <article key={offer.title} className="dash-loyalty-offer">
+                <span className="dash-card-kicker">{offer.title}</span>
+                <h3>{offer.title}</h3>
+                <p>{offer.description}</p>
+              </article>
+            ))}
+          </div>
+        </article>
+
+        <article className="dash-help-card card">
+          <div className="dash-section-header">
+            <div>
+              <span className="dash-section-kicker">Help and trust</span>
+              <h2>Support is visible before anything goes wrong</h2>
+            </div>
+          </div>
+          <div className="dash-help-points">
+            <p><FiShield /> Payment, cancellation, and schedule questions are easiest to resolve before the booking date.</p>
+            <p><FiMessageCircle /> WhatsApp support is the fastest route for booking changes during {CUSTOMER_SUPPORT.hours}.</p>
+            <p><FiUser /> Account preferences and celebration reminders now live in one dedicated account area.</p>
+          </div>
+          <div className="dash-inline-actions">
+            <Link to="/account" className="btn btn-primary btn-sm">Manage Account</Link>
+            <Link to="/my-bookings" className="btn btn-secondary btn-sm">Open Booking Control</Link>
           </div>
         </article>
       </section>
@@ -381,6 +429,39 @@ export default function Dashboard() {
             <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
           </>
         )}
+      </section>
+
+      <section className="dash-trust-grid">
+        <article className="dash-help-card card">
+          <div className="dash-section-header">
+            <div>
+              <span className="dash-section-kicker">Frequently asked</span>
+              <h2>Common answers without extra back-and-forth</h2>
+            </div>
+          </div>
+          <div className="dash-faq-list">
+            {HELP_FAQS.slice(0, 3).map((item) => (
+              <article key={item.question} className="dash-faq-item">
+                <h3>{item.question}</h3>
+                <p>{item.answer}</p>
+              </article>
+            ))}
+          </div>
+        </article>
+
+        <article className="dash-help-card card">
+          <div className="dash-section-header">
+            <div>
+              <span className="dash-section-kicker">How it works</span>
+              <h2>A simple path from idea to private screening</h2>
+            </div>
+          </div>
+          <ol className="dash-steps-list">
+            {EXPERIENCE_STEPS.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+        </article>
       </section>
     </div>
   );

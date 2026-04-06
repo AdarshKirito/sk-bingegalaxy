@@ -19,6 +19,7 @@ const BookingPage = lazy(() => import('./pages/BookingPage'));
 const BookingConfirmation = lazy(() => import('./pages/BookingConfirmation'));
 const MyBookings = lazy(() => import('./pages/MyBookings'));
 const CustomerPayments = lazy(() => import('./pages/CustomerPayments'));
+const AccountCenter = lazy(() => import('./pages/AccountCenter'));
 const PaymentPage = lazy(() => import('./pages/PaymentPage'));
 const AdminLogin = lazy(() => import('./pages/AdminLogin'));
 const AdminRegister = lazy(() => import('./pages/AdminRegister'));
@@ -111,6 +112,7 @@ function App() {
             <Route path="/booking/:ref" element={<BingeRequired><BookingConfirmation /></BingeRequired>} />
             <Route path="/my-bookings" element={<BingeRequired><MyBookings /></BingeRequired>} />
             <Route path="/payments" element={<BingeRequired><CustomerPayments /></BingeRequired>} />
+            <Route path="/account" element={<ProtectedRoute><AccountCenter /></ProtectedRoute>} />
             <Route path="/payment/:ref" element={<BingeRequired><PaymentPage /></BingeRequired>} />
 
             <Route path="/admin/login" element={<AdminLogin />} />

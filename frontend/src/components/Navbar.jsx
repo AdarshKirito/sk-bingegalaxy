@@ -39,6 +39,8 @@ export default function Navbar() {
     { to: '/payments', icon: <FiCreditCard />, label: 'Payments' },
   ];
 
+  const accountLink = { to: '/account', icon: <FiUser />, label: 'Account' };
+
   const navLinkClass = ({ isActive }) => `nav-link${isActive ? ' nav-link-active' : ''}`;
 
   return (
@@ -87,9 +89,18 @@ export default function Navbar() {
                       <span>{link.label}</span>
                     </NavLink>
                   ))}
+                  <NavLink to={accountLink.to} className={navLinkClass}>
+                    {accountLink.icon}
+                    <span>{accountLink.label}</span>
+                  </NavLink>
                 </div>
               ) : null}
-              {!selectedBinge && <NavLink to="/binges" className={navLinkClass}><FiMapPin /> Venues</NavLink>}
+              {!selectedBinge && (
+                <>
+                  <NavLink to="/binges" className={navLinkClass}><FiMapPin /> Venues</NavLink>
+                  <NavLink to={accountLink.to} className={navLinkClass}><FiUser /> Account</NavLink>
+                </>
+              )}
               <div className="nav-customer-meta nav-mobile-only">
                 {selectedBinge && (
                   <button onClick={handleChangeBinge} className="nav-link nav-btn venue-btn" title="Change venue">

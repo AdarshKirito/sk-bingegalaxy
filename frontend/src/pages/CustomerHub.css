@@ -306,6 +306,226 @@
   flex-direction: column;
 }
 
+.customer-mini-grid-3up {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.customer-hub-date-field {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 148px;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.customer-hub-date-field span {
+  padding-left: 0.25rem;
+}
+
+.customer-hub-date-field input,
+.customer-account-field input,
+.customer-account-field select {
+  min-height: 44px;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-card);
+  color: var(--text);
+}
+
+.customer-booking-card-rich {
+  gap: 1rem;
+}
+
+.customer-booking-actions-support {
+  padding-top: 0.2rem;
+  border-top: 1px solid var(--border);
+}
+
+.customer-booking-support-note {
+  padding: 0.8rem 0.9rem;
+  border-radius: 16px;
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--text-secondary);
+}
+
+.customer-booking-support-note span,
+.customer-account-policy-list p {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+
+.customer-booking-help-grid,
+.customer-account-grid,
+.customer-account-trust-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.customer-account-grid-wide {
+  grid-template-columns: 1.25fr 0.9fr;
+}
+
+.customer-account-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.customer-account-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  background: rgba(37, 99, 235, 0.1);
+  color: var(--primary);
+  font-size: 1.15rem;
+}
+
+.customer-account-list,
+.customer-account-form-grid,
+.customer-benefits-grid,
+.customer-account-support-grid,
+.customer-faq-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.customer-account-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.customer-account-list div,
+.customer-benefit-card,
+.customer-account-reminder-box,
+.customer-faq-item {
+  padding: 1rem;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.customer-account-list span,
+.customer-account-field span {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.customer-account-support-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.customer-account-support-link {
+  display: flex;
+  gap: 0.85rem;
+  align-items: flex-start;
+  padding: 1rem;
+  border-radius: 18px;
+  text-decoration: none;
+  color: var(--text);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.customer-account-support-link svg {
+  margin-top: 0.1rem;
+  color: var(--primary);
+}
+
+.customer-account-support-link span,
+.customer-account-note,
+.customer-benefit-card p,
+.customer-faq-item p,
+.customer-steps-list li {
+  color: var(--text-secondary);
+}
+
+.customer-account-policy-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.customer-account-form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.customer-account-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.customer-account-toggle-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.customer-account-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.customer-account-toggle input {
+  width: 18px;
+  height: 18px;
+}
+
+.customer-account-toggle span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.customer-account-reminder-box {
+  display: grid;
+  gap: 0.45rem;
+  background: linear-gradient(145deg, rgba(37, 99, 235, 0.08), var(--bg-card));
+}
+
+.customer-account-reminder-box strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.customer-benefits-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.customer-benefit-card {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.customer-benefit-card .customer-hub-panel-label {
+  margin-bottom: 0;
+}
+
+.customer-faq-list-compact {
+  grid-template-columns: 1fr;
+}
+
+.customer-steps-list {
+  display: grid;
+  gap: 0.8rem;
+  padding-left: 1.15rem;
+}
+
+.customer-steps-list-tight {
+  gap: 0.65rem;
+}
+
 .customer-hub-empty {
   display: flex;
   flex-direction: column;
@@ -322,7 +542,15 @@
   .customer-hub-stats,
   .customer-booking-grid,
   .customer-payment-grid,
-  .customer-mini-grid {
+  .customer-mini-grid,
+  .customer-booking-help-grid,
+  .customer-account-grid,
+  .customer-account-grid-wide,
+  .customer-account-trust-grid,
+  .customer-benefits-grid,
+  .customer-account-support-grid,
+  .customer-account-list,
+  .customer-account-form-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -341,7 +569,9 @@
   .customer-booking-head,
   .customer-payment-head,
   .customer-mini-card,
-  .customer-hub-filters {
+  .customer-hub-filters,
+  .customer-account-support-link,
+  .customer-account-toggle {
     flex-direction: column;
     align-items: stretch;
   }
@@ -351,7 +581,8 @@
   }
 
   .customer-hub-search,
-  .customer-hub-select {
+  .customer-hub-select,
+  .customer-hub-date-field {
     width: 100%;
     max-width: none;
   }

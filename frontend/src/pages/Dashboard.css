@@ -292,6 +292,14 @@
   margin-bottom: 1.5rem;
 }
 
+.dash-retention-grid,
+.dash-trust-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.95fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
 .dash-venue-card {
   display: grid;
   gap: 1rem;
@@ -371,6 +379,69 @@
 
 .dash-section-header {
   margin-bottom: 1rem;
+}
+
+.dash-loyalty-card,
+.dash-help-card {
+  display: grid;
+  gap: 1rem;
+  padding: 1.35rem;
+}
+
+.dash-loyalty-card {
+  background:
+    linear-gradient(180deg, rgba(245, 158, 11, 0.08), transparent 60%),
+    var(--bg-card);
+}
+
+.dash-help-card {
+  background:
+    linear-gradient(180deg, rgba(37, 99, 235, 0.08), transparent 60%),
+    var(--bg-card);
+}
+
+.dash-loyalty-offers,
+.dash-faq-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.dash-loyalty-offer,
+.dash-faq-item {
+  padding: 1rem;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.dash-loyalty-offer h3,
+.dash-faq-item h3 {
+  margin: 0.25rem 0 0.45rem;
+}
+
+.dash-loyalty-offer p,
+.dash-faq-item p,
+.dash-help-points p,
+.dash-steps-list li {
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.dash-help-points,
+.dash-steps-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.dash-help-points p {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+
+.dash-steps-list {
+  padding-left: 1.15rem;
 }
 
 .dash-section-header h2 {
@@ -507,7 +578,11 @@
 
   .dash-hero,
   .dash-insights-grid,
-  .dash-exp-grid {
+  .dash-exp-grid,
+  .dash-retention-grid,
+  .dash-trust-grid,
+  .dash-loyalty-offers,
+  .dash-faq-list {
     grid-template-columns: 1fr;
   }
 
