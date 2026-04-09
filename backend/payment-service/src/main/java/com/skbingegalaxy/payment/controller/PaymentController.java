@@ -1,9 +1,11 @@
 package com.skbingegalaxy.payment.controller;
 
 import com.skbingegalaxy.common.dto.ApiResponse;
+import com.skbingegalaxy.payment.service.PaymentBingeScopeService;
 import com.skbingegalaxy.payment.dto.*;
 import com.skbingegalaxy.payment.service.PaymentService;
 import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -16,13 +18,32 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class PaymentController {
 
+    private final PaymentBingeScopeService scopeService;
     private final PaymentService paymentService;
+
+    @ModelAttribute
+    void validateBingeScope(
+            HttpServletRequest request,
+            @RequestHeader(value = "X-User-Id", required = false) Long userId,
+            @RequestHeader(value = "X-User-Role", required = false) String role) {
+        String uri = request.getRequestURI();
+        if (uri.endsWith("/callback")) {
+            return;
+        }
+        if (uri.contains("/admin/")) {
+            scopeService.requireManagedBinge(userId, role, "managing payments");
+            return;
+        }
+        scopeService.requireSelectedBinge("accessing payments");
+    }
 
     @PostMapping("/initiate")
     public ResponseEntity<ApiResponse<PaymentDto>> initiatePayment(
             @Valid @RequestBody InitiatePaymentRequest request,
-            @RequestHeader("X-User-Id") Long userId) {
-        PaymentDto payment = paymentService.initiatePayment(request, userId);
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader(value = "X-User-Email", required = false) String userEmail,
+            @RequestHeader(value = "X-User-Name", required = false) String userName) {
+        PaymentDto payment = paymentService.initiatePayment(request, userId, userEmail, userName);
         return ResponseEntity.ok(ApiResponse.ok("Payment initiated", payment));
     }
 
@@ -33,24 +54,33 @@ public class PaymentController {
         return ResponseEntity.ok(ApiResponse.ok("Payment callback processed", payment));
     }
 
-    @PostMapping("/simulate/{transactionId}")
+    @PostMapping("/admin/simulate/{transactionId}")
     public ResponseEntity<ApiResponse<PaymentDto>> simulatePayment(
-            @PathVariable String transactionId) {
+            @PathVariable String transactionId,
+            @RequestHeader("X-User-Role") String userRole) {
+        if (!"ADMIN".equalsIgnoreCase(userRole) && !"SUPER_ADMIN".equalsIgnoreCase(userRole)) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Only admins can simulate payments", org.springframework.http.HttpStatus.FORBIDDEN);
+        }
         PaymentDto payment = paymentService.simulatePayment(transactionId);
         return ResponseEntity.ok(ApiResponse.ok("Payment simulated", payment));
     }
 
     @GetMapping("/transaction/{transactionId}")
     public ResponseEntity<ApiResponse<PaymentDto>> getByTransactionId(
-            @PathVariable String transactionId) {
-        PaymentDto payment = paymentService.getPaymentByTransactionId(transactionId);
+            @PathVariable String transactionId,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String userRole) {
+        PaymentDto payment = paymentService.getPaymentByTransactionId(transactionId, userId, userRole);
         return ResponseEntity.ok(ApiResponse.ok("Payment details", payment));
     }
 
     @GetMapping("/booking/{bookingRef}")
     public ResponseEntity<ApiResponse<List<PaymentDto>>> getByBookingRef(
-            @PathVariable String bookingRef) {
-        List<PaymentDto> payments = paymentService.getPaymentsByBookingRef(bookingRef);
+            @PathVariable String bookingRef,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String userRole) {
+        List<PaymentDto> payments = paymentService.getPaymentsByBookingRef(bookingRef, userId, userRole);
         return ResponseEntity.ok(ApiResponse.ok("Payments for booking", payments));
     }
 
@@ -64,7 +94,12 @@ public class PaymentController {
     @PostMapping("/admin/refund")
     public ResponseEntity<ApiResponse<RefundDto>> initiateRefund(
             @Valid @RequestBody RefundRequest request,
-            @RequestHeader("X-User-Email") String adminEmail) {
+            @RequestHeader("X-User-Email") String adminEmail,
+            @RequestHeader("X-User-Role") String userRole) {
+        if (!"ADMIN".equalsIgnoreCase(userRole) && !"SUPER_ADMIN".equalsIgnoreCase(userRole)) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Only admins can initiate refunds", org.springframework.http.HttpStatus.FORBIDDEN);
+        }
         RefundDto refund = paymentService.initiateRefund(request, adminEmail);
         return ResponseEntity.ok(ApiResponse.ok("Refund initiated", refund));
     }
@@ -103,7 +138,12 @@ public class PaymentController {
     @PostMapping("/admin/record-cash")
     public ResponseEntity<ApiResponse<PaymentDto>> recordCashPayment(
             @Valid @RequestBody RecordCashPaymentRequest request,
-            @RequestHeader("X-User-Email") String adminEmail) {
+            @RequestHeader("X-User-Email") String adminEmail,
+            @RequestHeader("X-User-Role") String userRole) {
+        if (!"ADMIN".equalsIgnoreCase(userRole) && !"SUPER_ADMIN".equalsIgnoreCase(userRole)) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Only admins can record cash payments", org.springframework.http.HttpStatus.FORBIDDEN);
+        }
         PaymentDto payment = paymentService.recordCashPayment(request, adminEmail);
         return ResponseEntity.ok(ApiResponse.ok("Cash payment recorded", payment));
     }
@@ -115,7 +155,12 @@ public class PaymentController {
     @PostMapping("/admin/add-payment")
     public ResponseEntity<ApiResponse<PaymentDto>> addPayment(
             @Valid @RequestBody AddPaymentRequest request,
-            @RequestHeader("X-User-Email") String adminEmail) {
+            @RequestHeader("X-User-Email") String adminEmail,
+            @RequestHeader("X-User-Role") String userRole) {
+        if (!"ADMIN".equalsIgnoreCase(userRole) && !"SUPER_ADMIN".equalsIgnoreCase(userRole)) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Only admins can add payments", org.springframework.http.HttpStatus.FORBIDDEN);
+        }
         PaymentDto payment = paymentService.addPayment(request, adminEmail);
         return ResponseEntity.ok(ApiResponse.ok("Payment recorded", payment));
     }

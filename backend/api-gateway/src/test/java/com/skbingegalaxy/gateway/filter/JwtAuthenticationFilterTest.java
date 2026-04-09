@@ -75,7 +75,7 @@ class JwtAuthenticationFilterTest {
 
             filter.filter(exchange, chain).block();
 
-            verify(chain).filter(exchange);
+            verify(chain).filter(any());
             assertThat(exchange.getResponse().getStatusCode()).isNotEqualTo(HttpStatus.UNAUTHORIZED);
         }
 
@@ -87,7 +87,7 @@ class JwtAuthenticationFilterTest {
 
             filter.filter(exchange, chain).block();
 
-            verify(chain).filter(exchange);
+            verify(chain).filter(any());
         }
 
         @Test
@@ -98,18 +98,18 @@ class JwtAuthenticationFilterTest {
 
             filter.filter(exchange, chain).block();
 
-            verify(chain).filter(exchange);
+            verify(chain).filter(any());
         }
 
         @Test
-        void swaggerPath_bypassesAuth() {
+        void swaggerPath_requiresAuth() {
             MockServerHttpRequest request = MockServerHttpRequest
                     .get("/swagger-ui/index.html").build();
             MockServerWebExchange exchange = MockServerWebExchange.from(request);
 
             filter.filter(exchange, chain).block();
 
-            verify(chain).filter(exchange);
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         }
 
         @Test
@@ -120,7 +120,19 @@ class JwtAuthenticationFilterTest {
 
             filter.filter(exchange, chain).block();
 
-            verify(chain).filter(exchange);
+            verify(chain).filter(any());
+        }
+
+        @Test
+        void bookedSlots_bypassesAuth() {
+            MockServerHttpRequest request = MockServerHttpRequest
+                    .get("/api/v1/bookings/booked-slots?date=2026-04-08").build();
+            MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+            filter.filter(exchange, chain).block();
+
+            verify(chain).filter(any());
+            assertThat(exchange.getResponse().getStatusCode()).isNotEqualTo(HttpStatus.UNAUTHORIZED);
         }
     }
 

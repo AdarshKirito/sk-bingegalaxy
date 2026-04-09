@@ -16,8 +16,10 @@
   border: 1px solid var(--border);
   border-radius: 28px;
   padding: 1.6rem;
-  background: linear-gradient(145deg, rgba(37, 99, 235, 0.08), rgba(14, 165, 233, 0.04) 55%, var(--bg-card));
-  box-shadow: var(--shadow-sm);
+  background:
+    radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.05), transparent 24%),
+    linear-gradient(145deg, rgba(var(--primary-rgb), 0.1), rgba(14, 165, 233, 0.04) 55%, var(--bg-card));
+  box-shadow: 0 14px 30px rgba(var(--primary-rgb), 0.06), var(--shadow-sm);
 }
 
 [data-theme="dark"] .booking-shell-copy,
@@ -36,6 +38,15 @@
   pointer-events: none;
 }
 
+.booking-shell-copy::before,
+.booking-shell-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(var(--primary-rgb), 0), rgba(var(--primary-rgb), 0.35), rgba(var(--accent-rgb), 0.18), rgba(var(--primary-rgb), 0));
+}
+
 .booking-shell-kicker,
 .booking-shell-panel-label {
   display: inline-flex;
@@ -45,6 +56,10 @@
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--primary);
+  padding: 0.42rem 0.78rem;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--primary-rgb), 0.14);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.08), rgba(var(--accent-rgb), 0.03));
 }
 
 .booking-shell-copy h1,
@@ -72,11 +87,17 @@
   gap: 0.45rem;
   padding: 0.58rem 0.8rem;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.7);
-  border: 1px solid rgba(37, 99, 235, 0.12);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.07), rgba(255, 255, 255, 0.72));
+  border: 1px solid rgba(var(--primary-rgb), 0.1);
   color: var(--text);
   font-size: 0.84rem;
   font-weight: 600;
+}
+
+[data-theme="dark"] .booking-shell-chips span,
+[data-theme="dark"] .booking-shell-panel-meta span {
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.12), rgba(var(--primary-rgb), 0.06));
+  border-color: rgba(var(--primary-rgb), 0.18);
 }
 
 .booking-page {
@@ -140,7 +161,7 @@
   background: var(--primary);
   border-color: var(--primary);
   color: #fff;
-  box-shadow: var(--shadow-primary);
+  box-shadow: var(--shadow-primary), 0 0 0 4px rgba(var(--primary-rgb), 0.12);
 }
 
 .step-dot.completed {
@@ -187,8 +208,8 @@
 
 .event-type-card.selected {
   border-color: var(--primary);
-  background: var(--primary-bg);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.06), var(--primary-bg));
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12), 0 12px 24px rgba(var(--primary-rgb), 0.06);
 }
 
 .et-price {
@@ -216,15 +237,15 @@
 }
 
 .date-btn:hover, .slot-btn:hover {
-  border-color: var(--primary);
-  background: var(--primary-bg);
+  border-color: rgba(var(--primary-rgb), 0.35);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.06), var(--primary-bg));
 }
 
 .date-btn.selected, .slot-btn.selected {
   background: var(--primary);
   border-color: var(--primary);
   color: #fff;
-  box-shadow: var(--shadow-primary);
+  box-shadow: var(--shadow-primary), 0 10px 20px rgba(var(--primary-rgb), 0.1);
 }
 
 .slot-grid {
@@ -248,7 +269,7 @@
 
 .addon-card.selected {
   border-color: var(--success);
-  background: var(--success-bg);
+  background: linear-gradient(180deg, rgba(var(--success-rgb), 0.06), var(--success-bg));
 }
 
 .addon-price {
@@ -269,8 +290,8 @@
 .review-card {
   max-width: 600px;
   margin: 0 auto;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.04), transparent 20%), var(--bg-card);
+  border: 1px solid rgba(var(--primary-rgb), 0.1);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
 }

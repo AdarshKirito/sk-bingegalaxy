@@ -4,6 +4,7 @@ import com.skbingegalaxy.booking.client.AvailabilityClient;
 import com.skbingegalaxy.booking.client.AvailabilityClientFallback;
 import com.skbingegalaxy.booking.entity.*;
 import com.skbingegalaxy.booking.repository.*;
+import com.skbingegalaxy.common.context.BingeContext;
 import com.skbingegalaxy.common.enums.BookingStatus;
 import com.skbingegalaxy.common.enums.PaymentStatus;
 import com.skbingegalaxy.common.exception.BusinessException;
@@ -58,6 +59,8 @@ class BookingCheckoutAndRevenueTest {
 
     @BeforeEach
     void setUp() {
+                BingeContext.clear();
+                BingeContext.setBingeId(11L);
         ReflectionTestUtils.setField(bookingService, "refPrefix", "SKBG");
 
         EventType eventType = EventType.builder()
@@ -103,7 +106,7 @@ class BookingCheckoutAndRevenueTest {
             // Scheduled: 10:00 - 13:00, checking out at 14:00 (after end)
             LocalDateTime checkoutTime = LocalDateTime.of(LocalDate.now(), LocalTime.of(14, 0));
 
-            when(bookingRepository.findByBookingRef("SKBG25123456"))
+            when(bookingRepository.findByBookingRefAndBingeId("SKBG25123456", 11L))
                     .thenReturn(Optional.of(checkedInBooking));
             when(bookingRepository.save(any(Booking.class)))
                     .thenAnswer(i -> i.getArgument(0));
@@ -121,7 +124,7 @@ class BookingCheckoutAndRevenueTest {
             // Scheduled: 10:00 - 13:00, checking out at 11:30 (early)
             LocalDateTime checkoutTime = LocalDateTime.of(LocalDate.now(), LocalTime.of(11, 30));
 
-            when(bookingRepository.findByBookingRef("SKBG25123456"))
+            when(bookingRepository.findByBookingRefAndBingeId("SKBG25123456", 11L))
                     .thenReturn(Optional.of(checkedInBooking));
             when(bookingRepository.save(any(Booking.class)))
                     .thenAnswer(i -> i.getArgument(0));
@@ -139,7 +142,7 @@ class BookingCheckoutAndRevenueTest {
         void checkout_notCheckedIn_throwsException() {
             checkedInBooking.setStatus(BookingStatus.CONFIRMED);
 
-            when(bookingRepository.findByBookingRef("SKBG25123456"))
+            when(bookingRepository.findByBookingRefAndBingeId("SKBG25123456", 11L))
                     .thenReturn(Optional.of(checkedInBooking));
 
             assertThatThrownBy(() -> bookingService.earlyCheckout("SKBG25123456", LocalDateTime.now()))
@@ -152,7 +155,7 @@ class BookingCheckoutAndRevenueTest {
         void checkout_noPayment_throwsException() {
             checkedInBooking.setPaymentStatus(PaymentStatus.PENDING);
 
-            when(bookingRepository.findByBookingRef("SKBG25123456"))
+            when(bookingRepository.findByBookingRefAndBingeId("SKBG25123456", 11L))
                     .thenReturn(Optional.of(checkedInBooking));
 
             assertThatThrownBy(() -> bookingService.earlyCheckout("SKBG25123456", LocalDateTime.now()))
@@ -163,7 +166,7 @@ class BookingCheckoutAndRevenueTest {
         @Test
         @DisplayName("Checkout for non-existent booking throws ResourceNotFoundException")
         void checkout_notFound_throwsException() {
-            when(bookingRepository.findByBookingRef("INVALID")).thenReturn(Optional.empty());
+                        when(bookingRepository.findByBookingRefAndBingeId("INVALID", 11L)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> bookingService.earlyCheckout("INVALID", LocalDateTime.now()))
                     .isInstanceOf(ResourceNotFoundException.class);
@@ -174,7 +177,7 @@ class BookingCheckoutAndRevenueTest {
         void checkout_verifyPersistedState() {
             LocalDateTime checkoutTime = LocalDateTime.of(LocalDate.now(), LocalTime.of(14, 0));
 
-            when(bookingRepository.findByBookingRef("SKBG25123456"))
+            when(bookingRepository.findByBookingRefAndBingeId("SKBG25123456", 11L))
                     .thenReturn(Optional.of(checkedInBooking));
             when(bookingRepository.save(any(Booking.class)))
                     .thenAnswer(i -> i.getArgument(0));
@@ -201,16 +204,12 @@ class BookingCheckoutAndRevenueTest {
         @Test
         @DisplayName("Adds amount to collectedAmount correctly")
         void addToCollectedAmount_addsCorrectly() {
-            checkedInBooking.setCollectedAmount(BigDecimal.ZERO);
-
-            when(bookingRepository.findByBookingRef("SKBG25123456"))
-                    .thenReturn(Optional.of(checkedInBooking));
-
+            when(bookingRepository.addToCollectedAmount("SKBG25123456", BigDecimal.valueOf(11000)))
+                    .thenReturn(1);
+            // No mismatch check since no findByBookingRef stubbed — totalAmount is null
             bookingService.addToCollectedAmount("SKBG25123456", BigDecimal.valueOf(11000));
 
-            assertThat(checkedInBooking.getCollectedAmount())
-                    .isEqualByComparingTo(BigDecimal.valueOf(11000));
-            verify(bookingRepository).save(checkedInBooking);
+            verify(bookingRepository).addToCollectedAmount("SKBG25123456", BigDecimal.valueOf(11000));
         }
 
         @Test
@@ -221,44 +220,39 @@ class BookingCheckoutAndRevenueTest {
         }
 
         @Test
-        @DisplayName("Non-existent booking is silently ignored")
-        void addToCollectedAmount_bookingNotFound_noop() {
-            when(bookingRepository.findByBookingRef("INVALID")).thenReturn(Optional.empty());
-
-            bookingService.addToCollectedAmount("INVALID", BigDecimal.valueOf(5000));
-
-            verify(bookingRepository, never()).save(any());
+        @DisplayName("Zero amount is ignored")
+        void addToCollectedAmount_zeroAmount_noop() {
+            bookingService.addToCollectedAmount("SKBG25123456", BigDecimal.ZERO);
+            verifyNoInteractions(bookingRepository);
         }
 
         @Test
-        @DisplayName("Multiple payments accumulate correctly")
+        @DisplayName("Multiple payments accumulate via atomic query")
         void addToCollectedAmount_accumulatesMultiplePayments() {
-            checkedInBooking.setCollectedAmount(BigDecimal.valueOf(5000));
+            when(bookingRepository.addToCollectedAmount(eq("SKBG25123456"), any()))
+                    .thenReturn(1);
 
-            when(bookingRepository.findByBookingRef("SKBG25123456"))
-                    .thenReturn(Optional.of(checkedInBooking));
-
+            bookingService.addToCollectedAmount("SKBG25123456", BigDecimal.valueOf(5000));
             bookingService.addToCollectedAmount("SKBG25123456", BigDecimal.valueOf(4000));
 
-            assertThat(checkedInBooking.getCollectedAmount())
-                    .isEqualByComparingTo(BigDecimal.valueOf(9000));
+            verify(bookingRepository).addToCollectedAmount("SKBG25123456", BigDecimal.valueOf(5000));
+            verify(bookingRepository).addToCollectedAmount("SKBG25123456", BigDecimal.valueOf(4000));
         }
 
         @Test
-        @DisplayName("Amount mismatch with totalAmount logs warning but still saves")
+        @DisplayName("Amount mismatch with totalAmount logs warning")
         void addToCollectedAmount_mismatchWarning_stillSaves() {
             checkedInBooking.setTotalAmount(BigDecimal.valueOf(11000));
-            checkedInBooking.setCollectedAmount(BigDecimal.ZERO);
+            checkedInBooking.setCollectedAmount(BigDecimal.valueOf(9000));
 
+            when(bookingRepository.addToCollectedAmount("SKBG25123456", BigDecimal.valueOf(9000)))
+                    .thenReturn(1);
             when(bookingRepository.findByBookingRef("SKBG25123456"))
                     .thenReturn(Optional.of(checkedInBooking));
 
-            // Pay only 9000 of 11000 — should log warning but save
             bookingService.addToCollectedAmount("SKBG25123456", BigDecimal.valueOf(9000));
 
-            assertThat(checkedInBooking.getCollectedAmount())
-                    .isEqualByComparingTo(BigDecimal.valueOf(9000));
-            verify(bookingRepository).save(checkedInBooking);
+            verify(bookingRepository).addToCollectedAmount("SKBG25123456", BigDecimal.valueOf(9000));
         }
     }
 

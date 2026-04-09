@@ -31,9 +31,9 @@
 
 :root {
   --primary-rgb: 99, 102, 241;
-  --accent-rgb: 245, 158, 11;
+  --accent-rgb: 245, 166, 35;
   --success-rgb: 16, 185, 129;
-  --warning-rgb: 245, 158, 11;
+  --warning-rgb: 245, 166, 35;
   --danger-rgb: 239, 68, 68;
   --primary: #6366f1;
   --primary-dark: #4f46e5;
@@ -41,21 +41,21 @@
   --primary-bg: rgba(99, 102, 241, 0.08);
   --secondary: #f43f5e;
   --secondary-light: #fb7185;
-  --accent: #f59e0b;
-  --accent-light: #fbbf24;
+  --accent: #f5a623;
+  --accent-light: #fcc73a;
   --bg: #f5f7fa;
   --bg-card: #ffffff;
   --bg-card-hover: #f8fafc;
   --bg-input: #f1f5f9;
   --bg-hero: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   --text: #1e293b;
-  --text-secondary: #64748b;
-  --text-muted: #94a3b8;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
   --text-on-primary: #ffffff;
   --success: #10b981;
   --success-bg: rgba(16, 185, 129, 0.1);
-  --warning: #f59e0b;
-  --warning-bg: rgba(245, 158, 11, 0.1);
+  --warning: #f5a623;
+  --warning-bg: rgba(245, 166, 35, 0.1);
   --danger: #ef4444;
   --danger-bg: rgba(239, 68, 68, 0.1);
   --border: #e2e8f0;
@@ -72,18 +72,23 @@
 
 /* Dark mode */
 [data-theme="dark"] {
-  --bg: #0f172a;
-  --bg-card: #1e293b;
-  --bg-card-hover: #334155;
-  --bg-input: #1e293b;
-  --text: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --border: #334155;
-  --border-hover: #475569;
+  --bg: #111827;
+  --bg-card: #1f2937;
+  --bg-card-hover: #374151;
+  --bg-input: #1f2937;
+  --text: #f3f4f6;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --border: #374151;
+  --border-hover: #4b5563;
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.2);
   --shadow: 0 2px 8px rgba(0, 0, 0, 0.2), 0 4px 16px rgba(0, 0, 0, 0.15);
   --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.2);
+  --primary-bg: rgba(99, 102, 241, 0.15);
+  --success-bg: rgba(16, 185, 129, 0.15);
+  --warning-bg: rgba(245, 166, 35, 0.15);
+  --danger-bg: rgba(239, 68, 68, 0.15);
+  --accent-light: #fcd34d;
 }
 
 html {
@@ -93,10 +98,79 @@ html {
 
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: var(--bg);
+  background:
+    radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.055), transparent 20%),
+    radial-gradient(circle at top right, rgba(var(--primary-rgb), 0.08), transparent 18%),
+    var(--bg);
   color: var(--text);
   line-height: 1.6;
   min-height: 100vh;
+  position: relative;
+  overflow-x: hidden;
+}
+
+body::before,
+body::after {
+  content: '';
+  position: fixed;
+  border-radius: 999px;
+  pointer-events: none;
+  filter: blur(12px);
+  z-index: 0;
+}
+
+body::before {
+  width: 300px;
+  height: 300px;
+  top: 84px;
+  left: -110px;
+  background: radial-gradient(circle, rgba(var(--accent-rgb), 0.18) 0%, rgba(var(--accent-rgb), 0.07) 38%, transparent 72%);
+}
+
+body::after {
+  width: 360px;
+  height: 360px;
+  right: -140px;
+  bottom: 32px;
+  background: radial-gradient(circle, rgba(var(--primary-rgb), 0.18) 0%, rgba(var(--accent-rgb), 0.09) 38%, transparent 74%);
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+}
+
+#main-content {
+  position: relative;
+  isolation: isolate;
+}
+
+#main-content::before,
+#main-content::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto auto 0;
+  pointer-events: none;
+  border-radius: 999px;
+  filter: blur(8px);
+  opacity: 0.9;
+}
+
+#main-content::before {
+  width: 220px;
+  height: 220px;
+  top: 10px;
+  left: -90px;
+  background: radial-gradient(circle, rgba(var(--accent-rgb), 0.12) 0%, transparent 72%);
+}
+
+#main-content::after {
+  inset: auto 0 40px auto;
+  width: 220px;
+  height: 220px;
+  right: -90px;
+  background: radial-gradient(circle, rgba(var(--accent-rgb), 0.075) 0%, rgba(var(--primary-rgb), 0.08) 42%, transparent 74%);
 }
 
 a {
@@ -140,14 +214,14 @@ input, select, textarea {
 }
 
 .btn-primary {
-  background: var(--primary);
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
   color: #fff;
   box-shadow: var(--shadow-sm);
 }
 .btn-primary:hover {
-  background: var(--primary-dark);
+  background: linear-gradient(135deg, var(--primary-dark) 0%, color-mix(in srgb, var(--primary-dark) 92%, var(--accent) 8%) 100%);
   transform: translateY(-1px);
-  box-shadow: var(--shadow-primary);
+  box-shadow: var(--shadow-primary), 0 0 0 1px rgba(var(--accent-rgb), 0.09);
 }
 
 .btn-secondary {
@@ -175,7 +249,12 @@ input, select, textarea {
 }
 
 .card {
-  background: var(--bg-card);
+  position: relative;
+  background:
+    radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.075), transparent 26%),
+    radial-gradient(circle at bottom right, rgba(var(--primary-rgb), 0.06), transparent 30%),
+    linear-gradient(180deg, rgba(var(--accent-rgb), 0.05), transparent 22%),
+    var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 1.5rem;
@@ -183,9 +262,18 @@ input, select, textarea {
   box-shadow: var(--shadow-sm);
 }
 
+.card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(var(--primary-rgb), 0), rgba(var(--primary-rgb), 0.32), rgba(var(--accent-rgb), 0.3), rgba(var(--primary-rgb), 0));
+  pointer-events: none;
+}
+
 .card:hover {
-  box-shadow: var(--shadow);
-  border-color: var(--border-hover);
+  box-shadow: var(--shadow), 0 0 0 1px rgba(var(--accent-rgb), 0.08);
+  border-color: color-mix(in srgb, var(--border-hover) 86%, var(--accent) 14%);
 }
 
 .input-group {
@@ -222,7 +310,7 @@ input, select, textarea {
   outline: none;
   border-color: var(--primary);
   background: var(--bg-card);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12), 0 0 0 6px rgba(var(--accent-rgb), 0.04);
 }
 
 .badge {
@@ -236,12 +324,20 @@ input, select, textarea {
 }
 
 .badge-success { background: var(--success-bg); color: var(--success); }
-.badge-warning { background: var(--warning-bg); color: #b45309; }
+.badge-warning { background: linear-gradient(135deg, var(--warning-bg), rgba(var(--accent-rgb), 0.08)); color: #b45309; }
 .badge-danger { background: var(--danger-bg); color: var(--danger); }
 .badge-info { background: var(--primary-bg); color: var(--primary); }
 
+[data-theme="dark"] .badge-warning { color: var(--accent-light); }
+
 .page-header {
   margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+  background-image: linear-gradient(90deg, rgba(var(--primary-rgb), 0), rgba(var(--accent-rgb), 0.14), rgba(var(--primary-rgb), 0));
+  background-size: 100% 1px;
+  background-position: bottom;
+  background-repeat: no-repeat;
 }
 .page-header h1 {
   font-size: 1.8rem;
@@ -353,9 +449,10 @@ input, select, textarea {
   background: var(--primary-bg);
 }
 .pagination-btn.active {
-  background: var(--primary);
+  background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary) 88%, var(--accent) 12%));
   color: #fff;
   border-color: var(--primary);
+  box-shadow: 0 2px 8px rgba(var(--primary-rgb), 0.25);
 }
 .pagination-btn:disabled {
   opacity: 0.4;
@@ -375,7 +472,7 @@ input, select, textarea {
   background: var(--bg);
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border-hover);
+  background: linear-gradient(180deg, var(--border-hover), color-mix(in srgb, var(--border-hover) 94%, var(--accent) 6%));
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {

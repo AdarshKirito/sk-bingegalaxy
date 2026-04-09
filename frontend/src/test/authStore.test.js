@@ -13,6 +13,13 @@ vi.mock('../services/endpoints', () => ({
   },
 }));
 
+// Mock the api module (logout calls api.post)
+vi.mock('../services/api', () => ({
+  default: {
+    post: vi.fn().mockResolvedValue({}),
+  },
+}));
+
 describe('useAuthStore', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -28,13 +35,13 @@ describe('useAuthStore', () => {
     expect(result.current.user).toBeNull();
   });
 
-  it('logout clears user-owned localStorage state', () => {
+  it('logout clears user-owned localStorage state', async () => {
     localStorage.setItem('user', JSON.stringify({ id: 1, role: 'USER' }));
     localStorage.setItem('selectedBinge', JSON.stringify({ id: 7, name: 'Main Branch' }));
     useAuthStore.setState({ user: { id: 1, role: 'USER' } });
 
     const { result } = renderHook(() => useAuthStore());
-    act(() => result.current.logout());
+    await act(async () => result.current.logout());
 
     expect(result.current.user).toBeNull();
     expect(localStorage.getItem('user')).toBeNull();
@@ -47,6 +54,13 @@ describe('useAuthStore', () => {
     act(() => result.current.setUser(userData));
 
     expect(result.current.user).toEqual(userData);
-    expect(JSON.parse(localStorage.getItem('user'))).toEqual(userData);
+    // localStorage stores only minimal fields
+    expect(JSON.parse(localStorage.getItem('user'))).toEqual({
+      id: 2,
+      firstName: 'John',
+      role: 'USER',
+      active: undefined,
+      phone: undefined,
+    });
   });
 });

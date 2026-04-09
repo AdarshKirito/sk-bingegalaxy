@@ -11,5 +11,7 @@ public interface CustomerPricingProfileRepository extends JpaRepository<Customer
     Optional<CustomerPricingProfile> findByCustomerIdAndBingeId(Long customerId, Long bingeId);
     Optional<CustomerPricingProfile> findByCustomerIdAndBingeIdIsNull(Long customerId);
     List<CustomerPricingProfile> findByRateCodeId(Long rateCodeId);
+    boolean existsByBingeId(Long bingeId);
+    boolean existsByRateCodeId(Long rateCodeId);
     boolean existsByCustomerId(Long customerId);
 }

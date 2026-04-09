@@ -89,6 +89,7 @@
   padding: 1.35rem;
   background:
     linear-gradient(180deg, rgba(99, 102, 241, 0.08), transparent 42%),
+    radial-gradient(circle at bottom left, rgba(var(--accent-rgb), 0.03), transparent 30%),
     var(--bg-card);
 }
 
@@ -186,6 +187,7 @@
 .dash-summary-card-accent {
   background:
     linear-gradient(180deg, rgba(99, 102, 241, 0.08), transparent 60%),
+    radial-gradient(circle at bottom right, rgba(var(--accent-rgb), 0.03), transparent 35%),
     var(--bg-card);
 }
 
@@ -235,8 +237,8 @@
 
 .dash-action-card:hover {
   transform: translateY(-3px);
-  box-shadow: var(--shadow);
-  border-color: var(--primary-light);
+  box-shadow: var(--shadow), 0 0 0 1px rgba(var(--accent-rgb), 0.05);
+  border-color: color-mix(in srgb, var(--primary-light) 88%, var(--accent) 12%);
 }
 
 .dash-icon-success {
@@ -412,7 +414,9 @@
   padding: 1rem;
   border-radius: 18px;
   border: 1px solid var(--border);
-  background: var(--bg-card);
+  background:
+    radial-gradient(circle at top right, rgba(var(--accent-rgb), 0.025), transparent 40%),
+    var(--bg-card);
 }
 
 .dash-loyalty-offer h3,

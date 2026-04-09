@@ -76,7 +76,10 @@ export default function StepReview({
                 </select>
               </div>
               {form.paymentMethod === 'CASH' && (
-                <p style={{ fontSize: '0.8rem', color: 'var(--success)', marginTop: '0.3rem' }}>Cash payment — booking will be auto-confirmed</p>
+                <p style={{ fontSize: '0.8rem', color: 'var(--success)', marginTop: '0.3rem' }}>Cash payment — booking will be auto-confirmed and recorded immediately</p>
+              )}
+              {form.paymentMethod !== 'CASH' && (
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>This records the payment immediately after the booking is created.</p>
               )}
             </>
           )

@@ -17,8 +17,12 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 import java.time.LocalDateTime;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -168,6 +172,46 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.data.token").value("jwt-token"));
     }
 
+        @Test
+        void googleLogin_localhostOrigin_omitsSecureCookie() throws Exception {
+                when(authService.googleLogin(anyString())).thenReturn(successResponse);
+
+                GoogleLoginRequest request = new GoogleLoginRequest("credential-token");
+
+                MvcResult result = mockMvc.perform(post("/api/v1/auth/google")
+                                                .header("Origin", "http://localhost:3000")
+                                                .contentType(MediaType.APPLICATION_JSON)
+                                                .content(objectMapper.writeValueAsString(request)))
+                                .andExpect(status().isOk())
+                                .andReturn();
+
+                List<String> cookies = result.getResponse().getHeaders("Set-Cookie");
+
+                assertThat(cookies).hasSize(2);
+                assertThat(cookies).allMatch(cookie -> !cookie.contains("; Secure"));
+                assertThat(cookies).allMatch(cookie -> cookie.contains("; SameSite=Strict"));
+        }
+
+        @Test
+        void googleLogin_forwardedHttps_keepsSecureCookie() throws Exception {
+                when(authService.googleLogin(anyString())).thenReturn(successResponse);
+
+                GoogleLoginRequest request = new GoogleLoginRequest("credential-token");
+
+                MvcResult result = mockMvc.perform(post("/api/v1/auth/google")
+                                                .header("Origin", "https://skbingegalaxy.com")
+                                                .header("X-Forwarded-Proto", "https")
+                                                .contentType(MediaType.APPLICATION_JSON)
+                                                .content(objectMapper.writeValueAsString(request)))
+                                .andExpect(status().isOk())
+                                .andReturn();
+
+                List<String> cookies = result.getResponse().getHeaders("Set-Cookie");
+
+                assertThat(cookies).hasSize(2);
+                assertThat(cookies).allMatch(cookie -> cookie.contains("; Secure"));
+        }
+
     // ── Refresh token endpoint ───────────────────────────
 
     @Test
@@ -219,9 +263,9 @@ class AuthControllerTest {
     }
 
     @Test
-    void getProfile_missingHeader_returns500() throws Exception {
+        void getProfile_missingHeader_returns401() throws Exception {
         mockMvc.perform(get("/api/v1/auth/profile"))
-                .andExpect(status().isInternalServerError());
+                                .andExpect(status().isUnauthorized());
     }
 
     @Test
@@ -233,7 +277,7 @@ class AuthControllerTest {
                 .email("john@example.com")
                 .preferredExperience("Birthday celebration")
                 .reminderLeadDays(14)
-                .notificationChannel("WHATSAPP")
+                .notificationChannel("EMAIL")
                 .receivesOffers(true)
                 .weekendAlerts(true)
                 .conciergeSupport(true)
@@ -250,7 +294,7 @@ class AuthControllerTest {
                                 {
                                   \"preferredExperience\": \"Birthday celebration\",
                                   \"reminderLeadDays\": 14,
-                                  \"notificationChannel\": \"WHATSAPP\",
+                                                                                                                                        \"notificationChannel\": \"EMAIL\",
                                   \"receivesOffers\": true,
                                   \"weekendAlerts\": true,
                                   \"conciergeSupport\": true
@@ -276,6 +320,63 @@ class AuthControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.email").value("support@example.com"))
                 .andExpect(jsonPath("$.data.phoneDisplay").value("+91 98765 43210"));
+    }
+
+    // ── Weak password validation tests ────────────────────
+
+    @Test
+    void register_weakPassword_noUppercase_returns400() throws Exception {
+        RegisterRequest request = RegisterRequest.builder()
+                .firstName("John").lastName("Doe")
+                .email("john@example.com").phone("9876543210")
+                .password("password@123").build();
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void register_weakPassword_noSpecialChar_returns400() throws Exception {
+        RegisterRequest request = RegisterRequest.builder()
+                .firstName("John").lastName("Doe")
+                .email("john@example.com").phone("9876543210")
+                .password("Password123").build();
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void register_weakPassword_tooShort_returns400() throws Exception {
+        RegisterRequest request = RegisterRequest.builder()
+                .firstName("John").lastName("Doe")
+                .email("john@example.com").phone("9876543210")
+                .password("P@1a").build();
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest());
+    }
+
+    // ── Account lockout via controller ─────────────────────
+
+    @Test
+    void login_lockedAccount_returns429() throws Exception {
+        when(authService.login(any(LoginRequest.class)))
+                .thenThrow(new BusinessException("Account is temporarily locked", HttpStatus.TOO_MANY_REQUESTS));
+
+        LoginRequest request = LoginRequest.builder()
+                .email("john@example.com").password("Password@123").build();
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isTooManyRequests());
     }
 
     // ── Reset password endpoint ──────────────────────────

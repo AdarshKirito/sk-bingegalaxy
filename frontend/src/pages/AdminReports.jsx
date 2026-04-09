@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { adminService } from '../services/endpoints';
 import { toast } from 'react-toastify';
+import { FiBarChart2, FiCalendar, FiCheckCircle, FiClock, FiAlertTriangle } from 'react-icons/fi';
+import './AdminPages.css';
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
@@ -82,138 +84,102 @@ export default function AdminReports() {
     setAuditing(false);
   };
 
-  const inputStyle = { padding: '0.5rem 0.8rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--text)', fontSize: '0.85rem' };
-
-  const cardStyle = (accent) => ({
-    flex: '1 1 220px', padding: '1.5rem', borderRadius: 'var(--radius-md, 10px)',
-    background: 'var(--bg-card, #1e1e2e)', border: '1px solid var(--border)',
-    borderLeft: `4px solid ${accent}`, textAlign: 'center',
-  });
-
   const daysLabel = fromDate && toDate ? (() => {
     const diff = Math.round((new Date(toDate + 'T00:00:00') - new Date(fromDate + 'T00:00:00')) / 86400000);
     return diff === 0 ? '(Single day)' : diff === 1 ? '(1 day)' : `(${diff} days)`;
   })() : '';
 
   return (
-    <div className="container">
-      <div className="page-header">
-        <h1>Reports</h1>
-        <p>Revenue and booking analytics by date range</p>
+    <div className="container adm-shell">
+      <div className="adm-header">
+        <div className="adm-header-copy">
+          <span className="adm-kicker"><FiBarChart2 /> Analytics</span>
+          <h1>Reports</h1>
+          <p>Revenue and booking analytics by date range</p>
+        </div>
       </div>
 
       {/* Date range selector */}
-      <div className="card" style={{ marginBottom: '1.5rem', padding: '1.25rem' }}>
+      <div className="adm-form">
+        <h3><FiCalendar style={{ marginRight: 6, verticalAlign: -2 }} />Select Date Range</h3>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <div>
-            <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.3rem' }}>From Date</label>
-            <input type="date" value={fromDate} onChange={e => handleFromDateChange(e.target.value)}
-              max={toDate || todayISO()} style={inputStyle} />
+          <div className="input-group" style={{ margin: 0 }}>
+            <label>From Date</label>
+            <input type="date" value={fromDate} onChange={e => handleFromDateChange(e.target.value)} max={toDate || todayISO()} />
           </div>
-          <div>
-            <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.3rem' }}>To Date</label>
-            <input type="date" value={toDate} onChange={e => handleToDateChange(e.target.value)}
-              max={todayISO()} style={inputStyle} />
+          <div className="input-group" style={{ margin: 0 }}>
+            <label>To Date</label>
+            <input type="date" value={toDate} onChange={e => handleToDateChange(e.target.value)} max={todayISO()} />
           </div>
-          <div>
-            <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.3rem' }}>Days Back</label>
+          <div className="input-group" style={{ margin: 0 }}>
+            <label>Days Back</label>
             <input type="number" min="0" value={days} onChange={e => handleDaysChange(e.target.value)}
-              placeholder="e.g. 5" style={{ ...inputStyle, width: '80px' }} />
+              placeholder="e.g. 5" style={{ width: '90px' }} />
           </div>
           <button className="btn btn-primary" onClick={fetchReport} disabled={loading || !fromDate || !toDate}>
             {loading ? 'Loading...' : 'Get Reports'}
           </button>
         </div>
-        {daysLabel && <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>{daysLabel} — {fromDate} to {toDate}</p>}
+        {daysLabel && <p className="adm-hint" style={{ marginTop: '0.5rem' }}>{daysLabel} — {fromDate} to {toDate}</p>}
       </div>
 
       {loading ? (
         <div className="loading"><div className="spinner"></div></div>
       ) : report ? (
         <>
-          {/* Date range */}
-          <div className="card" style={{ marginBottom: '1.25rem', padding: '0.75rem 1rem', fontSize: '0.85rem' }}>
+          {/* Period badge */}
+          <div className="adm-card" style={{ padding: '0.75rem 1.15rem', fontSize: '0.85rem' }}>
             <strong>Period:</strong> {report.fromDate} — {report.toDate}
           </div>
 
           {/* Stats cards */}
-          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '2rem' }}>
-            <div style={cardStyle('var(--primary, #6c5ce7)')}>
-              <div style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--primary)' }}>{report.totalBookings ?? 0}</div>
-              <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                Total Bookings
-              </div>
+          <div className="adm-grid-3">
+            <div className="adm-stat" style={{ '--stat-accent': 'var(--primary)' }}>
+              <div className="adm-stat-value">{report.totalBookings ?? 0}</div>
+              <div className="adm-stat-label">Total Bookings</div>
             </div>
-            <div style={cardStyle('var(--success, #00b894)')}>
-              <div style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--success)' }}>
-                ₹{Number(report.totalRevenue ?? 0).toLocaleString()}
-              </div>
-              <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                Actual Revenue (Collected)
-              </div>
+            <div className="adm-stat" style={{ '--stat-accent': 'var(--success)' }}>
+              <div className="adm-stat-value">₹{Number(report.totalRevenue ?? 0).toLocaleString()}</div>
+              <div className="adm-stat-label">Actual Revenue (Collected)</div>
             </div>
-            <div style={cardStyle('var(--warning, #fdcb6e)')}>
-              <div style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--warning, #fdcb6e)' }}>
-                ₹{Number(report.estimatedRevenue ?? 0).toLocaleString()}
-              </div>
-              <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                Estimated Revenue (All Bookings)
-              </div>
+            <div className="adm-stat" style={{ '--stat-accent': 'var(--warning, #f59e0b)' }}>
+              <div className="adm-stat-value">₹{Number(report.estimatedRevenue ?? 0).toLocaleString()}</div>
+              <div className="adm-stat-label">Estimated Revenue (All Bookings)</div>
             </div>
           </div>
 
           {/* Summary table */}
-          <div className="card" style={{ overflowX: 'auto' }}>
-            <h3 style={{ marginBottom: '1rem' }}>Summary</h3>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <div className="adm-table-wrap">
+            <div style={{ padding: '1rem 1rem 0' }}><h3>Summary</h3></div>
+            <table className="adm-table">
               <thead>
-                <tr style={{ borderBottom: '2px solid var(--border)' }}>
-                  <th style={{ textAlign: 'left', padding: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Metric</th>
-                  <th style={{ textAlign: 'right', padding: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Value</th>
+                <tr>
+                  <th>Metric</th>
+                  <th>Value</th>
                 </tr>
               </thead>
               <tbody>
-                <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td style={{ padding: '0.75rem' }}>Period</td>
-                  <td style={{ padding: '0.75rem', textAlign: 'right' }}>{report.period}</td>
-                </tr>
-                <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td style={{ padding: '0.75rem' }}>From</td>
-                  <td style={{ padding: '0.75rem', textAlign: 'right' }}>{report.fromDate}</td>
-                </tr>
-                <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td style={{ padding: '0.75rem' }}>To</td>
-                  <td style={{ padding: '0.75rem', textAlign: 'right' }}>{report.toDate}</td>
-                </tr>
-                <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td style={{ padding: '0.75rem' }}>Total Bookings</td>
-                  <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: 600 }}>{report.totalBookings}</td>
-                </tr>
-                <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td style={{ padding: '0.75rem' }}>Actual Revenue (Collected)</td>
-                  <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: 700, color: 'var(--success)' }}>
-                    ₹{Number(report.totalRevenue ?? 0).toLocaleString()}
-                  </td>
-                </tr>
-                <tr>
-                  <td style={{ padding: '0.75rem' }}>Estimated Revenue (All Bookings)</td>
-                  <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: 700, color: 'var(--warning, #fdcb6e)' }}>
-                    ₹{Number(report.estimatedRevenue ?? 0).toLocaleString()}
-                  </td>
-                </tr>
+                <tr><td>Period</td><td>{report.period}</td></tr>
+                <tr><td>From</td><td>{report.fromDate}</td></tr>
+                <tr><td>To</td><td>{report.toDate}</td></tr>
+                <tr><td>Total Bookings</td><td className="highlight">{report.totalBookings}</td></tr>
+                <tr><td>Actual Revenue (Collected)</td><td className="highlight success">₹{Number(report.totalRevenue ?? 0).toLocaleString()}</td></tr>
+                <tr><td>Estimated Revenue (All Bookings)</td><td className="highlight warning">₹{Number(report.estimatedRevenue ?? 0).toLocaleString()}</td></tr>
               </tbody>
             </table>
           </div>
         </>
       ) : (
-        <div className="card" style={{ textAlign: 'center', padding: '2rem' }}>
-          <p style={{ color: 'var(--text-muted)' }}>Select a date range and click "Get Reports"</p>
+        <div className="adm-empty">
+          <span className="adm-empty-icon"><FiBarChart2 /></span>
+          <h3>No report loaded</h3>
+          <p>Select a date range above and click "Get Reports" to view analytics.</p>
         </div>
       )}
 
       {/* Audit Section */}
-      <div className="card" style={{ marginTop: '2rem', padding: '1.25rem' }}>
-        <h3 style={{ marginBottom: '0.75rem' }}>Daily Audit</h3>
+      <div className="adm-card">
+        <h3 style={{ marginBottom: '0.5rem' }}><FiCheckCircle style={{ marginRight: 6, verticalAlign: -2 }} />Daily Audit</h3>
         <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
           Run audit to auto-resolve the current operational day: unchecked-in → No-Show, checked-in but not finished → Completed.
           After audit, the system advances to the next business day.
@@ -221,28 +187,26 @@ export default function AdminReports() {
 
         {/* Operational date status panel */}
         {opInfo && (
-          <div style={{ marginBottom: '1rem', padding: '0.85rem 1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-input)', fontSize: '0.86rem' }}>
-            <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap', alignItems: 'center' }}>
-              <div>
-                <span style={{ color: 'var(--text-secondary)' }}>Operational Date: </span>
-                <strong style={{ fontSize: '1rem', color: 'var(--primary)' }}>{opInfo.operationalDate}</strong>
-              </div>
-              <div>
-                <span style={{ color: 'var(--text-secondary)' }}>Server Time: </span>
-                <strong style={{ fontFamily: 'monospace' }}>
-                  {opInfo.serverDateTime ? opInfo.serverDateTime.substring(11, 16) : '--:--'}
-                </strong>
-              </div>
-              <div>
-                <span style={{ color: 'var(--text-secondary)' }}>Audit: </span>
-                {opInfo.auditAvailable ? (
-                  <span style={{ color: 'var(--success, #00b894)', fontWeight: 700 }}>✓ Available now</span>
-                ) : (
-                  <span style={{ color: 'var(--warning, #fdcb6e)', fontWeight: 600 }}>
-                    ⏳ {opInfo.auditUnavailableReason}
-                  </span>
-                )}
-              </div>
+          <div className="adm-op-panel" style={{ marginBottom: '1rem' }}>
+            <div>
+              <span className="adm-op-label">Operational Date: </span>
+              <span className="adm-op-value">{opInfo.operationalDate}</span>
+            </div>
+            <div>
+              <span className="adm-op-label">Server Time: </span>
+              <span className="adm-op-value mono">
+                {opInfo.serverDateTime ? opInfo.serverDateTime.substring(11, 16) : '--:--'}
+              </span>
+            </div>
+            <div>
+              <span className="adm-op-label">Audit: </span>
+              {opInfo.auditAvailable ? (
+                <span style={{ color: 'var(--success)', fontWeight: 700 }}><FiCheckCircle style={{ verticalAlign: -2, marginRight: 3 }} />Available now</span>
+              ) : (
+                <span style={{ color: 'var(--warning, #f59e0b)', fontWeight: 600 }}>
+                  <FiClock style={{ verticalAlign: -2, marginRight: 3 }} />{opInfo.auditUnavailableReason}
+                </span>
+              )}
             </div>
           </div>
         )}
@@ -258,15 +222,16 @@ export default function AdminReports() {
           </button>
         </div>
         {opInfo && !opInfo.auditAvailable && (
-          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
+          <p className="adm-hint" style={{ marginTop: '0.4rem' }}>
+            <FiAlertTriangle style={{ verticalAlign: -2, marginRight: 3 }} />
             The audit button will activate after 11:59 PM server time.
           </p>
         )}
 
         {auditResult && (
-          <div style={{ marginTop: '1rem', padding: '1rem', background: 'var(--bg-input)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
-            <h4 style={{ marginBottom: '0.5rem' }}>Audit Results — {auditResult.auditDate}</h4>
-            <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', fontSize: '0.88rem' }}>
+          <div className="adm-audit-result" style={{ marginTop: '1rem' }}>
+            <h4>Audit Results — {auditResult.auditDate}</h4>
+            <div className="adm-audit-stats">
               <div><strong>{auditResult.totalProcessed}</strong> bookings processed</div>
               <div style={{ color: 'var(--danger)' }}><strong>{auditResult.markedNoShow}</strong> marked No-Show</div>
               <div style={{ color: 'var(--success)' }}><strong>{auditResult.markedCompleted}</strong> marked Completed</div>

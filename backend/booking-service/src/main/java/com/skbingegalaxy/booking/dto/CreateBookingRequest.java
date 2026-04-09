@@ -17,7 +17,6 @@ public class CreateBookingRequest {
     private Long eventTypeId;
 
     @NotNull(message = "Booking date is required")
-    @FutureOrPresent(message = "Booking date must be today or in the future")
     private LocalDate bookingDate;
 
     @NotNull(message = "Start time is required")

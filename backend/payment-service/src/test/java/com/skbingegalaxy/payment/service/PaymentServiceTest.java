@@ -1,23 +1,36 @@
 package com.skbingegalaxy.payment.service;
 
+import com.skbingegalaxy.common.context.BingeContext;
 import com.skbingegalaxy.common.enums.PaymentMethod;
 import com.skbingegalaxy.common.enums.PaymentStatus;
 import com.skbingegalaxy.common.exception.BusinessException;
 import com.skbingegalaxy.common.exception.ResourceNotFoundException;
-import com.skbingegalaxy.payment.dto.*;
+import com.skbingegalaxy.payment.dto.AddPaymentRequest;
+import com.skbingegalaxy.payment.dto.InitiatePaymentRequest;
+import com.skbingegalaxy.payment.dto.PaymentCallbackRequest;
+import com.skbingegalaxy.payment.dto.PaymentDto;
+import com.skbingegalaxy.payment.dto.RecordCashPaymentRequest;
+import com.skbingegalaxy.payment.dto.RefundDto;
+import com.skbingegalaxy.payment.dto.RefundRequest;
 import com.skbingegalaxy.payment.entity.Payment;
 import com.skbingegalaxy.payment.entity.Refund;
 import com.skbingegalaxy.payment.repository.PaymentRepository;
 import com.skbingegalaxy.payment.repository.RefundRepository;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.test.util.ReflectionTestUtils;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -47,6 +60,9 @@ class PaymentServiceTest {
 
     @BeforeEach
     void setUp() {
+                BingeContext.clear();
+                ReflectionTestUtils.setField(paymentService, "razorpayKeySecret", "test-razorpay-secret");
+                ReflectionTestUtils.setField(paymentService, "paymentSimulationEnabled", true);
         testPayment = Payment.builder()
                 .id(1L)
                 .bookingRef("SKBG25123456")
@@ -61,6 +77,11 @@ class PaymentServiceTest {
                 .build();
     }
 
+        @AfterEach
+        void tearDown() {
+                BingeContext.clear();
+        }
+
     // â”€â”€ Initiate payment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Test
@@ -73,14 +94,14 @@ class PaymentServiceTest {
                 .build();
 
         when(paymentRepository.findByBookingRefAndStatus("SKBG25123456", PaymentStatus.SUCCESS))
-                .thenReturn(Optional.empty());
+                .thenReturn(List.of());
         when(paymentRepository.findFirstByBookingRefAndStatusOrderByCreatedAtDesc(
                 "SKBG25123456", PaymentStatus.INITIATED))
                 .thenReturn(Optional.empty());
         when(paymentRepository.save(any(Payment.class))).thenReturn(testPayment);
         stubNoRefunds(1L);
 
-        PaymentDto result = paymentService.initiatePayment(request, 1L);
+        PaymentDto result = paymentService.initiatePayment(request, 1L, "test@example.com", "Test User");
 
         assertThat(result.getBookingRef()).isEqualTo("SKBG25123456");
         assertThat(result.getTransactionId()).isEqualTo("TXN-ABCD1234");
@@ -96,13 +117,13 @@ class PaymentServiceTest {
                 .build();
 
         when(paymentRepository.findByBookingRefAndStatus("SKBG25123456", PaymentStatus.SUCCESS))
-                .thenReturn(Optional.empty());
+                .thenReturn(List.of());
         when(paymentRepository.findFirstByBookingRefAndStatusOrderByCreatedAtDesc(
                 "SKBG25123456", PaymentStatus.INITIATED))
                 .thenReturn(Optional.of(testPayment));
         stubNoRefunds(1L);
 
-        PaymentDto result = paymentService.initiatePayment(request, 1L);
+        PaymentDto result = paymentService.initiatePayment(request, 1L, "test@example.com", "Test User");
 
         assertThat(result.getTransactionId()).isEqualTo("TXN-ABCD1234");
         // Must NOT create a second record
@@ -118,21 +139,62 @@ class PaymentServiceTest {
                 .build();
 
         testPayment.setStatus(PaymentStatus.SUCCESS);
-        when(paymentRepository.findByBookingRefAndStatus("SKBG25123456", PaymentStatus.SUCCESS))
-                .thenReturn(Optional.of(testPayment));
+        when(paymentRepository.findByBookingRefAndStatus("SKBG25123456", PaymentStatus.SUCCESS)).thenReturn(List.of(testPayment));
 
-        assertThatThrownBy(() -> paymentService.initiatePayment(request, 1L))
+        assertThatThrownBy(() -> paymentService.initiatePayment(request, 1L, "test@example.com", "Test User"))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("already completed");
+    }
+
+    @Test
+    void initiatePayment_selectedBingePersistsScopedPayment() {
+        BingeContext.setBingeId(11L);
+
+        InitiatePaymentRequest request = InitiatePaymentRequest.builder()
+                .bookingRef("SKBG25123456")
+                .amount(BigDecimal.valueOf(5000))
+                .paymentMethod(PaymentMethod.UPI)
+                .currency("INR")
+                .build();
+
+        Payment savedPayment = Payment.builder()
+                .id(1L)
+                .bookingRef("SKBG25123456")
+                .customerId(1L)
+                .bingeId(11L)
+                .transactionId("TXN-ABCD1234")
+                .gatewayOrderId("ORD-EFGH5678")
+                .amount(BigDecimal.valueOf(5000))
+                .paymentMethod(PaymentMethod.UPI)
+                .status(PaymentStatus.INITIATED)
+                .currency("INR")
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        when(paymentRepository.findByBookingRefAndStatusAndBingeId("SKBG25123456", PaymentStatus.SUCCESS, 11L))
+                .thenReturn(List.of());
+        when(paymentRepository.findFirstByBookingRefAndStatusAndBingeIdOrderByCreatedAtDesc(
+                "SKBG25123456", PaymentStatus.INITIATED, 11L))
+                .thenReturn(Optional.empty());
+        when(paymentRepository.save(any(Payment.class))).thenReturn(savedPayment);
+        stubNoRefunds(1L);
+
+        paymentService.initiatePayment(request, 1L, "test@example.com", "Test User");
+
+        ArgumentCaptor<Payment> paymentCaptor = ArgumentCaptor.forClass(Payment.class);
+        verify(paymentRepository).save(paymentCaptor.capture());
+        assertThat(paymentCaptor.getValue().getBingeId()).isEqualTo(11L);
     }
 
     // â”€â”€ Handle callback â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Test
     void handleCallback_success() {
+        String gatewayPaymentId = "PAY-12345";
         PaymentCallbackRequest request = PaymentCallbackRequest.builder()
                 .gatewayOrderId("ORD-EFGH5678")
-                .gatewayPaymentId("PAY-12345")
+                .gatewayPaymentId(gatewayPaymentId)
+                .gatewaySignature(sign("ORD-EFGH5678|" + gatewayPaymentId))
                 .status("success")
                 .build();
 
@@ -154,6 +216,7 @@ class PaymentServiceTest {
                 .gatewayOrderId("ORD-EFGH5678")
                 .status("failed")
                 .errorDescription("Insufficient funds")
+                .gatewaySignature(sign("ORD-EFGH5678|"))
                 .build();
 
         when(paymentRepository.findByGatewayOrderId("ORD-EFGH5678"))
@@ -166,6 +229,22 @@ class PaymentServiceTest {
         assertThat(testPayment.getStatus()).isEqualTo(PaymentStatus.FAILED);
         assertThat(testPayment.getFailureReason()).isEqualTo("Insufficient funds");
     }
+
+        @Test
+        void handleCallback_successMissingSignature_throwsException() {
+                PaymentCallbackRequest request = PaymentCallbackRequest.builder()
+                                .gatewayOrderId("ORD-EFGH5678")
+                                .gatewayPaymentId("PAY-12345")
+                                .status("success")
+                                .build();
+
+                when(paymentRepository.findByGatewayOrderId("ORD-EFGH5678"))
+                        .thenReturn(Optional.of(testPayment));
+
+                assertThatThrownBy(() -> paymentService.handleCallback(request))
+                                .isInstanceOf(BusinessException.class)
+                                .hasMessageContaining("signature is required");
+        }
 
     @Test
     void handleCallback_alreadySuccessful_returnsExisting() {
@@ -233,6 +312,15 @@ class PaymentServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("Cannot simulate a REFUNDED payment");
     }
+
+        @Test
+        void simulatePayment_disabled_throwsException() {
+                ReflectionTestUtils.setField(paymentService, "paymentSimulationEnabled", false);
+
+                assertThatThrownBy(() -> paymentService.simulatePayment("TXN-ABCD1234"))
+                                .isInstanceOf(BusinessException.class)
+                                .hasMessageContaining("Payment simulation is disabled");
+        }
 
     // â”€â”€ Cancel payment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -407,7 +495,7 @@ class PaymentServiceTest {
                 .thenReturn(Optional.of(testPayment));
         stubNoRefunds(1L);
 
-        PaymentDto result = paymentService.getPaymentByTransactionId("TXN-ABCD1234");
+        PaymentDto result = paymentService.getPaymentByTransactionId("TXN-ABCD1234", 1L, "CUSTOMER");
         assertThat(result.getTransactionId()).isEqualTo("TXN-ABCD1234");
     }
 
@@ -415,7 +503,29 @@ class PaymentServiceTest {
     void getPaymentByTransactionId_notFound_throwsException() {
         when(paymentRepository.findByTransactionId("INVALID")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> paymentService.getPaymentByTransactionId("INVALID"))
+        assertThatThrownBy(() -> paymentService.getPaymentByTransactionId("INVALID", 1L, "CUSTOMER"))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void getPaymentByTransactionId_wrongOwner_throwsException() {
+        when(paymentRepository.findByTransactionId("TXN-ABCD1234"))
+                .thenReturn(Optional.of(testPayment));
+
+        assertThatThrownBy(() -> paymentService.getPaymentByTransactionId("TXN-ABCD1234", 99L, "CUSTOMER"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Not authorized");
+    }
+
+    @Test
+    void getPaymentByTransactionId_selectedBingeRejectsDifferentBinge() {
+        BingeContext.setBingeId(11L);
+        testPayment.setBingeId(99L);
+
+        when(paymentRepository.findByTransactionId("TXN-ABCD1234"))
+                .thenReturn(Optional.of(testPayment));
+
+        assertThatThrownBy(() -> paymentService.getPaymentByTransactionId("TXN-ABCD1234", 1L, "ADMIN"))
                 .isInstanceOf(ResourceNotFoundException.class);
     }
 
@@ -429,15 +539,52 @@ class PaymentServiceTest {
         assertThat(result).hasSize(1);
     }
 
+        @Test
+        void getCustomerPayments_selectedBingeUsesScopedQuery() {
+                BingeContext.setBingeId(11L);
+                testPayment.setBingeId(11L);
+
+                when(paymentRepository.findByCustomerIdAndBingeIdOrderByCreatedAtDesc(1L, 11L))
+                                .thenReturn(List.of(testPayment));
+                stubNoRefunds(1L);
+
+                List<PaymentDto> result = paymentService.getCustomerPayments(1L);
+
+                assertThat(result).hasSize(1);
+                verify(paymentRepository).findByCustomerIdAndBingeIdOrderByCreatedAtDesc(1L, 11L);
+                verify(paymentRepository, never()).findByCustomerIdOrderByCreatedAtDesc(1L);
+        }
+
     @Test
     void getPaymentsByBookingRef_returnsList() {
         when(paymentRepository.findByBookingRefOrderByCreatedAtDesc("SKBG25123456"))
                 .thenReturn(List.of(testPayment));
         stubNoRefunds(1L);
 
-        List<PaymentDto> result = paymentService.getPaymentsByBookingRef("SKBG25123456");
+        List<PaymentDto> result = paymentService.getPaymentsByBookingRef("SKBG25123456", 1L, "CUSTOMER");
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getBookingRef()).isEqualTo("SKBG25123456");
+    }
+
+    @Test
+    void getPaymentsByBookingRef_wrongOwner_throwsException() {
+        when(paymentRepository.findByBookingRefOrderByCreatedAtDesc("SKBG25123456"))
+                .thenReturn(List.of(testPayment));
+
+        assertThatThrownBy(() -> paymentService.getPaymentsByBookingRef("SKBG25123456", 99L, "CUSTOMER"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Not authorized");
+    }
+
+    @Test
+    void getPaymentsByBookingRef_adminCanAccessAnyBooking() {
+        when(paymentRepository.findByBookingRefOrderByCreatedAtDesc("SKBG25123456"))
+                .thenReturn(List.of(testPayment));
+        stubNoRefunds(1L);
+
+        List<PaymentDto> result = paymentService.getPaymentsByBookingRef("SKBG25123456", 77L, "ADMIN");
+
+        assertThat(result).hasSize(1);
     }
 
     // ── Record cash payment ─────────────────────────────────────────────────
@@ -451,8 +598,7 @@ class PaymentServiceTest {
                 .notes("Paid at counter")
                 .build();
 
-        when(paymentRepository.findByBookingRefAndStatus("SKBG25999999", PaymentStatus.SUCCESS))
-                .thenReturn(Optional.empty());
+        when(paymentRepository.findByBookingRefAndStatus("SKBG25999999", PaymentStatus.SUCCESS)).thenReturn(List.of());
 
         Payment cashPayment = Payment.builder()
                 .id(10L)
@@ -487,8 +633,7 @@ class PaymentServiceTest {
                 .build();
 
         testPayment.setStatus(PaymentStatus.SUCCESS);
-        when(paymentRepository.findByBookingRefAndStatus("SKBG25999999", PaymentStatus.SUCCESS))
-                .thenReturn(Optional.of(testPayment));
+        when(paymentRepository.findByBookingRefAndStatus("SKBG25999999", PaymentStatus.SUCCESS)).thenReturn(List.of(testPayment));
         stubNoRefunds(1L);
 
         PaymentDto result = paymentService.recordCashPayment(request, "admin@test.com");
@@ -619,6 +764,28 @@ class PaymentServiceTest {
         assertThat(stats.get("partiallyRefundedCount")).isEqualTo(1L);
     }
 
+        @Test
+        void getPaymentStats_selectedBingeUsesScopedAggregates() {
+                BingeContext.setBingeId(11L);
+
+                when(paymentRepository.getTotalSuccessfulPaymentsByBingeId(11L)).thenReturn(BigDecimal.valueOf(12000));
+                when(refundRepository.sumAllCompletedRefundsByBingeId(anyList(), eq(11L))).thenReturn(BigDecimal.valueOf(2000));
+                when(paymentRepository.countByStatusAndBingeId(PaymentStatus.SUCCESS, 11L)).thenReturn(4L);
+                when(paymentRepository.countByStatusAndBingeId(PaymentStatus.FAILED, 11L)).thenReturn(1L);
+                when(paymentRepository.countByStatusAndBingeId(PaymentStatus.INITIATED, 11L)).thenReturn(2L);
+                when(paymentRepository.countByStatusAndBingeId(PaymentStatus.REFUNDED, 11L)).thenReturn(1L);
+                when(paymentRepository.countByStatusAndBingeId(PaymentStatus.PARTIALLY_REFUNDED, 11L)).thenReturn(1L);
+
+                var stats = paymentService.getPaymentStats();
+
+                assertThat(stats.get("totalRevenue")).isEqualTo(BigDecimal.valueOf(12000));
+                assertThat(stats.get("totalRefunded")).isEqualTo(BigDecimal.valueOf(2000));
+                assertThat(stats.get("netRevenue")).isEqualTo(BigDecimal.valueOf(10000));
+                assertThat(stats.get("successCount")).isEqualTo(4L);
+                verify(paymentRepository).getTotalSuccessfulPaymentsByBingeId(11L);
+                verify(refundRepository).sumAllCompletedRefundsByBingeId(anyList(), eq(11L));
+        }
+
     // ── Simulate payment – failed retry ─────────────────────────────────────
 
     @Test
@@ -639,9 +806,11 @@ class PaymentServiceTest {
 
     @Test
     void handleCallback_capturedStatus_success() {
+        String gatewayPaymentId = "PAY-CAP-1";
         PaymentCallbackRequest request = PaymentCallbackRequest.builder()
                 .gatewayOrderId("ORD-EFGH5678")
-                .gatewayPaymentId("PAY-CAP-1")
+                .gatewayPaymentId(gatewayPaymentId)
+                .gatewaySignature(sign("ORD-EFGH5678|" + gatewayPaymentId))
                 .status("captured")
                 .build();
 
@@ -655,5 +824,58 @@ class PaymentServiceTest {
         assertThat(testPayment.getStatus()).isEqualTo(PaymentStatus.SUCCESS);
         verify(kafkaTemplate).send(anyString(), anyString(), any());
     }
+
+    // ── ensurePaymentAccess null-safety tests ───────────────────────────────
+
+    @Test
+    void getPaymentByTransactionId_nullCustomerId_customerRole_throwsForbidden() {
+        testPayment.setCustomerId(null);
+        testPayment.setStatus(PaymentStatus.SUCCESS);
+        when(paymentRepository.findByTransactionId("TXN-ABCD1234"))
+                .thenReturn(Optional.of(testPayment));
+
+        assertThatThrownBy(() -> paymentService.getPaymentByTransactionId("TXN-ABCD1234", 1L, "CUSTOMER"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Not authorized");
+    }
+
+    @Test
+    void getPaymentByTransactionId_nullRequesterId_throwsForbidden() {
+        testPayment.setStatus(PaymentStatus.SUCCESS);
+        when(paymentRepository.findByTransactionId("TXN-ABCD1234"))
+                .thenReturn(Optional.of(testPayment));
+
+        assertThatThrownBy(() -> paymentService.getPaymentByTransactionId("TXN-ABCD1234", null, "CUSTOMER"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Not authorized");
+    }
+
+    @Test
+    void getPaymentByTransactionId_adminRole_bypassesAccessCheck() {
+        testPayment.setCustomerId(null);
+        testPayment.setStatus(PaymentStatus.SUCCESS);
+        when(paymentRepository.findByTransactionId("TXN-ABCD1234"))
+                .thenReturn(Optional.of(testPayment));
+        stubNoRefunds(1L);
+
+        PaymentDto result = paymentService.getPaymentByTransactionId("TXN-ABCD1234", 99L, "ADMIN");
+
+        assertThat(result.getTransactionId()).isEqualTo("TXN-ABCD1234");
+    }
+
+        private String sign(String payload) {
+                try {
+                        Mac mac = Mac.getInstance("HmacSHA256");
+                        mac.init(new SecretKeySpec("test-razorpay-secret".getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+                        byte[] hash = mac.doFinal(payload.getBytes(StandardCharsets.UTF_8));
+                        StringBuilder builder = new StringBuilder(hash.length * 2);
+                        for (byte value : hash) {
+                                builder.append(String.format("%02x", value));
+                        }
+                        return builder.toString();
+                } catch (Exception exception) {
+                        throw new RuntimeException(exception);
+                }
+        }
 }
 

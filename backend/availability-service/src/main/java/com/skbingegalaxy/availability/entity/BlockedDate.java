@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "blocked_dates", uniqueConstraints = {
-    @UniqueConstraint(name = "uk_blocked_dates_date", columnNames = "blockedDate")
+    @UniqueConstraint(name = "uk_blocked_dates_binge_date", columnNames = {"bingeId", "blockedDate"})
 })
 @Getter @Setter
 @NoArgsConstructor @AllArgsConstructor

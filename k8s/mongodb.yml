@@ -5,7 +5,8 @@ metadata:
   namespace: sk-binge-galaxy
 spec:
   serviceName: mongodb
-  replicas: 1  # Scale to 3 for replica-set HA in production
+  replicas: 3
+  podManagementPolicy: Parallel
   selector:
     matchLabels:
       app: mongodb
@@ -15,9 +16,22 @@ spec:
         app: mongodb
     spec:
       terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
       containers:
         - name: mongodb
-          image: mongo:7
+          image: mongo:7.0
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          args:
+            - --bind_ip_all
+            - --replSet
+            - rs0
           ports:
             - containerPort: 27017
               name: mongodb
@@ -44,14 +58,20 @@ spec:
               cpu: "1000m"
           livenessProbe:
             exec:
-              command: ["mongosh", "--eval", "db.adminCommand('ping')"]
+              command:
+                - bash
+                - -c
+                - mongosh --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval "db.adminCommand('ping')"
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 6
           readinessProbe:
             exec:
-              command: ["mongosh", "--eval", "db.adminCommand('ping')"]
+              command:
+                - bash
+                - -c
+                - mongosh --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval "db.adminCommand('ping')"
             initialDelaySeconds: 5
             periodSeconds: 5
             timeoutSeconds: 3
@@ -60,6 +80,7 @@ spec:
         name: mongo-data
       spec:
         accessModes: ["ReadWriteOnce"]
+        storageClassName: __STORAGE_CLASS_NAME__
         resources:
           requests:
             storage: 10Gi
@@ -77,3 +98,64 @@ spec:
     - port: 27017
       targetPort: 27017
       name: mongodb
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mongodb-rs-init
+  namespace: sk-binge-galaxy
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        app: mongodb-rs-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mongodb-rs-init
+          image: mongo:7.0
+          env:
+            - name: MONGO_USER
+              valueFrom:
+                secretKeyRef:
+                  name: db-secrets
+                  key: MONGO_USER
+            - name: MONGO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-secrets
+                  key: MONGO_PASSWORD
+          command:
+            - bash
+            - -c
+            - |
+              set -euo pipefail
+
+              hosts=(mongodb-0.mongodb mongodb-1.mongodb mongodb-2.mongodb)
+              for host in "${hosts[@]}"; do
+                until mongosh --host "$host" --username "$MONGO_USER" --password "$MONGO_PASSWORD" --authenticationDatabase admin --eval "db.adminCommand('ping')" >/dev/null 2>&1; do
+                  echo "Waiting for $host"
+                  sleep 5
+                done
+              done
+
+              mongosh --host mongodb-0.mongodb \
+                --username "$MONGO_USER" \
+                --password "$MONGO_PASSWORD" \
+                --authenticationDatabase admin \
+                --eval '
+                  try {
+                    rs.status();
+                    print("Replica set already initialized");
+                  } catch (error) {
+                    rs.initiate({
+                      _id: "rs0",
+                      members: [
+                        { _id: 0, host: "mongodb-0.mongodb:27017" },
+                        { _id: 1, host: "mongodb-1.mongodb:27017" },
+                        { _id: 2, host: "mongodb-2.mongodb:27017" }
+                      ]
+                    });
+                  }
+                '

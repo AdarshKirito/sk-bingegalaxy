@@ -18,6 +18,9 @@ import java.util.List;
  */
 public class GatewayHeaderAuthFilter extends jakarta.servlet.http.HttpFilter {
 
+    private static final java.util.Set<String> VALID_ROLES = java.util.Set.of(
+        "CUSTOMER", "ADMIN", "SUPER_ADMIN");
+
     @Override
     protected void doFilter(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws IOException, ServletException {
@@ -25,7 +28,7 @@ public class GatewayHeaderAuthFilter extends jakarta.servlet.http.HttpFilter {
         String userId = request.getHeader("X-User-Id");
         String role = request.getHeader("X-User-Role");
 
-        if (userId != null && role != null) {
+        if (userId != null && role != null && VALID_ROLES.contains(role)) {
             var authorities = List.of(new SimpleGrantedAuthority("ROLE_" + role));
             var auth = new UsernamePasswordAuthenticationToken(userId, null, authorities);
             SecurityContextHolder.getContext().setAuthentication(auth);

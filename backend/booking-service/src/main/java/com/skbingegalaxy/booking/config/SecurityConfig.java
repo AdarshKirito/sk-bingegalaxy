@@ -21,7 +21,12 @@ public class SecurityConfig {
             .addFilterBefore(new GatewayHeaderAuthFilter(), UsernamePasswordAuthenticationFilter.class)
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/v1/bookings/admin/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
-                .requestMatchers("/api/v1/bookings/binges/**", "/api/v1/bookings/event-types", "/api/v1/bookings/add-ons").permitAll()
+                .requestMatchers(
+                    "/api/v1/bookings/binges/**",
+                    "/api/v1/bookings/event-types",
+                    "/api/v1/bookings/add-ons",
+                    "/api/v1/bookings/booked-slots"
+                ).permitAll()
                 .requestMatchers("/actuator/**").permitAll()
                 .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
                 .anyRequest().authenticated()

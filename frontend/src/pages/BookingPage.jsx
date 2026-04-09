@@ -12,7 +12,8 @@ export default function BookingPage() {
   const [searchParams] = useSearchParams();
   const { selectedBinge } = useBingeStore();
   const prefillBooking = location.state?.prefillBooking || null;
-  const initialEventTypeId = Number(location.state?.eventTypeId || prefillBooking?.eventTypeId || searchParams.get('eventType') || '') || null;
+  const rawEventTypeId = Number(location.state?.eventTypeId || prefillBooking?.eventTypeId || searchParams.get('eventType') || '');
+  const initialEventTypeId = Number.isFinite(rawEventTypeId) && rawEventTypeId > 0 ? rawEventTypeId : null;
   const prefilledEventName = location.state?.eventTypeName || null;
 
   const handleSubmit = async (payload) => {

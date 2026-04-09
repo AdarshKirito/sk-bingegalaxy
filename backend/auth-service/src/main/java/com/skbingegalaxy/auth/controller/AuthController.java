@@ -3,7 +3,7 @@ package com.skbingegalaxy.auth.controller;
 import com.skbingegalaxy.auth.dto.*;
 import com.skbingegalaxy.auth.service.AuthService;
 import com.skbingegalaxy.common.dto.ApiResponse;
-import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -25,7 +25,7 @@ public class AuthController {
     @Value("${app.jwt.refresh-expiration-ms:604800000}")
     private long refreshExpirationMs;
 
-    @Value("${app.cookie.secure:false}")
+    @Value("${app.cookie.secure:true}")
     private boolean cookieSecure;
 
     @Value("${app.cookie.domain:}")
@@ -33,34 +33,38 @@ public class AuthController {
 
     @PostMapping("/google")
     public ResponseEntity<ApiResponse<AuthResponse>> googleLogin(@Valid @RequestBody GoogleLoginRequest request,
+                                                                  HttpServletRequest httpRequest,
                                                                   HttpServletResponse response) {
         AuthResponse authResponse = authService.googleLogin(request.getCredential());
-        setAuthCookies(response, authResponse);
+        setAuthCookies(httpRequest, response, authResponse);
         return ResponseEntity.ok(ApiResponse.ok("Google login successful", authResponse));
     }
 
     @PostMapping("/register")
     public ResponseEntity<ApiResponse<AuthResponse>> register(@Valid @RequestBody RegisterRequest request,
+                                                               HttpServletRequest httpRequest,
                                                                HttpServletResponse response) {
         AuthResponse authResponse = authService.register(request);
-        setAuthCookies(response, authResponse);
+        setAuthCookies(httpRequest, response, authResponse);
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(ApiResponse.ok("Registration successful", authResponse));
     }
 
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<AuthResponse>> login(@Valid @RequestBody LoginRequest request,
+                                                            HttpServletRequest httpRequest,
                                                             HttpServletResponse response) {
         AuthResponse authResponse = authService.login(request);
-        setAuthCookies(response, authResponse);
+        setAuthCookies(httpRequest, response, authResponse);
         return ResponseEntity.ok(ApiResponse.ok("Login successful", authResponse));
     }
 
     @PostMapping("/admin/login")
     public ResponseEntity<ApiResponse<AuthResponse>> adminLogin(@Valid @RequestBody LoginRequest request,
+                                                                 HttpServletRequest httpRequest,
                                                                  HttpServletResponse response) {
         AuthResponse authResponse = authService.adminLogin(request);
-        setAuthCookies(response, authResponse);
+        setAuthCookies(httpRequest, response, authResponse);
         return ResponseEntity.ok(ApiResponse.ok("Admin login successful", authResponse));
     }
 
@@ -68,6 +72,7 @@ public class AuthController {
     public ResponseEntity<ApiResponse<AuthResponse>> refreshToken(
             @CookieValue(name = "refreshToken", required = false) String cookieRefreshToken,
             @RequestBody(required = false) RefreshTokenRequest request,
+            HttpServletRequest httpRequest,
             HttpServletResponse response) {
         String rt = cookieRefreshToken != null ? cookieRefreshToken
                    : (request != null ? request.getRefreshToken() : null);
@@ -76,7 +81,7 @@ public class AuthController {
                 .body(ApiResponse.error("Missing refresh token"));
         }
         AuthResponse authResponse = authService.refreshToken(rt);
-        setAuthCookies(response, authResponse);
+        setAuthCookies(httpRequest, response, authResponse);
         return ResponseEntity.ok(ApiResponse.ok("Token refreshed", authResponse));
     }
 
@@ -124,21 +129,31 @@ public class AuthController {
     }
 
     @PutMapping("/complete-profile")
-    public ResponseEntity<ApiResponse<UserDto>> completeProfile(
+    public ResponseEntity<ApiResponse<AuthResponse>> completeProfile(
             @RequestHeader("X-User-Id") Long userId,
-            @Valid @RequestBody CompleteProfileRequest request) {
-        UserDto updated = authService.completeProfile(userId, request.getPhone());
-        return ResponseEntity.ok(ApiResponse.ok("Profile updated", updated));
+            @Valid @RequestBody CompleteProfileRequest request,
+            HttpServletRequest httpRequest,
+            HttpServletResponse response) {
+        AuthResponse authResponse = authService.completeProfile(userId, request.getPhone());
+        setAuthCookies(httpRequest, response, authResponse);
+        return ResponseEntity.ok(ApiResponse.ok("Profile updated", authResponse));
     }
 
     @GetMapping("/admin/search-customers")
-    public ResponseEntity<ApiResponse<java.util.List<UserDto>>> searchCustomers(@RequestParam String q) {
-        return ResponseEntity.ok(ApiResponse.ok(authService.searchCustomers(q)));
+    public ResponseEntity<ApiResponse<org.springframework.data.domain.Page<UserDto>>> searchCustomers(
+            @RequestParam String q,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(page, Math.min(size, 200));
+        return ResponseEntity.ok(ApiResponse.ok(authService.searchCustomers(q, pageable)));
     }
 
     @GetMapping("/admin/customers")
-    public ResponseEntity<ApiResponse<java.util.List<UserDto>>> getAllCustomers() {
-        return ResponseEntity.ok(ApiResponse.ok(authService.getAllCustomers()));
+    public ResponseEntity<ApiResponse<org.springframework.data.domain.Page<UserDto>>> getAllCustomers(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(page, Math.min(size, 200));
+        return ResponseEntity.ok(ApiResponse.ok(authService.getAllCustomers(pageable)));
     }
 
     @GetMapping("/admin/customer/{id}")
@@ -155,7 +170,7 @@ public class AuthController {
     }
 
     @PostMapping("/admin/create-customer")
-    public ResponseEntity<ApiResponse<UserDto>> adminCreateCustomer(@Valid @RequestBody RegisterRequest request) {
+    public ResponseEntity<ApiResponse<UserDto>> adminCreateCustomer(@Valid @RequestBody AdminCreateCustomerRequest request) {
         UserDto user = authService.adminCreateCustomer(request);
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(ApiResponse.ok("Customer created", user));
@@ -163,9 +178,10 @@ public class AuthController {
 
     @PostMapping("/admin/register")
     public ResponseEntity<ApiResponse<AuthResponse>> adminRegister(@Valid @RequestBody RegisterRequest request,
+                                                                    HttpServletRequest httpRequest,
                                                                     HttpServletResponse response) {
         AuthResponse authResponse = authService.adminRegister(request);
-        setAuthCookies(response, authResponse);
+        setAuthCookies(httpRequest, response, authResponse);
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(ApiResponse.ok("Admin registration successful", authResponse));
     }
@@ -190,51 +206,110 @@ public class AuthController {
     }
 
     // ── Cookie helpers ───────────────────────────────────────
-    private void setAuthCookies(HttpServletResponse response, AuthResponse authResponse) {
-        Cookie accessCookie = new Cookie("token", authResponse.getToken());
-        accessCookie.setHttpOnly(true);
-        accessCookie.setSecure(cookieSecure);
-        accessCookie.setPath("/");
-        accessCookie.setMaxAge((int) (jwtExpirationMs / 1000));
-        if (cookieDomain != null && !cookieDomain.isBlank()) {
-            accessCookie.setDomain(cookieDomain);
-        }
-        accessCookie.setAttribute("SameSite", "Strict");
-        response.addCookie(accessCookie);
-
-        Cookie refreshCookie = new Cookie("refreshToken", authResponse.getRefreshToken());
-        refreshCookie.setHttpOnly(true);
-        refreshCookie.setSecure(cookieSecure);
-        refreshCookie.setPath("/api/v1/auth/refresh");
-        refreshCookie.setMaxAge((int) (refreshExpirationMs / 1000));
-        if (cookieDomain != null && !cookieDomain.isBlank()) {
-            refreshCookie.setDomain(cookieDomain);
-        }
-        refreshCookie.setAttribute("SameSite", "Strict");
-        response.addCookie(refreshCookie);
+    // Use Set-Cookie header directly to properly set SameSite attribute
+    // (Cookie.setAttribute("SameSite",...) is not honoured by all containers)
+    private void setAuthCookies(HttpServletRequest request, HttpServletResponse response, AuthResponse authResponse) {
+        boolean useSecureCookies = shouldUseSecureCookies(request);
+        response.addHeader("Set-Cookie", buildCookieHeader(
+            "token", authResponse.getToken(), "/", (int) (jwtExpirationMs / 1000), useSecureCookies));
+        response.addHeader("Set-Cookie", buildCookieHeader(
+            "refreshToken", authResponse.getRefreshToken(), "/api/v1/auth/refresh", (int) (refreshExpirationMs / 1000), useSecureCookies));
     }
 
     private void clearAuthCookies(HttpServletResponse response) {
-        Cookie accessCookie = new Cookie("token", "");
-        accessCookie.setHttpOnly(true);
-        accessCookie.setSecure(cookieSecure);
-        accessCookie.setPath("/");
-        accessCookie.setMaxAge(0);
-        if (cookieDomain != null && !cookieDomain.isBlank()) {
-            accessCookie.setDomain(cookieDomain);
-        }
-        accessCookie.setAttribute("SameSite", "Strict");
-        response.addCookie(accessCookie);
+        response.addHeader("Set-Cookie", buildCookieHeader("token", "", "/", 0, false));
+        response.addHeader("Set-Cookie", buildCookieHeader("refreshToken", "", "/api/v1/auth/refresh", 0, false));
+    }
 
-        Cookie refreshCookie = new Cookie("refreshToken", "");
-        refreshCookie.setHttpOnly(true);
-        refreshCookie.setSecure(cookieSecure);
-        refreshCookie.setPath("/api/v1/auth/refresh");
-        refreshCookie.setMaxAge(0);
-        if (cookieDomain != null && !cookieDomain.isBlank()) {
-            refreshCookie.setDomain(cookieDomain);
+    private String buildCookieHeader(String name, String value, String path, int maxAge, boolean secureCookie) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(name).append('=').append(value);
+        sb.append("; Path=").append(path);
+        sb.append("; Max-Age=").append(maxAge);
+        sb.append("; HttpOnly");
+        sb.append("; SameSite=Strict");
+        if (secureCookie) {
+            sb.append("; Secure");
         }
-        refreshCookie.setAttribute("SameSite", "Strict");
-        response.addCookie(refreshCookie);
+        if (cookieDomain != null && !cookieDomain.isBlank()) {
+            sb.append("; Domain=").append(cookieDomain);
+        }
+        return sb.toString();
+    }
+
+    private boolean shouldUseSecureCookies(HttpServletRequest request) {
+        if (!cookieSecure) {
+            return false;
+        }
+        if (isHttpsRequest(request)) {
+            return true;
+        }
+        return !isLocalDevelopmentRequest(request);
+    }
+
+    private boolean isHttpsRequest(HttpServletRequest request) {
+        if (request.isSecure()) {
+            return true;
+        }
+
+        String forwardedProto = request.getHeader("X-Forwarded-Proto");
+        if (forwardedProto != null && "https".equalsIgnoreCase(forwardedProto)) {
+            return true;
+        }
+
+        String forwardedSsl = request.getHeader("X-Forwarded-Ssl");
+        return forwardedSsl != null && "on".equalsIgnoreCase(forwardedSsl);
+    }
+
+    private boolean isLocalDevelopmentRequest(HttpServletRequest request) {
+        return isLocalHost(request.getServerName())
+            || isLocalHost(request.getHeader("Host"))
+            || isLocalHost(request.getHeader("X-Forwarded-Host"))
+            || isLocalHost(extractHost(request.getHeader("Origin")))
+            || isLocalHost(extractHost(request.getHeader("Referer")));
+    }
+
+    private boolean isLocalHost(String hostValue) {
+        if (hostValue == null || hostValue.isBlank()) {
+            return false;
+        }
+
+        String normalized = hostValue.trim();
+        int schemeSeparator = normalized.indexOf("://");
+        if (schemeSeparator >= 0) {
+            normalized = normalized.substring(schemeSeparator + 3);
+        }
+        int slashIndex = normalized.indexOf('/');
+        if (slashIndex >= 0) {
+            normalized = normalized.substring(0, slashIndex);
+        }
+        if (normalized.startsWith("[") && normalized.contains("]")) {
+            normalized = normalized.substring(1, normalized.indexOf(']'));
+        } else {
+            int portSeparator = normalized.indexOf(':');
+            if (portSeparator >= 0) {
+                normalized = normalized.substring(0, portSeparator);
+            }
+        }
+
+        return "localhost".equalsIgnoreCase(normalized)
+            || normalized.endsWith(".localhost")
+            || "127.0.0.1".equals(normalized)
+            || "0.0.0.0".equals(normalized)
+            || "::1".equals(normalized);
+    }
+
+    private String extractHost(String urlValue) {
+        if (urlValue == null || urlValue.isBlank()) {
+            return null;
+        }
+
+        String normalized = urlValue.trim();
+        int schemeSeparator = normalized.indexOf("://");
+        if (schemeSeparator >= 0) {
+            normalized = normalized.substring(schemeSeparator + 3);
+        }
+        int slashIndex = normalized.indexOf('/');
+        return slashIndex >= 0 ? normalized.substring(0, slashIndex) : normalized;
     }
 }

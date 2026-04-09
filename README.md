@@ -78,6 +78,10 @@ cd ..
 docker-compose up --build -d
 ```
 
+Local Docker Compose defaults to HTTP-safe auth cookies and simulated payments.
+To test the real Razorpay flow locally, set `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`,
+`PAYMENT_CALLBACK_URL`, and `PAYMENT_SIMULATION_ENABLED=false` before starting.
+
 The application will be available at:
 - **Frontend**: http://localhost:3000
 - **API Gateway**: http://localhost:8080
@@ -129,7 +133,7 @@ Frontend runs at http://localhost:3000 with Vite proxy to the API Gateway.
 
 | Role | Email | Password |
 |------|-------|----------|
-| Admin | admin@skbingegalaxy.com | Admin@123 |
+| Admin | admin@skbingegalaxy.com | *(auto-generated — see `.env` or `scripts/generate-env.sh`)* |
 
 The admin account is auto-seeded on first startup.
 
@@ -204,7 +208,7 @@ The admin account is auto-seeded on first startup.
 ### Payments (`/api/payments`)
 - `POST /initiate` — Initiate payment
 - `POST /callback` — Payment gateway callback
-- `POST /simulate/{txnId}` — Simulate payment (dev)
+- `POST /admin/simulate/{txnId}` — Simulate payment (admin-only, non-production)
 - `GET /transaction/{txnId}` — Get by transaction ID
 - `GET /booking/{ref}` — Payments for a booking
 - `GET /my` — My payments
@@ -213,15 +217,37 @@ The admin account is auto-seeded on first startup.
 ## Kubernetes Deployment
 
 ```bash
-# Apply all manifests
-kubectl apply -f k8s/namespace.yml
-kubectl apply -f k8s/postgres.yml
-kubectl apply -f k8s/mongodb.yml
-kubectl apply -f k8s/kafka.yml
-kubectl apply -f k8s/infrastructure.yml
-kubectl apply -f k8s/services.yml
-kubectl apply -f k8s/frontend.yml
+# 1. Prepare a production env file from .env.example
+# 2. Bootstrap ingress-nginx and cert-manager
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.11.5/deploy/static/provider/cloud/deploy.yaml
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.5/cert-manager.yaml
+
+# 3. Set a real STORAGE_CLASS_NAME in the env file for your cluster
+# 4. Set MANAGED_POSTGRES_HOST to your external PostgreSQL endpoint
+
+# 5. Render manifests for your domain, immutable image tag, and storage class
+bash scripts/render-k8s-manifests.sh .env .rendered-k8s <IMAGE_TAG>
+
+# 6. Create runtime secrets from the env file
+bash scripts/sync-k8s-secrets.sh .env sk-binge-galaxy
+
+# 7. Apply the rendered manifests
+kubectl apply -f .rendered-k8s/namespace.yml
+kubectl apply -f .rendered-k8s/cert-manager.yml
+kubectl apply -f .rendered-k8s/postgres-managed.yml
+kubectl apply -f .rendered-k8s/mongodb.yml
+kubectl apply -f .rendered-k8s/kafka.yml
+kubectl apply -f .rendered-k8s/rbac.yml
+kubectl apply -f .rendered-k8s/network-policy.yml
+kubectl apply -f .rendered-k8s/infrastructure.yml
+kubectl apply -f .rendered-k8s/services.yml
+kubectl apply -f .rendered-k8s/frontend.yml
+kubectl apply -f .rendered-k8s/monitoring.yml
 ```
+
+The Jenkins pipeline uses the same flow, deploys immutable image tags only, and waits for MongoDB replica-set initialization before verifying rollouts. It expects a Jenkins file credential named `production-env` containing the production `.env` content.
+
+Backup and restore procedures are documented in `BACKUP-RESTORE.md`.
 
 ## Project Structure
 

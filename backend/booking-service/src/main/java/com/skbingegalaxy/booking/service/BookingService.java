@@ -20,6 +20,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -37,8 +38,13 @@ import java.util.stream.Collectors;
 public class BookingService {
 
     private final BookingRepository bookingRepository;
+    private final BookingAddOnRepository bookingAddOnRepository;
     private final EventTypeRepository eventTypeRepository;
     private final AddOnRepository addOnRepository;
+    private final RateCodeEventPricingRepository rateCodeEventPricingRepository;
+    private final RateCodeAddonPricingRepository rateCodeAddonPricingRepository;
+    private final CustomerEventPricingRepository customerEventPricingRepository;
+    private final CustomerAddonPricingRepository customerAddonPricingRepository;
     private final AvailabilityClient availabilityClient;
     private final AvailabilityClientFallback availabilityFallback;
     private final KafkaTemplate<String, Object> kafkaTemplate;
@@ -48,6 +54,9 @@ public class BookingService {
     private final PricingService pricingService;
     private final BookingEventLogService eventLogService;
     private final SagaOrchestrator sagaOrchestrator;
+
+    @Value("${internal.api.secret}")
+    private String internalApiSecret;
 
     @Value("${app.booking.ref-prefix:SKBG}")
     private String refPrefix;
@@ -79,8 +88,8 @@ public class BookingService {
                 "Too many unpaid bookings were auto-cancelled recently. Please wait a few minutes before trying again.");
         }
 
-        EventType eventType = eventTypeRepository.findById(request.getEventTypeId())
-            .orElseThrow(() -> new ResourceNotFoundException("EventType", "id", request.getEventTypeId()));
+        Long bingeId = BingeContext.requireBingeId();
+        EventType eventType = findBookableEventType(request.getEventTypeId());
 
         // Resolve duration in minutes (30-min granularity)
         int durMin = resolveDurationMinutes(request.getDurationMinutes(), request.getDurationHours());
@@ -91,10 +100,10 @@ public class BookingService {
             throw new BusinessException("Duration must be in 30-minute increments");
         }
 
-        // Check availability via Feign (with circuit breaker fallback)
+        // Check availability via internal HTTP call with fallback cache
         int startMinute = request.getStartTime().getHour() * 60 + request.getStartTime().getMinute();
         Boolean available = availabilityClient.checkSlotAvailable(
-            request.getBookingDate(), startMinute, durMin);
+            internalApiSecret, request.getBookingDate(), bingeId, startMinute, durMin);
         if (available != null) {
             availabilityFallback.cacheResult(request.getBookingDate(), startMinute, durMin, available);
         }
@@ -123,8 +132,7 @@ public class BookingService {
 
         if (request.getAddOns() != null) {
             for (AddOnSelection sel : request.getAddOns()) {
-                AddOn addOn = addOnRepository.findById(sel.getAddOnId())
-                    .orElseThrow(() -> new ResourceNotFoundException("AddOn", "id", sel.getAddOnId()));
+                AddOn addOn = findBookableAddOn(sel.getAddOnId());
                 int qty = Math.max(sel.getQuantity(), 1);
                 PricingService.ResolvedAddonPrice addonPrice = pricingService.resolveAddonPrice(customerId, sel.getAddOnId());
                 BigDecimal linePrice = addonPrice.price().multiply(BigDecimal.valueOf(qty));
@@ -152,7 +160,7 @@ public class BookingService {
 
         Booking booking = Booking.builder()
             .bookingRef(bookingRef)
-            .bingeId(BingeContext.getBingeId())
+            .bingeId(bingeId)
             .customerId(customerId)
             .customerName(customerName)
             .customerEmail(customerEmail)
@@ -195,8 +203,7 @@ public class BookingService {
 
     // ── Get booking by ref ───────────────────────────────────
     public BookingDto getByRef(String bookingRef) {
-        return toDto(bookingRepository.findByBookingRef(bookingRef)
-            .orElseThrow(() -> new ResourceNotFoundException("Booking", "ref", bookingRef)));
+        return toDto(findScopedBookingByRef(bookingRef));
     }
 
     // ── Customer: my bookings ────────────────────────────────
@@ -295,12 +302,19 @@ public class BookingService {
     // ── Admin: update booking ────────────────────────────────
     @Transactional
     public BookingDto updateBooking(String bookingRef, UpdateBookingRequest request) {
-        Booking booking = bookingRepository.findByBookingRef(bookingRef)
-            .orElseThrow(() -> new ResourceNotFoundException("Booking", "ref", bookingRef));
+        Booking booking = findScopedBookingByRef(bookingRef);
         String previousStatus = booking.getStatus().name();
 
         if (request.getStatus() != null) {
-            BookingStatus newStatus = BookingStatus.valueOf(request.getStatus());
+            BookingStatus newStatus;
+            try {
+                newStatus = BookingStatus.valueOf(request.getStatus());
+            } catch (IllegalArgumentException e) {
+                throw new BusinessException("Invalid booking status: " + request.getStatus());
+            }
+            if (!isValidTransition(booking.getStatus(), newStatus)) {
+                throw new BusinessException("Cannot transition from " + booking.getStatus() + " to " + newStatus);
+            }
             booking.setStatus(newStatus);
             if (newStatus == BookingStatus.CONFIRMED) {
                 publishBookingEvent(booking, KafkaTopics.BOOKING_CONFIRMED);
@@ -334,8 +348,7 @@ public class BookingService {
         // Event type change
         if (request.getEventTypeId() != null
                 && !request.getEventTypeId().equals(booking.getEventType().getId())) {
-            EventType newEventType = eventTypeRepository.findById(request.getEventTypeId())
-                .orElseThrow(() -> new ResourceNotFoundException("EventType", "id", request.getEventTypeId()));
+            EventType newEventType = findBookableEventType(request.getEventTypeId());
             booking.setEventType(newEventType);
             pricingChanged = true;
         }
@@ -358,11 +371,21 @@ public class BookingService {
         }
 
         // Date/time change — check availability
+        boolean dateTimeChanged = false;
         if (request.getBookingDate() != null) {
             booking.setBookingDate(request.getBookingDate());
+            dateTimeChanged = true;
         }
         if (request.getStartTime() != null) {
             booking.setStartTime(request.getStartTime());
+            dateTimeChanged = true;
+        }
+        if (dateTimeChanged) {
+            int startMinute = booking.getStartTime().getHour() * 60 + booking.getStartTime().getMinute();
+            int durMin = resolveDurationMinutes(booking.getDurationMinutes(), booking.getDurationHours());
+            if (hasTimeConflict(booking.getBookingDate(), startMinute, durMin, booking.getId())) {
+                throw new BusinessException("Selected time slot is no longer available");
+            }
         }
 
         // Guest count change
@@ -403,8 +426,7 @@ public class BookingService {
                 // Replace all add-ons with the new list
                 booking.getAddOns().clear();
                 for (AddOnSelection sel : request.getAddOns()) {
-                    AddOn addOn = addOnRepository.findById(sel.getAddOnId())
-                        .orElseThrow(() -> new ResourceNotFoundException("AddOn", "id", sel.getAddOnId()));
+                    AddOn addOn = findBookableAddOn(sel.getAddOnId());
                     int qty = Math.max(sel.getQuantity(), 1);
                     BigDecimal resolvedPrice;
                     if (custId > 0) {
@@ -470,25 +492,53 @@ public class BookingService {
 
     // ── Get raw booking entity (for controller-level checks) ──
     public Booking getBookingEntity(String bookingRef) {
-        return bookingRepository.findByBookingRef(bookingRef)
-            .orElseThrow(() -> new ResourceNotFoundException("Booking", "ref", bookingRef));
+        return findScopedBookingByRef(bookingRef);
+    }
+
+    // ── Get raw booking entity for background/system flows ──
+    public Booking getBookingEntityForSystem(String bookingRef) {
+        return findBookingByRef(bookingRef);
     }
 
     // ── Admin: cancel booking ────────────────────────────────
     @Transactional
     public BookingDto cancelBooking(String bookingRef) {
-        Booking booking = bookingRepository.findByBookingRef(bookingRef)
-            .orElseThrow(() -> new ResourceNotFoundException("Booking", "ref", bookingRef));
+        return cancelBooking(findScopedBookingByRef(bookingRef), "ADMIN", "Booking cancelled by admin");
+    }
+
+    // ── System: cancel booking without request-scoped binge context ──
+    @Transactional
+    public BookingDto cancelBookingForSystem(String bookingRef, String reason) {
+        return cancelBooking(findBookingByRef(bookingRef), "SYSTEM", reason);
+    }
+
+    private BookingDto cancelBooking(Booking booking, String actorRole, String description) {
+        String bookingRef = booking.getBookingRef();
 
         if (booking.getStatus() == BookingStatus.CANCELLED) {
             throw new BusinessException("Booking is already cancelled");
+        }
+        if (booking.getStatus() == BookingStatus.COMPLETED || booking.getStatus() == BookingStatus.NO_SHOW) {
+            throw new BusinessException("Cannot cancel a " + booking.getStatus() + " booking");
         }
 
         String prevStatus = booking.getStatus().name();
         booking.setStatus(BookingStatus.CANCELLED);
         Booking saved = bookingRepository.save(booking);
-        eventLogService.logEvent(saved, BookingEventType.CANCELLED, prevStatus, null, "ADMIN",
-            "Booking cancelled by admin");
+
+        // Reverse collectedAmount for cancellations where money was already collected
+        if (saved.getCollectedAmount() != null
+                && saved.getCollectedAmount().compareTo(java.math.BigDecimal.ZERO) > 0) {
+            subtractFromCollectedAmount(bookingRef, saved.getCollectedAmount());
+            log.info("Reversed collectedAmount {} for cancelled booking {}",
+                    saved.getCollectedAmount(), bookingRef);
+        }
+
+        String eventDescription = StringUtils.hasText(description)
+            ? description
+            : ("SYSTEM".equals(actorRole) ? "Booking cancelled by system" : "Booking cancelled by admin");
+        eventLogService.logEvent(saved, BookingEventType.CANCELLED, prevStatus, null, actorRole,
+            eventDescription);
         publishBookingEvent(saved, KafkaTopics.BOOKING_CANCELLED);
         log.info("Booking cancelled: {}", bookingRef);
 
@@ -519,28 +569,23 @@ public class BookingService {
     // ── Collected amount tracking (called by payment-service via Kafka) ──
     @Transactional
     public void addToCollectedAmount(String bookingRef, java.math.BigDecimal amount) {
-        if (amount == null) return;
-        bookingRepository.findByBookingRef(bookingRef).ifPresent(b -> {
-            java.math.BigDecimal current = b.getCollectedAmount() != null ? b.getCollectedAmount() : java.math.BigDecimal.ZERO;
-            java.math.BigDecimal updated = current.add(amount);
-            if (b.getTotalAmount() != null && updated.compareTo(b.getTotalAmount()) != 0) {
-                log.warn("Payment mismatch for {}: collectedAmount={} vs totalAmount={}",
-                    bookingRef, updated, b.getTotalAmount());
-            }
-            b.setCollectedAmount(updated);
-            bookingRepository.save(b);
-        });
+        if (amount == null || amount.compareTo(java.math.BigDecimal.ZERO) == 0) return;
+        int updated = bookingRepository.addToCollectedAmount(bookingRef, amount);
+        if (updated > 0) {
+            bookingRepository.findByBookingRef(bookingRef).ifPresent(b -> {
+                if (b.getTotalAmount() != null && b.getCollectedAmount() != null
+                        && b.getCollectedAmount().compareTo(b.getTotalAmount()) != 0) {
+                    log.warn("Payment mismatch for {}: collectedAmount={} vs totalAmount={}",
+                        bookingRef, b.getCollectedAmount(), b.getTotalAmount());
+                }
+            });
+        }
     }
 
     @Transactional
     public void subtractFromCollectedAmount(String bookingRef, java.math.BigDecimal amount) {
-        if (amount == null) return;
-        bookingRepository.findByBookingRef(bookingRef).ifPresent(b -> {
-            java.math.BigDecimal current = b.getCollectedAmount() != null ? b.getCollectedAmount() : java.math.BigDecimal.ZERO;
-            java.math.BigDecimal updated = current.subtract(amount);
-            b.setCollectedAmount(updated.compareTo(java.math.BigDecimal.ZERO) < 0 ? java.math.BigDecimal.ZERO : updated);
-            bookingRepository.save(b);
-        });
+        if (amount == null || amount.compareTo(java.math.BigDecimal.ZERO) == 0) return;
+        bookingRepository.subtractFromCollectedAmount(bookingRef, amount);
     }
 
     // ── Dashboard stats ──────────────────────────────────────
@@ -726,11 +771,12 @@ public class BookingService {
     }
 
     // ── Booked slots for a date (for double-booking prevention) ──
+    @Transactional(readOnly = true)
     public List<BookedSlotDto> getBookedSlotsForDate(LocalDate date) {
         Long bid = BingeContext.getBingeId();
         List<Booking> active = bid != null
-            ? bookingRepository.findActiveBookingsByBingeAndDate(bid, date)
-            : bookingRepository.findActiveBookingsByDate(date);
+            ? bookingRepository.findActiveBookingsForReadByBingeAndDate(bid, date)
+            : bookingRepository.findActiveBookingsForReadByDate(date);
         return active.stream()
             .map(b -> {
                 int startMin = b.getStartTime().getHour() * 60 + b.getStartTime().getMinute();
@@ -748,13 +794,20 @@ public class BookingService {
     }
 
     // ── Check for time overlap with existing bookings (minutes-based) ──
+    @Transactional(readOnly = true)
     public boolean hasTimeConflict(LocalDate date, int startMinute, int durationMinutes) {
+        return hasTimeConflict(date, startMinute, durationMinutes, null);
+    }
+
+    @Transactional(readOnly = true)
+    public boolean hasTimeConflict(LocalDate date, int startMinute, int durationMinutes, Long excludeBookingId) {
         Long bid = BingeContext.getBingeId();
         List<Booking> activeBookings = bid != null
             ? bookingRepository.findActiveBookingsByBingeAndDate(bid, date)
             : bookingRepository.findActiveBookingsByDate(date);
         int newEnd = startMinute + durationMinutes;
         for (Booking b : activeBookings) {
+            if (excludeBookingId != null && excludeBookingId.equals(b.getId())) continue;
             int effectiveDuration = getEffectiveDurationMinutes(b);
             if (effectiveDuration == 0) continue; // fully freed early checkout
             int existingStart = b.getStartTime().getHour() * 60 + b.getStartTime().getMinute();
@@ -786,11 +839,23 @@ public class BookingService {
         return (durationMinutes != null && durationMinutes > 0) ? durationMinutes : durationHours * 60;
     }
 
+    private static final java.util.Map<BookingStatus, java.util.Set<BookingStatus>> VALID_TRANSITIONS = java.util.Map.of(
+        BookingStatus.PENDING, java.util.Set.of(BookingStatus.CONFIRMED, BookingStatus.CANCELLED),
+        BookingStatus.CONFIRMED, java.util.Set.of(BookingStatus.CHECKED_IN, BookingStatus.CANCELLED, BookingStatus.NO_SHOW),
+        BookingStatus.CHECKED_IN, java.util.Set.of(BookingStatus.COMPLETED),
+        BookingStatus.COMPLETED, java.util.Set.of(),
+        BookingStatus.CANCELLED, java.util.Set.of(),
+        BookingStatus.NO_SHOW, java.util.Set.of()
+    );
+
+    private static boolean isValidTransition(BookingStatus from, BookingStatus to) {
+        return VALID_TRANSITIONS.getOrDefault(from, java.util.Set.of()).contains(to);
+    }
+
     // ── Admin: early checkout ────────────────────────────────
     @Transactional
     public BookingDto earlyCheckout(String bookingRef, LocalDateTime clientNow) {
-        Booking booking = bookingRepository.findByBookingRef(bookingRef)
-            .orElseThrow(() -> new ResourceNotFoundException("Booking", "ref", bookingRef));
+        Booking booking = findScopedBookingByRef(bookingRef);
 
         if (booking.getStatus() != BookingStatus.CHECKED_IN) {
             throw new BusinessException(
@@ -870,11 +935,17 @@ public class BookingService {
     // ── Admin: create booking (walk-in) ──────────────────────
     @Transactional
     public BookingDto adminCreateBooking(AdminCreateBookingRequest request) {
-        EventType eventType = eventTypeRepository.findById(request.getEventTypeId())
-            .orElseThrow(() -> new ResourceNotFoundException("EventType", "id", request.getEventTypeId()));
+        EventType eventType = findBookableEventType(request.getEventTypeId());
+        validateAdminCustomerDetails(request);
 
         // Resolve duration in minutes
         int durMin = resolveDurationMinutes(request.getDurationMinutes(), request.getDurationHours());
+        if (durMin < 30 || durMin > 720) {
+            throw new BusinessException("Duration must be between 30 minutes and 12 hours");
+        }
+        if (durMin % 30 != 0) {
+            throw new BusinessException("Duration must be in 30-minute increments");
+        }
 
         // Check for double-booking with existing reservations
         int startMinute = request.getStartTime().getHour() * 60 + request.getStartTime().getMinute();
@@ -907,8 +978,7 @@ public class BookingService {
 
         if (request.getAddOns() != null) {
             for (AddOnSelection sel : request.getAddOns()) {
-                AddOn addOn = addOnRepository.findById(sel.getAddOnId())
-                    .orElseThrow(() -> new ResourceNotFoundException("AddOn", "id", sel.getAddOnId()));
+                AddOn addOn = findBookableAddOn(sel.getAddOnId());
                 int qty = Math.max(sel.getQuantity(), 1);
                 BigDecimal resolvedPrice;
                 if (custId > 0) {
@@ -938,11 +1008,12 @@ public class BookingService {
             // Admin explicitly sets total
             BigDecimal totalAmount = request.getOverrideTotalAmount();
             pricingSource = "ADMIN_OVERRIDE";
+            validateAdminPaymentTracking(custId, totalAmount);
 
             String bookingRef = generateBookingRef();
-            boolean isCash = "CASH".equalsIgnoreCase(request.getPaymentMethod());
-            BookingStatus status = isCash ? BookingStatus.CONFIRMED : BookingStatus.PENDING;
-            PaymentStatus payStatus = isCash ? PaymentStatus.SUCCESS : PaymentStatus.PENDING;
+            boolean autoConfirm = totalAmount.compareTo(BigDecimal.ZERO) == 0;
+            BookingStatus status = autoConfirm ? BookingStatus.CONFIRMED : BookingStatus.PENDING;
+            PaymentStatus payStatus = autoConfirm ? PaymentStatus.SUCCESS : PaymentStatus.PENDING;
 
             Booking booking = Booking.builder()
                 .bookingRef(bookingRef)
@@ -974,19 +1045,23 @@ public class BookingService {
             Booking saved = bookingRepository.save(booking);
             log.info("Admin booking created (override): {} for customer {}", bookingRef, request.getCustomerName());
             eventLogService.logEvent(saved, BookingEventType.CREATED, null, null, "ADMIN",
-                "Admin booking created with price override");
+                autoConfirm
+                    ? "Admin booking created with zero-value override"
+                    : "Admin booking created with price override; awaiting payment settlement");
             publishBookingEvent(saved, KafkaTopics.BOOKING_CREATED);
-            if (isCash) publishBookingEvent(saved, KafkaTopics.BOOKING_CONFIRMED);
+            if (autoConfirm) {
+                publishBookingEvent(saved, KafkaTopics.BOOKING_CONFIRMED);
+            }
             return toDto(saved);
         }
 
         BigDecimal totalAmount = baseAmount.add(addOnTotal).add(guestAmount);
+        validateAdminPaymentTracking(custId, totalAmount);
         String bookingRef = generateBookingRef();
 
-        // For CASH payments, booking is immediately CONFIRMED
-        boolean isCash = "CASH".equalsIgnoreCase(request.getPaymentMethod());
-        BookingStatus status = isCash ? BookingStatus.CONFIRMED : BookingStatus.PENDING;
-        PaymentStatus payStatus = isCash ? PaymentStatus.SUCCESS : PaymentStatus.PENDING;
+        boolean autoConfirm = totalAmount.compareTo(BigDecimal.ZERO) == 0;
+        BookingStatus status = autoConfirm ? BookingStatus.CONFIRMED : BookingStatus.PENDING;
+        PaymentStatus payStatus = autoConfirm ? PaymentStatus.SUCCESS : PaymentStatus.PENDING;
 
         Booking booking = Booking.builder()
             .bookingRef(bookingRef)
@@ -1020,38 +1095,56 @@ public class BookingService {
         Booking saved = bookingRepository.save(booking);
         log.info("Admin booking created: {} for customer {}", bookingRef, request.getCustomerName());
         eventLogService.logEvent(saved, BookingEventType.CREATED, null, null, "ADMIN",
-            "Admin booking created (walk-in)");
+            autoConfirm
+                ? "Admin booking created with zero payable amount"
+                : "Admin booking created; awaiting payment settlement");
 
         publishBookingEvent(saved, KafkaTopics.BOOKING_CREATED);
-        if (isCash) {
+        if (autoConfirm) {
             publishBookingEvent(saved, KafkaTopics.BOOKING_CONFIRMED);
         }
 
         return toDto(saved);
     }
 
+    private void validateAdminCustomerDetails(AdminCreateBookingRequest request) {
+        if (!StringUtils.hasText(request.getCustomerName())) {
+            throw new BusinessException("Customer name is required for admin bookings");
+        }
+        if (!StringUtils.hasText(request.getCustomerEmail())) {
+            throw new BusinessException("Customer email is required for admin bookings");
+        }
+    }
+
+    private void validateAdminPaymentTracking(Long customerId, BigDecimal totalAmount) {
+        if (totalAmount.compareTo(BigDecimal.ZERO) > 0 && (customerId == null || customerId <= 0)) {
+            throw new BusinessException("Admin bookings with a payable balance require a saved customer account");
+        }
+    }
+
     // ── Event types & add-ons (public) ──────────────────────
     public List<EventTypeDto> getActiveEventTypes() {
-        Long bid = BingeContext.getBingeId();
-        return (bid != null ? eventTypeRepository.findByBingeIdOrGlobalAndActiveTrue(bid) : eventTypeRepository.findByActiveTrue())
+        Long bid = requireSelectedBinge("viewing event types");
+        return eventTypeRepository.findByBingeIdOrGlobalAndActiveTrue(bid)
             .stream().map(this::toEventTypeDto).toList();
     }
 
     public List<AddOnDto> getActiveAddOns() {
-        Long bid = BingeContext.getBingeId();
-        return (bid != null ? addOnRepository.findByBingeIdOrGlobalAndActiveTrue(bid) : addOnRepository.findByActiveTrue())
+        Long bid = requireSelectedBinge("viewing add-ons");
+        return addOnRepository.findByBingeIdOrGlobalAndActiveTrue(bid)
             .stream().map(this::toAddOnDto).toList();
     }
 
     // ── Admin: Event type CRUD ─────────────────────────────
     public List<EventTypeDto> getAllEventTypes() {
-        Long bid = BingeContext.getBingeId();
-        return (bid != null ? eventTypeRepository.findByBingeIdOrGlobal(bid) : eventTypeRepository.findAll())
+        Long bid = requireSelectedBinge("managing event types");
+        return eventTypeRepository.findByBingeIdOrGlobal(bid)
             .stream().map(this::toEventTypeDto).toList();
     }
 
     @Transactional
     public EventTypeDto createEventType(EventTypeSaveRequest req) {
+        Long bid = requireSelectedBinge("creating an event type");
         EventType et = EventType.builder()
             .name(req.getName())
             .description(req.getDescription())
@@ -1062,15 +1155,14 @@ public class BookingService {
             .maxHours(req.getMaxHours())
             .imageUrls(req.getImageUrls() != null ? req.getImageUrls() : new ArrayList<>())
             .active(true)
-            .bingeId(BingeContext.getBingeId())
+            .bingeId(bid)
             .build();
         return toEventTypeDto(eventTypeRepository.save(et));
     }
 
     @Transactional
     public EventTypeDto updateEventType(Long id, EventTypeSaveRequest req) {
-        EventType et = eventTypeRepository.findById(id)
-            .orElseThrow(() -> new ResourceNotFoundException("EventType", "id", id));
+        EventType et = findManagedEventType(id);
         et.setName(req.getName());
         et.setDescription(req.getDescription());
         et.setBasePrice(req.getBasePrice());
@@ -1085,21 +1177,41 @@ public class BookingService {
 
     @Transactional
     public void deactivateEventType(Long id) {
-        EventType et = eventTypeRepository.findById(id)
-            .orElseThrow(() -> new ResourceNotFoundException("EventType", "id", id));
+        EventType et = findManagedEventType(id);
         et.setActive(!et.isActive());
         eventTypeRepository.save(et);
     }
 
+    @Transactional
+    public void deleteEventType(Long id) {
+        EventType eventType = findManagedEventType(id);
+        if (eventType.isActive()) {
+            throw new BusinessException("Deactivate the event type before deleting it");
+        }
+        if (bookingRepository.existsByEventTypeId(id)) {
+            throw new BusinessException("Cannot delete this event type because it is already used in bookings");
+        }
+        if (rateCodeEventPricingRepository.existsByEventTypeId(id)) {
+            throw new BusinessException("Cannot delete this event type because rate codes still reference it");
+        }
+        if (customerEventPricingRepository.existsByEventTypeId(id)) {
+            throw new BusinessException("Cannot delete this event type because customer pricing profiles still reference it");
+        }
+
+        eventTypeRepository.delete(eventType);
+        log.info("Event type deleted: '{}' (ID: {})", eventType.getName(), id);
+    }
+
     // ── Admin: Add-on CRUD ───────────────────────────────────
     public List<AddOnDto> getAllAddOns() {
-        Long bid = BingeContext.getBingeId();
-        return (bid != null ? addOnRepository.findByBingeIdOrGlobal(bid) : addOnRepository.findAll())
+        Long bid = requireSelectedBinge("managing add-ons");
+        return addOnRepository.findByBingeIdOrGlobal(bid)
             .stream().map(this::toAddOnDto).toList();
     }
 
     @Transactional
     public AddOnDto createAddOn(AddOnSaveRequest req) {
+        Long bid = requireSelectedBinge("creating an add-on");
         AddOn a = AddOn.builder()
             .name(req.getName())
             .description(req.getDescription())
@@ -1107,15 +1219,14 @@ public class BookingService {
             .category(req.getCategory().toUpperCase())
             .imageUrls(req.getImageUrls() != null ? req.getImageUrls() : new ArrayList<>())
             .active(true)
-            .bingeId(BingeContext.getBingeId())
+            .bingeId(bid)
             .build();
         return toAddOnDto(addOnRepository.save(a));
     }
 
     @Transactional
     public AddOnDto updateAddOn(Long id, AddOnSaveRequest req) {
-        AddOn a = addOnRepository.findById(id)
-            .orElseThrow(() -> new ResourceNotFoundException("AddOn", "id", id));
+        AddOn a = findManagedAddOn(id);
         a.setName(req.getName());
         a.setDescription(req.getDescription());
         a.setPrice(req.getPrice());
@@ -1127,16 +1238,94 @@ public class BookingService {
 
     @Transactional
     public void deactivateAddOn(Long id) {
-        AddOn a = addOnRepository.findById(id)
-            .orElseThrow(() -> new ResourceNotFoundException("AddOn", "id", id));
+        AddOn a = findManagedAddOn(id);
         a.setActive(!a.isActive());
         addOnRepository.save(a);
+    }
+
+    @Transactional
+    public void deleteAddOn(Long id) {
+        AddOn addOn = findManagedAddOn(id);
+        if (addOn.isActive()) {
+            throw new BusinessException("Deactivate the add-on before deleting it");
+        }
+        if (bookingAddOnRepository.existsByAddOnId(id)) {
+            throw new BusinessException("Cannot delete this add-on because it is already used in bookings");
+        }
+        if (rateCodeAddonPricingRepository.existsByAddOnId(id)) {
+            throw new BusinessException("Cannot delete this add-on because rate codes still reference it");
+        }
+        if (customerAddonPricingRepository.existsByAddOnId(id)) {
+            throw new BusinessException("Cannot delete this add-on because customer pricing profiles still reference it");
+        }
+
+        addOnRepository.delete(addOn);
+        log.info("Add-on deleted: '{}' (ID: {})", addOn.getName(), id);
+    }
+
+    private Booking findScopedBookingByRef(String bookingRef) {
+        Long bingeId = BingeContext.getBingeId();
+        if (bingeId == null) {
+            throw new BusinessException("Select a binge before accessing bookings");
+        }
+
+        return bookingRepository.findByBookingRefAndBingeId(bookingRef, bingeId)
+            .orElseThrow(() -> new ResourceNotFoundException("Booking", "ref", bookingRef));
+    }
+
+    private Booking findBookingByRef(String bookingRef) {
+        return bookingRepository.findByBookingRef(bookingRef)
+            .orElseThrow(() -> new ResourceNotFoundException("Booking", "ref", bookingRef));
+    }
+
+    private EventType findBookableEventType(Long id) {
+        Long bid = requireSelectedBinge("using event types");
+        return eventTypeRepository.findAccessibleById(id, bid)
+            .orElseThrow(() -> new ResourceNotFoundException("EventType", "id", id));
+    }
+
+    private AddOn findBookableAddOn(Long id) {
+        Long bid = requireSelectedBinge("using add-ons");
+        return addOnRepository.findAccessibleById(id, bid)
+            .orElseThrow(() -> new ResourceNotFoundException("AddOn", "id", id));
+    }
+
+    private EventType findManagedEventType(Long id) {
+        Long bid = requireSelectedBinge("managing event types");
+        return eventTypeRepository.findByIdAndBingeId(id, bid)
+            .orElseThrow(() -> new ResourceNotFoundException("EventType", "id", id));
+    }
+
+    private AddOn findManagedAddOn(Long id) {
+        Long bid = requireSelectedBinge("managing add-ons");
+        return addOnRepository.findByIdAndBingeId(id, bid)
+            .orElseThrow(() -> new ResourceNotFoundException("AddOn", "id", id));
+    }
+
+    private EventType findAccessibleEventType(Long id) {
+        Long bid = requireSelectedBinge("using event types");
+        return eventTypeRepository.findAccessibleById(id, bid)
+            .orElseThrow(() -> new ResourceNotFoundException("EventType", "id", id));
+    }
+
+    private AddOn findAccessibleAddOn(Long id) {
+        Long bid = requireSelectedBinge("using add-ons");
+        return addOnRepository.findAccessibleById(id, bid)
+            .orElseThrow(() -> new ResourceNotFoundException("AddOn", "id", id));
+    }
+
+    private Long requireSelectedBinge(String action) {
+        Long bingeId = BingeContext.getBingeId();
+        if (bingeId == null) {
+            throw new BusinessException("Select a binge before " + action);
+        }
+        return bingeId;
     }
 
     // ── Helpers ──────────────────────────────────────────────
     private String generateBookingRef() {
         String year = String.valueOf(Year.now().getValue()).substring(2);
-        int random = ThreadLocalRandom.current().nextInt(100000, 999999);
+        String random = UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase();
         return refPrefix + year + random;
     }
 
@@ -1167,7 +1356,9 @@ public class BookingService {
                 .build();
             outboxEventRepository.save(outbox);
         } catch (Exception e) {
-            log.warn("Failed to write outbox event for topic {}: {}", topic, e.getMessage());
+            log.error("Failed to write outbox event for topic {} and booking {}", topic, b.getBookingRef(), e);
+            throw new IllegalStateException(
+                "Failed to persist outbox event for topic " + topic + " and booking " + b.getBookingRef(), e);
         }
     }
 

@@ -58,7 +58,7 @@ export const ACCOUNT_PREFERENCES_DEFAULTS = {
   birthdayDay: '',
   anniversaryMonth: '',
   anniversaryDay: '',
-  notificationChannel: 'WHATSAPP',
+  notificationChannel: 'EMAIL',
   receivesOffers: true,
   weekendAlerts: true,
   conciergeSupport: true,

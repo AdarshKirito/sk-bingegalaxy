@@ -1,9 +1,12 @@
 server:
   port: 8761
+  shutdown: graceful
 
 spring:
   application:
     name: discovery-server
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
   security:
     user:
       name: eureka
@@ -11,12 +14,12 @@ spring:
 
 eureka:
   instance:
-    hostname: localhost
+    hostname: ${EUREKA_HOSTNAME:localhost}
   client:
     register-with-eureka: false
     fetch-registry: false
     service-url:
-      defaultZone: http://${spring.security.user.name}:${spring.security.user.password}@localhost:${server.port}/eureka/
+      defaultZone: http://${spring.security.user.name}:${spring.security.user.password}@${EUREKA_HOSTNAME:localhost}:${server.port}/eureka/
 
 management:
   endpoints:

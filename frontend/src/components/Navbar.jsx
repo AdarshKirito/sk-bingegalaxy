@@ -2,16 +2,43 @@ import { useState, useEffect } from 'react';
 import { Link, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useBinge } from '../context/BingeContext';
-import { FiLogOut, FiUser, FiCalendar, FiHome, FiBarChart2, FiPlusCircle, FiMapPin, FiMenu, FiX, FiCreditCard, FiCompass } from 'react-icons/fi';
+import {
+  FiBarChart2,
+  FiCalendar,
+  FiClock,
+  FiCompass,
+  FiCreditCard,
+  FiHome,
+  FiLogOut,
+  FiMapPin,
+  FiMenu,
+  FiPlusCircle,
+  FiSettings,
+  FiShield,
+  FiUser,
+  FiUsers,
+  FiX,
+} from 'react-icons/fi';
 import ThemeToggle from './ThemeToggle';
 import './Navbar.css';
 
 export default function Navbar() {
-  const { user, isAuthenticated, isAdmin, isSuperAdmin, logout } = useAuth();
+  const { user, isAuthenticated, isAdmin, isSuperAdmin, loading, logout } = useAuth();
   const { selectedBinge, clearBinge } = useBinge();
   const navigate = useNavigate();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
+  const authReady = !loading;
+  const effectiveIsAuthenticated = authReady && isAuthenticated;
+  const effectiveIsAdmin = authReady && isAdmin;
+  const effectiveIsSuperAdmin = authReady && isSuperAdmin;
+  const effectiveUser = authReady ? user : null;
+  const effectiveSelectedBinge = effectiveIsAuthenticated ? selectedBinge : null;
+  const isPublicHome = location.pathname === '/' && !effectiveIsAuthenticated;
+  const isCustomerSide = effectiveIsAuthenticated && !effectiveIsAdmin;
+  const isLoginRoute = ['/login', '/forgot-password', '/reset-password'].includes(location.pathname);
+  const isRegisterRoute = location.pathname === '/register';
+  const adminRoleLabel = effectiveIsSuperAdmin ? 'Super Admin' : 'Admin';
 
   // Close menu on route change
   useEffect(() => { setMenuOpen(false); }, [location.pathname]);
@@ -22,14 +49,14 @@ export default function Navbar() {
     return () => { document.body.style.overflow = ''; };
   }, [menuOpen]);
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate('/');
   };
 
   const handleChangeBinge = () => {
     clearBinge();
-    navigate(isAdmin ? '/admin/binges' : '/binges');
+    navigate(effectiveIsAdmin ? '/admin/binges' : '/binges');
   };
 
   const customerLinks = [
@@ -39,49 +66,79 @@ export default function Navbar() {
     { to: '/payments', icon: <FiCreditCard />, label: 'Payments' },
   ];
 
+  const adminConsoleLinks = [
+    { to: '/admin/dashboard', icon: <FiHome />, label: 'Dashboard' },
+    { to: '/admin/bookings', icon: <FiCalendar />, label: 'Bookings' },
+    { to: '/admin/book', icon: <FiPlusCircle />, label: 'Create' },
+    { to: '/admin/blocked-dates', icon: <FiClock />, label: 'Availability' },
+    { to: '/admin/event-types', icon: <FiSettings />, label: 'Catalog' },
+    { to: '/admin/users-config', icon: <FiUsers />, label: 'Users' },
+    { to: '/admin/reports', icon: <FiBarChart2 />, label: 'Reports' },
+  ];
+
   const accountLink = { to: '/account', icon: <FiUser />, label: 'Account' };
 
   const navLinkClass = ({ isActive }) => `nav-link${isActive ? ' nav-link-active' : ''}`;
+  const publicAuthLinkClass = (isActive) => `nav-auth-link${isActive ? ' nav-auth-link-active' : ''}`;
 
   return (
-    <nav className="navbar" aria-label="Main navigation">
+    <nav className={`navbar${isPublicHome ? ' navbar-home' : ''}${isCustomerSide ? ' navbar-customer' : ''}${isAdmin ? ' navbar-admin' : ''}`} aria-label="Main navigation">
       <div className="container navbar-inner">
         <Link to="/" className="navbar-brand" aria-label="SK Binge Galaxy home">
           <span className="brand-icon" aria-hidden="true">🎬</span>
           <span className="brand-copy">
             <strong>SK Binge Galaxy</strong>
-            <span className="brand-meta">{isAdmin ? 'Admin Console' : 'Customer Hub'}</span>
+            <span className="brand-meta">{!isAuthenticated ? 'Private Screenings' : isAdmin ? 'Admin Console' : 'Customer Hub'}</span>
           </span>
         </Link>
 
         {menuOpen && <div className="menu-overlay" onClick={() => setMenuOpen(false)} />}
 
         <div className={`navbar-links ${menuOpen ? 'open' : ''}`}>
-          {!isAuthenticated ? (
+          {!effectiveIsAuthenticated ? (
             <>
-              <Link to="/login" className="nav-link">Login</Link>
-              <Link to="/register" className="btn btn-primary btn-sm">Sign Up</Link>
+              <NavLink to="/login" className={publicAuthLinkClass(isLoginRoute)}>Login</NavLink>
+              <NavLink to="/register" className={publicAuthLinkClass(isRegisterRoute)}>Sign Up</NavLink>
             </>
-          ) : isAdmin ? (
+          ) : effectiveIsAdmin ? (
             <>
-              <NavLink to="/admin/binges" className={navLinkClass}><FiMapPin /> Binges</NavLink>
-              {selectedBinge && (
-                <>
-                  <NavLink to="/admin/dashboard" className={navLinkClass}><FiHome /> Dashboard</NavLink>
-                  <NavLink to="/admin/bookings" className={navLinkClass}><FiCalendar /> Bookings</NavLink>
-                  <NavLink to="/admin/book" className={navLinkClass}><FiPlusCircle /> Book Now</NavLink>
-                  <NavLink to="/admin/blocked-dates" className={navLinkClass}>Block Dates</NavLink>
-                  <NavLink to="/admin/event-types" className={navLinkClass}>Events</NavLink>
-                  <NavLink to="/admin/users-config" className={navLinkClass}>Users & Config</NavLink>
-                  <NavLink to="/admin/reports" className={navLinkClass}><FiBarChart2 /> Reports</NavLink>
-                  {isSuperAdmin && <NavLink to="/admin/register" className={navLinkClass}><FiUser /> Add Admin</NavLink>}
-                </>
+              <div className="nav-admin-entry">
+                <NavLink to="/admin/binges" className={navLinkClass}><FiMapPin /> Binges</NavLink>
+                {!effectiveSelectedBinge && effectiveIsSuperAdmin && <NavLink to="/admin/register" className={navLinkClass}><FiShield /> Add Admin</NavLink>}
+              </div>
+
+              {effectiveSelectedBinge && (
+                <div className="nav-admin-menu">
+                  <div className="nav-admin-links">
+                    {adminConsoleLinks.map(link => (
+                      <NavLink key={link.to} to={link.to} className={navLinkClass}>
+                        {link.icon}
+                        <span>{link.label}</span>
+                      </NavLink>
+                    ))}
+                    {effectiveIsSuperAdmin && (
+                      <NavLink to="/admin/register" className={navLinkClass}><FiShield /> <span>Add Admin</span></NavLink>
+                    )}
+                  </div>
+                  <div className="nav-customer-meta nav-mobile-only nav-admin-meta">
+                    <button onClick={handleChangeBinge} className="nav-link nav-btn venue-btn" title="Change venue">
+                      <FiMapPin />
+                      <span className="venue-details">
+                        <span className="venue-pill-label">Venue</span>
+                        <span className="venue-name">{effectiveSelectedBinge.name}</span>
+                      </span>
+                    </button>
+                    <span className="nav-user nav-admin-user"><FiShield /> <span>{effectiveUser?.firstName}</span><small>{adminRoleLabel}</small></span>
+                    <button onClick={handleLogout} className="nav-link nav-btn nav-logout-btn"><FiLogOut /> <span className="nav-action-label">Logout</span></button>
+                  </div>
+                </div>
               )}
-              <button onClick={handleLogout} className="nav-link nav-btn"><FiLogOut /> Logout</button>
+
+              {!effectiveSelectedBinge && <button onClick={handleLogout} className="nav-link nav-btn nav-mobile-only"><FiLogOut /> Logout</button>}
             </>
           ) : (
             <>
-              {selectedBinge ? (
+              {effectiveSelectedBinge ? (
                 <div className="nav-customer-links">
                   {customerLinks.map(link => (
                     <NavLink key={link.to} to={link.to} className={navLinkClass}>
@@ -95,23 +152,23 @@ export default function Navbar() {
                   </NavLink>
                 </div>
               ) : null}
-              {!selectedBinge && (
+              {!effectiveSelectedBinge && (
                 <>
                   <NavLink to="/binges" className={navLinkClass}><FiMapPin /> Venues</NavLink>
                   <NavLink to={accountLink.to} className={navLinkClass}><FiUser /> Account</NavLink>
                 </>
               )}
               <div className="nav-customer-meta nav-mobile-only">
-                {selectedBinge && (
+                {effectiveSelectedBinge && (
                   <button onClick={handleChangeBinge} className="nav-link nav-btn venue-btn" title="Change venue">
                     <FiMapPin />
                     <span className="venue-details">
                       <span className="venue-pill-label">Venue</span>
-                      <span className="venue-name">{selectedBinge.name}</span>
+                      <span className="venue-name">{effectiveSelectedBinge.name}</span>
                     </span>
                   </button>
                 )}
-                <span className="nav-user"><FiUser /> <span>{user?.firstName}</span><small>Customer</small></span>
+                <span className="nav-user"><FiUser /> <span>{effectiveUser?.firstName}</span><small>Customer</small></span>
                 <button onClick={handleLogout} className="nav-link nav-btn nav-logout-btn"><FiLogOut /> <span className="nav-action-label">Logout</span></button>
               </div>
             </>
@@ -119,21 +176,31 @@ export default function Navbar() {
         </div>
 
         <div className="navbar-right">
-          {isAuthenticated && !isAdmin && selectedBinge && (
+          {effectiveIsAuthenticated && effectiveIsAdmin && !effectiveSelectedBinge && (
+            <span className="nav-user nav-admin-user nav-desktop-only"><FiShield /> <span>{effectiveUser?.firstName}</span><small>{adminRoleLabel}</small></span>
+          )}
+
+          {effectiveIsAuthenticated && effectiveIsAdmin && !effectiveSelectedBinge && (
+            <button onClick={handleLogout} className="nav-link nav-btn nav-desktop-only nav-logout-btn" aria-label="Logout">
+              <FiLogOut /> <span className="nav-action-label">Logout</span>
+            </button>
+          )}
+
+          {effectiveIsAuthenticated && !effectiveIsAdmin && effectiveSelectedBinge && (
             <button onClick={handleChangeBinge} className="nav-link nav-btn venue-btn nav-desktop-only" title="Change venue">
               <FiMapPin />
               <span className="venue-details">
                 <span className="venue-pill-label">Venue</span>
-                <span className="venue-name">{selectedBinge.name}</span>
+                <span className="venue-name">{effectiveSelectedBinge.name}</span>
               </span>
             </button>
           )}
 
-          {isAuthenticated && !isAdmin && (
-            <span className="nav-user nav-desktop-only"><FiUser /> <span>{user?.firstName}</span><small>Customer</small></span>
+          {effectiveIsAuthenticated && !effectiveIsAdmin && (
+            <span className="nav-user nav-desktop-only"><FiUser /> <span>{effectiveUser?.firstName}</span><small>Customer</small></span>
           )}
 
-          {isAuthenticated && !isAdmin && (
+          {effectiveIsAuthenticated && !effectiveIsAdmin && (
             <button onClick={handleLogout} className="nav-link nav-btn nav-desktop-only nav-logout-btn" aria-label="Logout">
               <FiLogOut /> <span className="nav-action-label">Logout</span>
             </button>
@@ -150,6 +217,36 @@ export default function Navbar() {
           </button>
         </div>
       </div>
+
+      {effectiveIsAuthenticated && effectiveIsAdmin && effectiveSelectedBinge && (
+        <div className="container nav-admin-console">
+          <div className="nav-admin-links">
+            {adminConsoleLinks.map(link => (
+              <NavLink key={link.to} to={link.to} className={navLinkClass}>
+                {link.icon}
+                <span>{link.label}</span>
+              </NavLink>
+            ))}
+            {effectiveIsSuperAdmin && (
+              <NavLink to="/admin/register" className={navLinkClass}><FiShield /> <span>Add Admin</span></NavLink>
+            )}
+          </div>
+
+          <div className="nav-admin-status">
+            <button onClick={handleChangeBinge} className="nav-link nav-btn venue-btn" title="Change venue">
+              <FiMapPin />
+              <span className="venue-details">
+                <span className="venue-pill-label">Venue</span>
+                <span className="venue-name">{effectiveSelectedBinge.name}</span>
+              </span>
+            </button>
+            <span className="nav-user nav-admin-user"><FiShield /> <span>{effectiveUser?.firstName}</span><small>{adminRoleLabel}</small></span>
+            <button onClick={handleLogout} className="nav-link nav-btn nav-logout-btn" aria-label="Logout">
+              <FiLogOut /> <span className="nav-action-label">Logout</span>
+            </button>
+          </div>
+        </div>
+      )}
     </nav>
   );
 }

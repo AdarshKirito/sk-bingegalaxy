@@ -2,6 +2,9 @@ package com.skbingegalaxy.booking.scheduler;
 
 import com.skbingegalaxy.booking.entity.OutboxEvent;
 import com.skbingegalaxy.booking.repository.OutboxEventRepository;
+import com.skbingegalaxy.common.constants.KafkaTopics;
+import com.skbingegalaxy.common.event.BookingEvent;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
@@ -12,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Polls the outbox_event table and publishes unsent events to Kafka.
@@ -23,8 +27,11 @@ import java.util.List;
 @Slf4j
 public class OutboxPublisher {
 
+    private static final long KAFKA_SEND_TIMEOUT_SECONDS = 10;
+
     private final OutboxEventRepository outboxRepo;
-    private final KafkaTemplate<String, String> kafkaRawTemplate;
+    private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final ObjectMapper objectMapper;
 
     @Scheduled(fixedDelay = 2000)
     @SchedulerLock(name = "outboxPublisher", lockAtLeastFor = "1s", lockAtMostFor = "30s")
@@ -35,7 +42,9 @@ public class OutboxPublisher {
 
         for (OutboxEvent event : pending) {
             try {
-                kafkaRawTemplate.send(event.getTopic(), event.getAggregateKey(), event.getPayload());
+                Object payload = toKafkaPayload(event);
+                kafkaTemplate.send(event.getTopic(), event.getAggregateKey(), payload)
+                    .get(KAFKA_SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 event.setSent(true);
                 event.setSentAt(LocalDateTime.now());
             } catch (Exception e) {
@@ -46,5 +55,14 @@ public class OutboxPublisher {
         }
         outboxRepo.saveAll(pending);
         log.debug("Outbox: published {} events", pending.stream().filter(OutboxEvent::isSent).count());
+    }
+
+    private Object toKafkaPayload(OutboxEvent event) throws Exception {
+        if (KafkaTopics.BOOKING_CREATED.equals(event.getTopic())
+                || KafkaTopics.BOOKING_CONFIRMED.equals(event.getTopic())
+                || KafkaTopics.BOOKING_CANCELLED.equals(event.getTopic())) {
+            return objectMapper.readValue(event.getPayload(), BookingEvent.class);
+        }
+        return event.getPayload();
     }
 }

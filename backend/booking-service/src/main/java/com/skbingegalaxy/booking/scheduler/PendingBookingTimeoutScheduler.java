@@ -48,7 +48,9 @@ public class PendingBookingTimeoutScheduler {
 
         for (Booking booking : stale) {
             try {
-                bookingService.cancelBooking(booking.getBookingRef());
+                bookingService.cancelBookingForSystem(
+                    booking.getBookingRef(),
+                    "Booking auto-cancelled after payment timeout");
                 log.info("Saga timeout: auto-cancelled stale booking {} (created {})",
                     booking.getBookingRef(), booking.getCreatedAt());
             } catch (Exception e) {

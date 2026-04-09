@@ -69,12 +69,22 @@ public class BingeController {
     }
 
     // ── Admin: toggle active ─────────────────────────────────
-    @DeleteMapping("/admin/binges/{id}")
+    @PatchMapping("/admin/binges/{id}/toggle-active")
     public ResponseEntity<ApiResponse<Void>> toggleBinge(
             @PathVariable Long id,
             @RequestHeader("X-User-Id") Long adminId,
             @RequestHeader("X-User-Role") String role) {
         bingeService.toggleBinge(id, adminId, role);
         return ResponseEntity.ok(ApiResponse.ok("Binge toggled", null));
+    }
+
+    // ── Admin: delete binge ──────────────────────────────────
+    @DeleteMapping("/admin/binges/{id}")
+    public ResponseEntity<ApiResponse<Void>> deleteBinge(
+            @PathVariable Long id,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        bingeService.deleteBinge(id, adminId, role);
+        return ResponseEntity.ok(ApiResponse.ok("Binge deleted", null));
     }
 }

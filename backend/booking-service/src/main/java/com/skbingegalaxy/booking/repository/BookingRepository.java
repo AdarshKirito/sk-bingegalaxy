@@ -5,7 +5,9 @@ import com.skbingegalaxy.common.enums.BookingStatus;
 import com.skbingegalaxy.common.enums.PaymentStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -16,7 +18,13 @@ import java.util.Optional;
 
 public interface BookingRepository extends JpaRepository<Booking, Long> {
 
-    Optional<Booking> findByBookingRef(String bookingRef);
+       boolean existsByBingeId(Long bingeId);
+
+       boolean existsByEventTypeId(Long eventTypeId);
+
+       Optional<Booking> findByBookingRef(String bookingRef);
+
+       Optional<Booking> findByBookingRefAndBingeId(String bookingRef, Long bingeId);
 
     List<Booking> findByCustomerIdOrderByCreatedAtDesc(Long customerId);
 
@@ -114,8 +122,12 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     long countByCustomerId(Long customerId);
 
     // Find active (non-cancelled) bookings for a given date to prevent double-booking
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT b FROM Booking b WHERE b.bookingDate = :date AND b.status NOT IN ('CANCELLED', 'NO_SHOW')")
     List<Booking> findActiveBookingsByDate(@Param("date") LocalDate date);
+
+       @Query("SELECT b FROM Booking b WHERE b.bookingDate = :date AND b.status NOT IN ('CANCELLED', 'NO_SHOW')")
+       List<Booking> findActiveBookingsForReadByDate(@Param("date") LocalDate date);
 
     // ═══════════════════════════════════════════════════════════
     //  BINGE-SCOPED QUERIES
@@ -159,8 +171,12 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     @Query("SELECT b FROM Booking b WHERE b.bingeId = :bid AND b.customerId = :cid AND (b.status IN ('COMPLETED', 'CANCELLED', 'NO_SHOW') OR b.bookingDate < :today) ORDER BY b.bookingDate DESC, b.startTime DESC")
     List<Booking> findCustomerPastBookingsByBinge(@Param("bid") Long bingeId, @Param("cid") Long customerId, @Param("today") LocalDate today);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT b FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate = :date AND b.status NOT IN ('CANCELLED', 'NO_SHOW')")
     List<Booking> findActiveBookingsByBingeAndDate(@Param("bid") Long bingeId, @Param("date") LocalDate date);
+
+       @Query("SELECT b FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate = :date AND b.status NOT IN ('CANCELLED', 'NO_SHOW')")
+       List<Booking> findActiveBookingsForReadByBingeAndDate(@Param("bid") Long bingeId, @Param("date") LocalDate date);
 
     // Dashboard counts (binge-scoped)
     long countByBingeIdAndBookingDate(Long bingeId, LocalDate date);
@@ -204,4 +220,13 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     // Anti-abuse: count bookings auto-cancelled due to payment timeout in the recent window
     @Query("SELECT COUNT(b) FROM Booking b WHERE b.customerId = :cid AND b.status = 'CANCELLED' AND b.paymentStatus = 'PENDING' AND b.updatedAt > :since")
     long countRecentTimeoutCancellations(@Param("cid") Long customerId, @Param("since") LocalDateTime since);
+
+    // Atomic collected-amount updates (avoids read-modify-write race conditions)
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @Query("UPDATE Booking b SET b.collectedAmount = COALESCE(b.collectedAmount, 0) + :amount WHERE b.bookingRef = :ref")
+    int addToCollectedAmount(@Param("ref") String bookingRef, @Param("amount") java.math.BigDecimal amount);
+
+    @org.springframework.data.jpa.repository.Modifying
+    @Query("UPDATE Booking b SET b.collectedAmount = CASE WHEN COALESCE(b.collectedAmount, 0) - :amount < 0 THEN 0 ELSE COALESCE(b.collectedAmount, 0) - :amount END WHERE b.bookingRef = :ref")
+    int subtractFromCollectedAmount(@Param("ref") String bookingRef, @Param("amount") java.math.BigDecimal amount);
 }

@@ -14,6 +14,7 @@ public class CustomerPricingDto {
     private Long customerId;
     private Long rateCodeId;
     private String rateCodeName;
+    private boolean scopedProfile;
     private List<EventPricingEntry> eventPricings;
     private List<AddonPricingEntry> addonPricings;
     private LocalDateTime updatedAt;

@@ -1,22 +1,30 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { bookingService } from '../services/endpoints';
-import { FiCheckCircle } from 'react-icons/fi';
+import SEO from '../components/SEO';
+import { FiCheckCircle, FiClock } from 'react-icons/fi';
+import DOMPurify from 'dompurify';
+import './CustomerHub.css';
 
 export default function BookingConfirmation() {
   const { ref } = useParams();
   const [booking, setBooking] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     bookingService.getByRef(ref)
       .then(res => setBooking(res.data.data))
-      .catch(() => {})
+      .catch(err => {
+        console.error('Failed to load booking:', err);
+        setError(err?.response?.status === 404 ? 'Booking not found' : 'Failed to load booking details');
+      })
       .finally(() => setLoading(false));
   }, [ref]);
 
   if (loading) return <div className="loading"><div className="spinner"></div></div>;
-  if (!booking) return <div className="container"><p>Booking not found</p></div>;
+  if (error) return <div className="container customer-flow-shell customer-flow-shell-narrow"><div className="customer-flow-card customer-flow-empty"><h2>{error}</h2></div></div>;
+  if (!booking) return <div className="container customer-flow-shell customer-flow-shell-narrow"><div className="customer-flow-card customer-flow-empty"><h2>Booking not found</h2></div></div>;
 
   const statusBadge = {
     PENDING: 'badge-warning',
@@ -24,70 +32,87 @@ export default function BookingConfirmation() {
     CANCELLED: 'badge-danger',
     COMPLETED: 'badge-info',
   }[booking.status] || 'badge-info';
+  const durationLabel = (() => {
+    const minutes = booking.durationMinutes || (booking.durationHours * 60);
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    if (hours > 0 && remainingMinutes > 0) return `${hours}hr ${remainingMinutes}m`;
+    if (hours > 0) return `${hours}hr`;
+    return `${remainingMinutes}m`;
+  })();
 
   return (
-    <div className="container" style={{ maxWidth: '700px', margin: '0 auto' }}>
-      <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-        <FiCheckCircle style={{ fontSize: '3rem', color: 'var(--success)', marginBottom: '0.5rem' }} />
-        <h1>Booking {booking.status === 'PENDING' ? 'Created' : booking.status}</h1>
-        <p style={{ color: 'var(--text-secondary)', fontFamily: 'monospace', fontSize: '1.1rem' }}>{booking.bookingRef}</p>
-      </div>
+    <div className="container customer-flow-shell customer-flow-shell-narrow">
+      <SEO title="Booking Confirmation" description="Review your booking details, payment state, and next actions from one confirmation screen." />
 
-      <div className="card" style={{ marginBottom: '1.5rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
+      <section className="customer-flow-card customer-flow-empty">
+        <span className="customer-flow-icon"><FiCheckCircle /></span>
+        <h2>Booking {booking.status === 'PENDING' ? 'created' : booking.status.toLowerCase()}</h2>
+        <p className="customer-booking-ref">{booking.bookingRef}</p>
+        <div className="customer-flow-badges">
           <span className={`badge ${statusBadge}`}>{booking.status}</span>
           <span className={`badge ${booking.paymentStatus === 'SUCCESS' ? 'badge-success' : 'badge-warning'}`}>
             Payment: {booking.paymentStatus}
           </span>
         </div>
+      </section>
 
-        <div style={{ display: 'grid', gap: '0.6rem' }}>
-          <Row label="Event Type" value={booking.eventType?.name ?? booking.eventType} />
-          <Row label="Date" value={booking.bookingDate} />
-          <Row label="Time" value={booking.startTime} />
-          <Row label="Duration" value={(() => {
-            const m = booking.durationMinutes || (booking.durationHours * 60);
-            const h = Math.floor(m / 60);
-            const min = m % 60;
-            if (h > 0 && min > 0) return `${h}hr ${min}m`;
-            if (h > 0) return `${h}hr`;
-            return `${min}m`;
-          })()} />
-          {booking.addOns?.length > 0 && (
-            <Row label="Add-Ons" value={booking.addOns.map(a => a.name ?? a.addOnName).join(', ')} />
-          )}
-          {booking.specialNotes && <Row label="Notes" value={booking.specialNotes} />}
-          {booking.earlyCheckoutNote && (
-            <div style={{ padding: '0.6rem 0.85rem', background: 'rgba(16,185,129,0.08)', border: '1px solid var(--success)', borderRadius: '8px', fontSize: '0.88rem', color: 'var(--success)', marginTop: '0.25rem' }}>
-              ⏱️ {booking.earlyCheckoutNote}
-            </div>
-          )}
-          <hr style={{ borderColor: 'var(--border)' }} />
-          <Row label="Base Amount" value={`₹${booking.baseAmount?.toLocaleString()}`} />
-          <Row label="Add-On Amount" value={`₹${booking.addOnAmount?.toLocaleString()}`} />
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.2rem', fontWeight: '700' }}>
-            <span>Total</span>
-            <span style={{ color: 'var(--primary)' }}>₹{booking.totalAmount?.toLocaleString()}</span>
-          </div>
+      <section className="customer-flow-card customer-flow-stack">
+        <div className="customer-flow-row">
+          <span>Event type</span>
+          <strong>{booking.eventType?.name ?? booking.eventType}</strong>
         </div>
-      </div>
+        <div className="customer-flow-row">
+          <span>Date</span>
+          <strong>{booking.bookingDate}</strong>
+        </div>
+        <div className="customer-flow-row">
+          <span>Time</span>
+          <strong>{booking.startTime}</strong>
+        </div>
+        <div className="customer-flow-row">
+          <span>Duration</span>
+          <strong>{durationLabel}</strong>
+        </div>
+        {booking.addOns?.length > 0 && (
+          <div className="customer-flow-row">
+            <span>Add-ons</span>
+            <strong>{booking.addOns.map((item) => item.name ?? item.addOnName).join(', ')}</strong>
+          </div>
+        )}
+        {booking.specialNotes && (
+          <div className="customer-flow-row">
+            <span>Notes</span>
+            <strong>{DOMPurify.sanitize(booking.specialNotes, { ALLOWED_TAGS: [] })}</strong>
+          </div>
+        )}
+        {booking.earlyCheckoutNote && (
+          <div className="customer-flow-alert customer-flow-alert-success">
+            <strong><FiClock /> Early checkout note</strong>
+            <p>{DOMPurify.sanitize(booking.earlyCheckoutNote, { ALLOWED_TAGS: [] })}</p>
+          </div>
+        )}
+        <div className="customer-flow-row">
+          <span>Base amount</span>
+          <strong>{`₹${booking.baseAmount?.toLocaleString()}`}</strong>
+        </div>
+        <div className="customer-flow-row">
+          <span>Add-on amount</span>
+          <strong>{`₹${booking.addOnAmount?.toLocaleString()}`}</strong>
+        </div>
+        <div className="customer-flow-total">
+          <span>Total</span>
+          <strong className="customer-flow-amount">{`₹${booking.totalAmount?.toLocaleString()}`}</strong>
+        </div>
+      </section>
 
-      <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+      <div className="customer-flow-actions">
         {booking.status === 'PENDING' && booking.paymentStatus !== 'SUCCESS' && (
           <Link to={`/payment/${booking.bookingRef}`} className="btn btn-primary">Proceed to Payment</Link>
         )}
         <Link to="/my-bookings" className="btn btn-secondary">My Bookings</Link>
         <Link to="/book" className="btn btn-secondary">Book Another</Link>
       </div>
-    </div>
-  );
-}
-
-function Row({ label, value }) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.95rem' }}>
-      <span style={{ color: 'var(--text-secondary)' }}>{label}</span>
-      <span>{value}</span>
     </div>
   );
 }

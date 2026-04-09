@@ -38,7 +38,9 @@ export default function AdminCustomerPricing() {
     setSearching(true);
     try {
       const res = await authService.searchCustomers(query.trim());
-      setSearchResults(res.data.data || res.data || []);
+      // Server returns Page<UserDto> — extract .content
+      const payload = res.data.data;
+      setSearchResults(Array.isArray(payload) ? payload : (payload?.content ?? []));
     } catch { toast.error('Search failed'); }
     finally { setSearching(false); }
   };

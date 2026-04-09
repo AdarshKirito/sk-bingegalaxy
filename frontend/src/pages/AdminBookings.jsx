@@ -2,6 +2,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { adminService, bookingService, paymentService } from '../services/endpoints';
 import { toast } from 'react-toastify';
+import DOMPurify from 'dompurify';
+import Pagination from '../components/ui/Pagination';
+import './AdminBookings.css';
 
 const TABS = [
   { key: 'today', label: "Operational Day" },
@@ -240,43 +243,24 @@ export default function AdminBookings() {
     }
   })();
 
-  // --- Styles ---
-  const cardStyle = (accent) => ({
-    flex: '1 1 140px', padding: '1rem 1.2rem', borderRadius: 'var(--radius-md, 10px)',
-    background: 'var(--bg-card, #1e1e2e)', border: '1px solid var(--border)',
-    borderLeft: `4px solid ${accent}`, minWidth: 0,
-  });
-  const tabStyle = (active) => ({
-    padding: '0.55rem 1.1rem', borderRadius: 'var(--radius-sm, 6px) var(--radius-sm, 6px) 0 0',
-    border: 'none', cursor: 'pointer', fontWeight: active ? 700 : 500, fontSize: '0.85rem',
-    background: active ? 'var(--primary, #6c5ce7)' : 'transparent',
-    color: active ? '#fff' : 'var(--text-secondary)',
-    transition: 'all 0.15s',
-  });
-  const inputStyle = {
-    padding: '0.5rem 0.8rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
-    background: 'var(--bg-input)', color: 'var(--text)', fontSize: '0.85rem',
-  };
-  const modalOverlay = {
-    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem',
-  };
+  // Styles are now in AdminBookings.css
 
   return (
     <div className="container">
       <div className="page-header" style={{ marginBottom: '0.5rem' }}>
         <h1>Manage Bookings</h1>
+        <p>Manage all reservations, check-ins, and payments</p>
       </div>
 
       {/* Operational Date Banner + Today Stats Cards */}
       {stats && (
-        <div style={{ marginBottom: '1.25rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem', padding: '0.6rem 1rem', borderRadius: 'var(--radius-sm, 6px)', background: 'rgba(99,102,241,0.08)', border: '1px solid var(--primary)' }}>
-            <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Operational Day:</span>
-            <span style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--primary)' }}>{operationalDate}</span>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>All stats below are for this date</span>
+        <div>
+          <div className="ab-op-banner">
+            <span className="ab-op-banner-label">Operational Day:</span>
+            <span className="ab-op-banner-value">{operationalDate}</span>
+            <span className="ab-op-banner-hint">All stats below are for this date</span>
           </div>
-          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <div className="ab-stat-cards">
           {[
             { label: "Total",             val: stats.todayTotal ?? '-',     color: 'var(--primary)' },
             { label: 'Confirmed',          val: stats.todayConfirmed ?? '-', color: 'var(--success)' },
@@ -285,9 +269,9 @@ export default function AdminBookings() {
             { label: 'Completed',          val: stats.todayCompleted ?? '-', color: '#06b6d4' },
             { label: 'Cancelled',          val: stats.todayCancelled ?? '-', color: 'var(--danger, #e74c3c)' },
           ].map(c => (
-            <div key={c.label} style={cardStyle(c.color)}>
-              <div style={{ fontSize: '1.6rem', fontWeight: 700, color: c.color }}>{c.val}</div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>{c.label}</div>
+            <div key={c.label} className="ab-stat-card" style={{ borderLeftColor: c.color }}>
+              <div className="ab-stat-card-value" style={{ color: c.color }}>{c.val}</div>
+              <div className="ab-stat-card-label">{c.label}</div>
             </div>
           ))}
           </div>
@@ -295,18 +279,18 @@ export default function AdminBookings() {
       )}
 
       {/* Tab Bar */}
-      <div style={{ display: 'flex', gap: '0.25rem', borderBottom: '2px solid var(--border)', marginBottom: activeTab === 'today' ? '0' : '1rem', flexWrap: 'wrap' }}>
+      <div className={`ab-tabs ${activeTab === 'today' ? 'ab-tabs--no-margin' : 'ab-tabs--margin'}`}>
         {TABS.map(t => (
-          <button key={t.key} style={tabStyle(activeTab === t.key)} onClick={() => switchTab(t.key)}>{t.label}</button>
+          <button key={t.key} className={`ab-tab ${activeTab === t.key ? 'active' : ''}`} onClick={() => switchTab(t.key)}>{t.label}</button>
         ))}
       </div>
 
       {/* Today Sub-Tabs */}
       {activeTab === 'today' && (
-        <div style={{ display: 'flex', gap: '0.25rem', marginBottom: '1rem', flexWrap: 'wrap', paddingLeft: '0.5rem' }}>
+        <div className="ab-sub-tabs">
           {TODAY_SUB_TABS.map(st => (
             <button key={st.key}
-              style={{ padding: '0.4rem 0.8rem', borderRadius: 'var(--radius-sm)', border: 'none', cursor: 'pointer', fontSize: '0.78rem', fontWeight: todaySubTab === st.key ? 700 : 500, background: todaySubTab === st.key ? 'var(--primary-transparent, rgba(108,92,231,0.2))' : 'transparent', color: todaySubTab === st.key ? 'var(--primary)' : 'var(--text-secondary)' }}
+              className={`ab-sub-tab ${todaySubTab === st.key ? 'active' : ''}`}
               onClick={() => setTodaySubTab(st.key)}>
               {st.label}
             </button>
@@ -315,18 +299,18 @@ export default function AdminBookings() {
       )}
 
       {/* Filters Row */}
-      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1.25rem' }}>
+      <div className="ab-filter-row">
         {activeTab === 'byDate' && (
-          <input type="date" value={filterDate} onChange={e => { setFilterDate(e.target.value); setPage(0); }} style={inputStyle} />
+          <input type="date" className="ab-input" value={filterDate} onChange={e => { setFilterDate(e.target.value); setPage(0); }} />
         )}
         {activeTab === 'byStatus' && (
-          <select value={filterStatus} onChange={e => { setFilterStatus(e.target.value); setPage(0); }} style={inputStyle}>
+          <select className="ab-input" value={filterStatus} onChange={e => { setFilterStatus(e.target.value); setPage(0); }}>
             {STATUSES.map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
           </select>
         )}
 
         <input
-          style={{ ...inputStyle, flex: 1, minWidth: '180px' }}
+          className="ab-input ab-input-search"
           value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Search by ref, name, email, phone..."
           onKeyDown={e => e.key === 'Enter' && handleSearch()}
@@ -339,8 +323,8 @@ export default function AdminBookings() {
       {loading ? (
         <div className="loading"><div className="spinner"></div></div>
       ) : filteredBookings.length === 0 ? (
-        <div className="card" style={{ textAlign: 'center', padding: '2rem' }}>
-          <p style={{ color: 'var(--text-muted)' }}>
+        <div className="card ab-empty">
+          <p>
             {activeTab === 'today' ? `No bookings for operational day (${operationalDate})` :
              activeTab === 'upcoming' ? "No upcoming bookings" :
              "No bookings found"}
@@ -348,35 +332,30 @@ export default function AdminBookings() {
         </div>
       ) : (
         <>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <div className="ab-table-wrap">
+            <table className="ab-table">
               <thead>
-                <tr style={{ borderBottom: '2px solid var(--border)' }}>
+                <tr>
                   {['Ref', 'Customer', 'Event', 'Date', 'Time', 'Amount', 'Status', 'Payment'].map(h => (
-                    <th key={h} style={{ textAlign: 'left', padding: '0.75rem', fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 600 }}>{h}</th>
+                    <th key={h}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {filteredBookings.map(b => (
-                  <tr key={b.bookingRef} style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer', transition: 'background 0.1s' }}
-                    onClick={() => openDetailModal(b)}
-                    onMouseEnter={e => e.currentTarget.style.background = 'var(--primary-transparent, rgba(108,92,231,0.08))'}
-                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                    <td style={{ padding: '0.75rem' }}>
-                      <span style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--primary)' }}>{b.bookingRef}</span>
+                  <tr key={b.bookingRef} onClick={() => openDetailModal(b)}>
+                    <td><span className="ab-ref">{b.bookingRef}</span></td>
+                    <td>
+                      <span className="ab-customer-name">{b.customerName || b.customerEmail || 'N/A'}</span><br/>
+                      <span className="ab-customer-detail">{b.customerEmail}</span>
+                      {b.customerPhone && <><br/><span className="ab-customer-detail">📞 {b.customerPhone}</span></>}
                     </td>
-                    <td style={{ padding: '0.75rem' }}>
-                      <span style={{ fontWeight: 600 }}>{b.customerName || b.customerEmail || 'N/A'}</span><br/>
-                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{b.customerEmail}</span>
-                      {b.customerPhone && <><br/><span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>📞 {b.customerPhone}</span></>}
-                    </td>
-                    <td style={{ padding: '0.75rem' }}>{b.eventType?.name ?? b.eventType}</td>
-                    <td style={{ padding: '0.75rem' }}>{b.bookingDate}</td>
-                    <td style={{ padding: '0.75rem' }}>{b.startTime} ({(() => { const m = b.durationMinutes || (b.durationHours * 60); const h = Math.floor(m/60); const min = m%60; return h > 0 && min > 0 ? `${h}h ${min}m` : h > 0 ? `${h}h` : `${min}m`; })()})</td>
-                    <td style={{ padding: '0.75rem', fontWeight: 600 }}>₹{b.totalAmount?.toLocaleString()}</td>
-                    <td style={{ padding: '0.75rem' }}><span className={`badge ${statusBadge(b.status)}`}>{b.status?.replace('_', ' ')}</span></td>
-                    <td style={{ padding: '0.75rem' }}>
+                    <td>{b.eventType?.name ?? b.eventType}</td>
+                    <td>{b.bookingDate}</td>
+                    <td>{b.startTime} ({(() => { const m = b.durationMinutes || (b.durationHours * 60); const h = Math.floor(m/60); const min = m%60; return h > 0 && min > 0 ? `${h}h ${min}m` : h > 0 ? `${h}h` : `${min}m`; })()})</td>
+                    <td className="ab-amount">₹{b.totalAmount?.toLocaleString()}</td>
+                    <td><span className={`badge ${statusBadge(b.status)}`}>{b.status?.replace('_', ' ')}</span></td>
+                    <td>
                       <span className={`badge ${b.paymentStatus === 'SUCCESS' ? 'badge-success' : b.paymentStatus === 'PENDING' ? 'badge-warning' : 'badge-danger'}`}>
                         {b.paymentStatus?.replace('_', ' ')}
                       </span>
@@ -388,10 +367,8 @@ export default function AdminBookings() {
           </div>
 
           {totalPages > 1 && (
-            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', marginTop: '1.5rem' }}>
-              <button className="btn btn-secondary btn-sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Previous</button>
-              <span style={{ padding: '0.5rem 1rem', color: 'var(--text-secondary)' }}>Page {page + 1} of {totalPages}</span>
-              <button className="btn btn-secondary btn-sm" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>Next</button>
+            <div style={{ marginTop: '1.5rem' }}>
+              <Pagination page={page + 1} totalPages={totalPages} onPageChange={(p) => setPage(p - 1)} />
             </div>
           )}
         </>
@@ -399,12 +376,12 @@ export default function AdminBookings() {
 
       {/* Booking Detail Modal (Editable) */}
       {detailModal.open && detailModal.booking && (
-        <div style={modalOverlay} onClick={() => setDetailModal({ open: false, booking: null, bookingCount: 0 })}>
-          <div className="card" style={{ width: '100%', maxWidth: '620px', maxHeight: '90vh', overflowY: 'auto' }}
+        <div className="ab-modal-overlay" onClick={() => setDetailModal({ open: false, booking: null, bookingCount: 0 })}>
+          <div className="card ab-modal-card"
                onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <h3 style={{ margin: 0 }}>Reservation Details</h3>
-              <button style={{ background: 'none', border: 'none', color: 'var(--text)', fontSize: '1.3rem', cursor: 'pointer' }}
+            <div className="ab-modal-header">
+              <h3>Reservation Details</h3>
+              <button className="ab-modal-close"
                 onClick={() => setDetailModal({ open: false, booking: null, bookingCount: 0 })}>×</button>
             </div>
 
@@ -423,8 +400,8 @@ export default function AdminBookings() {
 
       {/* Admin Notes Modal */}
       {notesModal.open && (
-        <div style={modalOverlay}>
-          <div className="card" style={{ width: '100%', maxWidth: '420px' }}>
+        <div className="ab-modal-overlay">
+          <div className="card ab-notes-modal">
             <h3 style={{ marginBottom: '0.5rem' }}>Admin Notes</h3>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
               {notesModal.booking?.bookingRef} — {notesModal.booking?.customerName}
@@ -434,7 +411,6 @@ export default function AdminBookings() {
               onChange={e => setNotesText(e.target.value)}
               rows={5}
               placeholder="Internal notes (not visible to customer)..."
-              style={{ width: '100%', padding: '0.6rem', background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text)', resize: 'vertical' }}
             />
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
               <button className="btn btn-primary btn-sm" onClick={handleSaveNotes} disabled={notesSaving}>
@@ -579,7 +555,19 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
       setRefundAmount('');
       setRefundReason('');
       await refreshPayments();
-      await refreshBooking();
+      // Optimistically reflect the refund on the booking immediately
+      setB(prev => {
+        const newCollected = Math.max(0, parseFloat(prev.collectedAmount || 0) - amt);
+        const newBalance = parseFloat(prev.totalAmount || 0) - newCollected;
+        return {
+          ...prev,
+          collectedAmount: newCollected,
+          balanceDue: newBalance,
+          paymentStatus: newCollected < 0.01 ? 'REFUNDED' : 'PARTIALLY_REFUNDED',
+        };
+      });
+      // Sync with server after Kafka has processed the PAYMENT_REFUNDED event
+      setTimeout(() => refreshBooking(), 2000);
     } catch (err) { toast.error(err.response?.data?.message || 'Refund failed'); }
     setRefunding(false);
   };
@@ -597,7 +585,15 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
       });
       toast.success('Cash payment recorded successfully');
       await refreshPayments();
-      await refreshBooking();
+      // Optimistic update — show cleared balance immediately (Kafka updates DB asynchronously)
+      setB(prev => ({
+        ...prev,
+        collectedAmount: prev.totalAmount,
+        balanceDue: 0,
+        paymentStatus: 'SUCCESS',
+      }));
+      // Sync with server after Kafka has had time to process the event
+      setTimeout(() => refreshBooking(), 2000);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to record cash payment');
     }
@@ -627,7 +623,19 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
       setShowAddPayment(false);
       setAddPaymentForm({ amount: '', method: 'CASH', notes: '' });
       await refreshPayments();
-      await refreshBooking();
+      // Optimistic update — reflect the newly added payment amount immediately
+      const prevCollected = parseFloat(b.collectedAmount || 0);
+      const prevTotal = parseFloat(b.totalAmount || 0);
+      const newCollected = prevCollected + amt;
+      const newBalance = Math.max(0, prevTotal - newCollected);
+      setB(prev => ({
+        ...prev,
+        collectedAmount: newCollected,
+        balanceDue: newBalance,
+        paymentStatus: newBalance < 0.01 ? 'SUCCESS' : 'PARTIALLY_PAID',
+      }));
+      // Sync with server after Kafka has had time to process the event
+      setTimeout(() => refreshBooking(), 2000);
     } catch (err) { toast.error(err.response?.data?.message || 'Failed to record payment'); }
     setAddingPayment(false);
   };
@@ -652,7 +660,10 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
       toast.success(`Method changed \u2192 ${changeMethodNewMethod}`);
       setChangeMethodFor(null);
       await refreshPayments();
-      await refreshBooking();
+      // Optimistically update payment method (net collectedAmount unchanged — refund+re-add cancel out)
+      setB(prev => ({ ...prev, paymentMethod: changeMethodNewMethod }));
+      // Sync with server after Kafka has processed both the refund and re-add events
+      setTimeout(() => refreshBooking(), 2000);
     } catch (err) { toast.error(err.response?.data?.message || 'Failed to change method'); }
     setChangingMethod(false);
   };
@@ -788,22 +799,17 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
     setSaving(false);
   };
 
-  const tabBtnStyle = (active) => ({
-    padding: '0.5rem 1rem', border: 'none', cursor: 'pointer', fontWeight: active ? 700 : 500,
-    fontSize: '0.82rem', borderBottom: active ? '2px solid var(--primary)' : '2px solid transparent',
-    background: 'none', color: active ? 'var(--primary)' : 'var(--text-secondary)',
-  });
-
+  const tabBtnStyle = (active) => `ab-detail-tab ${active ? 'active' : ''}`;
   const rowStyle = { display: 'flex', justifyContent: 'space-between', padding: '0.45rem 0', borderBottom: '1px solid var(--border)', fontSize: '0.88rem', alignItems: 'center' };
   const labelStyle = { color: 'var(--text-secondary)', fontWeight: 500 };
   const editInputStyle = { padding: '0.35rem 0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--text)', fontSize: '0.85rem', flex: '1', marginLeft: '0.5rem', maxWidth: '280px' };
 
   return (
     <>
-      <div style={{ display: 'flex', gap: '0.25rem', borderBottom: '1px solid var(--border)', marginBottom: '1rem', alignItems: 'center' }}>
-        <button style={tabBtnStyle(tab === 'customer')} onClick={() => setTab('customer')}>Customer</button>
-        <button style={tabBtnStyle(tab === 'reservation')} onClick={() => setTab('reservation')}>Reservation</button>
-        <button style={tabBtnStyle(tab === 'payment')} onClick={() => setTab('payment')}>Payment</button>
+      <div className="ab-detail-tabs">
+        <button className={tabBtnStyle(tab === 'customer')} onClick={() => setTab('customer')}>Customer</button>
+        <button className={tabBtnStyle(tab === 'reservation')} onClick={() => setTab('reservation')}>Reservation</button>
+        <button className={tabBtnStyle(tab === 'payment')} onClick={() => setTab('payment')}>Payment</button>
       </div>
 
       {tab === 'customer' && (
@@ -1009,19 +1015,19 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
           <div style={rowStyle}>
             <span style={labelStyle}>Special Notes</span>
             {editing ? <input style={editInputStyle} value={editForm.specialNotes} onChange={e => setEditForm({ ...editForm, specialNotes: e.target.value })} />
-              : <span>{b.specialNotes || 'N/A'}</span>}
+              : <span>{DOMPurify.sanitize(b.specialNotes || 'N/A', { ALLOWED_TAGS: [] })}</span>}
           </div>
           <div style={rowStyle}>
             <span style={labelStyle}>Admin Notes</span>
             {editing ? <input style={editInputStyle} value={editForm.adminNotes} onChange={e => setEditForm({ ...editForm, adminNotes: e.target.value })} />
-              : <span>{b.adminNotes || 'N/A'}</span>}
+              : <span>{DOMPurify.sanitize(b.adminNotes || 'N/A', { ALLOWED_TAGS: [] })}</span>}
           </div>
           <div style={rowStyle}><span style={labelStyle}>Created</span><span>{b.createdAt ? new Date(b.createdAt).toLocaleString() : 'N/A'}</span></div>
 
           {/* Early checkout info */}
           {b.earlyCheckoutNote && (
             <div style={{ marginTop: '0.75rem', padding: '0.6rem 0.8rem', background: 'rgba(0, 206, 201, 0.1)', border: '1px solid #00cec9', borderRadius: 'var(--radius-sm)', fontSize: '0.85rem', color: '#00cec9' }}>
-              ⏱️ {b.earlyCheckoutNote}
+              ⏱️ {DOMPurify.sanitize(b.earlyCheckoutNote, { ALLOWED_TAGS: [] })}
             </div>
           )}
           {b.actualCheckoutTime && !b.earlyCheckoutNote && (
@@ -1101,7 +1107,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                     <div style={rowStyle}><span style={labelStyle}>Remaining Refundable</span><span style={{ color: 'var(--success, #00b894)' }}>₹{(p.remainingRefundable ?? 0).toLocaleString()}</span></div>
                   </>
                 )}
-                {p.failureReason && <div style={rowStyle}><span style={labelStyle}>Failure Reason</span><span style={{ color: 'var(--danger)' }}>{p.failureReason}</span></div>}
+                {p.failureReason && <div style={rowStyle}><span style={labelStyle}>Failure Reason</span><span style={{ color: 'var(--danger)' }}>{DOMPurify.sanitize(p.failureReason, { ALLOWED_TAGS: [] })}</span></div>}
                 {(p.status === 'SUCCESS' || p.status === 'PARTIALLY_REFUNDED') && (
                   <>
                     <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>

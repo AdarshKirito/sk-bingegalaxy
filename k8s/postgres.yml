@@ -3,6 +3,16 @@ kind: StatefulSet
 metadata:
   name: postgres
   namespace: sk-binge-galaxy
+  annotations:
+    # ⚠ PRODUCTION WARNING: This single-node StatefulSet is NOT suitable for production.
+    # A node failure causes data-layer downtime for all four databases (auth, availability,
+    # booking, payment). For production, use one of:
+    #   1. Managed PostgreSQL (AWS RDS, GCP Cloud SQL, Azure Database) — RECOMMENDED
+    #   2. CloudNativePG operator (cnpg.io) with 3-node cluster + automatic failover
+    #   3. Patroni/Spilo with streaming replication
+    # When using a managed service, disable this StatefulSet and use the ExternalName
+    # Service at the bottom of this file instead.
+    production-ready: "false"
 spec:
   serviceName: postgres
   replicas: 1  # Use PgBouncer + streaming replication for HA; scale via read-replicas
@@ -15,9 +25,18 @@ spec:
         app: postgres
     spec:
       terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
       containers:
         - name: postgres
           image: postgres:16-alpine
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           ports:
             - containerPort: 5432
               name: postgres
@@ -63,6 +82,7 @@ spec:
         name: postgres-data
       spec:
         accessModes: ["ReadWriteOnce"]
+        storageClassName: __STORAGE_CLASS_NAME__
         resources:
           requests:
             storage: 10Gi
@@ -91,3 +111,17 @@ data:
     SELECT 'CREATE DATABASE availability_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'availability_db')\gexec
     SELECT 'CREATE DATABASE booking_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'booking_db')\gexec
     SELECT 'CREATE DATABASE payment_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'payment_db')\gexec
+---
+# ── Managed PostgreSQL (production) ──────────────────────────────────────────
+# Uncomment the Service below and disable the StatefulSet above when switching
+# to a managed PostgreSQL instance (RDS, Cloud SQL, Azure Database, etc.).
+# Replace __MANAGED_PG_HOST__ with your managed DB hostname.
+#
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: postgres
+#   namespace: sk-binge-galaxy
+# spec:
+#   type: ExternalName
+#   externalName: __MANAGED_PG_HOST__

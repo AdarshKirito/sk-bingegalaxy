@@ -54,7 +54,7 @@ public class SystemSettingsService {
     @Transactional
     public LocalDate advanceOperationalDate(LocalDate clientToday) {
         LocalDate cap = clientToday != null ? clientToday : LocalDate.now();
-        SystemSettings settings = repo.findById(1L)
+        SystemSettings settings = repo.findByIdForUpdate(1L)
                 .orElseGet(() -> SystemSettings.builder().id(1L).operationalDate(cap).build());
         settings.setOperationalDate(settings.getOperationalDate().plusDays(1));
         return repo.save(settings).getOperationalDate();

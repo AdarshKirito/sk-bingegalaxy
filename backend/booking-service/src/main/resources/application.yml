@@ -1,8 +1,23 @@
+server:
+  shutdown: graceful
+
 spring:
   application:
     name: booking-service
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
   config:
     import: optional:configserver:${SPRING_CLOUD_CONFIG_URI:http://localhost:8888}
+  flyway:
+    baseline-on-migrate: true
+    baseline-version: 0
+
+spring.cloud.openfeign:
+  client:
+    config:
+      default:
+        connect-timeout: 5000
+        read-timeout: 5000
 
 eureka:
   client:

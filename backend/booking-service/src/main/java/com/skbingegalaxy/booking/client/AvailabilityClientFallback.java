@@ -4,8 +4,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Fallback for availability-service circuit breaker.
@@ -17,7 +18,16 @@ import java.util.concurrent.ConcurrentHashMap;
 @Slf4j
 public class AvailabilityClientFallback implements AvailabilityClient {
 
-    private final Map<String, Boolean> cache = new ConcurrentHashMap<>();
+    private static final int MAX_CACHE_SIZE = 1024;
+
+    private final Map<String, Boolean> cache = Collections.synchronizedMap(
+        new LinkedHashMap<>(64, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, Boolean> eldest) {
+                return size() > MAX_CACHE_SIZE;
+            }
+        }
+    );
 
     /**
      * Called by application code to record a successful availability lookup.
@@ -29,7 +39,11 @@ public class AvailabilityClientFallback implements AvailabilityClient {
     }
 
     @Override
-    public Boolean checkSlotAvailable(LocalDate date, int startMinute, int durationMinutes) {
+    public Boolean checkSlotAvailable(String internalApiSecret,
+                                      LocalDate date,
+                                      Long bingeId,
+                                      int startMinute,
+                                      int durationMinutes) {
         String key = cacheKey(date, startMinute, durationMinutes);
         Boolean cached = cache.get(key);
 

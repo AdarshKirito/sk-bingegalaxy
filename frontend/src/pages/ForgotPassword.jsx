@@ -29,7 +29,7 @@ export default function ForgotPassword() {
 
   return (
     <div className="auth-page">
-      <div className="auth-card card">
+      <div className="auth-card card" style={{ margin: '0 auto' }}>
         <h1>Forgot Password</h1>
         <p className="auth-subtitle">We'll send you reset instructions</p>
 

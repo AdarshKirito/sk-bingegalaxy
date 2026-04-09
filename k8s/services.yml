@@ -14,12 +14,31 @@ spec:
         app: auth-service
     spec:
       serviceAccountName: spring-cloud-kubernetes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: auth-service
+                topologyKey: kubernetes.io/hostname
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: auth-service
-          image: skbingegalaxy/auth-service:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          image: skbingegalaxy/auth-service:IMAGE_TAG  # Set by CI/CD
           imagePullPolicy: Always
           ports:
             - containerPort: 8081
+              name: http
           envFrom:
             - configMapRef:
                 name: app-config
@@ -28,6 +47,8 @@ spec:
             - secretRef:
                 name: app-secrets
           env:
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://postgres:5432/auth_db
             - name: JAVA_TOOL_OPTIONS
               value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
           resources:
@@ -57,6 +78,12 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 15
             failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -86,12 +113,31 @@ spec:
         app: availability-service
     spec:
       serviceAccountName: spring-cloud-kubernetes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: availability-service
+                topologyKey: kubernetes.io/hostname
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: availability-service
-          image: skbingegalaxy/availability-service:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          image: skbingegalaxy/availability-service:IMAGE_TAG  # Set by CI/CD
           imagePullPolicy: Always
           ports:
             - containerPort: 8082
+              name: http
           envFrom:
             - configMapRef:
                 name: app-config
@@ -100,6 +146,8 @@ spec:
             - secretRef:
                 name: app-secrets
           env:
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://postgres:5432/availability_db
             - name: JAVA_TOOL_OPTIONS
               value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
           resources:
@@ -129,6 +177,12 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 15
             failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -158,12 +212,31 @@ spec:
         app: booking-service
     spec:
       serviceAccountName: spring-cloud-kubernetes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: booking-service
+                topologyKey: kubernetes.io/hostname
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: booking-service
-          image: skbingegalaxy/booking-service:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          image: skbingegalaxy/booking-service:IMAGE_TAG  # Set by CI/CD
           imagePullPolicy: Always
           ports:
             - containerPort: 8083
+              name: http
           envFrom:
             - configMapRef:
                 name: app-config
@@ -172,6 +245,8 @@ spec:
             - secretRef:
                 name: app-secrets
           env:
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://postgres:5432/booking_db
             - name: JAVA_TOOL_OPTIONS
               value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
           resources:
@@ -201,6 +276,12 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 15
             failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -230,12 +311,31 @@ spec:
         app: payment-service
     spec:
       serviceAccountName: spring-cloud-kubernetes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: payment-service
+                topologyKey: kubernetes.io/hostname
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: payment-service
-          image: skbingegalaxy/payment-service:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          image: skbingegalaxy/payment-service:IMAGE_TAG  # Set by CI/CD
           imagePullPolicy: Always
           ports:
             - containerPort: 8084
+              name: http
           envFrom:
             - configMapRef:
                 name: app-config
@@ -244,6 +344,8 @@ spec:
             - secretRef:
                 name: app-secrets
           env:
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://postgres:5432/payment_db
             - name: JAVA_TOOL_OPTIONS
               value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
           resources:
@@ -273,6 +375,12 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 15
             failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -292,7 +400,7 @@ metadata:
   name: notification-service
   namespace: sk-binge-galaxy
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: notification-service
@@ -302,12 +410,31 @@ spec:
         app: notification-service
     spec:
       serviceAccountName: spring-cloud-kubernetes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: notification-service
+                topologyKey: kubernetes.io/hostname
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: notification-service
-          image: skbingegalaxy/notification-service:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          image: skbingegalaxy/notification-service:IMAGE_TAG  # Set by CI/CD
           imagePullPolicy: Always
           ports:
             - containerPort: 8085
+              name: http
           envFrom:
             - configMapRef:
                 name: app-config
@@ -345,6 +472,12 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 15
             failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

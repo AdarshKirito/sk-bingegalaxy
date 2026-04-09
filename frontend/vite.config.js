@@ -6,7 +6,9 @@ export default defineConfig({
   server: {
     port: 3000,
     headers: {
-      'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
+      // Match nginx dev/prod behavior so Google popup auth can use postMessage
+      // without the browser warning emitted by stricter COOP values.
+      'Cross-Origin-Opener-Policy': 'unsafe-none',
     },
     proxy: {
       '/api/v1': {

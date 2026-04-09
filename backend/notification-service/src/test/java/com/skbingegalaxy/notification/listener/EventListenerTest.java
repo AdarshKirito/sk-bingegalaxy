@@ -5,6 +5,7 @@ import com.skbingegalaxy.common.event.BookingEvent;
 import com.skbingegalaxy.common.event.NotificationEvent;
 import com.skbingegalaxy.common.event.PaymentEvent;
 import com.skbingegalaxy.notification.dto.NotificationDto;
+import com.skbingegalaxy.notification.repository.NotificationRepository;
 import com.skbingegalaxy.notification.service.NotificationService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -25,6 +26,7 @@ import static org.mockito.Mockito.*;
 class EventListenerTest {
 
     @Mock private NotificationService notificationService;
+    @Mock private NotificationRepository notificationRepository;
     @InjectMocks private EventListener eventListener;
 
     @Test
@@ -96,6 +98,8 @@ class EventListenerTest {
                 .transactionId("TXN-123")
                 .amount(BigDecimal.valueOf(5000))
                 .paymentMethod("UPI")
+                .customerEmail("john@example.com")
+                .customerName("John Doe")
                 .build();
 
         when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
@@ -106,7 +110,7 @@ class EventListenerTest {
         verify(notificationService).sendNotification(
                 eq("PAYMENT_SUCCESS"),
                 eq(NotificationChannel.EMAIL),
-                isNull(), isNull(), isNull(),
+                eq("john@example.com"), isNull(), eq("John Doe"),
                 contains("SKBG003"),
                 any(),
                 eq("SKBG003"),
@@ -119,6 +123,8 @@ class EventListenerTest {
         PaymentEvent event = PaymentEvent.builder()
                 .bookingRef("SKBG004")
                 .transactionId("TXN-456")
+                .customerEmail("john@example.com")
+                .customerName("John Doe")
                 .build();
 
         when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
@@ -129,7 +135,7 @@ class EventListenerTest {
         verify(notificationService).sendNotification(
                 eq("PAYMENT_FAILED"),
                 eq(NotificationChannel.EMAIL),
-                isNull(), isNull(), isNull(),
+                eq("john@example.com"), isNull(), eq("John Doe"),
                 contains("SKBG004"),
                 any(),
                 eq("SKBG004"),

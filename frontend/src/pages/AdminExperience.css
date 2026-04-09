@@ -1,0 +1,234 @@
+.app-main-admin {
+  background:
+    radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.04), transparent 24%),
+    radial-gradient(circle at top right, rgba(var(--primary-rgb), 0.1), transparent 20%),
+    linear-gradient(180deg, rgba(var(--primary-rgb), 0.03), transparent 20%),
+    var(--bg);
+}
+
+.app-main-admin .page-header h1,
+.app-main-admin .adm-header h1 {
+  letter-spacing: -0.03em;
+}
+
+.app-main-admin .page-header p,
+.app-main-admin .adm-header p {
+  color: color-mix(in srgb, var(--text-secondary) 90%, var(--primary) 10%);
+}
+
+.app-main-admin .card,
+.app-main-admin .stat-card,
+.app-main-admin .admin-nav-card,
+.app-main-admin .auth-card,
+.app-main-admin .admin-binge-form,
+.app-main-admin .admin-binge-empty,
+.app-main-admin .admin-binge-item,
+.app-main-admin .adm-card,
+.app-main-admin .adm-form,
+.app-main-admin .adm-empty,
+.app-main-admin .adm-item,
+.app-main-admin .adm-summary,
+.app-main-admin .adm-list-item,
+.app-main-admin .adm-stat,
+.app-main-admin .adm-table-wrap,
+.app-main-admin .adm-modal,
+.app-main-admin .adm-flow-copy,
+.app-main-admin .adm-flow-card,
+.app-main-admin .adm-venue-card {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(var(--primary-rgb), 0.1);
+  background:
+    radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.02), transparent 24%),
+    linear-gradient(180deg, rgba(var(--primary-rgb), 0.04), transparent 28%),
+    var(--bg-card);
+  box-shadow: 0 14px 30px rgba(var(--primary-rgb), 0.04), var(--shadow-sm);
+}
+
+.app-main-admin .card::before,
+.app-main-admin .stat-card::before,
+.app-main-admin .admin-nav-card::before,
+.app-main-admin .auth-card::before,
+.app-main-admin .admin-binge-form::before,
+.app-main-admin .admin-binge-empty::before,
+.app-main-admin .admin-binge-item::before,
+.app-main-admin .adm-card::before,
+.app-main-admin .adm-form::before,
+.app-main-admin .adm-empty::before,
+.app-main-admin .adm-item::before,
+.app-main-admin .adm-summary::before,
+.app-main-admin .adm-list-item::before,
+.app-main-admin .adm-stat::before,
+.app-main-admin .adm-table-wrap::before,
+.app-main-admin .adm-modal::before,
+.app-main-admin .adm-flow-copy::before,
+.app-main-admin .adm-flow-card::before,
+.app-main-admin .adm-venue-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(var(--primary-rgb), 0), rgba(var(--primary-rgb), 0.35), rgba(var(--accent-rgb), 0.14), rgba(var(--primary-rgb), 0));
+}
+
+.app-main-admin .card:hover,
+.app-main-admin .admin-nav-card:hover,
+.app-main-admin .admin-binge-item:hover,
+.app-main-admin .adm-card:hover,
+.app-main-admin .adm-item:hover,
+.app-main-admin .adm-list-item:hover,
+.app-main-admin .adm-venue-card:hover {
+  border-color: rgba(var(--primary-rgb), 0.2);
+  box-shadow: 0 18px 36px rgba(var(--primary-rgb), 0.07), var(--shadow);
+}
+
+.app-main-admin .btn-secondary {
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.08), rgba(var(--accent-rgb), 0.03));
+  color: var(--primary-dark);
+  border: 1px solid rgba(var(--primary-rgb), 0.14);
+}
+
+.app-main-admin .btn-secondary:hover {
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.14), rgba(var(--accent-rgb), 0.05));
+  color: var(--primary-dark);
+}
+
+.app-main-admin .btn-primary {
+  box-shadow: var(--shadow-primary), 0 10px 22px rgba(var(--primary-rgb), 0.1);
+}
+
+.app-main-admin .input-group label,
+.app-main-admin label {
+  color: var(--text);
+}
+
+.app-main-admin .input-group input,
+.app-main-admin .input-group select,
+.app-main-admin .input-group textarea,
+.app-main-admin input[type="date"],
+.app-main-admin input[type="number"],
+.app-main-admin input[type="text"],
+.app-main-admin input[type="email"],
+.app-main-admin input[type="password"],
+.app-main-admin input[type="tel"],
+.app-main-admin select,
+.app-main-admin textarea {
+  border-color: rgba(var(--primary-rgb), 0.12);
+  background:
+    linear-gradient(180deg, rgba(var(--primary-rgb), 0.03), transparent 70%),
+    var(--bg-input);
+}
+
+.app-main-admin .input-group input:focus,
+.app-main-admin .input-group select:focus,
+.app-main-admin .input-group textarea:focus,
+.app-main-admin input:focus,
+.app-main-admin select:focus,
+.app-main-admin textarea:focus {
+  border-color: rgba(var(--primary-rgb), 0.4);
+  box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.08), 0 8px 18px rgba(var(--primary-rgb), 0.06);
+}
+
+.app-main-admin table {
+  background: transparent;
+}
+
+.app-main-admin th {
+  color: color-mix(in srgb, var(--text-secondary) 90%, var(--primary) 10%);
+}
+
+.app-main-admin tr:hover {
+  background: linear-gradient(90deg, rgba(var(--primary-rgb), 0.05), rgba(var(--accent-rgb), 0.02));
+}
+
+.app-main-admin .badge-info,
+.app-main-admin .badge-warning,
+.app-main-admin .badge-success,
+.app-main-admin .badge-danger {
+  box-shadow: inset 0 0 0 1px rgba(var(--primary-rgb), 0.06);
+}
+
+.app-main-admin .auth-page {
+  background:
+    radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.05), transparent 24%),
+    radial-gradient(circle at top right, rgba(var(--primary-rgb), 0.14), transparent 22%),
+    linear-gradient(180deg, rgba(var(--primary-rgb), 0.03), transparent 24%),
+    var(--bg);
+}
+
+.app-main-admin .auth-card {
+  margin-inline: auto;
+}
+
+.app-main-admin .auth-subtitle {
+  color: color-mix(in srgb, var(--text-secondary) 90%, var(--primary) 10%);
+}
+
+.admin-binge-shell {
+  max-width: 980px;
+  margin: 2rem auto;
+}
+
+.admin-binge-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.admin-binge-header h2 {
+  margin: 0;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.admin-binge-header p {
+  margin: 0.35rem 0 0;
+  color: var(--text-secondary);
+}
+
+.admin-binge-form {
+  margin-bottom: 1.5rem;
+  padding: 1.5rem;
+}
+
+.admin-binge-form h3 {
+  margin: 0 0 1rem;
+}
+
+.admin-binge-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.admin-binge-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem;
+}
+
+.admin-binge-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.admin-binge-empty {
+  text-align: center;
+  padding: 3rem;
+}
+
+@media (max-width: 768px) {
+  .admin-binge-header,
+  .admin-binge-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .admin-binge-actions {
+    flex-wrap: wrap;
+  }
+}

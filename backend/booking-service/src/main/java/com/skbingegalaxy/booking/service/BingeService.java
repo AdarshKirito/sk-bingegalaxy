@@ -3,7 +3,12 @@ package com.skbingegalaxy.booking.service;
 import com.skbingegalaxy.booking.dto.BingeDto;
 import com.skbingegalaxy.booking.dto.BingeSaveRequest;
 import com.skbingegalaxy.booking.entity.Binge;
+import com.skbingegalaxy.booking.repository.AddOnRepository;
 import com.skbingegalaxy.booking.repository.BingeRepository;
+import com.skbingegalaxy.booking.repository.BookingRepository;
+import com.skbingegalaxy.booking.repository.CustomerPricingProfileRepository;
+import com.skbingegalaxy.booking.repository.EventTypeRepository;
+import com.skbingegalaxy.booking.repository.RateCodeRepository;
 import com.skbingegalaxy.common.exception.BusinessException;
 import com.skbingegalaxy.common.exception.DuplicateResourceException;
 import com.skbingegalaxy.common.exception.ResourceNotFoundException;
@@ -22,6 +27,11 @@ import java.util.List;
 public class BingeService {
 
     private final BingeRepository bingeRepository;
+    private final BookingRepository bookingRepository;
+    private final EventTypeRepository eventTypeRepository;
+    private final AddOnRepository addOnRepository;
+    private final RateCodeRepository rateCodeRepository;
+    private final CustomerPricingProfileRepository customerPricingProfileRepository;
 
     public List<BingeDto> getAdminBinges(Long adminId, String role) {
         if ("SUPER_ADMIN".equals(role)) {
@@ -95,6 +105,37 @@ public class BingeService {
         binge.setActive(!binge.isActive());
         bingeRepository.save(binge);
         log.info("Binge toggled: '{}' active={}", binge.getName(), binge.isActive());
+    }
+
+    @Transactional
+    public void deleteBinge(Long id, Long adminId, String role) {
+        Binge binge = bingeRepository.findById(id)
+            .orElseThrow(() -> new ResourceNotFoundException("Binge", "id", id));
+
+        if (!"SUPER_ADMIN".equals(role) && !binge.getAdminId().equals(adminId)) {
+            throw new BusinessException("Access denied: you do not own this binge", HttpStatus.FORBIDDEN);
+        }
+        if (binge.isActive()) {
+            throw new BusinessException("Deactivate the binge before deleting it");
+        }
+        if (bookingRepository.existsByBingeId(id)) {
+            throw new BusinessException("Cannot delete this binge because it already has bookings");
+        }
+        if (eventTypeRepository.existsByBingeId(id)) {
+            throw new BusinessException("Delete this binge's event types before deleting the binge");
+        }
+        if (addOnRepository.existsByBingeId(id)) {
+            throw new BusinessException("Delete this binge's add-ons before deleting the binge");
+        }
+        if (rateCodeRepository.existsByBingeId(id)) {
+            throw new BusinessException("Delete this binge's rate codes before deleting the binge");
+        }
+        if (customerPricingProfileRepository.existsByBingeId(id)) {
+            throw new BusinessException("Delete this binge's customer pricing profiles before deleting the binge");
+        }
+
+        bingeRepository.delete(binge);
+        log.info("Binge deleted: '{}' (ID: {})", binge.getName(), id);
     }
 
     private BingeDto toDto(Binge b) {

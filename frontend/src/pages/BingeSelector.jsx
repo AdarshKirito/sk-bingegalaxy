@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { bookingService } from '../services/endpoints';
 import { useBinge } from '../context/BingeContext';
 import { toast } from 'react-toastify';
+import SEO from '../components/SEO';
+import { FiArrowRight, FiCompass, FiMapPin } from 'react-icons/fi';
+import './CustomerHub.css';
 
 export default function BingeSelector() {
   const [binges, setBinges] = useState([]);
@@ -29,27 +32,48 @@ export default function BingeSelector() {
     navigate('/dashboard');
   };
 
-  if (loading) return <div className="container"><p>Loading venues...</p></div>;
+  if (loading) {
+    return (
+      <div className="container customer-flow-shell customer-flow-shell-narrow">
+        <SEO title="Select Venue" description="Choose the venue that anchors your customer booking experience." />
+        <div className="customer-flow-card customer-flow-empty">
+          <span className="customer-flow-icon"><FiCompass /></span>
+          <h2>Loading venues...</h2>
+          <p>Preparing the available locations for your next private screening.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="container" style={{ maxWidth: 700, margin: '2rem auto' }}>
-      <h2 style={{ textAlign: 'center', color: 'var(--text)' }}>Select a Venue</h2>
-      <p style={{ textAlign: 'center', color: 'var(--text-secondary)', marginBottom: '2rem' }}>Choose a venue to browse events and make bookings.</p>
+    <div className="container customer-flow-shell customer-flow-shell-narrow">
+      <SEO title="Select Venue" description="Choose the venue that anchors your customer booking experience." />
+
+      <section className="customer-flow-copy">
+        <span className="customer-flow-kicker">Choose venue</span>
+        <h1>Select the venue that sets the base for bookings, pricing, and support.</h1>
+        <p>Once you pick a venue, the customer dashboard, booking flow, and account experience all center around that location.</p>
+      </section>
 
       {binges.length === 0 ? (
-        <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
-          <p style={{ fontSize: '1.2rem', color: 'var(--text-muted)' }}>No venues available right now. Please check back later.</p>
+        <div className="customer-flow-card customer-flow-empty">
+          <span className="customer-flow-icon"><FiMapPin /></span>
+          <h2>No venues available right now</h2>
+          <p>Please check back later for active locations.</p>
         </div>
       ) : (
-        <div style={{ display: 'grid', gap: '1rem' }}>
-          {binges.map((b) => (
-            <div key={b.id} className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }} onClick={() => handleSelect(b)}>
-              <div>
-                <h3 style={{ margin: 0, color: 'var(--text)' }}>{b.name}</h3>
-                {b.address && <p style={{ margin: '0.25rem 0 0', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>{b.address}</p>}
+        <div className="customer-venue-grid">
+          {binges.map((binge) => (
+            <article key={binge.id} className="customer-venue-card" onClick={() => handleSelect(binge)}>
+              <div className="customer-venue-card-copy">
+                <span className="customer-flow-kicker">Venue option</span>
+                <h3>{binge.name}</h3>
+                <p>{binge.address || 'Private-screening location ready for bookings.'}</p>
               </div>
-              <button className="btn btn-primary btn-sm">Select</button>
-            </div>
+              <button type="button" className="btn btn-primary btn-sm">
+                Select <FiArrowRight />
+              </button>
+            </article>
           ))}
         </div>
       )}

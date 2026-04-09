@@ -35,19 +35,13 @@ public class AdminSeeder implements CommandLineRunner {
         var existing = userRepository.findByEmail(adminEmail);
         if (existing.isPresent()) {
             User admin = existing.get();
-            boolean changed = false;
             if (admin.getRole() != UserRole.SUPER_ADMIN) {
                 admin.setRole(UserRole.SUPER_ADMIN);
-                changed = true;
-                log.info("Admin user upgraded to SUPER_ADMIN: {}", adminEmail);
-            }
-            // Always sync password from config
-            admin.setPassword(passwordEncoder.encode(adminPassword));
-            changed = true;
-            if (changed) {
                 userRepository.save(admin);
+                log.info("Admin user upgraded to SUPER_ADMIN: {}", adminEmail);
+            } else {
+                log.info("Super admin already exists, skipping seed: {}", adminEmail);
             }
-            log.info("Super admin synced: {}", adminEmail);
         } else {
             String[] names = adminName.split(" ", 2);
             User admin = User.builder()

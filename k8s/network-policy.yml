@@ -9,6 +9,108 @@ spec:
   policyTypes:
     - Ingress
 ---
+# Default deny all egress traffic in the namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: sk-binge-galaxy
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+---
+# Allow DNS resolution for all pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: sk-binge-galaxy
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+# Allow egress from backend services → infra (Kafka, Postgres, MongoDB, Redis, Zipkin)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-backends-to-infra
+  namespace: sk-binge-galaxy
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [auth-service, availability-service, booking-service, payment-service, notification-service, api-gateway]
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values: [kafka, postgres, mongodb, redis, zipkin, discovery-server, config-server]
+---
+# Allow egress from payment-service to external payment gateways (Razorpay)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-payment-external
+  namespace: sk-binge-galaxy
+spec:
+  podSelector:
+    matchLabels:
+      app: payment-service
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - port: 443
+          protocol: TCP
+---
+# Allow egress from notification-service to external SMTP
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-notification-external
+  namespace: sk-binge-galaxy
+spec:
+  podSelector:
+    matchLabels:
+      app: notification-service
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - port: 587
+          protocol: TCP
+        - port: 465
+          protocol: TCP
+---
 # Allow ingress controller → frontend & api-gateway
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -66,7 +168,25 @@ spec:
       ports:
         - port: 8082
 ---
-# Allow all pods → Kafka & PostgreSQL & MongoDB
+# Allow api-gateway → redis (shared rate limiting)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gateway-to-redis
+  namespace: sk-binge-galaxy
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: api-gateway
+      ports:
+        - port: 6379
+---
+# Allow only backend services → Kafka & PostgreSQL & MongoDB
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -80,7 +200,11 @@ spec:
         values: [kafka, postgres, mongodb]
   ingress:
     - from:
-        - podSelector: {}
+        - podSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values: [auth-service, booking-service, payment-service, notification-service, availability-service]
 ---
 # Allow Prometheus scraping on all pods (/actuator/prometheus)
 apiVersion: networking.k8s.io/v1
@@ -102,3 +226,22 @@ spec:
         - port: 8083
         - port: 8084
         - port: 8085
+---
+# Allow all pods → discovery-server & config-server (service registration)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-service-registration
+  namespace: sk-binge-galaxy
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [discovery-server, config-server]
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - port: 8761
+        - port: 8888

@@ -1,0 +1,202 @@
+# PostgreSQL and MongoDB backup CronJobs
+# Backs up all databases daily at 2 AM UTC.
+# Adjust storageClassName and storage size for your cloud provider.
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: sk-binge-galaxy
+spec:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            fsGroup: 999
+          containers:
+            - name: postgres-backup
+              image: postgres:16-alpine
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+              env:
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: db-secrets
+                      key: SPRING_DATASOURCE_USERNAME
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: db-secrets
+                      key: SPRING_DATASOURCE_PASSWORD
+                - name: BACKUP_S3_BUCKET
+                  valueFrom:
+                    secretKeyRef:
+                      name: app-secrets
+                      key: BACKUP_S3_BUCKET
+                      optional: true
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
+                  for db in auth_db availability_db booking_db payment_db; do
+                    echo "Backing up $db..."
+                    pg_dump -h postgres -U "$PGUSER" "$db" -f "/backups/${db}_${TIMESTAMP}.sql"
+                    gzip -f "/backups/${db}_${TIMESTAMP}.sql"
+                  done
+                  # Prune local backups older than 14 days
+                  find /backups -name "*.sql.gz" -mtime +14 -delete
+                  # Sync to off-cluster object storage
+                  if [ -n "${BACKUP_S3_BUCKET:-}" ]; then
+                    if command -v aws >/dev/null 2>&1; then
+                      aws s3 sync /backups/ "s3://${BACKUP_S3_BUCKET}/postgres/" \
+                        --storage-class STANDARD_IA --only-show-errors
+                      echo "PostgreSQL backups synced to s3://${BACKUP_S3_BUCKET}/postgres/"
+                    else
+                      echo "WARNING: BACKUP_S3_BUCKET is set but aws CLI is not available in the backup image. Skipping off-cluster sync."
+                    fi
+                  else
+                    echo "WARNING: BACKUP_S3_BUCKET not set — backups are local-only."
+                  fi
+                  echo "PostgreSQL backup complete."
+              volumeMounts:
+                - name: backup-storage
+                  mountPath: /backups
+              resources:
+                requests:
+                  memory: "128Mi"
+                  cpu: "100m"
+                limits:
+                  memory: "256Mi"
+                  cpu: "250m"
+          volumes:
+            - name: backup-storage
+              persistentVolumeClaim:
+                claimName: postgres-backup-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-backup-pvc
+  namespace: sk-binge-galaxy
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: __STORAGE_CLASS_NAME__
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mongodb-backup
+  namespace: sk-binge-galaxy
+spec:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            fsGroup: 999
+          containers:
+            - name: mongodb-backup
+              image: mongo:7.0
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+              env:
+                - name: MONGO_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: db-secrets
+                      key: MONGO_USER
+                - name: MONGO_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: db-secrets
+                      key: MONGO_PASSWORD
+                - name: BACKUP_S3_BUCKET
+                  valueFrom:
+                    secretKeyRef:
+                      name: app-secrets
+                      key: BACKUP_S3_BUCKET
+                      optional: true
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
+                  echo "Backing up all MongoDB databases..."
+                  mongodump \
+                    --host mongodb-0.mongodb:27017,mongodb-1.mongodb:27017,mongodb-2.mongodb:27017 \
+                    --username "$MONGO_USER" \
+                    --password "$MONGO_PASSWORD" \
+                    --authenticationDatabase admin \
+                    --gzip \
+                    --archive="/backups/mongodb_all_${TIMESTAMP}.gz"
+                  # Prune local backups older than 14 days
+                  find /backups -name "*.gz" -mtime +14 -delete
+                  # Sync to off-cluster object storage
+                  if [ -n "${BACKUP_S3_BUCKET:-}" ]; then
+                    if command -v aws >/dev/null 2>&1; then
+                      aws s3 sync /backups/ "s3://${BACKUP_S3_BUCKET}/mongodb/" \
+                        --storage-class STANDARD_IA --only-show-errors
+                      echo "MongoDB backups synced to s3://${BACKUP_S3_BUCKET}/mongodb/"
+                    else
+                      echo "WARNING: BACKUP_S3_BUCKET is set but aws CLI is not available in the backup image. Skipping off-cluster sync."
+                    fi
+                  else
+                    echo "WARNING: BACKUP_S3_BUCKET not set — backups are local-only."
+                  fi
+                  echo "MongoDB backup complete."
+              volumeMounts:
+                - name: backup-storage
+                  mountPath: /backups
+              resources:
+                requests:
+                  memory: "128Mi"
+                  cpu: "100m"
+                limits:
+                  memory: "256Mi"
+                  cpu: "250m"
+          volumes:
+            - name: backup-storage
+              persistentVolumeClaim:
+                claimName: mongodb-backup-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongodb-backup-pvc
+  namespace: sk-binge-galaxy
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: __STORAGE_CLASS_NAME__
+  resources:
+    requests:
+      storage: 10Gi

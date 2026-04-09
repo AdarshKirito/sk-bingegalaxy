@@ -12,16 +12,36 @@
 
 .customer-hub-copy,
 .customer-hub-highlight {
+  position: relative;
+  overflow: hidden;
   border-radius: 28px;
   padding: 1.5rem;
   border: 1px solid var(--border);
-  background: linear-gradient(150deg, rgba(37, 99, 235, 0.08), rgba(14, 165, 233, 0.04) 52%, var(--bg-card));
-  box-shadow: var(--shadow-sm);
+  background:
+    radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.05), transparent 26%),
+    linear-gradient(150deg, rgba(var(--primary-rgb), 0.1), rgba(14, 165, 233, 0.04) 52%, var(--bg-card));
+  box-shadow: 0 14px 32px rgba(var(--primary-rgb), 0.06), var(--shadow-sm);
 }
 
 [data-theme="dark"] .customer-hub-copy,
 [data-theme="dark"] .customer-hub-highlight {
-  background: linear-gradient(150deg, rgba(37, 99, 235, 0.12), rgba(14, 165, 233, 0.08) 55%, var(--bg-card));
+  background:
+    radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.04), transparent 24%),
+    linear-gradient(150deg, rgba(var(--primary-rgb), 0.14), rgba(14, 165, 233, 0.08) 55%, var(--bg-card));
+}
+
+.customer-hub-copy::before,
+.customer-hub-highlight::before,
+.customer-hub-panel::before,
+.customer-booking-card::before,
+.customer-payment-card::before,
+.customer-mini-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(var(--primary-rgb), 0), rgba(var(--primary-rgb), 0.35), rgba(var(--accent-rgb), 0.18), rgba(var(--primary-rgb), 0));
+  pointer-events: none;
 }
 
 .customer-hub-kicker,
@@ -34,6 +54,10 @@
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--primary);
+  padding: 0.42rem 0.78rem;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--primary-rgb), 0.14);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.08), rgba(var(--accent-rgb), 0.03));
 }
 
 .customer-hub-copy h1,
@@ -73,7 +97,7 @@
 .customer-booking-head strong,
 .customer-payment-head strong {
   font-size: 1.25rem;
-  color: var(--primary);
+  color: color-mix(in srgb, var(--primary) 84%, var(--accent) 16%);
 }
 
 .customer-hub-highlight-meta,
@@ -121,15 +145,22 @@
   width: 42px;
   height: 42px;
   border-radius: 14px;
-  background: rgba(37, 99, 235, 0.1);
+  background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.14), rgba(var(--accent-rgb), 0.06));
   color: var(--primary);
+  box-shadow: inset 0 0 0 1px rgba(var(--primary-rgb), 0.12);
 }
 
 .customer-hub-toolbar,
 .customer-hub-panel,
 .customer-booking-card,
 .customer-payment-card {
+  position: relative;
   border-radius: 24px;
+  border: 1px solid rgba(var(--primary-rgb), 0.08);
+  background:
+    linear-gradient(180deg, rgba(var(--primary-rgb), 0.03), transparent 24%),
+    var(--bg-card);
+  box-shadow: 0 12px 28px rgba(var(--primary-rgb), 0.04), var(--shadow-sm);
 }
 
 .customer-hub-toolbar {
@@ -150,7 +181,7 @@
 }
 
 .customer-hub-inline-link {
-  color: var(--primary);
+  color: var(--primary-dark);
   font-weight: 600;
   text-decoration: none;
 }
@@ -177,8 +208,10 @@
   min-height: 44px;
   padding: 0 0.85rem;
   border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-card);
+  border: 1px solid rgba(var(--primary-rgb), 0.1);
+  background:
+    linear-gradient(180deg, rgba(var(--primary-rgb), 0.04), transparent 70%),
+    var(--bg-card);
   color: var(--text-secondary);
 }
 
@@ -246,10 +279,11 @@
   display: inline-flex;
   font-family: monospace;
   font-size: 0.8rem;
-  color: var(--text-muted);
+  color: color-mix(in srgb, var(--primary) 60%, var(--text-muted) 40%);
   padding: 0.2rem 0.55rem;
   border-radius: 999px;
-  background: var(--bg-input);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.08), rgba(var(--accent-rgb), 0.03));
+  border: 1px solid rgba(var(--primary-rgb), 0.1);
 }
 
 .customer-booking-meta,
@@ -273,7 +307,7 @@
   align-items: center;
   padding: 0.34rem 0.65rem;
   border-radius: 999px;
-  background: rgba(37, 99, 235, 0.08);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.08), rgba(var(--accent-rgb), 0.04));
   color: var(--text);
   font-size: 0.8rem;
   font-weight: 600;
@@ -297,8 +331,10 @@
   align-items: center;
   padding: 1rem;
   border-radius: 20px;
-  border: 1px solid var(--border);
-  background: var(--bg-card);
+  border: 1px solid rgba(var(--primary-rgb), 0.1);
+  background:
+    linear-gradient(180deg, rgba(var(--primary-rgb), 0.04), transparent 55%),
+    var(--bg-card);
 }
 
 .customer-mini-card-actions {
@@ -404,8 +440,10 @@
 .customer-faq-item {
   padding: 1rem;
   border-radius: 18px;
-  border: 1px solid var(--border);
-  background: var(--bg-card);
+  border: 1px solid rgba(var(--primary-rgb), 0.1);
+  background:
+    linear-gradient(180deg, rgba(var(--primary-rgb), 0.04), transparent 65%),
+    var(--bg-card);
 }
 
 .customer-account-list span,
@@ -430,8 +468,10 @@
   border-radius: 18px;
   text-decoration: none;
   color: var(--text);
-  border: 1px solid var(--border);
-  background: var(--bg-card);
+  border: 1px solid rgba(var(--primary-rgb), 0.1);
+  background:
+    linear-gradient(180deg, rgba(var(--primary-rgb), 0.04), transparent 65%),
+    var(--bg-card);
 }
 
 .customer-account-support-link svg {
@@ -472,8 +512,10 @@
   gap: 0.75rem;
   padding: 0.9rem 1rem;
   border-radius: 16px;
-  border: 1px solid var(--border);
-  background: var(--bg-card);
+  border: 1px solid rgba(var(--primary-rgb), 0.1);
+  background:
+    linear-gradient(180deg, rgba(var(--primary-rgb), 0.04), transparent 65%),
+    var(--bg-card);
 }
 
 .customer-account-toggle input {
@@ -490,7 +532,7 @@
 .customer-account-reminder-box {
   display: grid;
   gap: 0.45rem;
-  background: linear-gradient(145deg, rgba(37, 99, 235, 0.08), var(--bg-card));
+  background: linear-gradient(145deg, rgba(var(--primary-rgb), 0.08), rgba(var(--accent-rgb), 0.03), var(--bg-card));
 }
 
 .customer-account-reminder-box strong {
@@ -535,6 +577,262 @@
   padding: 3rem 1.5rem;
   text-align: center;
   border-radius: 24px;
+}
+
+.customer-flow-shell {
+  max-width: 980px;
+  margin: 0 auto;
+  display: grid;
+  gap: 1.25rem;
+}
+
+.customer-flow-shell-narrow {
+  max-width: 760px;
+}
+
+.customer-flow-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.85fr);
+  gap: 1.1rem;
+}
+
+.customer-flow-copy,
+.customer-flow-summary,
+.customer-flow-card,
+.customer-venue-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(var(--primary-rgb), 0.1);
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.04), transparent 24%),
+    linear-gradient(145deg, rgba(var(--primary-rgb), 0.08), transparent 42%),
+    var(--bg-card);
+  box-shadow: 0 16px 34px rgba(var(--primary-rgb), 0.05), var(--shadow-sm);
+}
+
+[data-theme="dark"] .customer-flow-copy,
+[data-theme="dark"] .customer-flow-summary,
+[data-theme="dark"] .customer-flow-card,
+[data-theme="dark"] .customer-venue-card {
+  background:
+    radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.03), transparent 24%),
+    linear-gradient(145deg, rgba(var(--primary-rgb), 0.14), transparent 42%),
+    var(--bg-card);
+}
+
+.customer-flow-copy,
+.customer-flow-summary,
+.customer-flow-card {
+  padding: 1.45rem;
+}
+
+.customer-flow-copy::before,
+.customer-flow-summary::before,
+.customer-flow-card::before,
+.customer-venue-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(var(--primary-rgb), 0), rgba(var(--primary-rgb), 0.35), rgba(var(--accent-rgb), 0.18), rgba(var(--primary-rgb), 0));
+}
+
+.customer-flow-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.42rem 0.78rem;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--primary-rgb), 0.14);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.08), rgba(var(--accent-rgb), 0.03));
+  color: var(--primary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.customer-flow-copy h1,
+.customer-flow-summary h2,
+.customer-flow-card h2,
+.customer-flow-card h3,
+.customer-venue-card h3 {
+  color: var(--text);
+}
+
+.customer-flow-copy h1 {
+  margin: 0.85rem 0 0.7rem;
+  font-size: clamp(2rem, 3vw, 3rem);
+  line-height: 1.04;
+  letter-spacing: -0.04em;
+}
+
+.customer-flow-copy p,
+.customer-flow-summary p,
+.customer-flow-card p,
+.customer-venue-card p,
+.customer-flow-helper,
+.customer-flow-row span:first-child {
+  color: var(--text-secondary);
+}
+
+.customer-flow-badges,
+.customer-flow-actions,
+.customer-flow-inline,
+.customer-venue-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.customer-flow-actions {
+  justify-content: center;
+}
+
+.customer-flow-summary strong,
+.customer-flow-amount {
+  font-size: 1.6rem;
+  color: color-mix(in srgb, var(--primary) 84%, var(--accent) 16%);
+}
+
+.customer-flow-stack,
+.customer-flow-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.customer-flow-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: flex-start;
+  padding: 0.82rem 0.95rem;
+  border-radius: 18px;
+  border: 1px solid rgba(var(--primary-rgb), 0.08);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.04), rgba(255, 255, 255, 0.62));
+}
+
+[data-theme="dark"] .customer-flow-row {
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.06), rgba(15, 23, 42, 0.4));
+}
+
+.customer-flow-row span:last-child,
+.customer-flow-row strong,
+.customer-venue-card h3 {
+  text-align: right;
+  font-weight: 600;
+}
+
+.customer-flow-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  padding-top: 0.8rem;
+  margin-top: 0.2rem;
+  border-top: 1px solid rgba(var(--primary-rgb), 0.12);
+}
+
+.customer-flow-alert {
+  padding: 0.95rem 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(var(--primary-rgb), 0.1);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.05), rgba(var(--accent-rgb), 0.02));
+}
+
+.customer-flow-alert strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.customer-flow-alert-success {
+  border-color: rgba(var(--success-rgb), 0.28);
+  background: linear-gradient(180deg, rgba(var(--success-rgb), 0.1), rgba(var(--primary-rgb), 0.02));
+}
+
+.customer-flow-alert-warning {
+  border-color: rgba(var(--warning-rgb), 0.26);
+}
+
+.customer-flow-alert-danger {
+  border-color: rgba(var(--danger-rgb), 0.24);
+  background: linear-gradient(180deg, rgba(var(--danger-rgb), 0.08), rgba(var(--primary-rgb), 0.02));
+}
+
+.customer-flow-select {
+  width: 100%;
+}
+
+.customer-flow-select select {
+  width: 100%;
+  min-height: 46px;
+  padding: 0.75rem 0.95rem;
+  border-radius: 14px;
+  border: 1px solid rgba(var(--primary-rgb), 0.12);
+  background:
+    linear-gradient(180deg, rgba(var(--primary-rgb), 0.04), transparent 70%),
+    var(--bg-card);
+  color: var(--text);
+}
+
+.customer-flow-empty {
+  text-align: center;
+  padding: 3rem 1.4rem;
+}
+
+.customer-flow-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.16), rgba(var(--accent-rgb), 0.06));
+  color: var(--primary);
+  font-size: 1.55rem;
+  box-shadow: inset 0 0 0 1px rgba(var(--primary-rgb), 0.12);
+}
+
+.customer-venue-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.customer-venue-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.2rem 1.25rem;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.customer-venue-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(var(--primary-rgb), 0.22);
+  box-shadow: 0 18px 34px rgba(var(--primary-rgb), 0.08), var(--shadow);
+}
+
+.customer-venue-card-copy {
+  min-width: 0;
+}
+
+.customer-venue-card-copy h3 {
+  margin-bottom: 0.25rem;
+}
+
+.customer-venue-card-copy p {
+  margin: 0;
+}
+
+@media (max-width: 1024px) {
+  .customer-flow-hero {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 1024px) {
@@ -582,9 +880,23 @@
 
   .customer-hub-search,
   .customer-hub-select,
-  .customer-hub-date-field {
+  .customer-hub-date-field,
+  .customer-flow-actions .btn,
+  .customer-venue-card,
+  .customer-flow-row {
     width: 100%;
     max-width: none;
+  }
+
+  .customer-flow-row,
+  .customer-venue-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .customer-flow-row span:last-child,
+  .customer-venue-card h3 {
+    text-align: left;
   }
 
   .customer-booking-head strong,

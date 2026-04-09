@@ -18,6 +18,7 @@ import org.thymeleaf.context.Context;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
 @Slf4j
@@ -32,6 +33,15 @@ public class NotificationService {
 
     @Value("${app.notification.max-retries:3}")
     private int maxRetries;
+
+    @Value("${app.sms.provider:disabled}")
+    private String smsProvider;
+
+    @Value("${app.whatsapp.provider:disabled}")
+    private String whatsappProvider;
+
+    private final AtomicBoolean retryInProgress = new AtomicBoolean(false);
+    private static final int RETRY_BATCH_SIZE = 100;
 
     public NotificationService(
             NotificationRepository notificationRepository,
@@ -90,30 +100,53 @@ public class NotificationService {
             .stream().map(this::toDto).toList();
     }
 
-    public void retryFailedNotifications() {
-        List<Notification> failed = notificationRepository
-            .findBySentFalseAndRetryCountLessThan(maxRetries);
+    public List<NotificationDto> getByBookingRefAndEmail(String bookingRef, String email) {
+        return notificationRepository.findByBookingRefAndRecipientEmailOrderByCreatedAtDesc(bookingRef, email)
+            .stream().map(this::toDto).toList();
+    }
 
-        for (Notification n : failed) {
-            n.setRetryCount(n.getRetryCount() + 1);
-            boolean success = dispatchNotification(n);
-            n.setSent(success);
-            if (success) {
-                n.setSentAt(LocalDateTime.now());
-            }
-            notificationRepository.save(n);
+    public void retryFailedNotifications() {
+        if (!retryInProgress.compareAndSet(false, true)) {
+            log.info("Retry already in progress, skipping");
+            return;
         }
-        log.info("Retried {} failed notifications", failed.size());
+        try {
+            List<Notification> failed = notificationRepository
+                .findBySentFalseAndRetryCountLessThan(maxRetries,
+                    org.springframework.data.domain.PageRequest.of(0, RETRY_BATCH_SIZE))
+                .getContent();
+
+            for (Notification n : failed) {
+                n.setRetryCount(n.getRetryCount() + 1);
+                boolean success = dispatchNotification(n);
+                n.setSent(success);
+                if (success) {
+                    n.setSentAt(LocalDateTime.now());
+                }
+                notificationRepository.save(n);
+            }
+            log.info("Retried {} failed notifications", failed.size());
+        } finally {
+            retryInProgress.set(false);
+        }
     }
 
     private boolean dispatchNotification(Notification notification) {
         try {
             switch (notification.getChannel()) {
-                case EMAIL -> sendEmail(notification);
+                case EMAIL -> {
+                    if (notification.getRecipientEmail() == null || notification.getRecipientEmail().isBlank()) {
+                        log.warn("Skipping EMAIL notification {} — no recipient email", notification.getId());
+                        notification.setFailureReason("No recipient email address");
+                        return false;
+                    }
+                    sendEmail(notification);
+                }
                 case SMS -> sendSms(notification);
                 case WHATSAPP -> sendWhatsApp(notification);
             }
-            return true;
+            // If the channel handler set a failureReason without throwing, treat as not sent
+            return notification.getFailureReason() == null;
         } catch (Exception e) {
             log.error("Failed to send {} notification to {}: {}",
                 notification.getChannel(), notification.getRecipientEmail(), e.getMessage());
@@ -133,8 +166,7 @@ public class NotificationService {
 
     private void sendEmail(Notification notification) throws MessagingException {
         if (mailSender == null) {
-            log.warn("JavaMailSender not configured — email to {} logged only", notification.getRecipientEmail());
-            return;
+            throw new IllegalStateException("Email delivery is not configured");
         }
         MimeMessage mimeMessage = mailSender.createMimeMessage();
         MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, "UTF-8");
@@ -162,13 +194,33 @@ public class NotificationService {
     }
 
     private void sendSms(Notification notification) {
-        // Mock SMS — replace with Twilio / MSG91 / AWS SNS integration
-        log.info("[SMS Mock] To: {}, Message: {}", notification.getRecipientPhone(), notification.getBody());
+        if (notification.getRecipientPhone() == null || notification.getRecipientPhone().isBlank()) {
+            log.warn("SMS notification {} skipped — no recipient phone number", notification.getId());
+            notification.setFailureReason("No recipient phone number");
+            return;
+        }
+        if (smsProvider == null || smsProvider.isBlank() || "mock".equalsIgnoreCase(smsProvider) || "disabled".equalsIgnoreCase(smsProvider)) {
+            log.info("SMS notification {} skipped — SMS provider is disabled", notification.getId());
+            notification.setFailureReason("SMS provider not configured");
+            return;
+        }
+        log.warn("SMS notification {} cannot be sent — provider '{}' not implemented", notification.getId(), smsProvider);
+        notification.setFailureReason("SMS provider not implemented: " + smsProvider);
     }
 
     private void sendWhatsApp(Notification notification) {
-        // Mock WhatsApp — replace with Twilio WhatsApp / WhatsApp Business API integration
-        log.info("[WhatsApp Mock] To: {}, Message: {}", notification.getRecipientPhone(), notification.getBody());
+        if (notification.getRecipientPhone() == null || notification.getRecipientPhone().isBlank()) {
+            log.warn("WhatsApp notification {} skipped — no recipient phone number", notification.getId());
+            notification.setFailureReason("No recipient phone number");
+            return;
+        }
+        if (whatsappProvider == null || whatsappProvider.isBlank() || "mock".equalsIgnoreCase(whatsappProvider) || "disabled".equalsIgnoreCase(whatsappProvider)) {
+            log.info("WhatsApp notification {} skipped — WhatsApp provider is disabled", notification.getId());
+            notification.setFailureReason("WhatsApp provider not configured");
+            return;
+        }
+        log.warn("WhatsApp notification {} cannot be sent — provider '{}' not implemented", notification.getId(), whatsappProvider);
+        notification.setFailureReason("WhatsApp provider not implemented: " + whatsappProvider);
     }
 
     private NotificationDto toDto(Notification n) {

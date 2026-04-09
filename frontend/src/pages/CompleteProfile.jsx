@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { authService } from '../services/endpoints';
 import { toast } from 'react-toastify';
@@ -10,7 +9,6 @@ export default function CompleteProfile() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const { user, setUser } = useAuth();
-  const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -24,11 +22,11 @@ export default function CompleteProfile() {
     setLoading(true);
     try {
       const res = await authService.completeProfile({ phone });
-      const updatedUser = res.data.data;
-      localStorage.setItem('user', JSON.stringify(updatedUser));
+      const updatedUser = res.data.data.user;
+      // setUser writes the minimal shape to localStorage and updates store;
+      // CompleteProfileRoute then redirects to /binges once user.phone is set
       setUser(updatedUser);
       toast.success('Profile completed!');
-      navigate('/binges');
     } catch (err) {
       const msg = err.userMessage || err.response?.data?.message || 'Failed to update profile';
       setError(msg);
@@ -40,7 +38,7 @@ export default function CompleteProfile() {
 
   return (
     <div className="auth-page">
-      <div className="auth-card card">
+      <div className="auth-card card" style={{ margin: '0 auto' }}>
         <h1>Complete Your Profile</h1>
         <p className="auth-subtitle">
           Welcome{user?.firstName ? `, ${user.firstName}` : ''}! Please add your phone number to continue.

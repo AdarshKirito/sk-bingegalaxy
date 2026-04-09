@@ -14,7 +14,8 @@ import java.time.LocalDateTime;
 @Table(name = "payments", indexes = {
     @Index(name = "idx_payment_booking_ref", columnList = "bookingRef"),
     @Index(name = "idx_payment_transaction_id", columnList = "transactionId", unique = true),
-    @Index(name = "idx_payment_customer_id", columnList = "customerId")
+    @Index(name = "idx_payment_customer_id", columnList = "customerId"),
+    @Index(name = "idx_payment_binge_id", columnList = "bingeId")
 })
 @Getter @Setter
 @NoArgsConstructor @AllArgsConstructor
@@ -25,11 +26,16 @@ public class Payment {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Version
+    private Long version;
+
     @Column(nullable = false)
     private String bookingRef;
 
     @Column(nullable = false)
     private Long customerId;
+
+    private Long bingeId;
 
     @Column(nullable = false, unique = true)
     private String transactionId;
@@ -56,6 +62,12 @@ public class Payment {
     private PaymentStatus status;
 
     private String currency;
+
+    private String customerEmail;
+
+    private String customerName;
+
+    private String customerPhone;
 
     private String gatewayResponse;
 

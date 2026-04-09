@@ -2,6 +2,8 @@ package com.skbingegalaxy.auth.repository;
 
 import com.skbingegalaxy.auth.entity.User;
 import com.skbingegalaxy.common.enums.UserRole;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -16,15 +18,21 @@ public interface UserRepository extends JpaRepository<User, Long> {
     boolean existsByPhone(String phone);
     Optional<User> findByEmailAndRole(String email, UserRole role);
 
+    /**
+     * Full-text customer search. Uses LIKE with leading wildcard which prevents
+     * standard B-tree index usage. For production at scale, create a pg_trgm GIN
+     * index: CREATE INDEX idx_user_search ON users USING gin (
+     *   (first_name || ' ' || last_name || ' ' || email) gin_trgm_ops);
+     */
     @Query("SELECT u FROM User u WHERE u.role = 'CUSTOMER' AND (" +
            "LOWER(u.firstName) LIKE LOWER(CONCAT('%', :q, '%')) OR " +
            "LOWER(u.lastName) LIKE LOWER(CONCAT('%', :q, '%')) OR " +
            "LOWER(u.email) LIKE LOWER(CONCAT('%', :q, '%')) OR " +
            "u.phone LIKE CONCAT('%', :q, '%'))")
-    List<User> searchCustomers(@Param("q") String query);
+    Page<User> searchCustomers(@Param("q") String query, Pageable pageable);
 
     @Query("SELECT u FROM User u WHERE u.role = 'CUSTOMER' ORDER BY u.firstName, u.lastName")
-    List<User> findAllCustomers();
+    Page<User> findAllCustomers(Pageable pageable);
 
     @Query("SELECT u FROM User u WHERE u.role = 'ADMIN' ORDER BY u.firstName, u.lastName")
     List<User> findAllAdmins();

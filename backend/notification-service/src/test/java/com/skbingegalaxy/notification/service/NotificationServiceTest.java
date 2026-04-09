@@ -73,8 +73,8 @@ class NotificationServiceTest {
         }
 
         @Test
-        @DisplayName("Email dispatch succeeds when mailSender is null (logged)")
-        void emailWithNullMailSender_markedAsSent() {
+        @DisplayName("Email dispatch fails when mailSender is not configured")
+        void emailWithNullMailSender_markedAsFailed() {
             when(notificationRepository.save(any(Notification.class)))
                     .thenAnswer(i -> {
                         Notification n = i.getArgument(0);
@@ -87,13 +87,13 @@ class NotificationServiceTest {
                     "john@example.com", null, "John",
                     "Payment OK", "Paid.", null, null);
 
-            // With null mailSender, sendEmail logs and returns (no exception → success)
-            assertThat(result.isSent()).isTrue();
+            assertThat(result.isSent()).isFalse();
+            assertThat(result.getFailureReason()).contains("Email delivery is not configured");
         }
 
         @Test
-        @DisplayName("SMS notification dispatches correctly")
-        void smsNotification_dispatches() {
+        @DisplayName("SMS notification fails when provider is disabled")
+        void smsNotification_failsWhenProviderDisabled() {
             when(notificationRepository.save(any(Notification.class)))
                     .thenAnswer(i -> {
                         Notification n = i.getArgument(0);
@@ -106,13 +106,14 @@ class NotificationServiceTest {
                     null, "9876543210", "John",
                     null, "Your booking is confirmed.", "SKBG001", null);
 
-            assertThat(result.isSent()).isTrue();
+            assertThat(result.isSent()).isFalse();
+            assertThat(result.getFailureReason()).contains("SMS provider not configured");
             assertThat(result.getChannel()).isEqualTo(NotificationChannel.SMS);
         }
 
         @Test
-        @DisplayName("WhatsApp notification dispatches correctly")
-        void whatsappNotification_dispatches() {
+        @DisplayName("WhatsApp notification fails when provider is disabled")
+        void whatsappNotification_failsWhenProviderDisabled() {
             when(notificationRepository.save(any(Notification.class)))
                     .thenAnswer(i -> {
                         Notification n = i.getArgument(0);
@@ -125,7 +126,8 @@ class NotificationServiceTest {
                     null, "9876543210", "John",
                     null, "Booking confirmed!", "SKBG002", null);
 
-            assertThat(result.isSent()).isTrue();
+                assertThat(result.isSent()).isFalse();
+                assertThat(result.getFailureReason()).contains("WhatsApp provider not configured");
             assertThat(result.getChannel()).isEqualTo(NotificationChannel.WHATSAPP);
         }
 
@@ -221,21 +223,21 @@ class NotificationServiceTest {
                     .type("BOOKING_CREATED").channel(NotificationChannel.EMAIL)
                     .subject("Test").body("Body").sent(false).retryCount(1).build();
 
-            when(notificationRepository.findBySentFalseAndRetryCountLessThan(3))
-                    .thenReturn(List.of(failed));
+            when(notificationRepository.findBySentFalseAndRetryCountLessThan(eq(3), any(org.springframework.data.domain.Pageable.class)))
+                    .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(failed)));
 
             notificationService.retryFailedNotifications();
 
             assertThat(failed.getRetryCount()).isEqualTo(2);
-            assertThat(failed.isSent()).isTrue(); // mailSender=null → logs only → success
+                assertThat(failed.isSent()).isFalse();
             verify(notificationRepository).save(failed);
         }
 
         @Test
         @DisplayName("No failed notifications does nothing")
         void noFailed_doesNothing() {
-            when(notificationRepository.findBySentFalseAndRetryCountLessThan(3))
-                    .thenReturn(List.of());
+            when(notificationRepository.findBySentFalseAndRetryCountLessThan(eq(3), any(org.springframework.data.domain.Pageable.class)))
+                    .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of()));
 
             notificationService.retryFailedNotifications();
 

@@ -17,7 +17,10 @@ public class AdminCreateBookingRequest {
     // Customer details - either existing customer ID or new customer info
     private Long customerId;
     private String customerName;
+    @jakarta.validation.constraints.Email(message = "Customer email must be valid")
+    @Size(max = 150)
     private String customerEmail;
+    @jakarta.validation.constraints.Pattern(regexp = "^$|^\\d{10}$", message = "Phone must be 10 digits")
     private String customerPhone;
 
     @NotNull(message = "Event type ID is required")
@@ -50,6 +53,11 @@ public class AdminCreateBookingRequest {
     private String paymentMethod; // UPI, CARD, CASH, etc.
 
     // Admin price overrides (optional — overrides resolved pricing)
+    @jakarta.validation.constraints.DecimalMin(value = "0.00", message = "Override base amount must be non-negative")
+    @jakarta.validation.constraints.DecimalMax(value = "999999.99", message = "Override base amount exceeds maximum")
     private BigDecimal overrideBaseAmount;
+
+    @jakarta.validation.constraints.DecimalMin(value = "0.00", message = "Override total amount must be non-negative")
+    @jakarta.validation.constraints.DecimalMax(value = "999999.99", message = "Override total amount exceeds maximum")
     private BigDecimal overrideTotalAmount;
 }

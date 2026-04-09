@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { adminService } from '../services/endpoints';
 import { toast } from 'react-toastify';
+import { FiTrash2 } from 'react-icons/fi';
 
 export default function AdminRateCodes() {
   const [rateCodes, setRateCodes] = useState([]);
@@ -92,7 +93,23 @@ export default function AdminRateCodes() {
       await adminService.toggleRateCode(id);
       toast.success('Rate code toggled');
       load();
-    } catch { toast.error('Toggle failed'); }
+    } catch (err) { toast.error(err.userMessage || 'Toggle failed'); }
+  };
+
+  const handleDelete = async (rateCode) => {
+    if (rateCode.active) {
+      toast.error('Deactivate the rate code before deleting it');
+      return;
+    }
+    if (!confirm(`Delete rate code "${rateCode.name}" permanently? This cannot be undone.`)) return;
+
+    try {
+      await adminService.deleteRateCode(rateCode.id);
+      toast.success('Rate code deleted');
+      load();
+    } catch (err) {
+      toast.error(err.userMessage || err.response?.data?.message || 'Delete failed');
+    }
   };
 
   const inputStyle = { padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--text)', fontSize: '0.85rem', width: '100%' };
@@ -245,6 +262,11 @@ export default function AdminRateCodes() {
                   <button className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }} onClick={() => handleToggle(rc.id)}>
                     {rc.active ? 'Deactivate' : 'Activate'}
                   </button>
+                  {!rc.active && (
+                    <button className="btn adm-danger-btn" style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }} onClick={() => handleDelete(rc)}>
+                      <FiTrash2 /> Delete
+                    </button>
+                  )}
                 </div>
               </div>
 

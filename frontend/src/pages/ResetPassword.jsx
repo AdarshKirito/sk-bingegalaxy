@@ -14,7 +14,8 @@ export default function ResetPassword() {
     e.preventDefault();
     setError('');
     if (!form.otp.trim()) { setError('OTP code is required'); toast.error('Please enter the OTP code'); return; }
-    if (form.newPassword.length < 6) { setError('Password must be at least 6 characters'); toast.error('Password must be at least 6 characters'); return; }
+    if (!/^\d{6,8}$/.test(form.otp.trim())) { setError('OTP must be 6–8 digits'); toast.error('OTP must be 6–8 digits'); return; }
+    if (form.newPassword.length < 10) { setError('Password must be at least 10 characters'); toast.error('Password must be at least 10 characters'); return; }
     if (form.newPassword !== form.confirmPassword) {
       setError('Passwords do not match');
       toast.error('Passwords do not match');
@@ -36,7 +37,7 @@ export default function ResetPassword() {
 
   return (
     <div className="auth-page">
-      <div className="auth-card card">
+      <div className="auth-card card" style={{ margin: '0 auto' }}>
         <h1>Reset Password</h1>
         <p className="auth-subtitle">Enter the OTP sent to your email</p>
 
@@ -47,13 +48,13 @@ export default function ResetPassword() {
             <label>OTP Code</label>
             <input required value={form.otp}
               onChange={(e) => setForm({ ...form, otp: e.target.value })}
-              placeholder="6-digit code" maxLength={6} />
+              placeholder="8-digit code" maxLength={8} />
           </div>
           <div className="input-group">
             <label>New Password</label>
-            <input type="password" required minLength={6} value={form.newPassword}
+            <input type="password" required minLength={10} value={form.newPassword}
               onChange={(e) => setForm({ ...form, newPassword: e.target.value })}
-              placeholder="Min 6 characters" />
+              placeholder="Min 10 characters (upper, lower, digit, special)" />
           </div>
           <div className="input-group">
             <label>Confirm Password</label>

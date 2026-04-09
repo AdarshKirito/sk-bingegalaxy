@@ -6,15 +6,111 @@
   margin-bottom: 1.5rem;
 }
 
+/* ── Clock / Operational-Date Banner ──────────────────────── */
+.admin-dash-banner {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
+.admin-dash-banner-inner {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  margin-bottom: 1.5rem;
+  cursor: pointer;
+  border: 1px solid var(--primary);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, rgba(var(--primary-rgb), 0.06), rgba(var(--accent-rgb), 0.03) 80%, transparent);
+  transition: var(--transition);
+}
+
+.admin-dash-banner-inner:hover {
+  background:
+    linear-gradient(135deg, rgba(var(--primary-rgb), 0.10), rgba(var(--accent-rgb), 0.05) 80%, transparent);
+  box-shadow: var(--shadow-sm), 0 0 0 1px rgba(var(--accent-rgb), 0.06);
+}
+
+.admin-dash-banner-icon {
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.admin-dash-banner-time {
+  font-size: 1.3rem;
+  font-weight: 700;
+  font-family: monospace;
+  color: var(--text);
+}
+
+.admin-dash-banner-date {
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+}
+
+.admin-dash-banner-meta {
+  margin-left: 1.5rem;
+  padding-left: 1.5rem;
+  border-left: 1px solid var(--border);
+}
+
+.admin-dash-banner-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.admin-dash-banner-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.admin-dash-banner-link {
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: var(--primary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ── Stat Cards ───────────────────────────────────────────── */
 .stat-card {
   display: flex;
   align-items: center;
   gap: 1rem;
   padding: 1.5rem;
-  background: var(--bg-card);
+  background:
+    linear-gradient(180deg, rgba(var(--primary-rgb), 0.03), rgba(var(--accent-rgb), 0.015) 50%, transparent 100%),
+    var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.stat-card-link {
+  text-decoration: none;
+  display: contents;
+}
+
+.stat-card-link .stat-card {
+  cursor: pointer;
+}
+
+.stat-card-link .stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(var(--accent-rgb), 0.08);
+}
+
+.stat-card-arrow {
+  margin-left: auto;
+  font-size: 0.75rem;
+  opacity: 0.7;
+  align-self: center;
 }
 
 .stat-icon {
@@ -24,7 +120,7 @@
   justify-content: center;
   width: 52px;
   height: 52px;
-  background: var(--primary-bg);
+  background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.12), rgba(var(--accent-rgb), 0.04));
   border-radius: 14px;
   color: var(--primary);
 }
@@ -40,11 +136,14 @@
   font-size: 0.85rem;
 }
 
+/* ── Nav Cards ────────────────────────────────────────────── */
 .admin-nav-card {
   text-decoration: none;
   color: var(--text);
   padding: 2rem;
-  background: var(--bg-card);
+  background:
+    linear-gradient(180deg, rgba(var(--primary-rgb), 0.03), rgba(var(--accent-rgb), 0.015) 50%, transparent 100%),
+    var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
@@ -53,8 +152,11 @@
 
 .admin-nav-card:hover {
   transform: translateY(-2px);
-  box-shadow: var(--shadow);
-  border-color: var(--primary-light);
+  box-shadow: var(--shadow), 0 0 0 1px rgba(var(--accent-rgb), 0.06);
+  border-color: color-mix(in srgb, var(--primary-light) 85%, var(--accent) 15%);
+  background:
+    linear-gradient(180deg, rgba(var(--primary-rgb), 0.05), rgba(var(--accent-rgb), 0.02) 50%, transparent 100%),
+    var(--bg-card);
 }
 
 .admin-nav-card h3 {
@@ -72,4 +174,6 @@
   .stat-icon { width: 40px; height: 40px; font-size: 1.3rem; border-radius: 10px; }
   .stat-value { font-size: 1.2rem; }
   .admin-nav-card { padding: 1.25rem; }
+  .admin-dash-banner-inner { flex-wrap: wrap; padding: 0.75rem 1rem; }
+  .admin-dash-banner-meta { margin-left: 0; padding-left: 0; border-left: none; border-top: 1px solid var(--border); padding-top: 0.5rem; width: 100%; }
 }

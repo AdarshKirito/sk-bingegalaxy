@@ -3,52 +3,80 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: skbg-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: skbg_admin
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/init-databases.sql:/docker-entrypoint-initdb.d/01-init.sql
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U skbg_admin"]
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.50"
 
   mongodb:
     image: mongo:7
     container_name: skbg-mongodb
+    restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: skbg_admin
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
     volumes:
       - mongo-data:/data/db
-    ports:
-      - "27017:27017"
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.50"
+
+  redis:
+    image: redis:7-alpine
+    container_name: skbg-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--requirepass", "${REDIS_PASSWORD:-}"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.25"
 
   # ── Kafka ──────────────────────────────────────────────────
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.0
     container_name: skbg-zookeeper
+    restart: unless-stopped
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
       KAFKA_OPTS: "-Dzookeeper.4lw.commands.whitelist=ruok,stat"
-    ports:
-      - "2181:2181"
     healthcheck:
       test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.50"
 
   kafka:
     image: confluentinc/cp-kafka:7.6.0
@@ -57,15 +85,13 @@ services:
     depends_on:
       zookeeper:
         condition: service_healthy
-    ports:
-      - "9092:9092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1  # ⚠ DEV ONLY — single broker, zero fault tolerance. K8s uses RF=3 with min.insync.replicas=2. Do NOT use docker-compose for production.
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
     healthcheck:
       test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
@@ -73,21 +99,50 @@ services:
       timeout: 10s
       retries: 10
       start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.00"
+
+  # Kafka topic initialisation (runs once and exits)
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        echo "Creating Kafka topics..."
+        for topic in booking.created booking.confirmed booking.cancelled \
+                     booking.cash-payment \
+                     payment.success payment.failed payment.refunded \
+                     notification.send user.registered password.reset; do
+          kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+            --topic $$topic --partitions 3 --replication-factor 1
+        done
+        echo "All topics created."
+    restart: "no"
 
   # ── Tracing ────────────────────────────────────────────────
   zipkin:
-    image: openzipkin/zipkin:latest
-    ports:
-      - "9411:9411"
+    image: openzipkin/zipkin:3.5.1
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.50"
 
   # ── Spring Cloud Infrastructure ────────────────────────────
   discovery-server:
     build: ./backend/discovery-server
     container_name: skbg-discovery
-    ports:
-      - "8761:8761"
+    restart: unless-stopped
     environment:
       EUREKA_PASSWORD: ${EUREKA_PASSWORD}
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8761/actuator/health"]
       interval: 15s
@@ -97,15 +152,15 @@ services:
   config-server:
     build: ./backend/config-server
     container_name: skbg-config
+    restart: unless-stopped
     depends_on:
       discovery-server:
         condition: service_healthy
-    ports:
-      - "8888:8888"
     environment:
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:${EUREKA_PASSWORD}@discovery-server:8761/eureka/
       CONFIG_SERVER_USER: ${CONFIG_SERVER_USER:-configuser}
       CONFIG_SERVER_PASSWORD: ${CONFIG_SERVER_PASSWORD}
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8888/actuator/health"]
       interval: 15s
@@ -115,8 +170,11 @@ services:
   api-gateway:
     build: ./backend/api-gateway
     container_name: skbg-gateway
+    restart: unless-stopped
     depends_on:
       config-server:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     ports:
       - "8080:8080"
@@ -125,12 +183,18 @@ services:
       SPRING_CLOUD_CONFIG_URI: http://config-server:8888
       SPRING_CLOUD_CONFIG_USERNAME: ${CONFIG_SERVER_USER:-configuser}
       SPRING_CLOUD_CONFIG_PASSWORD: ${CONFIG_SERVER_PASSWORD}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       JWT_SECRET: ${JWT_SECRET}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://skbingegalaxy.com,http://localhost:3000,http://localhost:8080}
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
 
   # ── Application Services ───────────────────────────────────
   auth-service:
     build: ./backend/auth-service
     container_name: skbg-auth
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
@@ -138,12 +202,13 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
-    ports:
-      - "8081:8081"
+      kafka-init:
+        condition: service_completed_successfully
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/auth_db
       SPRING_DATASOURCE_USERNAME: skbg_admin
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: validate
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:${EUREKA_PASSWORD}@discovery-server:8761/eureka/
       SPRING_CLOUD_CONFIG_URI: http://config-server:8888
       SPRING_CLOUD_CONFIG_USERNAME: ${CONFIG_SERVER_USER:-configuser}
@@ -152,30 +217,45 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      # Local compose runs over HTTP, so secure cookies must be opt-in.
+      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.50"
 
   availability-service:
     build: ./backend/availability-service
     container_name: skbg-availability
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
       config-server:
         condition: service_healthy
-    ports:
-      - "8082:8082"
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/availability_db
       SPRING_DATASOURCE_USERNAME: skbg_admin
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: validate
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:${EUREKA_PASSWORD}@discovery-server:8761/eureka/
       SPRING_CLOUD_CONFIG_URI: http://config-server:8888
       SPRING_CLOUD_CONFIG_USERNAME: ${CONFIG_SERVER_USER:-configuser}
       SPRING_CLOUD_CONFIG_PASSWORD: ${CONFIG_SERVER_PASSWORD}
       INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.50"
 
   booking-service:
     build: ./backend/booking-service
     container_name: skbg-booking
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
@@ -183,22 +263,30 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
-    ports:
-      - "8083:8083"
+      kafka-init:
+        condition: service_completed_successfully
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/booking_db
       SPRING_DATASOURCE_USERNAME: skbg_admin
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: validate
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:${EUREKA_PASSWORD}@discovery-server:8761/eureka/
       SPRING_CLOUD_CONFIG_URI: http://config-server:8888
       SPRING_CLOUD_CONFIG_USERNAME: ${CONFIG_SERVER_USER:-configuser}
       SPRING_CLOUD_CONFIG_PASSWORD: ${CONFIG_SERVER_PASSWORD}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.50"
 
   payment-service:
     build: ./backend/payment-service
     container_name: skbg-payment
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
@@ -206,21 +294,35 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
-    ports:
-      - "8084:8084"
+      kafka-init:
+        condition: service_completed_successfully
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/payment_db
       SPRING_DATASOURCE_USERNAME: skbg_admin
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: validate
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:${EUREKA_PASSWORD}@discovery-server:8761/eureka/
       SPRING_CLOUD_CONFIG_URI: http://config-server:8888
       SPRING_CLOUD_CONFIG_USERNAME: ${CONFIG_SERVER_USER:-configuser}
       SPRING_CLOUD_CONFIG_PASSWORD: ${CONFIG_SERVER_PASSWORD}
-      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
+      PAYMENT_CALLBACK_URL: "${PAYMENT_CALLBACK_URL}"
+      # Default to simulation for local compose so the service does not crash
+      # when Razorpay secrets are intentionally omitted in development.
+      PAYMENT_SIMULATION_ENABLED: "${PAYMENT_SIMULATION_ENABLED:-true}"
+      RAZORPAY_KEY_ID: "${RAZORPAY_KEY_ID}"
+      RAZORPAY_KEY_SECRET: "${RAZORPAY_KEY_SECRET}"
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.50"
 
   notification-service:
     build: ./backend/notification-service
     container_name: skbg-notification
+    restart: unless-stopped
     depends_on:
       mongodb:
         condition: service_healthy
@@ -228,24 +330,47 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
-    ports:
-      - "8085:8085"
+      kafka-init:
+        condition: service_completed_successfully
     environment:
       SPRING_DATA_MONGODB_URI: mongodb://skbg_admin:${MONGO_PASSWORD}@mongodb:27017/notification_db?authSource=admin
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:${EUREKA_PASSWORD}@discovery-server:8761/eureka/
       SPRING_CLOUD_CONFIG_URI: http://config-server:8888
       SPRING_CLOUD_CONFIG_USERNAME: ${CONFIG_SERVER_USER:-configuser}
       SPRING_CLOUD_CONFIG_PASSWORD: ${CONFIG_SERVER_PASSWORD}
-      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
+      EMAIL_HOST: "${EMAIL_HOST}"
+      EMAIL_PORT: "${EMAIL_PORT}"
+      EMAIL_USER: "${EMAIL_USER}"
+      EMAIL_PASS: "${EMAIL_PASS}"
+      EMAIL_FROM: "${EMAIL_FROM}"
+      MANAGEMENT_HEALTH_MAIL_ENABLED: ${MANAGEMENT_HEALTH_MAIL_ENABLED:-false}
+      SMS_PROVIDER: disabled
+      WHATSAPP_PROVIDER: disabled
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.50"
 
   # ── Frontend ───────────────────────────────────────────────
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
     container_name: skbg-frontend
+    restart: unless-stopped
     ports:
-      - "3000:80"
+      - "3000:8080"
     depends_on:
       - api-gateway
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.25"
 
 volumes:
   postgres-data:

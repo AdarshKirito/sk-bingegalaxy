@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env
+.env.*
+*.md
+.vscode
+.idea
+**/src/test
+**/target/surefire-reports
+**/target/generated-sources
+**/target/generated-test-sources
+**/target/test-classes
+**/target/maven-status
+**/target/maven-archiver
+**/target/*.jar.original

@@ -15,7 +15,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @EnableWebSecurity
 public class SecurityConfig {
 
-    @Value("${internal.api.secret:}")
+    @Value("${internal.api.secret}")
     private String internalApiSecret;
 
     @Bean
@@ -28,7 +28,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/v1/availability/admin/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                 .requestMatchers("/api/v1/availability/dates", "/api/v1/availability/slots", "/api/v1/availability/event-types").permitAll()
-                .requestMatchers("/api/v1/availability/internal/**").permitAll()
+                .requestMatchers("/api/v1/availability/internal/**").hasRole("SYSTEM")
                 .requestMatchers("/actuator/**").permitAll()
                 .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
                 .anyRequest().authenticated()

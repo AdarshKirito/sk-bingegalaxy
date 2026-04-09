@@ -15,6 +15,7 @@ public class PaymentCallbackRequest {
 
     private String gatewaySignature;
 
+    @NotBlank(message = "Payment status is required")
     private String status;
 
     private String errorCode;

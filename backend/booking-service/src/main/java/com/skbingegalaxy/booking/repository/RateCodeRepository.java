@@ -8,7 +8,10 @@ import java.util.Optional;
 
 public interface RateCodeRepository extends JpaRepository<RateCode, Long> {
     Optional<RateCode> findByName(String name);
+    Optional<RateCode> findByIdAndBingeId(Long id, Long bingeId);
+    Optional<RateCode> findByIdAndBingeIdIsNull(Long id);
     boolean existsByName(String name);
+    boolean existsByBingeId(Long bingeId);
     List<RateCode> findByActiveTrue();
     List<RateCode> findByBingeId(Long bingeId);
     List<RateCode> findByBingeIdAndActiveTrue(Long bingeId);

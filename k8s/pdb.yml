@@ -1,6 +1,28 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
+  name: discovery-server-pdb
+  namespace: sk-binge-galaxy
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: discovery-server
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: config-server-pdb
+  namespace: sk-binge-galaxy
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: config-server
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
   name: auth-service-pdb
   namespace: sk-binge-galaxy
 spec:
@@ -67,6 +89,28 @@ spec:
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
+  name: notification-service-pdb
+  namespace: sk-binge-galaxy
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: notification-service
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: mongodb-pdb
+  namespace: sk-binge-galaxy
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: mongodb
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
   name: kafka-pdb
   namespace: sk-binge-galaxy
 spec:
@@ -74,3 +118,14 @@ spec:
   selector:
     matchLabels:
       app: kafka
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis-pdb
+  namespace: sk-binge-galaxy
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: redis

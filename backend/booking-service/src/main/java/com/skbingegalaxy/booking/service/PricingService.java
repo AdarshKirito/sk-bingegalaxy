@@ -32,26 +32,25 @@ public class PricingService {
     // ═══════════════════════════════════════════════════════════
 
     public List<RateCodeDto> getAllRateCodes() {
-        Long bid = BingeContext.getBingeId();
-        return (bid != null ? rateCodeRepository.findByBingeId(bid) : rateCodeRepository.findAll())
+        Long bid = requireSelectedBinge("managing rate codes");
+        return rateCodeRepository.findByBingeId(bid)
             .stream().map(this::toRateCodeDto).toList();
     }
 
     public List<RateCodeDto> getActiveRateCodes() {
-        Long bid = BingeContext.getBingeId();
-        return (bid != null ? rateCodeRepository.findByBingeIdAndActiveTrue(bid) : rateCodeRepository.findByActiveTrue())
+        Long bid = requireSelectedBinge("viewing rate codes");
+        return rateCodeRepository.findByBingeIdAndActiveTrue(bid)
             .stream().map(this::toRateCodeDto).toList();
     }
 
     public RateCodeDto getRateCodeById(Long id) {
-        return toRateCodeDto(rateCodeRepository.findById(id)
-            .orElseThrow(() -> new ResourceNotFoundException("RateCode", "id", id)));
+        return toRateCodeDto(findScopedRateCode(id));
     }
 
     @Transactional
     public RateCodeDto createRateCode(RateCodeSaveRequest request) {
-        Long bid = BingeContext.getBingeId();
-        if (bid != null ? rateCodeRepository.existsByNameAndBingeId(request.getName(), bid) : rateCodeRepository.existsByName(request.getName())) {
+        Long bid = requireSelectedBinge("creating a rate code");
+        if (rateCodeRepository.existsByNameAndBingeId(request.getName(), bid)) {
             throw new DuplicateResourceException("RateCode", "name", request.getName());
         }
 
@@ -72,13 +71,12 @@ public class PricingService {
 
     @Transactional
     public RateCodeDto updateRateCode(Long id, RateCodeSaveRequest request) {
-        RateCode rateCode = rateCodeRepository.findById(id)
-            .orElseThrow(() -> new ResourceNotFoundException("RateCode", "id", id));
+        RateCode rateCode = findScopedRateCode(id);
 
         // Check name uniqueness if changed
-        Long bid = BingeContext.getBingeId();
+        Long bid = requireSelectedBinge("updating a rate code");
         if (!rateCode.getName().equals(request.getName())) {
-            boolean exists = bid != null ? rateCodeRepository.existsByNameAndBingeId(request.getName(), bid) : rateCodeRepository.existsByName(request.getName());
+            boolean exists = rateCodeRepository.existsByNameAndBingeId(request.getName(), bid);
             if (exists) throw new DuplicateResourceException("RateCode", "name", request.getName());
         }
 
@@ -99,11 +97,24 @@ public class PricingService {
 
     @Transactional
     public void toggleRateCode(Long id) {
-        RateCode rateCode = rateCodeRepository.findById(id)
-            .orElseThrow(() -> new ResourceNotFoundException("RateCode", "id", id));
+        RateCode rateCode = findScopedRateCode(id);
         rateCode.setActive(!rateCode.isActive());
         rateCodeRepository.save(rateCode);
         log.info("Rate code {} toggled to active={}", rateCode.getName(), rateCode.isActive());
+    }
+
+    @Transactional
+    public void deleteRateCode(Long id) {
+        RateCode rateCode = findScopedRateCode(id);
+        if (rateCode.isActive()) {
+            throw new BusinessException("Deactivate the rate code before deleting it");
+        }
+        if (customerPricingProfileRepository.existsByRateCodeId(id)) {
+            throw new BusinessException("Cannot delete this rate code because customer pricing profiles still use it");
+        }
+
+        rateCodeRepository.delete(rateCode);
+        log.info("Rate code deleted: {}", rateCode.getName());
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -111,21 +122,26 @@ public class PricingService {
     // ═══════════════════════════════════════════════════════════
 
     public CustomerPricingDto getCustomerPricing(Long customerId) {
-        Long bid = BingeContext.getBingeId();
-        Optional<CustomerPricingProfile> profile = findReadableCustomerProfile(customerId, bid);
+        Long bid = requireSelectedBinge("viewing customer pricing");
+        Optional<CustomerPricingProfile> scopedProfile = findWritableCustomerProfile(customerId, bid);
+        Optional<CustomerPricingProfile> profile = scopedProfile.isPresent()
+            ? scopedProfile
+            : findReadableCustomerProfile(customerId, bid);
         if (profile.isEmpty()) {
             return CustomerPricingDto.builder()
                 .customerId(customerId)
+                .scopedProfile(false)
                 .eventPricings(List.of())
                 .addonPricings(List.of())
                 .build();
         }
-        return toCustomerPricingDto(profile.get());
+        boolean isScopedProfile = scopedProfile.isPresent();
+        return toCustomerPricingDto(profile.get(), isScopedProfile);
     }
 
     @Transactional
     public CustomerPricingDto saveCustomerPricing(CustomerPricingSaveRequest request) {
-        Long bid = BingeContext.getBingeId();
+        Long bid = requireSelectedBinge("saving customer pricing");
         CustomerPricingProfile profile = findWritableCustomerProfile(request.getCustomerId(), bid)
             .orElseGet(() -> {
                 CustomerPricingProfile p = CustomerPricingProfile.builder()
@@ -137,8 +153,7 @@ public class PricingService {
 
         // Assign/unassign rate code
         if (request.getRateCodeId() != null) {
-            RateCode rc = rateCodeRepository.findById(request.getRateCodeId())
-                .orElseThrow(() -> new ResourceNotFoundException("RateCode", "id", request.getRateCodeId()));
+            RateCode rc = findScopedRateCode(request.getRateCodeId());
             profile.setRateCode(rc);
         } else {
             profile.setRateCode(null);
@@ -151,8 +166,7 @@ public class PricingService {
 
         if (request.getEventPricings() != null) {
             for (var ep : request.getEventPricings()) {
-                EventType et = eventTypeRepository.findById(ep.getEventTypeId())
-                    .orElseThrow(() -> new ResourceNotFoundException("EventType", "id", ep.getEventTypeId()));
+                EventType et = findAccessibleEventType(ep.getEventTypeId());
                 profile.getEventPricings().add(CustomerEventPricing.builder()
                     .customerPricingProfile(profile)
                     .eventType(et)
@@ -165,8 +179,7 @@ public class PricingService {
 
         if (request.getAddonPricings() != null) {
             for (var ap : request.getAddonPricings()) {
-                AddOn addon = addOnRepository.findById(ap.getAddOnId())
-                    .orElseThrow(() -> new ResourceNotFoundException("AddOn", "id", ap.getAddOnId()));
+                AddOn addon = findAccessibleAddOn(ap.getAddOnId());
                 profile.getAddonPricings().add(CustomerAddonPricing.builder()
                     .customerPricingProfile(profile)
                     .addOn(addon)
@@ -177,16 +190,25 @@ public class PricingService {
 
         profile = customerPricingProfileRepository.save(profile);
         log.info("Customer pricing saved for customerId={}", request.getCustomerId());
-        return toCustomerPricingDto(profile);
+        return toCustomerPricingDto(profile, true);
+    }
+
+    @Transactional
+    public void deleteCustomerPricing(Long customerId) {
+        Long bid = requireSelectedBinge("deleting customer pricing");
+        CustomerPricingProfile profile = findWritableCustomerProfile(customerId, bid)
+            .orElseThrow(() -> new ResourceNotFoundException("CustomerPricingProfile", "customerId", customerId));
+
+        customerPricingProfileRepository.delete(profile);
+        log.info("Customer pricing deleted for customerId={} bingeId={}", customerId, bid);
     }
 
     @Transactional
     public int bulkAssignRateCode(BulkRateCodeAssignRequest request) {
-        Long bid = BingeContext.getBingeId();
+        Long bid = requireSelectedBinge("bulk assigning rate codes");
         RateCode rateCode = null;
         if (request.getRateCodeId() != null) {
-            rateCode = rateCodeRepository.findById(request.getRateCodeId())
-                .orElseThrow(() -> new ResourceNotFoundException("RateCode", "id", request.getRateCodeId()));
+            rateCode = findScopedRateCode(request.getRateCodeId());
         }
 
         int count = 0;
@@ -217,9 +239,9 @@ public class PricingService {
      * (Booking-level admin override is applied at booking creation time, not here.)
      */
     public ResolvedPricingDto resolveCustomerPricing(Long customerId) {
-        Long bid = BingeContext.getBingeId();
-        List<EventType> allEvents = bid != null ? eventTypeRepository.findByBingeIdOrGlobalAndActiveTrue(bid) : eventTypeRepository.findByActiveTrue();
-        List<AddOn> allAddOns = bid != null ? addOnRepository.findByBingeIdOrGlobalAndActiveTrue(bid) : addOnRepository.findByActiveTrue();
+        Long bid = requireSelectedBinge("resolving customer pricing");
+        List<EventType> allEvents = eventTypeRepository.findByBingeIdOrGlobalAndActiveTrue(bid);
+        List<AddOn> allAddOns = addOnRepository.findByBingeIdOrGlobalAndActiveTrue(bid);
 
         Optional<CustomerPricingProfile> profileOpt = findReadableCustomerProfile(customerId, bid);
 
@@ -309,8 +331,7 @@ public class PricingService {
      * Returns {basePrice, hourlyRate, pricePerGuest, source, rateCodeName}.
      */
     public ResolvedEventPrice resolveEventPrice(Long customerId, Long eventTypeId) {
-        EventType et = eventTypeRepository.findById(eventTypeId)
-            .orElseThrow(() -> new ResourceNotFoundException("EventType", "id", eventTypeId));
+        EventType et = findAccessibleEventType(eventTypeId);
 
         Long bid = BingeContext.getBingeId();
         Optional<CustomerPricingProfile> profileOpt = findReadableCustomerProfile(customerId, bid);
@@ -346,8 +367,7 @@ public class PricingService {
      * Resolves the effective price for a SINGLE add-on for a given customer.
      */
     public ResolvedAddonPrice resolveAddonPrice(Long customerId, Long addOnId) {
-        AddOn addon = addOnRepository.findById(addOnId)
-            .orElseThrow(() -> new ResourceNotFoundException("AddOn", "id", addOnId));
+        AddOn addon = findAccessibleAddOn(addOnId);
 
         Long bid = BingeContext.getBingeId();
         Optional<CustomerPricingProfile> profileOpt = findReadableCustomerProfile(customerId, bid);
@@ -376,8 +396,7 @@ public class PricingService {
 
     private Optional<CustomerPricingProfile> findReadableCustomerProfile(Long customerId, Long bingeId) {
         if (bingeId != null) {
-            return customerPricingProfileRepository.findByCustomerIdAndBingeId(customerId, bingeId)
-                .or(() -> customerPricingProfileRepository.findByCustomerIdAndBingeIdIsNull(customerId));
+            return customerPricingProfileRepository.findByCustomerIdAndBingeId(customerId, bingeId);
         }
 
         return customerPricingProfileRepository.findByCustomerIdAndBingeIdIsNull(customerId);
@@ -403,15 +422,14 @@ public class PricingService {
      * Used by the admin booking wizard when overriding a customer's pricing with a specific rate code.
      */
     public ResolvedPricingDto resolveRateCodePricing(Long rateCodeId) {
-        RateCode rateCode = rateCodeRepository.findById(rateCodeId)
-            .orElseThrow(() -> new ResourceNotFoundException("RateCode", "id", rateCodeId));
+        RateCode rateCode = findScopedRateCode(rateCodeId);
         if (!rateCode.isActive()) {
             throw new BusinessException("Rate code '" + rateCode.getName() + "' is not active");
         }
 
-        Long bid = BingeContext.getBingeId();
-        List<EventType> allEvents = bid != null ? eventTypeRepository.findByBingeIdOrGlobalAndActiveTrue(bid) : eventTypeRepository.findByActiveTrue();
-        List<AddOn> allAddOns = bid != null ? addOnRepository.findByBingeIdOrGlobalAndActiveTrue(bid) : addOnRepository.findByActiveTrue();
+        Long bid = requireSelectedBinge("resolving rate code pricing");
+        List<EventType> allEvents = eventTypeRepository.findByBingeIdOrGlobalAndActiveTrue(bid);
+        List<AddOn> allAddOns = addOnRepository.findByBingeIdOrGlobalAndActiveTrue(bid);
 
         Map<Long, RateCodeEventPricing> rcEventMap = new HashMap<>();
         Map<Long, RateCodeAddonPricing> rcAddonMap = new HashMap<>();
@@ -459,8 +477,7 @@ public class PricingService {
     private void applyRateCodePricings(RateCode rateCode, RateCodeSaveRequest request) {
         if (request.getEventPricings() != null) {
             for (var ep : request.getEventPricings()) {
-                EventType et = eventTypeRepository.findById(ep.getEventTypeId())
-                    .orElseThrow(() -> new ResourceNotFoundException("EventType", "id", ep.getEventTypeId()));
+                EventType et = findAccessibleEventType(ep.getEventTypeId());
                 rateCode.getEventPricings().add(RateCodeEventPricing.builder()
                     .rateCode(rateCode)
                     .eventType(et)
@@ -472,8 +489,7 @@ public class PricingService {
         }
         if (request.getAddonPricings() != null) {
             for (var ap : request.getAddonPricings()) {
-                AddOn addon = addOnRepository.findById(ap.getAddOnId())
-                    .orElseThrow(() -> new ResourceNotFoundException("AddOn", "id", ap.getAddOnId()));
+                AddOn addon = findAccessibleAddOn(ap.getAddOnId());
                 rateCode.getAddonPricings().add(RateCodeAddonPricing.builder()
                     .rateCode(rateCode)
                     .addOn(addon)
@@ -481,6 +497,32 @@ public class PricingService {
                     .build());
             }
         }
+    }
+
+    private RateCode findScopedRateCode(Long id) {
+        Long bid = requireSelectedBinge("accessing a rate code");
+        return rateCodeRepository.findByIdAndBingeId(id, bid)
+            .orElseThrow(() -> new ResourceNotFoundException("RateCode", "id", id));
+    }
+
+    private EventType findAccessibleEventType(Long id) {
+        Long bid = requireSelectedBinge("using event types");
+        return eventTypeRepository.findAccessibleById(id, bid)
+            .orElseThrow(() -> new ResourceNotFoundException("EventType", "id", id));
+    }
+
+    private AddOn findAccessibleAddOn(Long id) {
+        Long bid = requireSelectedBinge("using add-ons");
+        return addOnRepository.findAccessibleById(id, bid)
+            .orElseThrow(() -> new ResourceNotFoundException("AddOn", "id", id));
+    }
+
+    private Long requireSelectedBinge(String action) {
+        Long bingeId = BingeContext.getBingeId();
+        if (bingeId == null) {
+            throw new BusinessException("Select a binge before " + action);
+        }
+        return bingeId;
     }
 
     private RateCodeDto toRateCodeDto(RateCode rc) {
@@ -508,11 +550,12 @@ public class PricingService {
             .build();
     }
 
-    private CustomerPricingDto toCustomerPricingDto(CustomerPricingProfile profile) {
+    private CustomerPricingDto toCustomerPricingDto(CustomerPricingProfile profile, boolean scopedProfile) {
         return CustomerPricingDto.builder()
             .customerId(profile.getCustomerId())
             .rateCodeId(profile.getRateCode() != null ? profile.getRateCode().getId() : null)
             .rateCodeName(profile.getRateCode() != null ? profile.getRateCode().getName() : null)
+            .scopedProfile(scopedProfile)
             .eventPricings(profile.getEventPricings().stream().map(ep ->
                 CustomerPricingDto.EventPricingEntry.builder()
                     .eventTypeId(ep.getEventType().getId())

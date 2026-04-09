@@ -1,6 +1,7 @@
 package com.skbingegalaxy.booking.controller;
 
 import com.skbingegalaxy.booking.dto.*;
+import com.skbingegalaxy.booking.service.AdminBingeScopeService;
 import com.skbingegalaxy.booking.service.BookingService;
 import com.skbingegalaxy.booking.service.PricingService;
 import com.skbingegalaxy.common.dto.ApiResponse;
@@ -19,8 +20,14 @@ import java.util.List;
 @RequiredArgsConstructor
 public class BookingController {
 
+    private final AdminBingeScopeService adminBingeScopeService;
     private final BookingService bookingService;
     private final PricingService pricingService;
+
+    @ModelAttribute
+    void validateSelectedBinge() {
+        adminBingeScopeService.requireSelectedBinge("accessing binge bookings");
+    }
 
     @PostMapping
     public ResponseEntity<ApiResponse<BookingDto>> createBooking(
@@ -35,8 +42,18 @@ public class BookingController {
     }
 
     @GetMapping("/{bookingRef}")
-    public ResponseEntity<ApiResponse<BookingDto>> getBooking(@PathVariable String bookingRef) {
-        return ResponseEntity.ok(ApiResponse.ok(bookingService.getByRef(bookingRef)));
+    public ResponseEntity<ApiResponse<BookingDto>> getBooking(
+            @PathVariable String bookingRef,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String userRole) {
+        BookingDto booking = bookingService.getByRef(bookingRef);
+        // Ownership check: customers can only view their own bookings
+        if (!"ADMIN".equalsIgnoreCase(userRole) && !"SUPER_ADMIN".equalsIgnoreCase(userRole)
+                && !userId.equals(booking.getCustomerId())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(ApiResponse.error("Not authorized to view this booking"));
+        }
+        return ResponseEntity.ok(ApiResponse.ok(booking));
     }
 
     @GetMapping("/my")

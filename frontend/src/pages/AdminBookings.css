@@ -1,0 +1,433 @@
+/* ── AdminBookings.css ─────────────────────────────────────── */
+
+/* Operational Date Banner */
+.ab-op-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 1rem;
+  margin-bottom: 0.75rem;
+  border-radius: var(--radius-sm, 6px);
+  background:
+    linear-gradient(135deg, rgba(var(--primary-rgb), 0.08), rgba(var(--accent-rgb), 0.03) 80%, transparent);
+  border: 1px solid var(--primary);
+}
+
+.ab-op-banner-label {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.ab-op-banner-value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.ab-op-banner-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+/* Stat Cards Row */
+.ab-stat-cards {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+
+.ab-stat-card {
+  flex: 1 1 140px;
+  padding: 1rem 1.2rem;
+  border-radius: var(--radius-md, 10px);
+  background: var(--bg-card, #1e1e2e);
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  min-width: 0;
+}
+
+.ab-stat-card-value {
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+
+.ab-stat-card-label {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin-top: 0.15rem;
+}
+
+/* Tab Bar */
+.ab-tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 2px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.ab-tabs--no-margin {
+  margin-bottom: 0;
+}
+
+.ab-tabs--margin {
+  margin-bottom: 1rem;
+}
+
+.ab-tab {
+  padding: 0.55rem 1.1rem;
+  border-radius: var(--radius-sm, 6px) var(--radius-sm, 6px) 0 0;
+  border: none;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 0.85rem;
+  background: transparent;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+}
+
+.ab-tab.active {
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--primary, #6c5ce7), color-mix(in srgb, var(--primary) 90%, var(--accent) 10%));
+  color: #fff;
+}
+
+/* Sub-Tabs */
+.ab-sub-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  padding-left: 0.5rem;
+}
+
+.ab-sub-tab {
+  padding: 0.4rem 0.8rem;
+  border-radius: var(--radius-sm);
+  border: none;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 500;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.ab-sub-tab.active {
+  font-weight: 700;
+  background: var(--primary-transparent, rgba(108, 92, 231, 0.2));
+  color: var(--primary);
+}
+
+/* Filter Row */
+.ab-filter-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 1.25rem;
+}
+
+.ab-input {
+  padding: 0.5rem 0.8rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.ab-input-search {
+  flex: 1;
+  min-width: 180px;
+}
+
+/* Table */
+.ab-table-wrap {
+  overflow-x: auto;
+}
+
+.ab-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.ab-table thead tr {
+  border-bottom: 2px solid var(--border);
+}
+
+.ab-table th {
+  text-align: left;
+  padding: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.ab-table td {
+  padding: 0.75rem;
+}
+
+.ab-table tbody tr {
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.ab-table tbody tr:hover {
+  background:
+    linear-gradient(90deg, rgba(var(--primary-rgb), 0.06), rgba(var(--accent-rgb), 0.03), rgba(var(--primary-rgb), 0.06));
+}
+
+.ab-table .ab-ref {
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: var(--primary);
+}
+
+.ab-table .ab-customer-name {
+  font-weight: 600;
+}
+
+.ab-table .ab-customer-detail {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.ab-table .ab-amount {
+  font-weight: 600;
+}
+
+/* Empty state */
+.ab-empty {
+  text-align: center;
+  padding: 2rem;
+}
+
+.ab-empty p {
+  color: var(--text-muted);
+}
+
+/* Modal Overlay */
+.ab-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.ab-modal-card {
+  width: 100%;
+  max-width: 620px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.ab-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.ab-modal-header h3 {
+  margin: 0;
+}
+
+.ab-modal-close {
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 1.3rem;
+  cursor: pointer;
+}
+
+/* Notes Modal */
+.ab-notes-modal {
+  width: 100%;
+  max-width: 420px;
+}
+
+.ab-notes-modal textarea {
+  width: 100%;
+  padding: 0.6rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  resize: vertical;
+}
+
+/* Detail Modal Tabs */
+.ab-detail-tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1rem;
+  align-items: center;
+}
+
+.ab-detail-tab {
+  padding: 0.5rem 1rem;
+  border: none;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 0.82rem;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-secondary);
+}
+
+.ab-detail-tab.active {
+  font-weight: 700;
+  border-bottom-color: var(--primary);
+  color: var(--primary);
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.04), transparent 70%);
+}
+
+/* Detail rows */
+.ab-detail-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.88rem;
+  align-items: center;
+}
+
+.ab-detail-label {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.ab-detail-edit-input {
+  padding: 0.35rem 0.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 0.85rem;
+  flex: 1;
+  margin-left: 0.5rem;
+  max-width: 280px;
+}
+
+/* Warning / info banners */
+.ab-warning-banner {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  margin-bottom: 0.3rem;
+}
+
+.ab-warning-banner--orange {
+  background: rgba(255, 100, 0, 0.1);
+  border: 1px solid orange;
+  color: orange;
+}
+
+.ab-warning-banner--info {
+  background: rgba(0, 206, 201, 0.1);
+  border: 1px solid #00cec9;
+  color: #00cec9;
+}
+
+.ab-warning-banner--danger {
+  background: rgba(231, 76, 60, 0.1);
+  border: 1px solid var(--danger, #e74c3c);
+  color: var(--danger, #e74c3c);
+}
+
+.ab-warning-banner--warn {
+  background: rgba(255, 165, 0, 0.1);
+  border: 1px solid var(--warning, orange);
+  color: var(--warning, orange);
+}
+
+/* Action button row */
+.ab-action-row {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 1.2rem;
+  flex-wrap: wrap;
+}
+
+/* Cancel modal inline */
+.ab-cancel-box {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: var(--bg-card);
+  border: 1px solid var(--danger, #e74c3c);
+  border-radius: var(--radius-sm);
+}
+
+.ab-cancel-box h4 {
+  margin-bottom: 0.75rem;
+  color: var(--danger);
+}
+
+/* Payment card */
+.ab-payment-card {
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+}
+
+/* Refund history */
+.ab-refund-history {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.ab-refund-history-title {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+}
+
+.ab-refund-history-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  padding: 0.2rem 0;
+  border-bottom: 1px dotted var(--border);
+}
+
+/* Early checkout / add-on rows */
+.ab-addon-row {
+  display: flex;
+  justify-content: space-between;
+  padding-left: 0.5rem;
+  font-size: 0.82rem;
+}
+
+/* Total row emphasis */
+.ab-total-row {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .ab-stat-cards {
+    gap: 0.5rem;
+  }
+  .ab-stat-card {
+    flex: 1 1 calc(50% - 0.25rem);
+  }
+  .ab-table th,
+  .ab-table td {
+    padding: 0.5rem;
+    font-size: 0.78rem;
+  }
+}

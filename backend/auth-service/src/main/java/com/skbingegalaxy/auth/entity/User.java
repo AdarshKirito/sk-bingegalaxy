@@ -64,7 +64,7 @@ public class User {
 
     @Column(length = 20)
     @Builder.Default
-    private String notificationChannel = "WHATSAPP";
+    private String notificationChannel = "EMAIL";
 
     @Column
     @Builder.Default
@@ -89,10 +89,35 @@ public class User {
     @Builder.Default
     private boolean active = true;
 
+    // ── Account lockout fields ───────────────────────────────
+    @Column(nullable = false)
+    @Builder.Default
+    private int failedLoginAttempts = 0;
+
+    @Column
+    private LocalDateTime lockedUntil;
+
     @CreationTimestamp
     @Column(updatable = false)
     private LocalDateTime createdAt;
 
     @UpdateTimestamp
     private LocalDateTime updatedAt;
+
+    public boolean isAccountLocked() {
+        return lockedUntil != null && LocalDateTime.now().isBefore(lockedUntil);
+    }
+
+    public void incrementFailedAttempts() {
+        this.failedLoginAttempts++;
+    }
+
+    public void resetFailedAttempts() {
+        this.failedLoginAttempts = 0;
+        this.lockedUntil = null;
+    }
+
+    public void lockAccount(int lockMinutes) {
+        this.lockedUntil = LocalDateTime.now().plusMinutes(lockMinutes);
+    }
 }

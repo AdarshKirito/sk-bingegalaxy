@@ -27,7 +27,9 @@ export default function StepCustomer({
     setCustSearching(true);
     try {
       const res = await authService.searchCustomers(q);
-      setCustResults(res.data.data || res.data || []);
+      // Server returns Page<UserDto> wrapped in ApiResponse — extract .content from the Page
+      const payload = res.data.data;
+      setCustResults(Array.isArray(payload) ? payload : (payload?.content ?? []));
     } catch { setCustResults([]); }
     setCustSearching(false);
   }, []);
@@ -56,7 +58,6 @@ export default function StepCustomer({
         lastName: newCust.lastName,
         email: newCust.email,
         phone: newCust.phone,
-        password: 'Temp@1234',
       });
       const created = res.data.data || res.data;
       setSelectedCustomer(created);

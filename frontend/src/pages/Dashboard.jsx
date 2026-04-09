@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
 import { useAuth } from '../context/AuthContext';
 import { authService, bookingService, paymentService } from '../services/endpoints';
 import useBingeStore from '../stores/bingeStore';
@@ -32,14 +33,17 @@ export default function Dashboard() {
 
   useEffect(() => {
     const loads = [
-      authService.getSupportContact().then(r => setSupportContact(r.data.data || null)).catch(() => {}),
-      bookingService.getCurrentBookings().then(r => setCurrentBookings(r.data.data || [])).catch(() => {}),
-      bookingService.getPastBookings().then(r => setPastBookings(r.data.data || [])).catch(() => {}),
-      paymentService.getMyPayments().then(r => setPayments(r.data.data || [])).catch(() => {}),
-      bookingService.getEventTypes().then(r => setEventTypes((r.data.data || r.data || []).filter(e => e.active !== false))).catch(() => {}),
-      bookingService.getMyPricing().then(r => setMyPricing(r.data.data || null)).catch(() => {}),
+      authService.getSupportContact().then(r => setSupportContact(r.data.data || null)).catch(() => null),
+      bookingService.getCurrentBookings().then(r => setCurrentBookings(r.data.data || [])).catch(() => null),
+      bookingService.getPastBookings().then(r => setPastBookings(r.data.data || [])).catch(() => null),
+      paymentService.getMyPayments().then(r => setPayments(r.data.data || [])).catch(() => null),
+      bookingService.getEventTypes().then(r => setEventTypes((r.data.data || r.data || []).filter(e => e.active !== false))).catch(() => null),
+      bookingService.getMyPricing().then(r => setMyPricing(r.data.data || null)).catch(() => null),
     ];
-    Promise.allSettled(loads).finally(() => setLoading(false));
+    Promise.allSettled(loads).then(results => {
+      const failed = results.filter(r => r.status === 'rejected' || r.value === null).length;
+      if (failed > 0) toast.error('Some dashboard data could not be loaded.');
+    }).finally(() => setLoading(false));
   }, []);
 
   const sortedCurrentBookings = [...currentBookings].sort((left, right) => {

@@ -13,29 +13,38 @@ spec:
       labels:
         app: frontend
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
       containers:
         - name: frontend
-          image: skbingegalaxy/frontend:latest
+          image: skbingegalaxy/frontend:IMAGE_TAG  # Set by CI/CD
           imagePullPolicy: Always
           ports:
-            - containerPort: 80
+            - containerPort: 8080
+              name: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           resources:
             requests:
-              memory: "64Mi"
+              memory: "128Mi"
               cpu: "50m"
             limits:
-              memory: "128Mi"
-              cpu: "100m"
+              memory: "256Mi"
+              cpu: "200m"
           readinessProbe:
             httpGet:
               path: /
-              port: 80
+              port: 8080
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /
-              port: 80
+              port: 8080
             initialDelaySeconds: 10
             periodSeconds: 15
             failureThreshold: 3
@@ -46,12 +55,11 @@ metadata:
   name: frontend
   namespace: sk-binge-galaxy
 spec:
-  type: LoadBalancer
   selector:
     app: frontend
   ports:
     - port: 80
-      targetPort: 80
+      targetPort: 8080
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -62,7 +70,7 @@ metadata:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
     nginx.ingress.kubernetes.io/limit-rps: "50"
-    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-body-size: "2m"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
     nginx.ingress.kubernetes.io/hsts: "true"
     nginx.ingress.kubernetes.io/hsts-max-age: "31536000"
@@ -72,10 +80,10 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - skbingegalaxy.local
-      secretName: skbingegalaxy-tls
+        - __INGRESS_HOST__
+      secretName: __TLS_SECRET_NAME__
   rules:
-    - host: skbingegalaxy.local
+    - host: __INGRESS_HOST__
       http:
         paths:
           - path: /

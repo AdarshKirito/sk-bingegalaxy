@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-init
+  namespace: sk-binge-galaxy
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: kafka-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: kafka-init
+          image: confluentinc/cp-kafka:7.6.0
+          command:
+            - bash
+            - -c
+            - |
+              echo "Waiting for Kafka broker to be available..."
+              until kafka-broker-api-versions --bootstrap-server kafka-0.kafka:9092 >/dev/null 2>&1; do
+                echo "Kafka not ready, retrying in 5s..."
+                sleep 5
+              done
+
+              echo "Creating Kafka topics..."
+              for topic in booking.created booking.confirmed booking.cancelled \
+                           booking.cash-payment \
+                           payment.success payment.failed payment.refunded \
+                           notification.send user.registered password.reset; do
+                kafka-topics --bootstrap-server kafka-0.kafka:9092 --create --if-not-exists \
+                  --topic $topic --partitions 3 --replication-factor 3 --config min.insync.replicas=2
+                echo "  -> $topic"
+              done
+              echo "All topics created successfully."
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"

@@ -55,7 +55,7 @@ export const availabilityService = {
 
 export const paymentService = {
   initiate: (data) => api.post('/payments/initiate', data),
-  simulate: (txnId) => api.post(`/payments/simulate/${txnId}`),
+  callback: (data) => api.post('/payments/callback', data),
   getByBooking: (ref) => api.get(`/payments/booking/${ref}`),
   getMyPayments: () => api.get('/payments/my'),
   cancelPayment: (txnId) => api.post(`/payments/cancel/${txnId}`),
@@ -85,18 +85,21 @@ export const adminService = {
   initiateRefund: (data) => api.post('/payments/admin/refund', data),
   getRefundsForPayment: (paymentId) => api.get(`/payments/admin/refunds/${paymentId}`),
   getPaymentStats: () => api.get('/payments/admin/stats'),
+  simulatePayment: (txnId) => api.post(`/payments/admin/simulate/${txnId}`),
   recordCashPayment: (data) => api.post('/payments/admin/record-cash', data),
   addPayment: (data) => api.post('/payments/admin/add-payment', data),
   // Event type management
   getAllEventTypes: () => api.get('/bookings/admin/event-types'),
   createEventType: (data) => api.post('/bookings/admin/event-types', data),
   updateEventType: (id, data) => api.put(`/bookings/admin/event-types/${id}`, data),
-  toggleEventType: (id) => api.delete(`/bookings/admin/event-types/${id}`),
+  toggleEventType: (id) => api.patch(`/bookings/admin/event-types/${id}/toggle-active`),
+  deleteEventType: (id) => api.delete(`/bookings/admin/event-types/${id}`),
   // Add-on management
   getAllAddOns: () => api.get('/bookings/admin/add-ons'),
   createAddOn: (data) => api.post('/bookings/admin/add-ons', data),
   updateAddOn: (id, data) => api.put(`/bookings/admin/add-ons/${id}`, data),
-  toggleAddOn: (id) => api.delete(`/bookings/admin/add-ons/${id}`),
+  toggleAddOn: (id) => api.patch(`/bookings/admin/add-ons/${id}/toggle-active`),
+  deleteAddOn: (id) => api.delete(`/bookings/admin/add-ons/${id}`),
   // Reports
   getReport: (period) => api.get('/bookings/admin/reports', { params: { period, clientDate: clientDate() } }),
   getReportByDateRange: (from, to) => api.get('/bookings/admin/reports/date-range', { params: { from, to, clientDate: clientDate() } }),
@@ -116,10 +119,12 @@ export const adminService = {
   getRateCode: (id) => api.get(`/bookings/admin/pricing/rate-codes/${id}`),
   createRateCode: (data) => api.post('/bookings/admin/pricing/rate-codes', data),
   updateRateCode: (id, data) => api.put(`/bookings/admin/pricing/rate-codes/${id}`, data),
-  toggleRateCode: (id) => api.delete(`/bookings/admin/pricing/rate-codes/${id}`),
+  toggleRateCode: (id) => api.patch(`/bookings/admin/pricing/rate-codes/${id}/toggle-active`),
+  deleteRateCode: (id) => api.delete(`/bookings/admin/pricing/rate-codes/${id}`),
   // Pricing: Customer
   getCustomerPricing: (customerId) => api.get(`/bookings/admin/pricing/customer/${customerId}`),
   saveCustomerPricing: (data) => api.post('/bookings/admin/pricing/customer', data),
+  deleteCustomerPricing: (customerId) => api.delete(`/bookings/admin/pricing/customer/${customerId}`),
   bulkAssignRateCode: (data) => api.post('/bookings/admin/pricing/bulk-assign-rate-code', data),
   resolveCustomerPricing: (customerId) => api.get(`/bookings/admin/pricing/resolve/${customerId}`),
   resolveRateCodePricing: (rateCodeId) => api.get(`/bookings/admin/pricing/resolve-rate-code/${rateCodeId}`),
@@ -128,5 +133,6 @@ export const adminService = {
   getBingesByAdmin: (adminId) => api.get(`/bookings/admin/binges/by-admin/${adminId}`),
   createBinge: (data) => api.post(`/bookings/admin/binges?clientDate=${clientDate()}`, data),
   updateBinge: (id, data) => api.put(`/bookings/admin/binges/${id}`, data),
-  toggleBinge: (id) => api.delete(`/bookings/admin/binges/${id}`),
+  toggleBinge: (id) => api.patch(`/bookings/admin/binges/${id}/toggle-active`),
+  deleteBinge: (id) => api.delete(`/bookings/admin/binges/${id}`),
 };

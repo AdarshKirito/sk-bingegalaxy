@@ -34,11 +34,25 @@ public class PasswordResetToken {
     @Builder.Default
     private boolean used = false;
 
+    @Column(nullable = false)
+    @Builder.Default
+    private int otpAttempts = 0;
+
+    private static final int MAX_OTP_ATTEMPTS = 5;
+
     @CreationTimestamp
     @Column(updatable = false)
     private LocalDateTime createdAt;
 
     public boolean isExpired() {
         return LocalDateTime.now().isAfter(expiresAt);
+    }
+
+    public boolean isOtpAttemptsExhausted() {
+        return otpAttempts >= MAX_OTP_ATTEMPTS;
+    }
+
+    public void incrementOtpAttempts() {
+        this.otpAttempts++;
     }
 }

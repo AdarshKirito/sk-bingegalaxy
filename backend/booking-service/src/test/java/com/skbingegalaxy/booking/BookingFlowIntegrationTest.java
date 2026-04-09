@@ -23,6 +23,8 @@ import java.time.LocalTime;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -61,7 +63,7 @@ class BookingFlowIntegrationTest {
     @Test
     void createBooking_andRetrieveByRef() throws Exception {
         EventType eventType = eventTypeRepository.findByActiveTrue().get(0);
-        when(availabilityClient.checkSlotAvailable(any(), anyInt(), anyInt())).thenReturn(true);
+                when(availabilityClient.checkSlotAvailable(anyString(), any(), anyLong(), anyInt(), anyInt())).thenReturn(true);
 
         CreateBookingRequest request = CreateBookingRequest.builder()
                 .eventTypeId(eventType.getId())
@@ -96,7 +98,7 @@ class BookingFlowIntegrationTest {
     @Test
     void adminCancelBooking() throws Exception {
         EventType eventType = eventTypeRepository.findByActiveTrue().get(0);
-        when(availabilityClient.checkSlotAvailable(any(), anyInt(), anyInt())).thenReturn(true);
+                when(availabilityClient.checkSlotAvailable(anyString(), any(), anyLong(), anyInt(), anyInt())).thenReturn(true);
 
         CreateBookingRequest request = CreateBookingRequest.builder()
                 .eventTypeId(eventType.getId())

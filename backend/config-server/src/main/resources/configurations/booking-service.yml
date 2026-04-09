@@ -1,17 +1,32 @@
 server:
   port: 8083
 
+internal:
+  api:
+    secret: ${INTERNAL_API_SECRET}
+
 spring:
   application:
     name: booking-service
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/booking_db}
     username: ${SPRING_DATASOURCE_USERNAME:skbg_admin}
-    password: ${SPRING_DATASOURCE_PASSWORD:skbg_secret}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:8}
+      minimum-idle: ${SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE:2}
+      idle-timeout: ${SPRING_DATASOURCE_HIKARI_IDLE_TIMEOUT:300000}
+      max-lifetime: ${SPRING_DATASOURCE_HIKARI_MAX_LIFETIME:1800000}
+      connection-timeout: ${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT:30000}
+      validation-timeout: ${SPRING_DATASOURCE_HIKARI_VALIDATION_TIMEOUT:5000}
+  flyway:
+    enabled: ${SPRING_FLYWAY_ENABLED:true}
+    baseline-on-migrate: ${SPRING_FLYWAY_BASELINE_ON_MIGRATE:true}
+    baseline-version: ${SPRING_FLYWAY_BASELINE_VERSION:0}
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: ${SPRING_JPA_HIBERNATE_DDL_AUTO:validate}
     show-sql: false
     properties:
       hibernate:
@@ -36,8 +51,10 @@ app:
     max-hours: 8
     advance-booking-days: 90
     cancellation-hours-before: 24
+    max-pending-per-customer: 2
+    cooldown-minutes-after-timeout: 10
   saga:
-    pending-timeout-minutes: 30
+    pending-timeout-minutes: 15
     check-interval-ms: 300000
 
 # ── Resilience4j Circuit Breaker ─────────────────────────
@@ -53,6 +70,27 @@ resilience4j:
         permitted-number-of-calls-in-half-open-state: 3
         slow-call-duration-threshold: 3s
         slow-call-rate-threshold: 80
+        register-health-indicator: true
+    instances:
+      availability-service:
+        base-config: default
+  retry:
+    configs:
+      default:
+        max-attempts: 3
+        wait-duration: 500ms
+        retry-exceptions:
+          - java.io.IOException
+          - java.net.SocketTimeoutException
+          - feign.RetryableException
+    instances:
+      availability-service:
+        base-config: default
+  bulkhead:
+    configs:
+      default:
+        max-concurrent-calls: 20
+        max-wait-duration: 500ms
     instances:
       availability-service:
         base-config: default
@@ -63,16 +101,32 @@ resilience4j:
 
 logging:
   level:
-    com.skbingegalaxy.booking: DEBUG
+    com.skbingegalaxy.booking: WARN
 
 eureka:
   instance:
     prefer-ip-address: true
 
 management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics,circuitbreakers
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  health:
+    circuitbreakers:
+      enabled: true
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
   tracing:
     sampling:
-      probability: 1.0
+      probability: ${TRACING_SAMPLING:0.05}
     propagation:
       type: b3
   zipkin:

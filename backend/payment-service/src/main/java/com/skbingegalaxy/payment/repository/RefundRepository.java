@@ -36,4 +36,8 @@ public interface RefundRepository extends JpaRepository<Refund, Long> {
      */
     @Query("SELECT COALESCE(SUM(r.amount), 0) FROM Refund r WHERE r.status IN :statuses")
     BigDecimal sumAllCompletedRefunds(@Param("statuses") List<PaymentStatus> statuses);
+
+    @Query("SELECT COALESCE(SUM(r.amount), 0) FROM Refund r WHERE r.status IN :statuses AND r.payment.bingeId = :bingeId")
+    BigDecimal sumAllCompletedRefundsByBingeId(@Param("statuses") List<PaymentStatus> statuses,
+                                               @Param("bingeId") Long bingeId);
 }

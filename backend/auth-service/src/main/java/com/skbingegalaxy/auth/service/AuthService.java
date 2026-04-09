@@ -22,6 +22,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import jakarta.annotation.PostConstruct;
 import java.security.SecureRandom;
 import java.time.Month;
 import java.time.LocalDateTime;
@@ -29,7 +30,6 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.time.format.TextStyle;
 import java.time.temporal.ChronoField;
-import java.util.Collections;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -37,8 +37,6 @@ import java.util.UUID;
 
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
-import com.google.api.client.http.javanet.NetHttpTransport;
-import com.google.api.client.json.gson.GsonFactory;
 
 @Service
 @RequiredArgsConstructor
@@ -55,6 +53,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtProvider jwtProvider;
     private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final GoogleIdTokenVerifier googleIdTokenVerifier;
 
     @Value("${app.otp.expiration-minutes:10}")
     private int otpExpirationMinutes;
@@ -62,8 +61,16 @@ public class AuthService {
     @Value("${app.otp.length:6}")
     private int otpLength;
 
-    @Value("${app.google.client-id:}")
-    private String googleClientId;
+    private static final int MAX_LOGIN_ATTEMPTS = 5;
+    private static final int LOCKOUT_MINUTES = 15;
+
+    /** Pre-computed BCrypt hash used in constant-time login to prevent timing oracles. */
+    private String dummyHash;
+
+    @PostConstruct
+    void initDummyHash() {
+        this.dummyHash = passwordEncoder.encode("timing-safety-dummy-" + java.util.UUID.randomUUID());
+    }
 
     @Value("${app.admin.email:admin@skbingegalaxy.com}")
     private String supportEmail;
@@ -78,12 +85,7 @@ public class AuthService {
     @Transactional
     public AuthResponse googleLogin(String credential) {
         try {
-            GoogleIdTokenVerifier verifier = new GoogleIdTokenVerifier.Builder(
-                    new NetHttpTransport(), GsonFactory.getDefaultInstance())
-                .setAudience(Collections.singletonList(googleClientId))
-                .build();
-
-            GoogleIdToken idToken = verifier.verify(credential);
+            GoogleIdToken idToken = googleIdTokenVerifier.verify(credential);
             if (idToken == null) {
                 throw new BusinessException("Invalid Google token", HttpStatus.UNAUTHORIZED);
             }
@@ -127,15 +129,16 @@ public class AuthService {
             throw e;
         } catch (Exception e) {
             log.error("Google login failed", e);
-            throw new BusinessException("Google login failed: " + e.getMessage(), HttpStatus.UNAUTHORIZED);
+            throw new BusinessException("Google login failed. Please try again.", HttpStatus.UNAUTHORIZED);
         }
     }
 
     // ── Register ─────────────────────────────────────────────
     @Transactional
     public AuthResponse register(RegisterRequest request) {
-        if (userRepository.existsByEmail(request.getEmail())) {
-            throw new DuplicateResourceException("User", "email", request.getEmail());
+        String email = request.getEmail().toLowerCase();
+        if (userRepository.existsByEmail(email)) {
+            throw new DuplicateResourceException("User", "email", email);
         }
         if (userRepository.existsByPhone(request.getPhone())) {
             throw new DuplicateResourceException("User", "phone", request.getPhone());
@@ -144,7 +147,7 @@ public class AuthService {
         User user = User.builder()
             .firstName(request.getFirstName())
             .lastName(request.getLastName())
-            .email(request.getEmail().toLowerCase())
+            .email(email)
             .phone(request.getPhone())
             .password(passwordEncoder.encode(request.getPassword()))
             .role(UserRole.CUSTOMER)
@@ -163,18 +166,36 @@ public class AuthService {
     }
 
     // ── Customer login ───────────────────────────────────────
+    @Transactional
     public AuthResponse login(LoginRequest request) {
-        User user = userRepository.findByEmail(request.getEmail().toLowerCase())
-            .orElseThrow(() -> new BusinessException("Invalid email or password", HttpStatus.UNAUTHORIZED));
+        // Constant-time login: always perform password check to prevent email enumeration via timing
+        User user = userRepository.findByEmail(request.getEmail().toLowerCase()).orElse(null);
+        String storedHash = user != null ? user.getPassword() : this.dummyHash;
 
+        boolean passwordMatches = passwordEncoder.matches(request.getPassword(), storedHash);
+
+        if (user == null) {
+            throw new BusinessException("Invalid email or password", HttpStatus.UNAUTHORIZED);
+        }
         if (!user.isActive()) {
             throw new BusinessException("Account is deactivated. Contact support.", HttpStatus.FORBIDDEN);
         }
-        if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+        if (user.isAccountLocked()) {
+            throw new BusinessException("Account is temporarily locked due to too many failed attempts. Try again later.", HttpStatus.TOO_MANY_REQUESTS);
+        }
+        if (!passwordMatches) {
+            user.incrementFailedAttempts();
+            if (user.getFailedLoginAttempts() >= MAX_LOGIN_ATTEMPTS) {
+                user.lockAccount(LOCKOUT_MINUTES);
+                log.warn("Account locked for user {} after {} failed attempts", user.getId(), MAX_LOGIN_ATTEMPTS);
+            }
+            userRepository.save(user);
             throw new BusinessException("Invalid email or password", HttpStatus.UNAUTHORIZED);
         }
 
-        log.info("Customer login: {}", user.getEmail());
+        user.resetFailedAttempts();
+        userRepository.save(user);
+        log.info("Customer login: userId={}", user.getId());
         return buildAuthResponse(user);
     }
 
@@ -194,30 +215,56 @@ public class AuthService {
     }
 
     // ── Admin login ──────────────────────────────────────────
+    @Transactional
     public AuthResponse adminLogin(LoginRequest request) {
-        User user = userRepository.findByEmail(request.getEmail().toLowerCase())
-            .orElseThrow(() -> new BusinessException("Invalid admin credentials", HttpStatus.UNAUTHORIZED));
+        // Constant-time login: always perform password check to prevent email enumeration via timing
+        User user = userRepository.findByEmail(request.getEmail().toLowerCase()).orElse(null);
+        String storedHash = user != null ? user.getPassword() : this.dummyHash;
 
-        if (user.getRole() != UserRole.ADMIN && user.getRole() != UserRole.SUPER_ADMIN) {
+        boolean passwordMatches = passwordEncoder.matches(request.getPassword(), storedHash);
+
+        if (user == null || (user.getRole() != UserRole.ADMIN && user.getRole() != UserRole.SUPER_ADMIN)) {
             throw new BusinessException("Invalid admin credentials", HttpStatus.UNAUTHORIZED);
         }
 
-        if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+        if (!user.isActive()) {
+            throw new BusinessException("Account is deactivated", HttpStatus.FORBIDDEN);
+        }
+        if (user.isAccountLocked()) {
+            throw new BusinessException("Account is temporarily locked due to too many failed attempts. Try again later.", HttpStatus.TOO_MANY_REQUESTS);
+        }
+        if (!passwordMatches) {
+            user.incrementFailedAttempts();
+            if (user.getFailedLoginAttempts() >= MAX_LOGIN_ATTEMPTS) {
+                user.lockAccount(LOCKOUT_MINUTES);
+                log.warn("Admin account locked for user {} after {} failed attempts", user.getId(), MAX_LOGIN_ATTEMPTS);
+            }
+            userRepository.save(user);
             throw new BusinessException("Invalid admin credentials", HttpStatus.UNAUTHORIZED);
         }
 
-        log.info("Admin login: {}", user.getEmail());
+        user.resetFailedAttempts();
+        userRepository.save(user);
+        log.info("Admin login: userId={}", user.getId());
         return buildAuthResponse(user);
     }
 
     // ── Forgot password ──────────────────────────────────────
     @Transactional
     public void forgotPassword(ForgotPasswordRequest request) {
-        User user = userRepository.findByEmail(request.getEmail().toLowerCase())
-            .orElseThrow(() -> new ResourceNotFoundException("User", "email", request.getEmail()));
+        var optionalUser = userRepository.findByEmail(request.getEmail().toLowerCase());
+        if (optionalUser.isEmpty()) {
+            // Return silently to prevent email enumeration
+            log.debug("Forgot-password request for non-existent email: {}", request.getEmail());
+            return;
+        }
+        User user = optionalUser.get();
 
         String token = UUID.randomUUID().toString();
         String otp = generateOtp();
+
+        // Invalidate any existing unused tokens for this user
+        resetTokenRepository.markAllUnusedAsUsedForUser(user.getId());
 
         PasswordResetToken resetToken = PasswordResetToken.builder()
             .token(token)
@@ -262,22 +309,41 @@ public class AuthService {
     // ── Verify OTP (for phone-based recovery) ────────────────
     @Transactional
     public void verifyOtpAndResetPassword(VerifyOtpRequest request) {
+        // OTP must be paired with token to prevent brute-force across all users
+        if (request.getToken() == null || request.getToken().isBlank()) {
+            throw new BusinessException("Reset token is required along with OTP");
+        }
+
+        // Look up by token first (not by OTP) to enforce per-token attempt counting
         PasswordResetToken resetToken = resetTokenRepository
-            .findByOtpAndUsedFalse(request.getOtp())
-            .orElseThrow(() -> new BusinessException("Invalid or expired OTP"));
+            .findByTokenAndUsedFalse(request.getToken())
+            .orElseThrow(() -> new BusinessException("Invalid or expired reset token"));
 
         if (resetToken.isExpired()) {
             throw new BusinessException("OTP has expired");
+        }
+
+        // Enforce max OTP attempts to prevent brute-force
+        if (resetToken.isOtpAttemptsExhausted()) {
+            resetToken.setUsed(true);
+            resetTokenRepository.save(resetToken);
+            throw new BusinessException("Too many incorrect OTP attempts. Please request a new code.");
+        }
+
+        if (!request.getOtp().equals(resetToken.getOtp())) {
+            resetToken.incrementOtpAttempts();
+            resetTokenRepository.save(resetToken);
+            throw new BusinessException("Invalid OTP");
         }
 
         User user = resetToken.getUser();
         user.setPassword(passwordEncoder.encode(request.getNewPassword()));
         userRepository.save(user);
 
-        resetToken.setUsed(true);
-        resetTokenRepository.save(resetToken);
+        // Invalidate ALL unused tokens for this user (not just the current one)
+        resetTokenRepository.markAllUnusedAsUsedForUser(user.getId());
 
-        log.info("OTP-based password reset completed for: {}", user.getEmail());
+        log.info("OTP-based password reset completed for userId: {}", user.getId());
     }
 
     // ── Get current user profile ─────────────────────────────
@@ -326,7 +392,7 @@ public class AuthService {
         user.setBirthdayDay(birthdayDay);
         user.setAnniversaryMonth(anniversaryMonth);
         user.setAnniversaryDay(anniversaryDay);
-        user.setNotificationChannel(request.getNotificationChannel() != null ? request.getNotificationChannel().trim().toUpperCase(Locale.ENGLISH) : "WHATSAPP");
+        user.setNotificationChannel(normalizeNotificationChannel(request.getNotificationChannel()));
         user.setReceivesOffers(request.getReceivesOffers() != null ? request.getReceivesOffers() : Boolean.TRUE);
         user.setWeekendAlerts(request.getWeekendAlerts() != null ? request.getWeekendAlerts() : Boolean.TRUE);
         user.setConciergeSupport(request.getConciergeSupport() != null ? request.getConciergeSupport() : Boolean.TRUE);
@@ -338,7 +404,7 @@ public class AuthService {
 
     // ── Complete profile (add phone after Google sign-in) ─────
     @Transactional
-    public UserDto completeProfile(Long userId, String phone) {
+    public AuthResponse completeProfile(Long userId, String phone) {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
         if (userRepository.existsByPhone(phone)) {
@@ -347,20 +413,30 @@ public class AuthService {
         user.setPhone(phone);
         user = userRepository.save(user);
         log.info("Profile completed for: {}", user.getEmail());
-        return toDto(user);
+        // Return fresh tokens so the JWT includes the phone claim
+        String token = jwtProvider.generateToken(user);
+        String refreshToken = jwtProvider.generateRefreshToken(user);
+        return AuthResponse.builder()
+            .token(token)
+            .refreshToken(refreshToken)
+            .user(toDto(user))
+            .build();
     }
 
     // ── Admin: search customers ──────────────────────────────
-    public java.util.List<UserDto> searchCustomers(String query) {
-        return userRepository.searchCustomers(query).stream().map(this::toDto).toList();
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<UserDto> searchCustomers(String query, org.springframework.data.domain.Pageable pageable) {
+        return userRepository.searchCustomers(query, pageable).map(this::toDto);
     }
 
     // ── Admin: list all customers ────────────────────────────
-    public java.util.List<UserDto> getAllCustomers() {
-        return userRepository.findAllCustomers().stream().map(this::toDto).toList();
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<UserDto> getAllCustomers(org.springframework.data.domain.Pageable pageable) {
+        return userRepository.findAllCustomers(pageable).map(this::toDto);
     }
 
     // ── Super Admin: list all admins ─────────────────────────
+    @Transactional(readOnly = true)
     public java.util.List<UserDto> getAllAdmins() {
         return userRepository.findAllAdmins().stream().map(this::toDto).toList();
     }
@@ -375,9 +451,25 @@ public class AuthService {
         }
         userRepository.delete(user);
         log.info("Super admin deleted user: {} (ID: {}, role: {})", user.getEmail(), id, user.getRole());
+
+        // Notify user about account deletion
+        try {
+            NotificationEvent event = NotificationEvent.builder()
+                .channel(NotificationChannel.EMAIL)
+                .recipientEmail(user.getEmail())
+                .recipientName(user.getFirstName())
+                .subject("Account Deleted – SK Binge Galaxy")
+                .body("Hi " + user.getFirstName() + ", your account has been deleted by an administrator. "
+                    + "If you believe this was a mistake, please contact support.")
+                .build();
+            kafkaTemplate.send(KafkaTopics.NOTIFICATION_SEND, event);
+        } catch (Exception e) {
+            log.warn("Failed to send account-deletion notification to {}: {}", user.getEmail(), e.getMessage());
+        }
     }
 
     // ── Admin: get customer by ID ────────────────────────────
+    @Transactional(readOnly = true)
     public UserDto getCustomerById(Long id) {
         User user = userRepository.findById(id)
             .orElseThrow(() -> new ResourceNotFoundException("User", "id", id));
@@ -395,7 +487,9 @@ public class AuthService {
             throw new DuplicateResourceException("User", "email", request.getEmail());
         }
         // Check phone uniqueness (if changed)
-        if (!user.getPhone().equals(request.getPhone()) && userRepository.existsByPhone(request.getPhone())) {
+        if (!java.util.Objects.equals(user.getPhone(), request.getPhone())
+                && request.getPhone() != null
+                && userRepository.existsByPhone(request.getPhone())) {
             throw new DuplicateResourceException("User", "phone", request.getPhone());
         }
 
@@ -428,7 +522,9 @@ public class AuthService {
         if (!user.getEmail().equals(request.getEmail()) && userRepository.existsByEmail(request.getEmail())) {
             throw new DuplicateResourceException("User", "email", request.getEmail());
         }
-        if (!user.getPhone().equals(request.getPhone()) && userRepository.existsByPhone(request.getPhone())) {
+        if (!java.util.Objects.equals(user.getPhone(), request.getPhone())
+                && request.getPhone() != null
+                && userRepository.existsByPhone(request.getPhone())) {
             throw new DuplicateResourceException("User", "phone", request.getPhone());
         }
 
@@ -449,20 +545,27 @@ public class AuthService {
 
     // ── Admin: create customer ───────────────────────────────
     @Transactional
-    public UserDto adminCreateCustomer(RegisterRequest request) {
-        if (userRepository.existsByEmail(request.getEmail())) {
-            throw new DuplicateResourceException("User", "email", request.getEmail());
+    public UserDto adminCreateCustomer(AdminCreateCustomerRequest request) {
+        String email = request.getEmail().toLowerCase();
+        if (userRepository.existsByEmail(email)) {
+            throw new DuplicateResourceException("User", "email", email);
         }
-        if (userRepository.existsByPhone(request.getPhone())) {
+        if (request.getPhone() != null && !request.getPhone().isBlank()
+                && userRepository.existsByPhone(request.getPhone())) {
             throw new DuplicateResourceException("User", "phone", request.getPhone());
         }
+
+        // Generate a secure random password if none provided (admin-created customers)
+        String rawPassword = (request.getPassword() != null && !request.getPassword().isBlank())
+            ? request.getPassword()
+            : generateSecurePassword();
 
         User user = User.builder()
             .firstName(request.getFirstName())
             .lastName(request.getLastName())
-            .email(request.getEmail())
+            .email(email)
             .phone(request.getPhone())
-            .password(passwordEncoder.encode(request.getPassword()))
+            .password(passwordEncoder.encode(rawPassword))
             .role(UserRole.CUSTOMER)
             .active(true)
             .build();
@@ -475,8 +578,9 @@ public class AuthService {
     // ── Admin register ────────────────────────────────────────
     @Transactional
     public AuthResponse adminRegister(RegisterRequest request) {
-        if (userRepository.existsByEmail(request.getEmail())) {
-            throw new DuplicateResourceException("User", "email", request.getEmail());
+        String email = request.getEmail().toLowerCase();
+        if (userRepository.existsByEmail(email)) {
+            throw new DuplicateResourceException("User", "email", email);
         }
         if (userRepository.existsByPhone(request.getPhone())) {
             throw new DuplicateResourceException("User", "phone", request.getPhone());
@@ -485,7 +589,7 @@ public class AuthService {
         User user = User.builder()
             .firstName(request.getFirstName())
             .lastName(request.getLastName())
-            .email(request.getEmail().toLowerCase())
+            .email(email)
             .phone(request.getPhone())
             .password(passwordEncoder.encode(request.getPassword()))
             .role(UserRole.ADMIN)
@@ -520,7 +624,7 @@ public class AuthService {
             .birthdayDay(user.getBirthdayDay())
             .anniversaryMonth(user.getAnniversaryMonth())
             .anniversaryDay(user.getAnniversaryDay())
-            .notificationChannel(user.getNotificationChannel() != null ? user.getNotificationChannel() : "WHATSAPP")
+            .notificationChannel(normalizeNotificationChannel(user.getNotificationChannel()))
             .receivesOffers(user.getReceivesOffers() != null ? user.getReceivesOffers() : true)
             .weekendAlerts(user.getWeekendAlerts() != null ? user.getWeekendAlerts() : true)
             .conciergeSupport(user.getConciergeSupport() != null ? user.getConciergeSupport() : true)
@@ -536,6 +640,14 @@ public class AuthService {
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String normalizeNotificationChannel(String notificationChannel) {
+        if (notificationChannel == null || notificationChannel.isBlank()) {
+            return "EMAIL";
+        }
+        String normalized = notificationChannel.trim().toUpperCase(Locale.ENGLISH);
+        return "CALLBACK".equals(normalized) ? "CALLBACK" : "EMAIL";
     }
 
     private String normalizeCelebrationMonth(String month) {
@@ -610,6 +722,31 @@ public class AuthService {
         SecureRandom random = new SecureRandom();
         int bound = (int) Math.pow(10, otpLength);
         return String.format("%0" + otpLength + "d", random.nextInt(bound));
+    }
+
+    private String generateSecurePassword() {
+        String upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        String lower = "abcdefghijklmnopqrstuvwxyz";
+        String digits = "0123456789";
+        String special = "!@#$%^&*";
+        String all = upper + lower + digits + special;
+        SecureRandom rng = new SecureRandom();
+        StringBuilder sb = new StringBuilder(16);
+        // Ensure at least one char from each category
+        sb.append(upper.charAt(rng.nextInt(upper.length())));
+        sb.append(lower.charAt(rng.nextInt(lower.length())));
+        sb.append(digits.charAt(rng.nextInt(digits.length())));
+        sb.append(special.charAt(rng.nextInt(special.length())));
+        for (int i = 4; i < 16; i++) {
+            sb.append(all.charAt(rng.nextInt(all.length())));
+        }
+        // Shuffle to avoid predictable pattern
+        char[] arr = sb.toString().toCharArray();
+        for (int i = arr.length - 1; i > 0; i--) {
+            int j = rng.nextInt(i + 1);
+            char tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+        }
+        return new String(arr);
     }
 
     private void sendNotification(User user, String template, Map<String, String> data) {

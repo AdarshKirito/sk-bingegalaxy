@@ -8,13 +8,14 @@ import './AdminDashboard.css';
 export default function AdminDashboard() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [now, setNow] = useState(new Date());
   const [operationalDate, setOperationalDate] = useState(null);
 
   useEffect(() => {
     adminService.getDashboardStats()
       .then(res => setStats(res.data.data))
-      .catch(() => {})
+      .catch(() => setError('Failed to load dashboard stats'))
       .finally(() => setLoading(false));
     adminService.getOperationalDate()
       .then(res => {
@@ -42,6 +43,14 @@ export default function AdminDashboard() {
     </div>
   );
 
+  if (error) return (
+    <div className="container admin-dash">
+      <div className="page-header"><h1>Admin Dashboard</h1><p>SK Binge Galaxy management console</p></div>
+      <p style={{ color: 'var(--danger, #ef4444)', textAlign: 'center', marginTop: '2rem' }}>{error}</p>
+      <button className="btn btn-primary" style={{ display: 'block', margin: '1rem auto' }} onClick={() => window.location.reload()}>Retry</button>
+    </div>
+  );
+
   const dateStr = now.toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const timeStr = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
 
@@ -53,27 +62,25 @@ export default function AdminDashboard() {
       </div>
 
       {/* Live Date & Time + Operational Date */}
-      <Link to="/admin/reports" style={{ textDecoration: 'none' }}>
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1rem 1.5rem', marginBottom: '1.5rem', cursor: 'pointer', border: '1px solid var(--primary)', background: 'rgba(99,102,241,0.06)' }}>
-          <FiClock size={28} color="var(--primary)" />
+      <Link to="/admin/reports" className="admin-dash-banner">
+        <div className="card admin-dash-banner-inner">
+          <FiClock size={28} className="admin-dash-banner-icon" />
           <div>
-            <div style={{ fontSize: '1.3rem', fontWeight: 700, fontFamily: 'monospace', color: 'var(--text)' }}>{timeStr}</div>
-            <div style={{ fontSize: '0.88rem', color: 'var(--text-secondary)' }}>{dateStr}</div>
+            <div className="admin-dash-banner-time">{timeStr}</div>
+            <div className="admin-dash-banner-date">{dateStr}</div>
           </div>
           {operationalDate && (
-            <div style={{ marginLeft: '1.5rem', paddingLeft: '1.5rem', borderLeft: '1px solid var(--border)' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Operational Day</div>
-              <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--primary)' }}>{operationalDate}</div>
+            <div className="admin-dash-banner-meta">
+              <div className="admin-dash-banner-label">Operational Day</div>
+              <div className="admin-dash-banner-value">{operationalDate}</div>
             </div>
           )}
-          <div style={{ marginLeft: 'auto', fontSize: '0.8rem', color: 'var(--primary)', fontWeight: 600 }}>
-            Reports & Audit →
-          </div>
+          <div className="admin-dash-banner-link">Reports &amp; Audit →</div>
         </div>
       </Link>
 
       <div className="grid-4 stat-cards">
-        <StatCard icon={<FiCalendar />} label="Today's Bookings" value={stats?.totalBookings || 0} color="var(--primary)" to="/admin/bookings?tab=today&sub=all" />
+        <StatCard icon={<FiCalendar />} label="Today's Bookings" value={stats?.todayTotal || 0} color="var(--primary)" to="/admin/bookings?tab=today&sub=all" />
         <StatCard icon={<FiUsers />} label="Pending" value={stats?.todayPending || 0} color="var(--warning)" to="/admin/bookings?tab=today&sub=pending" />
         <StatCard icon={<FiTrendingUp />} label="Confirmed" value={stats?.todayConfirmed || 0} color="var(--success)" to="/admin/bookings?tab=today&sub=confirmed" />
         <StatCard icon={<FiDollarSign />} label="Today's Revenue" value={`₹${(stats?.todayRevenue ?? 0).toLocaleString()}`} color="var(--secondary)" to="/admin/reports" />
@@ -114,17 +121,14 @@ export default function AdminDashboard() {
 
 function StatCard({ icon, label, value, color, to }) {
   const content = (
-    <div className="card stat-card" style={to ? { cursor: 'pointer', transition: 'transform 0.15s, box-shadow 0.15s' }
-      : undefined}
-      onMouseEnter={e => { if (to) { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.18)'; } }}
-      onMouseLeave={e => { if (to) { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = ''; } }}>
+    <div className="card stat-card">
       <div className="stat-icon" style={{ color }}>{icon}</div>
       <div>
         <p className="stat-value">{value}</p>
         <p className="stat-label">{label}</p>
       </div>
-      {to && <div style={{ marginLeft: 'auto', fontSize: '0.75rem', color, opacity: 0.7, alignSelf: 'center' }}>→</div>}
+      {to && <div className="stat-card-arrow" style={{ color }}>→</div>}
     </div>
   );
-  return to ? <Link to={to} style={{ textDecoration: 'none', display: 'contents' }}>{content}</Link> : content;
+  return to ? <Link to={to} className="stat-card-link">{content}</Link> : content;
 }

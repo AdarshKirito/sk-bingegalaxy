@@ -28,45 +28,188 @@ spec:
       interval: 15s
       scrapeTimeout: 10s
 ---
-# PodMonitor alternative (scrapes pods directly without needing Service port names)
-apiVersion: monitoring.coreos.com/v1
-kind: PodMonitor
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: spring-boot-pods
+  name: zipkin
   namespace: sk-binge-galaxy
-  labels:
-    release: prometheus
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: zipkin
+  template:
+    metadata:
+      labels:
+        app: zipkin
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: zipkin
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          image: openzipkin/zipkin:3.5.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9411
+              name: http
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "250m"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9411
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9411
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zipkin
+  namespace: sk-binge-galaxy
 spec:
   selector:
-    matchExpressions:
-      - key: app
-        operator: In
-        values:
-          - auth-service
-          - availability-service
-          - booking-service
-          - payment-service
-          - notification-service
-          - api-gateway
-  namespaceSelector:
-    matchNames:
-      - sk-binge-galaxy
-  podMetricsEndpoints:
-    - port: "8081"
-      path: /actuator/prometheus
-      interval: 15s
-    - port: "8082"
-      path: /actuator/prometheus
-      interval: 15s
-    - port: "8083"
-      path: /actuator/prometheus
-      interval: 15s
-    - port: "8084"
-      path: /actuator/prometheus
-      interval: 15s
-    - port: "8085"
-      path: /actuator/prometheus
-      interval: 15s
-    - port: "8080"
-      path: /actuator/prometheus
-      interval: 15s
+    app: zipkin
+  ports:
+    - port: 9411
+      targetPort: 9411
+      name: http
+---
+# Grafana — dashboarding for Prometheus metrics
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: sk-binge-galaxy
+data:
+  datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus-operated.sk-binge-galaxy.svc.cluster.local:9090
+        isDefault: true
+        editable: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: sk-binge-galaxy
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        fsGroup: 472
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.1.4
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: GRAFANA_ADMIN_USER
+                  optional: true
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: GRAFANA_ADMIN_PASSWORD
+                  optional: true
+            - name: GF_SERVER_ROOT_URL
+              value: "%(protocol)s://%(domain)s/grafana/"
+            - name: GF_SERVER_SERVE_FROM_SUB_PATH
+              value: "true"
+            - name: GF_ANALYTICS_REPORTING_ENABLED
+              value: "false"
+            - name: GF_ANALYTICS_CHECK_FOR_UPDATES
+              value: "false"
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/grafana
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+      volumes:
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: sk-binge-galaxy
+  labels:
+    app: grafana
+spec:
+  selector:
+    app: grafana
+  ports:
+    - port: 3000
+      targetPort: 3000
+      name: http

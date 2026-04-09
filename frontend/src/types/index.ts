@@ -13,12 +13,12 @@ export interface User {
   birthdayDay?: number;
   anniversaryMonth?: string;
   anniversaryDay?: number;
-  notificationChannel?: 'WHATSAPP' | 'EMAIL' | 'CALLBACK';
+  notificationChannel?: 'EMAIL' | 'CALLBACK';
   receivesOffers?: boolean;
   weekendAlerts?: boolean;
   conciergeSupport?: boolean;
   role: 'USER' | 'ADMIN' | 'SUPER_ADMIN';
-  isActive?: boolean;
+  active?: boolean;
 }
 
 export interface SupportContact {

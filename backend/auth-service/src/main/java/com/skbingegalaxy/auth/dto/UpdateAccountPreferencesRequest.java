@@ -38,7 +38,7 @@ public class UpdateAccountPreferencesRequest {
     @Max(value = 31, message = "Anniversary day cannot exceed 31")
     private Integer anniversaryDay;
 
-    @Pattern(regexp = "WHATSAPP|EMAIL|CALLBACK", message = "Notification channel must be WHATSAPP, EMAIL, or CALLBACK")
+    @Pattern(regexp = "EMAIL|CALLBACK", message = "Notification channel must be EMAIL or CALLBACK")
     private String notificationChannel;
 
     private Boolean receivesOffers;

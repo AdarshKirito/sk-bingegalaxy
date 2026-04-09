@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { adminService, paymentService } from '../services/endpoints';
+import { adminService, bookingService, paymentService } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import BookingWizard from '../components/BookingWizard';
+import { FiCheckCircle, FiCreditCard, FiTrendingDown, FiTrendingUp } from 'react-icons/fi';
+import './AdminPages.css';
 
 export default function AdminBookingCreate() {
   const navigate = useNavigate();
@@ -14,6 +16,51 @@ export default function AdminBookingCreate() {
   const [priceDiff, setPriceDiff] = useState(null);
   const [chargeMethod, setChargeMethod] = useState('CASH');
   const [processing, setProcessing] = useState(false);
+
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const syncAdminPaymentRecord = async (booking, paymentMethod) => {
+    const amount = Number(booking?.totalAmount ?? 0);
+    const customerId = booking?.customerId ?? 0;
+
+    if (!paymentMethod || !Number.isFinite(amount) || amount < 1 || !customerId) return;
+
+    if (paymentMethod === 'CASH') {
+      await adminService.recordCashPayment({
+        bookingRef: booking.bookingRef,
+        amount,
+        customerId,
+        notes: 'Recorded during admin booking creation',
+      });
+      return;
+    }
+
+    await adminService.addPayment({
+      bookingRef: booking.bookingRef,
+      amount,
+      customerId,
+      paymentMethod,
+      notes: `${paymentMethod} payment recorded during admin booking creation`,
+    });
+  };
+
+  const waitForBookingPaymentSync = async (bookingRef) => {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      try {
+        const res = await bookingService.getByRef(bookingRef);
+        const synced = res.data.data;
+        if (synced?.paymentStatus === 'SUCCESS' && synced?.status === 'CONFIRMED') {
+          return synced;
+        }
+      } catch (_) {
+        // Ignore transient sync errors and retry briefly.
+      }
+
+      await wait(250);
+    }
+
+    return null;
+  };
 
   const handleSubmit = async (payload) => {
     if (editBookingData?.bookingRef) {
@@ -105,9 +152,25 @@ export default function AdminBookingCreate() {
       return;
     }
     const res = await adminService.adminCreateBooking(payload);
-    const ref = res.data.data?.bookingRef || 'created';
+    const booking = res.data.data;
+    const ref = booking?.bookingRef || 'created';
+    const paymentMethod = payload.paymentMethod || 'CASH';
+    const paymentLabel = paymentMethod.replace(/_/g, ' ').toLowerCase();
 
-    toast.success(`Booking ${ref} created successfully!`);
+    try {
+      await syncAdminPaymentRecord(booking, paymentMethod);
+      const syncedBooking = await waitForBookingPaymentSync(ref);
+      if (syncedBooking) {
+        toast.success(`Booking ${ref} created and ${paymentLabel} payment recorded.`);
+      } else {
+        toast.info(`Booking ${ref} created and ${paymentLabel} payment recorded. Status may take a moment to refresh.`);
+      }
+    } catch (err) {
+      toast.error(
+        `Booking ${ref} was created, but the ${paymentLabel} payment record failed. Complete it from Bookings.`
+      );
+    }
+
     navigate('/admin/bookings');
   };
 
@@ -174,67 +237,84 @@ export default function AdminBookingCreate() {
     const wasPaid = priceDiff.paymentStatus === 'SUCCESS'
                  || priceDiff.paymentStatus === 'PARTIALLY_REFUNDED';
     return (
-      <div className="container" style={{ maxWidth: '500px', margin: '3rem auto' }}>
-        <div className="card" style={{ padding: '2rem' }}>
-          <h2 style={{ marginBottom: '1rem', textAlign: 'center' }}>
-            {isIncrease ? '💰 Additional Charge Required' : (wasPaid ? '💳 Refund Due' : '📉 Price Reduced')}
-          </h2>
-          <p style={{ textAlign: 'center', color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
-            The reservation price has changed after your edits.
-          </p>
+      <div className="container adm-shell" style={{ maxWidth: '760px' }}>
+        <div className="adm-summary">
+          <div className="adm-summary-copy">
+            <span className="adm-summary-title">
+              {isIncrease ? 'Additional Charge Required' : (wasPaid ? 'Refund Review Required' : 'Price Reduced')}
+            </span>
+            <span className="adm-summary-text">The reservation total changed after your edits. Choose how to handle the difference before returning to bookings.</span>
+          </div>
+          <div className="adm-inline-actions">
+            <span className={`adm-badge ${isIncrease ? 'adm-badge-inactive' : 'adm-badge-active'}`}>
+              {isIncrease ? <FiTrendingUp /> : <FiTrendingDown />}
+              {isIncrease ? 'Charge' : 'Adjustment'}
+            </span>
+          </div>
+        </div>
 
-          <div style={{ background: 'var(--bg-input)', borderRadius: 'var(--radius-sm)', padding: '1rem', marginBottom: '1.5rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Previous Total</span>
-              <span>₹{priceDiff.oldTotal.toLocaleString()}</span>
+        <div className="adm-card">
+          <div className="adm-panel-stack">
+            <div className="adm-table-wrap">
+              <table className="adm-table">
+                <thead>
+                  <tr>
+                    <th>Metric</th>
+                    <th>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Previous Total</td>
+                    <td>₹{priceDiff.oldTotal.toLocaleString()}</td>
+                  </tr>
+                  <tr>
+                    <td>New Total</td>
+                    <td className="highlight">₹{priceDiff.newTotal.toLocaleString()}</td>
+                  </tr>
+                  {wasPaid && (
+                    <tr>
+                      <td>Already Collected</td>
+                      <td>₹{priceDiff.collectedAmount.toLocaleString()}</td>
+                    </tr>
+                  )}
+                  <tr>
+                    <td className="highlight">{isIncrease ? 'Customer Owes' : (wasPaid ? 'Refund to Customer' : 'Customer Saves')}</td>
+                    <td className={`highlight ${isIncrease ? '' : 'success'}`} style={isIncrease ? { color: 'var(--danger)' } : undefined}>
+                      ₹{absDiff.toLocaleString()}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>New Total</span>
-              <span style={{ fontWeight: 700 }}>₹{priceDiff.newTotal.toLocaleString()}</span>
-            </div>
-            {wasPaid && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Already Collected</span>
-                <span>₹{priceDiff.collectedAmount.toLocaleString()}</span>
+
+            {isIncrease && (
+              <div className="input-group" style={{ maxWidth: '260px' }}>
+                <label><FiCreditCard style={{ marginRight: 6, verticalAlign: -2 }} />Payment Method</label>
+                <select value={chargeMethod} onChange={(e) => setChargeMethod(e.target.value)}>
+                  <option value="CASH">Cash</option>
+                  <option value="UPI">UPI</option>
+                  <option value="CARD">Card</option>
+                  <option value="BANK_TRANSFER">Bank Transfer</option>
+                  <option value="WALLET">Wallet</option>
+                </select>
               </div>
             )}
-            <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '0.5rem', borderTop: '1px solid var(--border)', fontWeight: 700, fontSize: '1.1rem' }}>
-              <span style={{ color: isIncrease ? 'var(--danger, #e74c3c)' : 'var(--success, #00b894)' }}>
-                {isIncrease ? 'Customer Owes' : (wasPaid ? 'Refund to Customer' : 'New Savings')}
-              </span>
-              <span style={{ color: isIncrease ? 'var(--danger, #e74c3c)' : 'var(--success, #00b894)' }}>
-                ₹{absDiff.toLocaleString()}
-              </span>
-            </div>
-          </div>
 
-          {isIncrease && (
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.3rem' }}>
-                Payment Method
-              </label>
-              <select value={chargeMethod} onChange={e => setChargeMethod(e.target.value)}
-                style={{ padding: '0.5rem 0.8rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--text)', fontSize: '0.85rem', width: '100%' }}>
-                <option value="CASH">Cash</option>
-                <option value="UPI">UPI</option>
-                <option value="CARD">Card</option>
-                <option value="BANK_TRANSFER">Bank Transfer</option>
-                <option value="WALLET">Wallet</option>
-              </select>
+            <div className="adm-form-actions">
+              <button className="btn btn-secondary" onClick={handleSkipCharge} disabled={processing}>
+                {isIncrease ? "Don't Charge" : wasPaid ? "Don't Refund" : 'Skip'}
+              </button>
+              <button className="btn btn-primary" onClick={handleChargeOrRefund} disabled={processing}>
+                {processing
+                  ? 'Processing...'
+                  : isIncrease
+                    ? `Charge ₹${absDiff.toLocaleString()}`
+                    : wasPaid
+                      ? `Refund ₹${absDiff.toLocaleString()}`
+                      : <><FiCheckCircle /> OK, Got It</>}
+              </button>
             </div>
-          )}
-
-          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
-            <button className="btn btn-primary" onClick={handleChargeOrRefund} disabled={processing}
-              style={{ minWidth: '160px' }}>
-              {processing ? 'Processing...'
-                : isIncrease ? `Charge ₹${absDiff.toLocaleString()}`
-                : wasPaid ? `Refund ₹${absDiff.toLocaleString()}`
-                : 'OK, Got It'}
-            </button>
-            <button className="btn btn-secondary" onClick={handleSkipCharge} disabled={processing}>
-              {isIncrease ? "Don't Charge" : wasPaid ? "Don't Refund" : 'Skip'}
-            </button>
           </div>
         </div>
       </div>

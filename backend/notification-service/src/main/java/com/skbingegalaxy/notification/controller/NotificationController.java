@@ -25,13 +25,25 @@ public class NotificationController {
 
     @GetMapping("/booking/{bookingRef}")
     public ResponseEntity<ApiResponse<List<NotificationDto>>> getByBookingRef(
-            @PathVariable String bookingRef) {
-        List<NotificationDto> notifications = notificationService.getByBookingRef(bookingRef);
+            @PathVariable String bookingRef,
+            @RequestHeader("X-User-Email") String email,
+            @RequestHeader(value = "X-User-Role", defaultValue = "") String role) {
+        List<NotificationDto> notifications;
+        if ("ADMIN".equalsIgnoreCase(role) || "SUPER_ADMIN".equalsIgnoreCase(role)) {
+            notifications = notificationService.getByBookingRef(bookingRef);
+        } else {
+            notifications = notificationService.getByBookingRefAndEmail(bookingRef, email);
+        }
         return ResponseEntity.ok(ApiResponse.ok("Notifications for booking", notifications));
     }
 
     @PostMapping("/admin/retry-failed")
-    public ResponseEntity<ApiResponse<Void>> retryFailed() {
+    public ResponseEntity<ApiResponse<Void>> retryFailed(
+            @RequestHeader(value = "X-User-Role", defaultValue = "") String role) {
+        if (!"ADMIN".equalsIgnoreCase(role) && !"SUPER_ADMIN".equalsIgnoreCase(role)) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Only admins can retry failed notifications", org.springframework.http.HttpStatus.FORBIDDEN);
+        }
         notificationService.retryFailedNotifications();
         return ResponseEntity.ok(ApiResponse.ok("Failed notifications retried", null));
     }

@@ -7,11 +7,22 @@ spring:
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/auth_db}
     username: ${SPRING_DATASOURCE_USERNAME:skbg_admin}
-    password: ${SPRING_DATASOURCE_PASSWORD:skbg_secret}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:8}
+      minimum-idle: ${SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE:2}
+      idle-timeout: ${SPRING_DATASOURCE_HIKARI_IDLE_TIMEOUT:300000}
+      max-lifetime: ${SPRING_DATASOURCE_HIKARI_MAX_LIFETIME:1800000}
+      connection-timeout: ${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT:30000}
+      validation-timeout: ${SPRING_DATASOURCE_HIKARI_VALIDATION_TIMEOUT:5000}
+  flyway:
+    enabled: ${SPRING_FLYWAY_ENABLED:true}
+    baseline-on-migrate: ${SPRING_FLYWAY_BASELINE_ON_MIGRATE:true}
+    baseline-version: ${SPRING_FLYWAY_BASELINE_VERSION:0}
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: ${SPRING_JPA_HIBERNATE_DDL_AUTO:validate}
     show-sql: false
     properties:
       hibernate:
@@ -25,32 +36,53 @@ spring:
 
 app:
   jwt:
-    secret: ${JWT_SECRET:c2tiLWJpbmdlLWdhbGF4eS1zdXBlci1zZWNyZXQta2V5LXByb2R1Y3Rpb24tY2hhbmdlLXRoaXM=}
+    secret: ${JWT_SECRET}
     expiration-ms: 900000  # 15 minutes
     refresh-expiration-ms: 604800000  # 7 days
+  cookie:
+    secure: ${COOKIE_SECURE:true}
+    domain: ${COOKIE_DOMAIN:}
   admin:
     email: ${ADMIN_EMAIL:admin@skbingegalaxy.com}
-    password: ${ADMIN_PASSWORD:Admin@123}
+    password: ${ADMIN_PASSWORD}
     name: ${ADMIN_NAME:System Administrator}
     phone: ${ADMIN_PHONE:9876543210}
   google:
-    client-id: ${GOOGLE_CLIENT_ID:437058573375-97f1e70umbnqqn6anlp4pn7c2h2h3v1o.apps.googleusercontent.com}
+    client-id: ${GOOGLE_CLIENT_ID}
   otp:
     expiration-minutes: 10
-    length: 6
+    length: 8
+  reminders:
+    enabled: ${CELEBRATION_REMINDERS_ENABLED:true}
+    cron: ${CELEBRATION_REMINDER_CRON:0 0 9 * * *}
+    zone: ${CELEBRATION_REMINDER_ZONE:Asia/Kolkata}
 
 logging:
   level:
-    com.skbingegalaxy.auth: DEBUG
+    com.skbingegalaxy.auth: WARN
 
 eureka:
   instance:
     prefer-ip-address: true
 
 management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
   tracing:
     sampling:
-      probability: 1.0
+      probability: ${TRACING_SAMPLING:0.05}
     propagation:
       type: b3
   zipkin:

@@ -62,7 +62,7 @@ export default function AccountCenter() {
       setPayments(paymentRes.status === 'fulfilled' ? (paymentRes.value.data.data || []) : []);
       setMyPricing(pricingRes.status === 'fulfilled' ? (pricingRes.value.data.data || null) : null);
     }).finally(() => setLoading(false));
-  }, [selectedBinge, setUser, user]);
+  }, [selectedBinge]);
 
   const customer = profile || user || {};
   const support = mergeSupportContact(supportContact);
@@ -243,7 +243,6 @@ export default function AccountCenter() {
             <label className="customer-account-field">
               <span>Reminder channel</span>
               <select value={preferences.notificationChannel} onChange={(event) => updatePreference('notificationChannel', event.target.value)}>
-                <option value="WHATSAPP">WhatsApp</option>
                 <option value="EMAIL">Email</option>
                 <option value="CALLBACK">Callback request</option>
               </select>
@@ -409,7 +408,7 @@ function formatCelebrationDate(month, day) {
 function buildReminderSummary(preferences) {
   const channelLabel = preferences.notificationChannel === 'CALLBACK'
     ? 'callback coordination'
-    : `${preferences.notificationChannel.toLowerCase()} reminders`;
+    : `${(preferences.notificationChannel || 'EMAIL').toLowerCase()} reminders`;
 
   const activeCount = [
     hasCelebrationDate(preferences.birthdayMonth, preferences.birthdayDay),

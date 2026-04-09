@@ -1,6 +1,7 @@
 package com.skbingegalaxy.payment.service;
 
 import com.skbingegalaxy.common.constants.KafkaTopics;
+import com.skbingegalaxy.common.context.BingeContext;
 import com.skbingegalaxy.common.enums.PaymentMethod;
 import com.skbingegalaxy.common.enums.PaymentStatus;
 import com.skbingegalaxy.common.event.PaymentEvent;
@@ -14,14 +15,20 @@ import com.skbingegalaxy.payment.repository.RefundRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import javax.crypto.Mac;
@@ -34,29 +41,44 @@ public class PaymentService {
 
     /** Statuses that count as a completed refund for amount-calculation purposes. */
     private static final List<PaymentStatus> REFUNDED_STATUSES =
-            List.of(PaymentStatus.REFUNDED, PaymentStatus.SUCCESS);
+            List.of(PaymentStatus.REFUNDED);
 
     private final PaymentRepository paymentRepository;
     private final RefundRepository refundRepository;
     private final KafkaTemplate<String, Object> kafkaTemplate;
 
-    @org.springframework.beans.factory.annotation.Value("${app.razorpay.key-secret}")
+    @Value("${app.razorpay.key-secret}")
     private String razorpayKeySecret;
 
+    @Value("${app.razorpay.key-id:}")
+    private String razorpayKeyId;
+
+    @Value("${app.payment.simulation-enabled:false}")
+    private boolean paymentSimulationEnabled;
+
+    @Value("${app.payment.dedup-window-seconds:30}")
+    private int dedupWindowSeconds;
+
+    @jakarta.annotation.PostConstruct
+    void validateConfig() {
+        if (!paymentSimulationEnabled && (razorpayKeySecret == null || razorpayKeySecret.isBlank())) {
+            throw new IllegalStateException(
+                "RAZORPAY_KEY_SECRET must be set when payment simulation is disabled");
+        }
+    }
+
     @Transactional
-    public PaymentDto initiatePayment(InitiatePaymentRequest request, Long customerId) {
+    public PaymentDto initiatePayment(InitiatePaymentRequest request, Long customerId, String customerEmail, String customerName) {
         log.info("Initiating payment for booking: {}, amount: {}", request.getBookingRef(), request.getAmount());
 
-        // Guard 1: payment already succeeded for this booking â€” reject duplicate attempt
-        paymentRepository.findByBookingRefAndStatus(request.getBookingRef(), PaymentStatus.SUCCESS)
-            .ifPresent(p -> {
-                throw new BusinessException("Payment already completed for booking " + request.getBookingRef(), HttpStatus.CONFLICT);
-            });
+        // Guard 1: payment already succeeded for this booking — reject duplicate attempt
+        if (!findSuccessfulPaymentsForCurrentBinge(request.getBookingRef()).isEmpty()) {
+            throw new BusinessException("Payment already completed for booking " + request.getBookingRef(), HttpStatus.CONFLICT);
+        }
 
         // Guard 2 (idempotency): an INITIATED payment already exists â€” return it
         // instead of creating a duplicate (handles network-retry / double-click scenarios)
-        var existing = paymentRepository.findFirstByBookingRefAndStatusOrderByCreatedAtDesc(
-                request.getBookingRef(), PaymentStatus.INITIATED);
+        var existing = findExistingInitiatedPaymentForCurrentBinge(request.getBookingRef());
         if (existing.isPresent()) {
             log.info("Returning existing INITIATED payment {} for booking {}",
                     existing.get().getTransactionId(), request.getBookingRef());
@@ -64,17 +86,28 @@ public class PaymentService {
         }
 
         String transactionId = "TXN-" + UUID.randomUUID().toString().substring(0, 12).toUpperCase();
-        String gatewayOrderId = "ORD-" + UUID.randomUUID().toString().substring(0, 12).toUpperCase();
+        String gatewayOrderId;
+        if (!paymentSimulationEnabled && razorpayKeyId != null && !razorpayKeyId.isBlank()) {
+            gatewayOrderId = createRazorpayOrder(
+                request.getAmount(),
+                request.getCurrency() != null ? request.getCurrency() : "INR",
+                request.getBookingRef());
+        } else {
+            gatewayOrderId = "ORD-" + UUID.randomUUID().toString().substring(0, 12).toUpperCase();
+        }
 
         Payment payment = Payment.builder()
             .bookingRef(request.getBookingRef())
             .customerId(customerId)
+            .bingeId(getCurrentBingeId())
             .transactionId(transactionId)
             .gatewayOrderId(gatewayOrderId)
             .amount(request.getAmount())
             .paymentMethod(request.getPaymentMethod())
             .status(PaymentStatus.INITIATED)
             .currency(request.getCurrency() != null ? request.getCurrency() : "INR")
+            .customerEmail(customerEmail)
+            .customerName(customerName)
             .build();
 
         payment = paymentRepository.save(payment);
@@ -87,24 +120,36 @@ public class PaymentService {
     public PaymentDto handleCallback(PaymentCallbackRequest request) {
         log.info("Handling payment callback for gatewayOrderId: {}", request.getGatewayOrderId());
 
-        // Verify Razorpay signature to prevent forged callbacks
-        if (request.getGatewayPaymentId() != null && request.getGatewaySignature() != null) {
-            String payload = request.getGatewayOrderId() + "|" + request.getGatewayPaymentId();
-            if (!verifySignature(payload, request.getGatewaySignature())) {
-                log.warn("Invalid payment callback signature for gatewayOrderId: {}", request.getGatewayOrderId());
-                throw new BusinessException("Invalid payment signature", HttpStatus.FORBIDDEN);
-            }
-        }
-
         Payment payment = paymentRepository.findByGatewayOrderId(request.getGatewayOrderId())
             .orElseThrow(() -> new ResourceNotFoundException("Payment", "gatewayOrderId", request.getGatewayOrderId()));
 
-        // Idempotent: already in a terminal state â€” return without re-processing
+        // Idempotent: already in a terminal state — return without re-processing
         if (payment.getStatus() == PaymentStatus.SUCCESS
                 || payment.getStatus() == PaymentStatus.REFUNDED
                 || payment.getStatus() == PaymentStatus.PARTIALLY_REFUNDED) {
-            log.info("Callback ignored â€” payment already in terminal state: {}", payment.getStatus());
+            log.info("Callback ignored — payment already in terminal state: {}", payment.getStatus());
             return toPaymentDtoWithRefunds(payment);
+        }
+
+        // Reject stale callbacks — payment must have been initiated within the last 24 hours
+        if (payment.getCreatedAt() != null && payment.getCreatedAt().isBefore(LocalDateTime.now().minusHours(24))) {
+            log.warn("Rejected stale payment callback for gatewayOrderId: {} (created: {})", request.getGatewayOrderId(), payment.getCreatedAt());
+            throw new BusinessException("Payment callback expired — payment was initiated more than 24 hours ago", HttpStatus.BAD_REQUEST);
+        }
+
+        // Verify Razorpay signature on ALL callbacks to prevent forged success AND failure notifications.
+        // Unsigned callbacks are rejected entirely — an attacker could otherwise forge failure
+        // notifications to cancel legitimate INITIATED payments.
+        if (request.getGatewaySignature() == null || request.getGatewaySignature().isBlank()) {
+            log.warn("Rejected unsigned payment callback for gatewayOrderId: {}", request.getGatewayOrderId());
+            throw new BusinessException("Payment callback signature is required", HttpStatus.FORBIDDEN);
+        }
+
+        String paymentId = request.getGatewayPaymentId() != null ? request.getGatewayPaymentId() : "";
+        String payload = request.getGatewayOrderId() + "|" + paymentId;
+        if (!verifySignature(payload, request.getGatewaySignature())) {
+            log.warn("Invalid payment callback signature for gatewayOrderId: {}", request.getGatewayOrderId());
+            throw new BusinessException("Invalid payment signature", HttpStatus.FORBIDDEN);
         }
 
         if ("success".equalsIgnoreCase(request.getStatus()) || "captured".equalsIgnoreCase(request.getStatus())) {
@@ -136,8 +181,13 @@ public class PaymentService {
      */
     @Transactional
     public PaymentDto simulatePayment(String transactionId) {
+        if (!paymentSimulationEnabled) {
+            throw new BusinessException("Payment simulation is disabled", HttpStatus.FORBIDDEN);
+        }
+
         Payment payment = paymentRepository.findByTransactionId(transactionId)
             .orElseThrow(() -> new ResourceNotFoundException("Payment", "transactionId", transactionId));
+        ensurePaymentInCurrentBinge(payment, "transactionId", transactionId);
 
         // Already succeeded â€” idempotent return
         if (payment.getStatus() == PaymentStatus.SUCCESS) {
@@ -172,6 +222,7 @@ public class PaymentService {
     public PaymentDto cancelPayment(String transactionId, Long requesterId) {
         Payment payment = paymentRepository.findByTransactionId(transactionId)
             .orElseThrow(() -> new ResourceNotFoundException("Payment", "transactionId", transactionId));
+        ensurePaymentInCurrentBinge(payment, "transactionId", transactionId);
 
         if (!payment.getCustomerId().equals(requesterId)) {
             throw new BusinessException("Not authorized to cancel this payment", HttpStatus.FORBIDDEN);
@@ -192,21 +243,37 @@ public class PaymentService {
     }
 
     @Transactional(readOnly = true)
-    public PaymentDto getPaymentByTransactionId(String transactionId) {
-        return toPaymentDtoWithRefunds(
-            paymentRepository.findByTransactionId(transactionId)
-                .orElseThrow(() -> new ResourceNotFoundException("Payment", "transactionId", transactionId)));
+    public PaymentDto getPaymentByTransactionId(String transactionId, Long requesterId, String requesterRole) {
+        Payment payment = paymentRepository.findByTransactionId(transactionId)
+                .orElseThrow(() -> new ResourceNotFoundException("Payment", "transactionId", transactionId));
+        ensurePaymentInCurrentBinge(payment, "transactionId", transactionId);
+        ensurePaymentAccess(payment, requesterId, requesterRole);
+        return toPaymentDtoWithRefunds(payment);
     }
 
     @Transactional(readOnly = true)
-    public List<PaymentDto> getPaymentsByBookingRef(String bookingRef) {
-        return paymentRepository.findByBookingRefOrderByCreatedAtDesc(bookingRef)
-            .stream().map(this::toPaymentDtoWithRefunds).toList();
+    public List<PaymentDto> getPaymentsByBookingRef(String bookingRef, Long requesterId, String requesterRole) {
+        List<Payment> payments = findPaymentsByBookingRefForCurrentBinge(bookingRef);
+        if (payments.isEmpty()) {
+            return List.of();
+        }
+        if (isAdminRole(requesterRole)) {
+            return payments.stream().map(this::toPaymentDtoWithRefunds).toList();
+        }
+
+        List<Payment> ownedPayments = payments.stream()
+                .filter(payment -> payment.getCustomerId() != null && payment.getCustomerId().equals(requesterId))
+                .toList();
+        if (ownedPayments.isEmpty()) {
+            throw new BusinessException("Not authorized to access payments for this booking", HttpStatus.FORBIDDEN);
+        }
+
+        return ownedPayments.stream().map(this::toPaymentDtoWithRefunds).toList();
     }
 
     @Transactional(readOnly = true)
     public List<PaymentDto> getCustomerPayments(Long customerId) {
-        return paymentRepository.findByCustomerIdOrderByCreatedAtDesc(customerId)
+        return findCustomerPaymentsForCurrentBinge(customerId)
             .stream().map(this::toPaymentDtoWithRefunds).toList();
     }
 
@@ -224,6 +291,7 @@ public class PaymentService {
         Payment payment = paymentRepository.findByIdForUpdate(request.getPaymentId())
             .orElseThrow(() -> new ResourceNotFoundException("Payment", "id",
                 request.getPaymentId().toString()));
+        ensurePaymentInCurrentBinge(payment, "id", request.getPaymentId());
 
         // Only SUCCESS / PARTIALLY_REFUNDED payments are eligible
         if (payment.getStatus() != PaymentStatus.SUCCESS
@@ -297,10 +365,10 @@ public class PaymentService {
         log.info("Recording cash payment for booking: {} by admin: {}", request.getBookingRef(), adminEmail);
 
         // Idempotency: a SUCCESS payment already exists — return it
-        var existing = paymentRepository.findByBookingRefAndStatus(request.getBookingRef(), PaymentStatus.SUCCESS);
-        if (existing.isPresent()) {
+        var existingSuccess = findSuccessfulPaymentsForCurrentBinge(request.getBookingRef());
+        if (!existingSuccess.isEmpty()) {
             log.info("Cash payment already recorded for booking {}", request.getBookingRef());
-            return toPaymentDtoWithRefunds(existing.get());
+            return toPaymentDtoWithRefunds(existingSuccess.get(0));
         }
 
         String transactionId = "CASH-" + UUID.randomUUID().toString().substring(0, 12).toUpperCase();
@@ -308,7 +376,8 @@ public class PaymentService {
 
         Payment payment = Payment.builder()
             .bookingRef(request.getBookingRef())
-            .customerId(request.getCustomerId() != null ? request.getCustomerId() : 0L)
+            .customerId(request.getCustomerId())
+            .bingeId(getCurrentBingeId())
             .transactionId(transactionId)
             .gatewayOrderId(gatewayOrderId)
             .amount(request.getAmount())
@@ -332,12 +401,30 @@ public class PaymentService {
     /**
      * Record an additional payment for a booking with any payment method.
      * Used for split payments, method changes, or collecting remaining balances.
-     * Unlike recordCashPayment, this has no idempotency guard — it always creates a new record.
+     * Idempotency guard: rejects duplicate requests with the same booking, method, and amount within 30 seconds.
      */
     @Transactional
     public PaymentDto addPayment(AddPaymentRequest request, String adminEmail) {
         log.info("Adding {} payment of {} for booking {} by admin {}",
             request.getPaymentMethod(), request.getAmount(), request.getBookingRef(), adminEmail);
+
+        // Idempotency guard: reject if an identical payment was recorded within the dedup window
+        List<Payment> recentDupes = findRecentDuplicatesForCurrentBinge(
+            request.getBookingRef(), request.getPaymentMethod(),
+            request.getAmount(), LocalDateTime.now().minusSeconds(dedupWindowSeconds));
+        if (!recentDupes.isEmpty()) {
+            log.info("Duplicate addPayment detected for booking {} — returning existing payment {}",
+                    request.getBookingRef(), recentDupes.get(0).getTransactionId());
+            return toPaymentDtoWithRefunds(recentDupes.get(0));
+        }
+
+        // Over-collection guard: warn if cumulative payments already exceed original amount
+        BigDecimal existingTotal = sumSuccessfulPaymentsForCurrentBinge(request.getBookingRef());
+        if (existingTotal != null && existingTotal.compareTo(BigDecimal.ZERO) > 0) {
+            BigDecimal projectedTotal = existingTotal.add(request.getAmount());
+            log.warn("Over-collection check for booking {}: existing={}, adding={}, projected={}",
+                    request.getBookingRef(), existingTotal, request.getAmount(), projectedTotal);
+        }
 
         String prefix = request.getPaymentMethod().name();
         String transactionId = prefix + "-" + UUID.randomUUID().toString().substring(0, 12).toUpperCase();
@@ -346,6 +433,7 @@ public class PaymentService {
         Payment payment = Payment.builder()
             .bookingRef(request.getBookingRef())
             .customerId(request.getCustomerId() != null ? request.getCustomerId() : 0L)
+            .bingeId(getCurrentBingeId())
             .transactionId(transactionId)
             .gatewayOrderId(gatewayOrderId)
             .amount(request.getAmount())
@@ -369,8 +457,9 @@ public class PaymentService {
     @Transactional(readOnly = true)
     public List<RefundDto> getRefundsForPayment(Long paymentId) {
         // Verify payment exists
-        paymentRepository.findById(paymentId)
+        Payment payment = paymentRepository.findById(paymentId)
             .orElseThrow(() -> new ResourceNotFoundException("Payment", "id", paymentId.toString()));
+        ensurePaymentInCurrentBinge(payment, "id", paymentId);
         return refundRepository.findByPaymentIdOrderByCreatedAtDesc(paymentId)
             .stream().map(this::toRefundDto).toList();
     }
@@ -380,13 +469,13 @@ public class PaymentService {
      */
     @Transactional(readOnly = true)
     public Map<String, Object> getPaymentStats() {
-        BigDecimal totalRevenue   = paymentRepository.getTotalSuccessfulPayments();
-        BigDecimal totalRefunded  = refundRepository.sumAllCompletedRefunds(REFUNDED_STATUSES);
-        long successCount         = paymentRepository.countByStatus(PaymentStatus.SUCCESS);
-        long failedCount          = paymentRepository.countByStatus(PaymentStatus.FAILED);
-        long initiatedCount       = paymentRepository.countByStatus(PaymentStatus.INITIATED);
-        long refundedCount        = paymentRepository.countByStatus(PaymentStatus.REFUNDED);
-        long partialCount         = paymentRepository.countByStatus(PaymentStatus.PARTIALLY_REFUNDED);
+        BigDecimal totalRevenue   = getTotalSuccessfulPaymentsForCurrentBinge();
+        BigDecimal totalRefunded  = getTotalRefundedForCurrentBinge();
+        long successCount         = countPaymentsByStatusForCurrentBinge(PaymentStatus.SUCCESS);
+        long failedCount          = countPaymentsByStatusForCurrentBinge(PaymentStatus.FAILED);
+        long initiatedCount       = countPaymentsByStatusForCurrentBinge(PaymentStatus.INITIATED);
+        long refundedCount        = countPaymentsByStatusForCurrentBinge(PaymentStatus.REFUNDED);
+        long partialCount         = countPaymentsByStatusForCurrentBinge(PaymentStatus.PARTIALLY_REFUNDED);
 
         return Map.of(
             "totalRevenue",            totalRevenue,
@@ -410,6 +499,9 @@ public class PaymentService {
             .currency(payment.getCurrency())
             .paymentMethod(payment.getPaymentMethod().name())
             .status(payment.getStatus().name())
+            .customerEmail(payment.getCustomerEmail())
+            .customerName(payment.getCustomerName())
+            .customerPhone(payment.getCustomerPhone())
             .paidAt(payment.getPaidAt())
             .build();
 
@@ -468,6 +560,7 @@ public class PaymentService {
             .totalRefunded(totalRefunded)
             .remainingRefundable(remaining)
             .refundCount(refundCount)
+            .razorpayKeyId(p.getStatus() == PaymentStatus.INITIATED ? razorpayKeyId : null)
             .build();
     }
 
@@ -485,6 +578,131 @@ public class PaymentService {
             .refundedAt(r.getRefundedAt())
             .createdAt(r.getCreatedAt())
             .build();
+    }
+
+    private Long getCurrentBingeId() {
+        return BingeContext.getBingeId();
+    }
+
+    private List<Payment> findSuccessfulPaymentsForCurrentBinge(String bookingRef) {
+        Long bingeId = getCurrentBingeId();
+        return bingeId != null
+            ? paymentRepository.findByBookingRefAndStatusAndBingeId(bookingRef, PaymentStatus.SUCCESS, bingeId)
+            : paymentRepository.findByBookingRefAndStatus(bookingRef, PaymentStatus.SUCCESS);
+    }
+
+    private Optional<Payment> findExistingInitiatedPaymentForCurrentBinge(String bookingRef) {
+        Long bingeId = getCurrentBingeId();
+        return bingeId != null
+            ? paymentRepository.findFirstByBookingRefAndStatusAndBingeIdOrderByCreatedAtDesc(bookingRef, PaymentStatus.INITIATED, bingeId)
+            : paymentRepository.findFirstByBookingRefAndStatusOrderByCreatedAtDesc(bookingRef, PaymentStatus.INITIATED);
+    }
+
+    private List<Payment> findPaymentsByBookingRefForCurrentBinge(String bookingRef) {
+        Long bingeId = getCurrentBingeId();
+        return bingeId != null
+            ? paymentRepository.findByBookingRefAndBingeIdOrderByCreatedAtDesc(bookingRef, bingeId)
+            : paymentRepository.findByBookingRefOrderByCreatedAtDesc(bookingRef);
+    }
+
+    private List<Payment> findCustomerPaymentsForCurrentBinge(Long customerId) {
+        Long bingeId = getCurrentBingeId();
+        return bingeId != null
+            ? paymentRepository.findByCustomerIdAndBingeIdOrderByCreatedAtDesc(customerId, bingeId)
+            : paymentRepository.findByCustomerIdOrderByCreatedAtDesc(customerId);
+    }
+
+    private List<Payment> findRecentDuplicatesForCurrentBinge(String bookingRef, PaymentMethod paymentMethod,
+                                                              BigDecimal amount, LocalDateTime since) {
+        Long bingeId = getCurrentBingeId();
+        return bingeId != null
+            ? paymentRepository.findRecentDuplicatesByBingeId(bookingRef, paymentMethod, amount, bingeId, since)
+            : paymentRepository.findRecentDuplicates(bookingRef, paymentMethod, amount, since);
+    }
+
+    private BigDecimal sumSuccessfulPaymentsForCurrentBinge(String bookingRef) {
+        Long bingeId = getCurrentBingeId();
+        return bingeId != null
+            ? paymentRepository.sumSuccessfulPaymentsByBookingRefAndBingeId(bookingRef, bingeId)
+            : paymentRepository.sumSuccessfulPaymentsByBookingRef(bookingRef);
+    }
+
+    private BigDecimal getTotalSuccessfulPaymentsForCurrentBinge() {
+        Long bingeId = getCurrentBingeId();
+        return bingeId != null
+            ? paymentRepository.getTotalSuccessfulPaymentsByBingeId(bingeId)
+            : paymentRepository.getTotalSuccessfulPayments();
+    }
+
+    private BigDecimal getTotalRefundedForCurrentBinge() {
+        Long bingeId = getCurrentBingeId();
+        return bingeId != null
+            ? refundRepository.sumAllCompletedRefundsByBingeId(REFUNDED_STATUSES, bingeId)
+            : refundRepository.sumAllCompletedRefunds(REFUNDED_STATUSES);
+    }
+
+    private long countPaymentsByStatusForCurrentBinge(PaymentStatus status) {
+        Long bingeId = getCurrentBingeId();
+        return bingeId != null
+            ? paymentRepository.countByStatusAndBingeId(status, bingeId)
+            : paymentRepository.countByStatus(status);
+    }
+
+    private void ensurePaymentInCurrentBinge(Payment payment, String field, Object value) {
+        Long bingeId = getCurrentBingeId();
+        if (bingeId != null && !bingeId.equals(payment.getBingeId())) {
+            throw new ResourceNotFoundException("Payment", field, value);
+        }
+    }
+
+    private void ensurePaymentAccess(Payment payment, Long requesterId, String requesterRole) {
+        if (isAdminRole(requesterRole)) {
+            return;
+        }
+        if (requesterId == null || payment.getCustomerId() == null || !payment.getCustomerId().equals(requesterId)) {
+            throw new BusinessException("Not authorized to access this payment", HttpStatus.FORBIDDEN);
+        }
+    }
+
+    private boolean isAdminRole(String requesterRole) {
+        return "ADMIN".equalsIgnoreCase(requesterRole) || "SUPER_ADMIN".equalsIgnoreCase(requesterRole);
+    }
+
+    /**
+     * Creates a Razorpay order via the Razorpay Orders API and returns the order ID (e.g. "order_xxx").
+     * Only called when simulation is disabled and a valid key-id is configured.
+     */
+    @SuppressWarnings("unchecked")
+    private String createRazorpayOrder(BigDecimal amount, String currency, String receipt) {
+        try {
+            String credentials = Base64.getEncoder()
+                .encodeToString((razorpayKeyId + ":" + razorpayKeySecret).getBytes(StandardCharsets.UTF_8));
+
+            Map<String, Object> body = Map.of(
+                "amount", amount.multiply(BigDecimal.valueOf(100)).longValue(), // rupees → paise
+                "currency", currency != null ? currency : "INR",
+                "receipt", receipt
+            );
+
+            Map<String, Object> response = RestClient.create()
+                .post()
+                .uri("https://api.razorpay.com/v1/orders")
+                .header("Authorization", "Basic " + credentials)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .retrieve()
+                .body(Map.class);
+
+            if (response != null && response.containsKey("id")) {
+                return (String) response.get("id");
+            }
+            throw new BusinessException("Razorpay order creation failed — no id returned", HttpStatus.BAD_GATEWAY);
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Failed to create Razorpay order for receipt={}: {}", receipt, e.getMessage());
+            throw new BusinessException("Payment gateway error. Please try again.", HttpStatus.BAD_GATEWAY);
+        }
     }
 
     /**

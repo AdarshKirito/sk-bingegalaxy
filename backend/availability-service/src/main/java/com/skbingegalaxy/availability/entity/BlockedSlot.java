@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "blocked_slots", uniqueConstraints = {
-    @UniqueConstraint(name = "uk_blocked_slot", columnNames = {"slotDate", "startHour"})
+    @UniqueConstraint(name = "uk_blocked_slot_binge", columnNames = {"bingeId", "slotDate", "startHour"})
 })
 @Getter @Setter
 @NoArgsConstructor @AllArgsConstructor
@@ -25,9 +25,15 @@ public class BlockedSlot {
     @Column(nullable = false)
     private LocalDate slotDate;
 
+    /**
+     * Start of blocked period. For admin-created blocked slots this is typically
+     * an hour (0-23); for booking-created blocks it may represent minutes since
+     * midnight. Named 'startHour' for DB-column compatibility.
+     */
     @Column(nullable = false)
-    private int startHour;  // 0-23
+    private int startHour;
 
+    /** End of blocked period — same unit as startHour. */
     @Column(nullable = false)
     private int endHour;
 

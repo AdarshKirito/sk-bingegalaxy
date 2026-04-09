@@ -3,6 +3,24 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { adminService, authService } from '../services/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
+import {
+  FiChevronDown,
+  FiChevronUp,
+  FiCreditCard,
+  FiEye,
+  FiEyeOff,
+  FiMapPin,
+  FiPlus,
+  FiSave,
+  FiSearch,
+  FiSettings,
+  FiShield,
+  FiTag,
+  FiTrash2,
+  FiUser,
+  FiUsers,
+} from 'react-icons/fi';
+import './AdminPages.css';
 
 export default function AdminUsersConfig() {
   const { userId } = useParams();
@@ -51,6 +69,57 @@ export default function AdminUsersConfig() {
   const [rcExpandedId, setRcExpandedId] = useState(null);
   const [rcForm, setRcForm] = useState({ name: '', description: '', eventPricings: [], addonPricings: [] });
 
+  const buildEmptyCustomerPricing = () => ({
+    rateCodeId: '',
+    rateCodeName: '',
+    scopedProfile: false,
+    eventPricings: eventTypes.map((eventType) => ({
+      eventTypeId: eventType.id,
+      eventTypeName: eventType.name,
+      basePrice: '',
+      hourlyRate: '',
+      pricePerGuest: '',
+    })),
+    addonPricings: addOns.map((addOn) => ({
+      addOnId: addOn.id,
+      addOnName: addOn.name,
+      price: '',
+    })),
+    dirty: false,
+  });
+
+  const hydrateCustomerPricing = (pricing) => {
+    const epMap = {};
+    (pricing.eventPricings || []).forEach((eventPricing) => { epMap[eventPricing.eventTypeId] = eventPricing; });
+    const apMap = {};
+    (pricing.addonPricings || []).forEach((addonPricing) => { apMap[addonPricing.addOnId] = addonPricing; });
+
+    return {
+      rateCodeId: pricing.rateCodeId || '',
+      rateCodeName: pricing.rateCodeName || '',
+      scopedProfile: Boolean(pricing.scopedProfile),
+      eventPricings: eventTypes.map((eventType) => {
+        const existing = epMap[eventType.id];
+        return {
+          eventTypeId: eventType.id,
+          eventTypeName: eventType.name,
+          basePrice: existing ? String(existing.basePrice) : '',
+          hourlyRate: existing ? String(existing.hourlyRate) : '',
+          pricePerGuest: existing ? String(existing.pricePerGuest) : '',
+        };
+      }),
+      addonPricings: addOns.map((addOn) => {
+        const existing = apMap[addOn.id];
+        return {
+          addOnId: addOn.id,
+          addOnName: addOn.name,
+          price: existing ? String(existing.price) : '',
+        };
+      }),
+      dirty: false,
+    };
+  };
+
   /* ── initial load ── */
   useEffect(() => {
     const promises = [
@@ -65,7 +134,8 @@ export default function AdminUsersConfig() {
         setEventTypes(etRes.data.data || []);
         setAddOns(aoRes.data.data || []);
         setRateCodes(rcRes.data.data || []);
-        setAllCustomers(custRes.data.data || custRes.data || []);
+        const custData = custRes.data.data;
+        setAllCustomers(Array.isArray(custData) ? custData : custData?.content || []);
         if (adminRes) setAllAdmins(adminRes.data.data || adminRes.data || []);
       })
       .catch(() => toast.error('Failed to load data'))
@@ -79,16 +149,6 @@ export default function AdminUsersConfig() {
       if (c) selectCustomer(c);
     }
   }, [userId, allCustomers]);
-
-  /* ── helpers ── */
-  const inputStyle = { padding: '0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--text)', fontSize: '0.85rem', width: '100%' };
-  const smallInputStyle = { ...inputStyle, width: '110px', textAlign: 'right' };
-  const labelStyle = { fontWeight: 600, fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.3rem', display: 'block' };
-  const tabBtnStyle = (active) => ({
-    padding: '0.5rem 1.2rem', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
-    border: 'none', borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
-    background: 'transparent', color: active ? 'var(--accent)' : 'var(--text-secondary)',
-  });
 
   /* ── select customer ── */
   const selectCustomer = async (cust) => {
@@ -109,24 +169,10 @@ export default function AdminUsersConfig() {
     try {
       const res = await adminService.getCustomerPricing(selectedCustomer.id);
       const p = res.data.data || res.data;
-      const epMap = {};
-      (p.eventPricings || []).forEach(ep => { epMap[ep.eventTypeId] = ep; });
-      const apMap = {};
-      (p.addonPricings || []).forEach(ap => { apMap[ap.addOnId] = ap; });
-      setCustPricing({
-        rateCodeId: p.rateCodeId || '',
-        rateCodeName: p.rateCodeName || '',
-        eventPricings: eventTypes.map(et => {
-          const ex = epMap[et.id];
-          return { eventTypeId: et.id, eventTypeName: et.name, basePrice: ex ? String(ex.basePrice) : '', hourlyRate: ex ? String(ex.hourlyRate) : '', pricePerGuest: ex ? String(ex.pricePerGuest) : '' };
-        }),
-        addonPricings: addOns.map(a => {
-          const ex = apMap[a.id];
-          return { addOnId: a.id, addOnName: a.name, price: ex ? String(ex.price) : '' };
-        }),
-        dirty: false,
-      });
-    } catch { toast.error('Failed to load pricing'); }
+      setCustPricing(hydrateCustomerPricing(p));
+    } catch {
+      toast.error('Failed to load pricing');
+    }
   };
 
   useEffect(() => {
@@ -171,9 +217,22 @@ export default function AdminUsersConfig() {
     try {
       await adminService.saveCustomerPricing(payload);
       toast.success(`Pricing saved for ${selectedCustomer.firstName} ${selectedCustomer.lastName}`);
-      setCustPricing(prev => ({ ...prev, dirty: false }));
+      setCustPricing(prev => ({ ...prev, dirty: false, scopedProfile: true }));
     } catch (err) {
       toast.error(err.response?.data?.message || 'Save failed');
+    }
+  };
+
+  const handleDeletePricing = async () => {
+    if (!selectedCustomer || !custPricing?.scopedProfile) return;
+    if (!confirm(`Delete the pricing profile for "${selectedCustomer.firstName} ${selectedCustomer.lastName}" in this binge?`)) return;
+
+    try {
+      await adminService.deleteCustomerPricing(selectedCustomer.id);
+      toast.success(`Pricing deleted for ${selectedCustomer.firstName} ${selectedCustomer.lastName}`);
+      await loadCustomerPricing();
+    } catch (err) {
+      toast.error(err.userMessage || err.response?.data?.message || 'Delete failed');
     }
   };
 
@@ -243,7 +302,23 @@ export default function AdminUsersConfig() {
       await adminService.toggleRateCode(id);
       toast.success('Rate code toggled');
       reloadRateCodes();
-    } catch { toast.error('Toggle failed'); }
+    } catch (err) { toast.error(err.userMessage || 'Toggle failed'); }
+  };
+
+  const handleDeleteRC = async (rateCode) => {
+    if (rateCode.active) {
+      toast.error('Deactivate the rate code before deleting it');
+      return;
+    }
+    if (!confirm(`Delete rate code "${rateCode.name}" permanently? This cannot be undone.`)) return;
+
+    try {
+      await adminService.deleteRateCode(rateCode.id);
+      toast.success('Rate code deleted');
+      reloadRateCodes();
+    } catch (err) {
+      toast.error(err.userMessage || err.response?.data?.message || 'Delete failed');
+    }
   };
 
   /* ── delete user (super admin) ── */
@@ -319,418 +394,593 @@ export default function AdminUsersConfig() {
       })
     : allCustomers;
 
-  if (loading) return <div className="container"><div className="loading"><div className="spinner"></div></div></div>;
+  if (loading) {
+    return <div className="container"><div className="loading"><div className="spinner"></div></div></div>;
+  }
 
-  /* ═══════════════════════════════════════════════════
-     RENDER
-     ═══════════════════════════════════════════════════ */
   return (
-    <div className="container" style={{ maxWidth: '1200px', margin: '0 auto' }}>
-      <div className="page-header" style={{ marginBottom: '1rem' }}>
-        <h1>Users & Config</h1>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Manage customers, pricing, and rate codes in one place</p>
+    <div className="container adm-shell">
+      <div className="adm-header">
+        <div className="adm-header-copy">
+          <span className="adm-kicker"><FiSettings /> Admin workspace</span>
+          <h1>Users & Config</h1>
+          <p>Manage customers, admin access, and pricing templates in one premium control surface.</p>
+        </div>
       </div>
 
-      {/* ── top-level section tabs ── */}
-      <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', marginBottom: '1.25rem' }}>
-        <button style={tabBtnStyle(section === 'users')} onClick={() => setSection('users')}>Users</button>
-        {isSuperAdmin && <button style={tabBtnStyle(section === 'admins')} onClick={() => setSection('admins')}>Admins</button>}
-        <button style={tabBtnStyle(section === 'rate-codes')} onClick={() => setSection('rate-codes')}>Rate Codes</button>
+      <div className="adm-tabs">
+        <button className={`adm-tab${section === 'users' ? ' active' : ''}`} onClick={() => setSection('users')}>
+          <FiUsers /> Users
+        </button>
+        {isSuperAdmin && (
+          <button className={`adm-tab${section === 'admins' ? ' active' : ''}`} onClick={() => setSection('admins')}>
+            <FiShield /> Admins
+          </button>
+        )}
+        <button className={`adm-tab${section === 'rate-codes' ? ' active' : ''}`} onClick={() => setSection('rate-codes')}>
+          <FiTag /> Rate Codes
+        </button>
       </div>
 
-      {/* ════════════════════  USERS SECTION  ════════════════════ */}
       {section === 'users' && (
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
-          {/* ── left: customer list ── */}
-          <div style={{ width: '340px', flexShrink: 0 }}>
-            <div className="card" style={{ padding: '0.75rem' }}>
-              <input style={{ ...inputStyle, marginBottom: '0.5rem' }} value={filterText}
-                onChange={e => setFilterText(e.target.value)} placeholder="Filter users by name, email, phone..." />
-              <div style={{ maxHeight: '65vh', overflowY: 'auto' }}>
+        <div className="adm-split-layout adm-split-layout-wide">
+          <aside className="adm-panel-stack">
+            <div className="adm-card adm-list-card">
+              <div className="input-group" style={{ marginBottom: '0.75rem' }}>
+                <label><FiSearch style={{ marginRight: 6, verticalAlign: -2 }} />Find customer</label>
+                <input
+                  value={filterText}
+                  onChange={(e) => setFilterText(e.target.value)}
+                  placeholder="Filter users by name, email, or phone..."
+                />
+              </div>
+              <div className="adm-list">
                 {filteredCustomers.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>No customers found</div>
-                ) : filteredCustomers.map(c => (
-                  <div key={c.id}
-                    onClick={() => selectCustomer(c)}
-                    style={{
-                      padding: '0.55rem 0.65rem', cursor: 'pointer', borderRadius: 'var(--radius-sm)',
-                      marginBottom: '0.25rem',
-                      background: selectedCustomer?.id === c.id ? 'rgba(99,102,241,0.15)' : 'transparent',
-                      borderLeft: selectedCustomer?.id === c.id ? '3px solid var(--accent)' : '3px solid transparent',
-                    }}>
-                    <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{c.firstName} {c.lastName}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{c.email} • {c.phone}</div>
+                  <div className="adm-empty compact">
+                    <span className="adm-empty-icon"><FiUsers /></span>
+                    <h3>No customers found</h3>
+                    <p>Try a different name, email, or phone number.</p>
                   </div>
+                ) : filteredCustomers.map((customer) => (
+                  <button
+                    type="button"
+                    key={customer.id}
+                    className={`adm-list-item${selectedCustomer?.id === customer.id ? ' active' : ''}`}
+                    onClick={() => selectCustomer(customer)}
+                  >
+                    <span className="adm-list-item-title">{customer.firstName} {customer.lastName}</span>
+                    <span className="adm-list-item-meta">{customer.email || 'No email'}</span>
+                    <span className="adm-list-item-meta">{customer.phone || 'No phone'}</span>
+                  </button>
                 ))}
               </div>
             </div>
-          </div>
+          </aside>
 
-          {/* ── right: customer detail / pricing ── */}
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <section className="adm-panel-stack">
             {!selectedCustomer ? (
-              <div className="card" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-                Select a customer from the list to view details or manage pricing.
+              <div className="adm-empty">
+                <span className="adm-empty-icon"><FiUser /></span>
+                <h3>Select a customer</h3>
+                <p>Choose a customer from the left to edit account details or pricing overrides.</p>
               </div>
             ) : (
               <>
-                {/* sub-tabs: Details | Pricing */}
-                <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', marginBottom: '1rem' }}>
-                  <button style={tabBtnStyle(customerTab === 'details')} onClick={() => setCustomerTab('details')}>Details</button>
-                  <button style={tabBtnStyle(customerTab === 'pricing')} onClick={() => setCustomerTab('pricing')}>Pricing</button>
+                <div className="adm-summary">
+                  <div className="adm-summary-copy">
+                    <span className="adm-summary-title">{selectedCustomer.firstName} {selectedCustomer.lastName}</span>
+                    <span className="adm-summary-text">
+                      {selectedCustomer.email || 'No email'}
+                      {selectedCustomer.phone ? ` • ${selectedCustomer.phone}` : ''}
+                    </span>
+                  </div>
+                  <div className="adm-inline-actions">
+                    <span className="adm-badge adm-badge-info"><FiUser /> Customer</span>
+                    {custPricing?.dirty && <span className="adm-badge adm-badge-info"><FiCreditCard /> Unsaved pricing</span>}
+                  </div>
                 </div>
 
-                {/* ── Details tab ── */}
+                <div className="adm-subtabs">
+                  <button className={`adm-subtab${customerTab === 'details' ? ' active' : ''}`} onClick={() => setCustomerTab('details')}>
+                    Details
+                  </button>
+                  <button className={`adm-subtab${customerTab === 'pricing' ? ' active' : ''}`} onClick={() => setCustomerTab('pricing')}>
+                    Pricing
+                  </button>
+                </div>
+
                 {customerTab === 'details' && (
-                  <div className="card" style={{ padding: '1.5rem' }}>
-                    <h3 style={{ margin: '0 0 1rem', fontSize: '1rem' }}>Edit Customer — {selectedCustomer.firstName} {selectedCustomer.lastName}</h3>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                      <div>
-                        <label style={labelStyle}>First Name *</label>
-                        <input style={inputStyle} value={editForm.firstName} onChange={e => setEditForm({ ...editForm, firstName: e.target.value })} />
+                  <div className="adm-form">
+                    <h3>Edit Customer</h3>
+                    <div className="adm-field-grid">
+                      <div className="input-group">
+                        <label>First Name *</label>
+                        <input value={editForm.firstName} onChange={(e) => setEditForm({ ...editForm, firstName: e.target.value })} />
                       </div>
-                      <div>
-                        <label style={labelStyle}>Last Name *</label>
-                        <input style={inputStyle} value={editForm.lastName} onChange={e => setEditForm({ ...editForm, lastName: e.target.value })} />
+                      <div className="input-group">
+                        <label>Last Name *</label>
+                        <input value={editForm.lastName} onChange={(e) => setEditForm({ ...editForm, lastName: e.target.value })} />
                       </div>
-                      <div style={{ gridColumn: '1 / -1' }}>
-                        <label style={labelStyle}>Email *</label>
-                        <input type="email" style={inputStyle} value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} />
+                      <div className="input-group adm-field-span">
+                        <label>Email *</label>
+                        <input type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} />
                       </div>
-                      <div style={{ gridColumn: '1 / -1' }}>
-                        <label style={labelStyle}>Phone *</label>
-                        <input style={inputStyle} value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} />
+                      <div className="input-group adm-field-span">
+                        <label>Phone *</label>
+                        <input value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} />
                       </div>
-                      <div style={{ gridColumn: '1 / -1' }}>
-                        <label style={labelStyle}>Change Password</label>
-                        <div style={{ position: 'relative' }}>
-                          <input type={showPassword ? 'text' : 'password'} style={{ ...inputStyle, paddingRight: '3rem' }}
-                            value={editForm.password} onChange={e => setEditForm({ ...editForm, password: e.target.value })}
-                            placeholder="Enter new password to change" autoComplete="off" />
-                          <button type="button" onClick={() => setShowPassword(!showPassword)}
-                            style={{ position: 'absolute', right: '0.5rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '0.85rem', padding: '0.2rem 0.4rem' }}>
-                            {showPassword ? '🙈 Hide' : '👁️ Show'}
+                      <div className="input-group adm-field-span">
+                        <label>Change Password</label>
+                        <div className="adm-password-wrap">
+                          <input
+                            type={showPassword ? 'text' : 'password'}
+                            value={editForm.password}
+                            onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
+                            placeholder="Enter a new password to reset the account"
+                            autoComplete="off"
+                          />
+                          <button type="button" className="adm-password-toggle" onClick={() => setShowPassword(!showPassword)}>
+                            {showPassword ? <><FiEyeOff /> Hide</> : <><FiEye /> Show</>}
                           </button>
                         </div>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginTop: '0.3rem' }}>
-                          Leave blank to keep current password
-                        </span>
+                        <span className="adm-hint">Leave blank to keep the existing password unchanged.</span>
                       </div>
                     </div>
-                    <div style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                    <div className="adm-form-actions">
                       {isSuperAdmin && (
-                        <button className="btn" style={{ background: '#ef4444', color: '#fff', marginRight: 'auto' }}
-                          onClick={() => setDeleteConfirm({ id: selectedCustomer.id, name: `${selectedCustomer.firstName} ${selectedCustomer.lastName}`, role: 'customer' })}>
-                          Delete Account
+                        <button
+                          className="btn adm-danger-btn push-left"
+                          onClick={() => setDeleteConfirm({ id: selectedCustomer.id, name: `${selectedCustomer.firstName} ${selectedCustomer.lastName}`, role: 'customer' })}
+                        >
+                          <FiTrash2 /> Delete Account
                         </button>
                       )}
                       <button className="btn btn-primary" onClick={handleSaveDetails} disabled={saving}>
-                        {saving ? 'Saving...' : 'Save Changes'}
+                        <FiSave /> {saving ? 'Saving...' : 'Save Changes'}
                       </button>
                     </div>
                   </div>
                 )}
 
-                {/* ── Pricing tab ── */}
                 {customerTab === 'pricing' && (
-                  <div className="card" style={{ padding: '1.5rem' }}>
-                    <h3 style={{ margin: '0 0 1rem', fontSize: '1rem' }}>Pricing — {selectedCustomer.firstName} {selectedCustomer.lastName}</h3>
+                  <div className="adm-card">
+                    <div className="adm-summary" style={{ marginBottom: '1rem' }}>
+                      <div className="adm-summary-copy">
+                        <span className="adm-summary-title">Customer Pricing</span>
+                        <span className="adm-summary-text">Override event and add-on pricing for this customer.</span>
+                      </div>
+                      {custPricing?.dirty && <span className="adm-badge adm-badge-info"><FiCreditCard /> Unsaved changes</span>}
+                    </div>
+
                     {!custPricing ? (
-                      <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Loading pricing...</div>
+                      <div className="adm-empty compact">
+                        <span className="adm-empty-icon"><FiCreditCard /></span>
+                        <h3>Loading pricing</h3>
+                        <p>Preparing the customer pricing profile.</p>
+                      </div>
                     ) : (
-                      <>
-                        {/* Rate code assignment */}
-                        <div style={{ marginBottom: '1rem' }}>
-                          <label style={labelStyle}>Assigned Rate Code</label>
-                          <select style={{ ...inputStyle, width: '250px' }}
+                      <div className="adm-panel-stack">
+                        <div className="input-group" style={{ maxWidth: '320px' }}>
+                          <label>Assigned Rate Code</label>
+                          <select
                             value={custPricing.rateCodeId}
-                            onChange={e => setCustPricing(prev => ({ ...prev, rateCodeId: e.target.value, dirty: true }))}>
+                            onChange={(e) => setCustPricing((prev) => ({ ...prev, rateCodeId: e.target.value, dirty: true }))}
+                          >
                             <option value="">None (Default Pricing)</option>
-                            {rateCodes.filter(r => r.active).map(rc => <option key={rc.id} value={rc.id}>{rc.name}</option>)}
+                            {rateCodes.filter((rateCode) => rateCode.active).map((rateCode) => (
+                              <option key={rateCode.id} value={rateCode.id}>{rateCode.name}</option>
+                            ))}
                           </select>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginTop: '0.25rem' }}>
-                            Customer-specific overrides below take priority over the rate code.
-                          </span>
+                          <span className="adm-hint">Customer-specific overrides below take priority over the assigned rate code.</span>
                         </div>
 
-                        {/* Event type overrides */}
-                        <h4 style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>Event Type Overrides</h4>
-                        <div style={{ overflowX: 'auto' }}>
-                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', marginBottom: '1rem' }}>
-                            <thead>
-                              <tr style={{ borderBottom: '2px solid var(--border)' }}>
-                                <th style={{ textAlign: 'left', padding: '0.4rem' }}>Event Type</th>
-                                <th style={{ textAlign: 'right', padding: '0.4rem' }}>Base Price</th>
-                                <th style={{ textAlign: 'right', padding: '0.4rem' }}>Hourly Rate</th>
-                                <th style={{ textAlign: 'right', padding: '0.4rem' }}>Price/Guest</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {custPricing.eventPricings.map((ep, i) => (
-                                <tr key={ep.eventTypeId} style={{ borderBottom: '1px solid var(--border)' }}>
-                                  <td style={{ padding: '0.4rem' }}>{ep.eventTypeName}</td>
-                                  <td style={{ padding: '0.4rem', textAlign: 'right' }}>
-                                    <input type="number" step="0.01" style={smallInputStyle} value={ep.basePrice}
-                                      onChange={e => {
-                                        const arr = [...custPricing.eventPricings]; arr[i] = { ...arr[i], basePrice: e.target.value };
-                                        setCustPricing(prev => ({ ...prev, eventPricings: arr, dirty: true }));
-                                      }} />
-                                  </td>
-                                  <td style={{ padding: '0.4rem', textAlign: 'right' }}>
-                                    <input type="number" step="0.01" style={smallInputStyle} value={ep.hourlyRate}
-                                      onChange={e => {
-                                        const arr = [...custPricing.eventPricings]; arr[i] = { ...arr[i], hourlyRate: e.target.value };
-                                        setCustPricing(prev => ({ ...prev, eventPricings: arr, dirty: true }));
-                                      }} />
-                                  </td>
-                                  <td style={{ padding: '0.4rem', textAlign: 'right' }}>
-                                    <input type="number" step="0.01" style={smallInputStyle} value={ep.pricePerGuest}
-                                      onChange={e => {
-                                        const arr = [...custPricing.eventPricings]; arr[i] = { ...arr[i], pricePerGuest: e.target.value };
-                                        setCustPricing(prev => ({ ...prev, eventPricings: arr, dirty: true }));
-                                      }} />
-                                  </td>
+                        <div>
+                          <h4 style={{ marginBottom: '0.5rem' }}>Event Type Overrides</h4>
+                          <div className="adm-table-wrap">
+                            <table className="adm-table">
+                              <thead>
+                                <tr>
+                                  <th>Event Type</th>
+                                  <th>Base Price</th>
+                                  <th>Hourly Rate</th>
+                                  <th>Price / Guest</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                              </thead>
+                              <tbody>
+                                {custPricing.eventPricings.map((eventPricing, index) => {
+                                  const defaultEvent = eventTypes.find((eventType) => eventType.id === eventPricing.eventTypeId);
+                                  return (
+                                    <tr key={eventPricing.eventTypeId}>
+                                      <td>
+                                        {eventPricing.eventTypeName}
+                                        {defaultEvent && (
+                                          <span className="adm-table-note">
+                                            Default: ₹{defaultEvent.basePrice} base / ₹{defaultEvent.hourlyRate}/hr / ₹{defaultEvent.pricePerGuest}/guest
+                                          </span>
+                                        )}
+                                      </td>
+                                      <td>
+                                        <input
+                                          type="number"
+                                          step="0.01"
+                                          className="input-compact"
+                                          value={eventPricing.basePrice}
+                                          placeholder={defaultEvent?.basePrice ?? ''}
+                                          onChange={(e) => {
+                                            const next = [...custPricing.eventPricings];
+                                            next[index] = { ...next[index], basePrice: e.target.value };
+                                            setCustPricing((prev) => ({ ...prev, eventPricings: next, dirty: true }));
+                                          }}
+                                        />
+                                      </td>
+                                      <td>
+                                        <input
+                                          type="number"
+                                          step="0.01"
+                                          className="input-compact"
+                                          value={eventPricing.hourlyRate}
+                                          placeholder={defaultEvent?.hourlyRate ?? ''}
+                                          onChange={(e) => {
+                                            const next = [...custPricing.eventPricings];
+                                            next[index] = { ...next[index], hourlyRate: e.target.value };
+                                            setCustPricing((prev) => ({ ...prev, eventPricings: next, dirty: true }));
+                                          }}
+                                        />
+                                      </td>
+                                      <td>
+                                        <input
+                                          type="number"
+                                          step="0.01"
+                                          className="input-compact"
+                                          value={eventPricing.pricePerGuest}
+                                          placeholder={defaultEvent?.pricePerGuest ?? ''}
+                                          onChange={(e) => {
+                                            const next = [...custPricing.eventPricings];
+                                            next[index] = { ...next[index], pricePerGuest: e.target.value };
+                                            setCustPricing((prev) => ({ ...prev, eventPricings: next, dirty: true }));
+                                          }}
+                                        />
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
 
-                        {/* Add-on overrides */}
-                        <h4 style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>Add-On Overrides</h4>
-                        <div style={{ overflowX: 'auto' }}>
-                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', marginBottom: '1rem' }}>
-                            <thead>
-                              <tr style={{ borderBottom: '2px solid var(--border)' }}>
-                                <th style={{ textAlign: 'left', padding: '0.4rem' }}>Add-On</th>
-                                <th style={{ textAlign: 'right', padding: '0.4rem' }}>Price</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {custPricing.addonPricings.map((ap, i) => (
-                                <tr key={ap.addOnId} style={{ borderBottom: '1px solid var(--border)' }}>
-                                  <td style={{ padding: '0.4rem' }}>{ap.addOnName}</td>
-                                  <td style={{ padding: '0.4rem', textAlign: 'right' }}>
-                                    <input type="number" step="0.01" style={smallInputStyle} value={ap.price}
-                                      onChange={e => {
-                                        const arr = [...custPricing.addonPricings]; arr[i] = { ...arr[i], price: e.target.value };
-                                        setCustPricing(prev => ({ ...prev, addonPricings: arr, dirty: true }));
-                                      }} />
-                                  </td>
+                        <div>
+                          <h4 style={{ marginBottom: '0.5rem' }}>Add-On Overrides</h4>
+                          <div className="adm-table-wrap">
+                            <table className="adm-table">
+                              <thead>
+                                <tr>
+                                  <th>Add-On</th>
+                                  <th>Price</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                              </thead>
+                              <tbody>
+                                {custPricing.addonPricings.map((addonPricing, index) => {
+                                  const defaultAddon = addOns.find((addOn) => addOn.id === addonPricing.addOnId);
+                                  return (
+                                    <tr key={addonPricing.addOnId}>
+                                      <td>
+                                        {addonPricing.addOnName}
+                                        {defaultAddon && <span className="adm-table-note">Default: ₹{defaultAddon.price}</span>}
+                                      </td>
+                                      <td>
+                                        <input
+                                          type="number"
+                                          step="0.01"
+                                          className="input-compact"
+                                          value={addonPricing.price}
+                                          placeholder={defaultAddon?.price ?? ''}
+                                          onChange={(e) => {
+                                            const next = [...custPricing.addonPricings];
+                                            next[index] = { ...next[index], price: e.target.value };
+                                            setCustPricing((prev) => ({ ...prev, addonPricings: next, dirty: true }));
+                                          }}
+                                        />
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
 
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-                          {custPricing.dirty && <span style={{ fontSize: '0.75rem', color: 'var(--warning)', alignSelf: 'center' }}>• unsaved changes</span>}
-                          <button className="btn btn-primary" onClick={handleSavePricing} disabled={!custPricing.dirty}>Save Pricing</button>
+                        <div className="adm-form-actions">
+                          {custPricing.scopedProfile ? (
+                            <button className="btn adm-danger-btn push-left" onClick={handleDeletePricing}>
+                              <FiTrash2 /> Delete Pricing Profile
+                            </button>
+                          ) : (
+                            <span className="adm-hint push-left">Only pricing saved in this binge can be deleted here.</span>
+                          )}
+                          {custPricing.dirty && <span className="adm-hint">Unsaved changes are ready to save.</span>}
+                          <button className="btn btn-primary" onClick={handleSavePricing} disabled={!custPricing.dirty}>
+                            <FiSave /> Save Pricing
+                          </button>
                         </div>
-                      </>
+                      </div>
                     )}
                   </div>
                 )}
               </>
             )}
-          </div>
+          </section>
         </div>
       )}
 
-      {/* ════════════════════  ADMINS SECTION (SUPER_ADMIN)  ════════════════════ */}
       {section === 'admins' && isSuperAdmin && (
-        <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: '1rem' }}>
-          {/* ── Left: admin list ── */}
-          <div>
-            <div className="card" style={{ padding: '0.75rem', marginBottom: '0.75rem' }}>
-              <input style={{ ...inputStyle }} value={adminFilterText}
-                onChange={e => setAdminFilterText(e.target.value)} placeholder="Filter admins..." />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }}>
-              {filteredAdmins.length === 0 ? (
-                <div className="card" style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>No admins found.</div>
-              ) : filteredAdmins.map(a => (
-                <div key={a.id} className="card" style={{
-                  padding: '0.6rem 0.75rem', cursor: 'pointer',
-                  border: selectedAdmin?.id === a.id ? '1.5px solid var(--accent)' : '1.5px solid transparent',
-                  background: selectedAdmin?.id === a.id ? 'var(--bg-card-hover, var(--bg-card))' : undefined,
-                }} onClick={() => selectAdmin(a)}>
-                  <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{a.firstName} {a.lastName}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{a.email}</div>
-                  <div style={{ fontSize: '0.7rem', color: a.active ? '#22c55e' : '#ef4444', marginTop: '0.1rem' }}>
-                    {a.active ? 'Active' : 'Inactive'} • {a.role === 'SUPER_ADMIN' ? 'Super Admin' : 'Admin'}
+        <div className="adm-split-layout">
+          <aside className="adm-panel-stack">
+            <div className="adm-card adm-list-card">
+              <div className="input-group" style={{ marginBottom: '0.75rem' }}>
+                <label><FiSearch style={{ marginRight: 6, verticalAlign: -2 }} />Find admin</label>
+                <input value={adminFilterText} onChange={(e) => setAdminFilterText(e.target.value)} placeholder="Filter admins by name or email..." />
+              </div>
+              <div className="adm-list compact">
+                {filteredAdmins.length === 0 ? (
+                  <div className="adm-empty compact">
+                    <span className="adm-empty-icon"><FiShield /></span>
+                    <h3>No admins found</h3>
+                    <p>Try a different filter.</p>
                   </div>
-                </div>
-              ))}
+                ) : filteredAdmins.map((admin) => (
+                  <button
+                    type="button"
+                    key={admin.id}
+                    className={`adm-list-item${selectedAdmin?.id === admin.id ? ' active' : ''}`}
+                    onClick={() => selectAdmin(admin)}
+                  >
+                    <span className="adm-list-item-title">{admin.firstName} {admin.lastName}</span>
+                    <span className="adm-list-item-meta">{admin.email || 'No email'}</span>
+                    <span className={`adm-list-item-status ${admin.active ? 'success' : 'danger'}`}>
+                      {admin.active ? 'Active' : 'Inactive'} • {admin.role === 'SUPER_ADMIN' ? 'Super Admin' : 'Admin'}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          </aside>
 
-          {/* ── Right: admin detail ── */}
-          <div>
+          <section className="adm-panel-stack">
             {!selectedAdmin ? (
-              <div className="card" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>Select an admin to view details</div>
+              <div className="adm-empty">
+                <span className="adm-empty-icon"><FiShield /></span>
+                <h3>Select an admin</h3>
+                <p>Choose an admin profile to update access details or review their venues.</p>
+              </div>
             ) : (
               <>
-                <div className="card" style={{ padding: '0.75rem 1rem', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <h3 style={{ margin: 0, fontSize: '1rem' }}>{selectedAdmin.firstName} {selectedAdmin.lastName}</h3>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{selectedAdmin.email} • Joined {selectedAdmin.createdAt ? new Date(selectedAdmin.createdAt).toLocaleDateString() : '—'}</span>
+                <div className="adm-summary">
+                  <div className="adm-summary-copy">
+                    <span className="adm-summary-title">{selectedAdmin.firstName} {selectedAdmin.lastName}</span>
+                    <span className="adm-summary-text">
+                      {selectedAdmin.email || 'No email'} • Joined {selectedAdmin.createdAt ? new Date(selectedAdmin.createdAt).toLocaleDateString() : '—'}
+                    </span>
                   </div>
-                  <button className="btn" style={{ background: '#ef4444', color: '#fff', fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
-                    onClick={() => setDeleteConfirm({ id: selectedAdmin.id, name: `${selectedAdmin.firstName} ${selectedAdmin.lastName}`, role: 'admin' })}>
-                    Delete
-                  </button>
+                  <div className="adm-inline-actions">
+                    <span className={`adm-badge ${selectedAdmin.active ? 'adm-badge-active' : 'adm-badge-inactive'}`}>
+                      {selectedAdmin.active ? 'Active' : 'Inactive'}
+                    </span>
+                    <span className="adm-badge adm-badge-info">{selectedAdmin.role === 'SUPER_ADMIN' ? 'Super Admin' : 'Admin'}</span>
+                    <button
+                      className="btn adm-danger-btn adm-compact-btn"
+                      onClick={() => setDeleteConfirm({ id: selectedAdmin.id, name: `${selectedAdmin.firstName} ${selectedAdmin.lastName}`, role: 'admin' })}
+                    >
+                      <FiTrash2 /> Delete
+                    </button>
+                  </div>
                 </div>
 
-                {/* Sub-tabs: Details | Binges */}
-                <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', marginBottom: '1rem' }}>
-                  <button style={tabBtnStyle(adminTab === 'details')} onClick={() => setAdminTab('details')}>Details</button>
-                  <button style={tabBtnStyle(adminTab === 'binges')} onClick={() => setAdminTab('binges')}>
+                <div className="adm-subtabs">
+                  <button className={`adm-subtab${adminTab === 'details' ? ' active' : ''}`} onClick={() => setAdminTab('details')}>
+                    Details
+                  </button>
+                  <button className={`adm-subtab${adminTab === 'binges' ? ' active' : ''}`} onClick={() => setAdminTab('binges')}>
                     Binges ({adminBinges.length})
                   </button>
                 </div>
 
-                {/* ── Details tab ── */}
                 {adminTab === 'details' && (
-                  <div className="card" style={{ padding: '1.25rem' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
-                      <div>
-                        <label style={labelStyle}>First Name</label>
-                        <input style={inputStyle} value={adminEditForm.firstName} onChange={e => setAdminEditForm({ ...adminEditForm, firstName: e.target.value })} />
+                  <div className="adm-form">
+                    <h3>Edit Admin Profile</h3>
+                    <div className="adm-field-grid">
+                      <div className="input-group">
+                        <label>First Name</label>
+                        <input value={adminEditForm.firstName} onChange={(e) => setAdminEditForm({ ...adminEditForm, firstName: e.target.value })} />
                       </div>
-                      <div>
-                        <label style={labelStyle}>Last Name</label>
-                        <input style={inputStyle} value={adminEditForm.lastName} onChange={e => setAdminEditForm({ ...adminEditForm, lastName: e.target.value })} />
+                      <div className="input-group">
+                        <label>Last Name</label>
+                        <input value={adminEditForm.lastName} onChange={(e) => setAdminEditForm({ ...adminEditForm, lastName: e.target.value })} />
                       </div>
-                      <div>
-                        <label style={labelStyle}>Email</label>
-                        <input style={inputStyle} type="email" value={adminEditForm.email} onChange={e => setAdminEditForm({ ...adminEditForm, email: e.target.value })} />
+                      <div className="input-group">
+                        <label>Email</label>
+                        <input type="email" value={adminEditForm.email} onChange={(e) => setAdminEditForm({ ...adminEditForm, email: e.target.value })} />
                       </div>
-                      <div>
-                        <label style={labelStyle}>Phone</label>
-                        <input style={inputStyle} value={adminEditForm.phone} onChange={e => setAdminEditForm({ ...adminEditForm, phone: e.target.value })} />
+                      <div className="input-group">
+                        <label>Phone</label>
+                        <input value={adminEditForm.phone} onChange={(e) => setAdminEditForm({ ...adminEditForm, phone: e.target.value })} />
+                      </div>
+                      <div className="input-group adm-field-span">
+                        <label>Reset Password</label>
+                        <div className="adm-password-wrap">
+                          <input
+                            type={adminShowPassword ? 'text' : 'password'}
+                            value={adminEditForm.password}
+                            onChange={(e) => setAdminEditForm({ ...adminEditForm, password: e.target.value })}
+                            placeholder="Leave blank to keep current password"
+                          />
+                          <button type="button" className="adm-password-toggle" onClick={() => setAdminShowPassword(!adminShowPassword)}>
+                            {adminShowPassword ? <><FiEyeOff /> Hide</> : <><FiEye /> Show</>}
+                          </button>
+                        </div>
+                        <span className="adm-hint">Only fill this in when you need to reset the admin password.</span>
                       </div>
                     </div>
-                    <div style={{ marginBottom: '1rem' }}>
-                      <label style={labelStyle}>Reset Password <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(leave blank to keep current)</span></label>
-                      <div style={{ position: 'relative' }}>
-                        <input style={inputStyle} type={adminShowPassword ? 'text' : 'password'} value={adminEditForm.password}
-                          onChange={e => setAdminEditForm({ ...adminEditForm, password: e.target.value })} placeholder="New password (optional)" />
-                        <button type="button" style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.8rem' }}
-                          onClick={() => setAdminShowPassword(!adminShowPassword)}>{adminShowPassword ? 'Hide' : 'Show'}</button>
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <div className="adm-form-actions">
                       <button className="btn btn-primary" onClick={handleSaveAdmin} disabled={adminSaving}>
-                        {adminSaving ? 'Saving...' : 'Save Changes'}
+                        <FiSave /> {adminSaving ? 'Saving...' : 'Save Changes'}
                       </button>
                     </div>
                   </div>
                 )}
 
-                {/* ── Binges tab ── */}
                 {adminTab === 'binges' && (
-                  <div>
-                    {adminBinges.length === 0 ? (
-                      <div className="card" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>This admin has not created any binges yet.</div>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                        {adminBinges.map(b => (
-                          <div key={b.id} className="card" style={{ padding: '0.75rem 1rem' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <div>
-                                <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{b.name}</div>
-                                {b.address && <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{b.address}</div>}
-                              </div>
-                              <span style={{
-                                fontSize: '0.7rem', padding: '0.15rem 0.5rem', borderRadius: '999px',
-                                background: b.active ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
-                                color: b.active ? '#22c55e' : '#ef4444',
-                              }}>{b.active ? 'Active' : 'Inactive'}</span>
+                  adminBinges.length === 0 ? (
+                    <div className="adm-empty compact">
+                      <span className="adm-empty-icon"><FiMapPin /></span>
+                      <h3>No binges yet</h3>
+                      <p>This admin has not created any venues.</p>
+                    </div>
+                  ) : (
+                    <div className="adm-panel-stack">
+                      {adminBinges.map((binge) => (
+                        <div key={binge.id} className="adm-mini-card">
+                          <div className="adm-inline-actions" style={{ justifyContent: 'space-between' }}>
+                            <div>
+                              <div className="adm-mini-card-title">{binge.name}</div>
+                              {binge.address && <div className="adm-mini-card-meta">{binge.address}</div>}
                             </div>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                              Created {b.createdAt ? new Date(b.createdAt).toLocaleDateString() : '—'}
-                              {b.operationalDate && <> • Op. Date: {b.operationalDate}</>}
-                            </div>
+                            <span className={`adm-badge ${binge.active ? 'adm-badge-active' : 'adm-badge-inactive'}`}>
+                              {binge.active ? 'Active' : 'Inactive'}
+                            </span>
                           </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                          <div className="adm-mini-card-meta">
+                            Created {binge.createdAt ? new Date(binge.createdAt).toLocaleDateString() : '—'}
+                            {binge.operationalDate ? ` • Op. Date: ${binge.operationalDate}` : ''}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )
                 )}
               </>
             )}
-          </div>
+          </section>
         </div>
       )}
 
-      {/* ════════════════════  DELETE CONFIRMATION MODAL  ════════════════════ */}
       {deleteConfirm && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
-          <div className="card" style={{ padding: '2rem', maxWidth: 420, textAlign: 'center' }}>
-            <h3 style={{ margin: '0 0 0.75rem', color: '#ef4444' }}>Delete Account</h3>
+        <div className="adm-modal-overlay" onClick={(e) => e.target === e.currentTarget && setDeleteConfirm(null)}>
+          <div className="adm-modal" style={{ maxWidth: '440px', textAlign: 'center' }}>
+            <h3 style={{ color: 'var(--danger)' }}>Delete Account</h3>
             <p style={{ marginBottom: '1.5rem', fontSize: '0.9rem' }}>
               Are you sure you want to permanently delete <strong>{deleteConfirm.name}</strong>'s {deleteConfirm.role} account? This action cannot be undone.
             </p>
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '0.75rem' }}>
+            <div className="adm-modal-actions" style={{ justifyContent: 'center' }}>
               <button className="btn btn-secondary" onClick={() => setDeleteConfirm(null)}>Cancel</button>
-              <button className="btn" style={{ background: '#ef4444', color: '#fff' }} onClick={handleDeleteUser}>Delete</button>
+              <button className="btn adm-danger-btn" onClick={handleDeleteUser}><FiTrash2 /> Delete</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ════════════════════  RATE CODES SECTION  ════════════════════ */}
       {section === 'rate-codes' && !showRCForm && (
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.75rem' }}>
-            <button className="btn btn-primary" onClick={openRCCreate}>+ New Rate Code</button>
+        <div className="adm-panel-stack">
+          <div className="adm-toolbar">
+            <div className="adm-header-copy">
+              <span className="adm-kicker"><FiTag /> Pricing templates</span>
+              <h1 style={{ fontSize: '1.45rem' }}>Rate Codes</h1>
+              <p>Named pricing templates that can be assigned to customer accounts.</p>
+            </div>
+            <button className="btn btn-primary" onClick={openRCCreate}><FiPlus /> New Rate Code</button>
           </div>
+
           {rateCodes.length === 0 ? (
-            <div className="card" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>No rate codes yet.</div>
+            <div className="adm-empty">
+              <span className="adm-empty-icon"><FiTag /></span>
+              <h3>No rate codes yet</h3>
+              <p>Create pricing templates for VIP, corporate, or custom account tiers.</p>
+            </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {rateCodes.map(rc => (
-                <div key={rc.id} className="card" style={{ padding: '0.75rem 1rem', opacity: rc.active ? 1 : 0.5 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ cursor: 'pointer', flex: 1 }} onClick={() => setRcExpandedId(rcExpandedId === rc.id ? null : rc.id)}>
-                      <span style={{ fontWeight: 600 }}>{rc.name}</span>
-                      {rc.description && <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginLeft: '0.5rem' }}>— {rc.description}</span>}
-                      <span style={{ marginLeft: '0.5rem', fontSize: '0.7rem', padding: '0.1rem 0.4rem', borderRadius: '999px', background: rc.active ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)', color: rc.active ? '#22c55e' : '#ef4444' }}>
-                        {rc.active ? 'Active' : 'Inactive'}
-                      </span>
+            <div className="adm-panel-stack">
+              {rateCodes.map((rateCode) => (
+                <div key={rateCode.id} className="adm-card" style={!rateCode.active ? { opacity: 0.58 } : undefined}>
+                  <div className="adm-toolbar">
+                    <div className="adm-summary-copy">
+                      <span className="adm-summary-title">{rateCode.name}</span>
+                      {rateCode.description && <span className="adm-summary-text">{rateCode.description}</span>}
+                      <div className="adm-inline-actions">
+                        <span className={`adm-badge ${rateCode.active ? 'adm-badge-active' : 'adm-badge-inactive'}`}>
+                          {rateCode.active ? 'Active' : 'Inactive'}
+                        </span>
+                        <span className="adm-badge adm-badge-info">
+                          {(rateCode.eventPricings || []).length} event pricing{(rateCode.eventPricings || []).length !== 1 ? 's' : ''}
+                          {' • '}
+                          {(rateCode.addonPricings || []).length} add-on pricing{(rateCode.addonPricings || []).length !== 1 ? 's' : ''}
+                        </span>
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', gap: '0.35rem' }}>
-                      <button className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }} onClick={() => openRCEdit(rc)}>Edit</button>
-                      <button className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }} onClick={() => handleToggleRC(rc.id)}>
-                        {rc.active ? 'Deactivate' : 'Activate'}
+                    <div className="adm-inline-actions">
+                      <button className="btn btn-secondary adm-compact-btn" onClick={() => setRcExpandedId(rcExpandedId === rateCode.id ? null : rateCode.id)}>
+                        {rcExpandedId === rateCode.id ? <><FiChevronUp /> Hide</> : <><FiChevronDown /> Details</>}
                       </button>
+                      <button className="btn btn-secondary adm-compact-btn" onClick={() => openRCEdit(rateCode)}>Edit</button>
+                      <button className="btn btn-secondary adm-compact-btn" onClick={() => handleToggleRC(rateCode.id)}>
+                        {rateCode.active ? 'Deactivate' : 'Activate'}
+                      </button>
+                      {!rateCode.active && (
+                        <button className="btn adm-danger-btn adm-compact-btn" onClick={() => handleDeleteRC(rateCode)}>
+                          <FiTrash2 /> Delete
+                        </button>
+                      )}
                     </div>
                   </div>
-                  {rcExpandedId === rc.id && (
-                    <div style={{ marginTop: '0.75rem', fontSize: '0.8rem', borderTop: '1px solid var(--border)', paddingTop: '0.5rem' }}>
-                      {(rc.eventPricings || []).length > 0 && (
-                        <>
-                          <strong>Events:</strong>
-                          <ul style={{ margin: '0.25rem 0 0.5rem 1.25rem', padding: 0 }}>
-                            {rc.eventPricings.map(ep => (
-                              <li key={ep.eventTypeId}>{ep.eventTypeName}: ₹{ep.basePrice} base / ₹{ep.hourlyRate}/hr / ₹{ep.pricePerGuest}/guest</li>
-                            ))}
-                          </ul>
-                        </>
+
+                  {rcExpandedId === rateCode.id && (
+                    <div className="adm-panel-stack" style={{ marginTop: '1rem' }}>
+                      {(rateCode.eventPricings || []).length > 0 && (
+                        <div className="adm-table-wrap">
+                          <table className="adm-table">
+                            <thead>
+                              <tr>
+                                <th>Event</th>
+                                <th>Base</th>
+                                <th>Hourly</th>
+                                <th>Per Guest</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {rateCode.eventPricings.map((eventPricing) => (
+                                <tr key={eventPricing.eventTypeId}>
+                                  <td>{eventPricing.eventTypeName}</td>
+                                  <td>₹{eventPricing.basePrice}</td>
+                                  <td>₹{eventPricing.hourlyRate}/hr</td>
+                                  <td>₹{eventPricing.pricePerGuest}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       )}
-                      {(rc.addonPricings || []).length > 0 && (
-                        <>
-                          <strong>Add-ons:</strong>
-                          <ul style={{ margin: '0.25rem 0 0 1.25rem', padding: 0 }}>
-                            {rc.addonPricings.map(ap => (
-                              <li key={ap.addOnId}>{ap.addOnName}: ₹{ap.price}</li>
-                            ))}
-                          </ul>
-                        </>
+
+                      {(rateCode.addonPricings || []).length > 0 && (
+                        <div className="adm-table-wrap">
+                          <table className="adm-table">
+                            <thead>
+                              <tr>
+                                <th>Add-On</th>
+                                <th>Price</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {rateCode.addonPricings.map((addonPricing) => (
+                                <tr key={addonPricing.addOnId}>
+                                  <td>{addonPricing.addOnName}</td>
+                                  <td>₹{addonPricing.price}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       )}
-                      {(rc.eventPricings || []).length === 0 && (rc.addonPricings || []).length === 0 && (
-                        <span style={{ color: 'var(--text-muted)' }}>No custom pricing defined for this rate code.</span>
+
+                      {(rateCode.eventPricings || []).length === 0 && (rateCode.addonPricings || []).length === 0 && (
+                        <span className="adm-hint">No custom pricing defined for this rate code.</span>
                       )}
                     </div>
                   )}
@@ -741,97 +991,148 @@ export default function AdminUsersConfig() {
         </div>
       )}
 
-      {/* ── Rate code form (create/edit) ── */}
       {section === 'rate-codes' && showRCForm && (
-        <div>
-          <div className="page-header" style={{ marginBottom: '1rem' }}>
-            <h2 style={{ fontSize: '1.1rem' }}>{editingRC ? 'Edit Rate Code' : 'Create Rate Code'}</h2>
+        <div className="adm-panel-stack">
+          <div className="adm-summary">
+            <div className="adm-summary-copy">
+              <span className="adm-summary-title">{editingRC ? 'Edit Rate Code' : 'Create Rate Code'}</span>
+              <span className="adm-summary-text">Build reusable pricing templates and leave blanks where defaults should apply.</span>
+            </div>
           </div>
-          <div className="card" style={{ padding: '1.5rem' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
-              <div>
-                <label style={labelStyle}>Rate Code Name *</label>
-                <input style={inputStyle} value={rcForm.name} onChange={e => setRcForm({ ...rcForm, name: e.target.value })} placeholder="e.g. VIP, Corporate, Student" />
+
+          <div className="adm-form">
+            <div className="adm-field-grid">
+              <div className="input-group">
+                <label>Rate Code Name *</label>
+                <input value={rcForm.name} onChange={(e) => setRcForm({ ...rcForm, name: e.target.value })} placeholder="e.g. VIP, Corporate, Student" />
               </div>
-              <div>
-                <label style={labelStyle}>Description</label>
-                <input style={inputStyle} value={rcForm.description} onChange={e => setRcForm({ ...rcForm, description: e.target.value })} placeholder="Optional description" />
+              <div className="input-group">
+                <label>Description</label>
+                <input value={rcForm.description} onChange={(e) => setRcForm({ ...rcForm, description: e.target.value })} placeholder="Optional description" />
               </div>
             </div>
 
-            <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem' }}>Event Type Pricing</h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>Leave blank to use default pricing.</p>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                <thead>
-                  <tr style={{ borderBottom: '2px solid var(--border)' }}>
-                    <th style={{ textAlign: 'left', padding: '0.5rem' }}>Event Type</th>
-                    <th style={{ textAlign: 'right', padding: '0.5rem' }}>Base Price</th>
-                    <th style={{ textAlign: 'right', padding: '0.5rem' }}>Hourly Rate</th>
-                    <th style={{ textAlign: 'right', padding: '0.5rem' }}>Price/Guest</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rcForm.eventPricings.map((ep, i) => {
-                    const def = eventTypes.find(e => e.id === ep.eventTypeId);
-                    return (
-                      <tr key={ep.eventTypeId} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td style={{ padding: '0.5rem' }}>
-                          {ep.eventTypeName}
-                          {def && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Default: ₹{def.basePrice} / ₹{def.hourlyRate}/hr / ₹{def.pricePerGuest}/guest</span>}
-                        </td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right' }}>
-                          <input type="number" step="0.01" style={{ ...smallInputStyle, width: '120px' }} value={ep.basePrice} placeholder={def?.basePrice ?? ''}
-                            onChange={e => { const arr = [...rcForm.eventPricings]; arr[i] = { ...arr[i], basePrice: e.target.value }; setRcForm({ ...rcForm, eventPricings: arr }); }} />
-                        </td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right' }}>
-                          <input type="number" step="0.01" style={{ ...smallInputStyle, width: '120px' }} value={ep.hourlyRate} placeholder={def?.hourlyRate ?? ''}
-                            onChange={e => { const arr = [...rcForm.eventPricings]; arr[i] = { ...arr[i], hourlyRate: e.target.value }; setRcForm({ ...rcForm, eventPricings: arr }); }} />
-                        </td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right' }}>
-                          <input type="number" step="0.01" style={{ ...smallInputStyle, width: '120px' }} value={ep.pricePerGuest} placeholder={def?.pricePerGuest ?? ''}
-                            onChange={e => { const arr = [...rcForm.eventPricings]; arr[i] = { ...arr[i], pricePerGuest: e.target.value }; setRcForm({ ...rcForm, eventPricings: arr }); }} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div style={{ marginTop: '1.5rem' }}>
+              <h3 style={{ marginBottom: '0.5rem' }}>Event Type Pricing</h3>
+              <p className="adm-hint" style={{ marginBottom: '0.75rem' }}>Leave blank to use default event pricing.</p>
+              <div className="adm-table-wrap">
+                <table className="adm-table">
+                  <thead>
+                    <tr>
+                      <th>Event Type</th>
+                      <th>Base Price</th>
+                      <th>Hourly Rate</th>
+                      <th>Price / Guest</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rcForm.eventPricings.map((eventPricing, index) => {
+                      const defaultEvent = eventTypes.find((eventType) => eventType.id === eventPricing.eventTypeId);
+                      return (
+                        <tr key={eventPricing.eventTypeId}>
+                          <td>
+                            {eventPricing.eventTypeName}
+                            {defaultEvent && (
+                              <span className="adm-table-note">
+                                Default: ₹{defaultEvent.basePrice} / ₹{defaultEvent.hourlyRate}/hr / ₹{defaultEvent.pricePerGuest}/guest
+                              </span>
+                            )}
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              step="0.01"
+                              className="input-compact"
+                              value={eventPricing.basePrice}
+                              placeholder={defaultEvent?.basePrice ?? ''}
+                              onChange={(e) => {
+                                const next = [...rcForm.eventPricings];
+                                next[index] = { ...next[index], basePrice: e.target.value };
+                                setRcForm({ ...rcForm, eventPricings: next });
+                              }}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              step="0.01"
+                              className="input-compact"
+                              value={eventPricing.hourlyRate}
+                              placeholder={defaultEvent?.hourlyRate ?? ''}
+                              onChange={(e) => {
+                                const next = [...rcForm.eventPricings];
+                                next[index] = { ...next[index], hourlyRate: e.target.value };
+                                setRcForm({ ...rcForm, eventPricings: next });
+                              }}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              step="0.01"
+                              className="input-compact"
+                              value={eventPricing.pricePerGuest}
+                              placeholder={defaultEvent?.pricePerGuest ?? ''}
+                              onChange={(e) => {
+                                const next = [...rcForm.eventPricings];
+                                next[index] = { ...next[index], pricePerGuest: e.target.value };
+                                setRcForm({ ...rcForm, eventPricings: next });
+                              }}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
-            <h3 style={{ fontSize: '1rem', marginTop: '1.5rem', marginBottom: '0.75rem' }}>Add-On Pricing</h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>Leave blank to use default pricing.</p>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                <thead>
-                  <tr style={{ borderBottom: '2px solid var(--border)' }}>
-                    <th style={{ textAlign: 'left', padding: '0.5rem' }}>Add-On</th>
-                    <th style={{ textAlign: 'right', padding: '0.5rem' }}>Price</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rcForm.addonPricings.map((ap, i) => {
-                    const def = addOns.find(a => a.id === ap.addOnId);
-                    return (
-                      <tr key={ap.addOnId} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td style={{ padding: '0.5rem' }}>
-                          {ap.addOnName}
-                          {def && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Default: ₹{def.price}</span>}
-                        </td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right' }}>
-                          <input type="number" step="0.01" style={{ ...smallInputStyle, width: '120px' }} value={ap.price} placeholder={def?.price ?? ''}
-                            onChange={e => { const arr = [...rcForm.addonPricings]; arr[i] = { ...arr[i], price: e.target.value }; setRcForm({ ...rcForm, addonPricings: arr }); }} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div style={{ marginTop: '1.5rem' }}>
+              <h3 style={{ marginBottom: '0.5rem' }}>Add-On Pricing</h3>
+              <p className="adm-hint" style={{ marginBottom: '0.75rem' }}>Leave blank to use default add-on pricing.</p>
+              <div className="adm-table-wrap">
+                <table className="adm-table">
+                  <thead>
+                    <tr>
+                      <th>Add-On</th>
+                      <th>Price</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rcForm.addonPricings.map((addonPricing, index) => {
+                      const defaultAddon = addOns.find((addOn) => addOn.id === addonPricing.addOnId);
+                      return (
+                        <tr key={addonPricing.addOnId}>
+                          <td>
+                            {addonPricing.addOnName}
+                            {defaultAddon && <span className="adm-table-note">Default: ₹{defaultAddon.price}</span>}
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              step="0.01"
+                              className="input-compact"
+                              value={addonPricing.price}
+                              placeholder={defaultAddon?.price ?? ''}
+                              onChange={(e) => {
+                                const next = [...rcForm.addonPricings];
+                                next[index] = { ...next[index], price: e.target.value };
+                                setRcForm({ ...rcForm, addonPricings: next });
+                              }}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.5rem' }}>
+            <div className="adm-form-actions">
               <button className="btn btn-secondary" onClick={() => setShowRCForm(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleSaveRC}>{editingRC ? 'Update' : 'Create'}</button>
+              <button className="btn btn-primary" onClick={handleSaveRC}><FiSave /> {editingRC ? 'Update' : 'Create'}</button>
             </div>
           </div>
         </div>

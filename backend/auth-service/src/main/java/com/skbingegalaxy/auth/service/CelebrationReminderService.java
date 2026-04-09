@@ -203,16 +203,15 @@ public class CelebrationReminderService {
     }
 
     private NotificationChannel resolveNotificationChannel(String deliveryPreference, String phone) {
-        if ("WHATSAPP".equals(deliveryPreference) && phone != null && !phone.isBlank()) {
-            return NotificationChannel.WHATSAPP;
-        }
         return NotificationChannel.EMAIL;
     }
 
     private String normalizeDeliveryPreference(String notificationChannel) {
-        return notificationChannel == null || notificationChannel.isBlank()
-            ? "WHATSAPP"
-            : notificationChannel.trim().toUpperCase(Locale.ENGLISH);
+        if (notificationChannel == null || notificationChannel.isBlank()) {
+            return "EMAIL";
+        }
+        String normalized = notificationChannel.trim().toUpperCase(Locale.ENGLISH);
+        return "CALLBACK".equals(normalized) ? "CALLBACK" : "EMAIL";
     }
 
     private LocalDate buildCelebrationDate(int year, String month, Integer day) {

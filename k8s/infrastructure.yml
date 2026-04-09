@@ -4,7 +4,7 @@ metadata:
   name: discovery-server
   namespace: sk-binge-galaxy
 spec:
-  replicas: 1
+  replicas: 1  # Single Eureka node; multi-replica requires headless peer config — use replicas:1 or replace with Spring Cloud K8s discovery
   selector:
     matchLabels:
       app: discovery-server
@@ -13,12 +13,27 @@ spec:
       labels:
         app: discovery-server
     spec:
+      serviceAccountName: spring-cloud-kubernetes
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: discovery-server
-          image: skbingegalaxy/discovery-server:latest
+          image: skbingegalaxy/discovery-server:IMAGE_TAG  # Set by CI/CD
           imagePullPolicy: Always
           ports:
             - containerPort: 8761
+              name: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          envFrom:
+            - secretRef:
+                name: app-secrets
           resources:
             requests:
               memory: "256Mi"
@@ -26,12 +41,35 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8761
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 20
           readinessProbe:
             httpGet:
               path: /actuator/health
               port: 8761
-            initialDelaySeconds: 30
+            initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8761
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -51,7 +89,7 @@ metadata:
   name: config-server
   namespace: sk-binge-galaxy
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: config-server
@@ -60,15 +98,30 @@ spec:
       labels:
         app: config-server
     spec:
+      serviceAccountName: spring-cloud-kubernetes
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: config-server
-          image: skbingegalaxy/config-server:latest
+          image: skbingegalaxy/config-server:IMAGE_TAG  # Set by CI/CD
           imagePullPolicy: Always
           ports:
             - containerPort: 8888
+              name: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          envFrom:
+            - secretRef:
+                name: app-secrets
           env:
-            - name: EUREKA_CLIENT_SERVICEURL_DEFAULTZONE
-              value: "http://admin:admin@discovery-server:8761/eureka/"
+            - name: EUREKA_CLIENT_ENABLED
+              value: "false"
           resources:
             requests:
               memory: "256Mi"
@@ -76,12 +129,35 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8888
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 20
           readinessProbe:
             httpGet:
               path: /actuator/health
               port: 8888
-            initialDelaySeconds: 30
+            initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8888
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -98,6 +174,77 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  name: redis
+  namespace: sk-binge-galaxy
+spec:
+  replicas: 1  # Single-instance Redis; use a managed Redis (ElastiCache/Upstash) for HA
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          args: ["redis-server", "--save", "", "--appendonly", "no", "--requirepass", "$(REDIS_PASSWORD)"]
+          ports:
+            - containerPort: 6379
+              name: redis
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: REDIS_PASSWORD
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+          readinessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: sk-binge-galaxy
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+      name: redis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
   name: api-gateway
   namespace: sk-binge-galaxy
 spec:
@@ -110,15 +257,38 @@ spec:
       labels:
         app: api-gateway
     spec:
+      serviceAccountName: spring-cloud-kubernetes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: api-gateway
+                topologyKey: kubernetes.io/hostname
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: api-gateway
-          image: skbingegalaxy/api-gateway:latest
+          image: skbingegalaxy/api-gateway:IMAGE_TAG  # Set by CI/CD
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
+              name: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
           envFrom:
             - configMapRef:
                 name: app-config
+            - secretRef:
+                name: app-secrets
           env:
             - name: JAVA_TOOL_OPTIONS
               value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
@@ -135,6 +305,7 @@ spec:
               port: 8080
             initialDelaySeconds: 20
             periodSeconds: 5
+            timeoutSeconds: 5
             failureThreshold: 20
           readinessProbe:
             httpGet:
@@ -142,13 +313,21 @@ spec:
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 5
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
               port: 8080
             initialDelaySeconds: 10
             periodSeconds: 15
+            timeoutSeconds: 5
             failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -156,7 +335,6 @@ metadata:
   name: api-gateway
   namespace: sk-binge-galaxy
 spec:
-  type: LoadBalancer
   selector:
     app: api-gateway
   ports:

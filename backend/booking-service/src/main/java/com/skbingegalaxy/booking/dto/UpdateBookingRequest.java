@@ -1,5 +1,7 @@
 package com.skbingegalaxy.booking.dto;
 
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
 import lombok.*;
 
@@ -20,9 +22,11 @@ public class UpdateBookingRequest {
     @Size(max = 150)
     private String customerName;
 
+    @jakarta.validation.constraints.Email(message = "Customer email must be valid")
     @Size(max = 150)
     private String customerEmail;
 
+    @jakarta.validation.constraints.Pattern(regexp = "^$|^\\d{10}$", message = "Phone must be 10 digits")
     @Size(max = 15)
     private String customerPhone;
 
@@ -34,6 +38,8 @@ public class UpdateBookingRequest {
     private Integer durationMinutes;
     private LocalTime startTime;
     private LocalDate bookingDate;
+    @Min(value = 1, message = "At least 1 guest required")
+    @Max(value = 100, message = "Maximum 100 guests")
     private Integer numberOfGuests;
     private List<AddOnSelection> addOns;
 }

@@ -7,6 +7,7 @@ import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import jakarta.annotation.PostConstruct;
 import javax.crypto.SecretKey;
 import java.util.Date;
 import java.util.HashMap;
@@ -17,6 +18,17 @@ public class JwtProvider {
 
     @Value("${app.jwt.secret}")
     private String jwtSecret;
+
+    @PostConstruct
+    void validateJwtSecret() {
+        if (jwtSecret == null || jwtSecret.isBlank()) {
+            throw new IllegalStateException("app.jwt.secret must be set (env: JWT_SECRET). Cannot start auth-service without a JWT signing key.");
+        }
+        byte[] keyBytes = io.jsonwebtoken.io.Decoders.BASE64.decode(jwtSecret);
+        if (keyBytes.length < 32) {
+            throw new IllegalStateException("app.jwt.secret must be at least 32 bytes (256 bits) for HMAC-SHA256. Current length: " + keyBytes.length);
+        }
+    }
 
     @Value("${app.jwt.expiration-ms}")
     private long jwtExpirationMs;
@@ -37,6 +49,7 @@ public class JwtProvider {
         claims.put("email", user.getEmail());
         claims.put("role", user.getRole().name());
         claims.put("firstName", user.getFirstName());
+        claims.put("phone", user.getPhone());
 
         return Jwts.builder()
             .claims(claims)

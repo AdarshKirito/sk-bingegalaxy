@@ -155,24 +155,15 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
       .catch(() => setResolvedPricing(null));
   }, [isAdmin, selectedRateCodeId]);
 
-  // Load availability
+  // Load availability (once, before step 2 is reached or when on step 2)
   useEffect(() => {
-    if (step >= 2 || availability.length > 0) return;
+    if (availability.length > 0) return;
+    if (step > 2) return;
     const from = format(new Date(), 'yyyy-MM-dd');
     const to = format(addDays(new Date(), isAdmin ? 60 : 30), 'yyyy-MM-dd');
     availabilityService.getDates(from, to)
       .then(res => setAvailability(res.data.data || []))
       .catch(() => toast.error('Failed to load available dates. Please try again.'));
-  }, [step, isAdmin, availability.length]);
-
-  useEffect(() => {
-    if (step === 2 && availability.length === 0) {
-      const from = format(new Date(), 'yyyy-MM-dd');
-      const to = format(addDays(new Date(), isAdmin ? 60 : 30), 'yyyy-MM-dd');
-      availabilityService.getDates(from, to)
-        .then(res => setAvailability(res.data.data || []))
-        .catch(() => toast.error('Failed to load available dates. Please try again.'));
-    }
   }, [step, isAdmin, availability.length]);
 
   // Load slots when date changes
@@ -304,14 +295,18 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
   };
 
   const fmtTime = (m) => {
-    const h = Math.floor(m / 60);
-    const min = m % 60;
+    const val = Number(m);
+    if (!Number.isFinite(val) || val < 0) return '--:--';
+    const h = Math.floor(val / 60) % 24;
+    const min = Math.floor(val % 60);
     return String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0');
   };
 
   const fmtDuration = (m) => {
-    const h = Math.floor(m / 60);
-    const min = m % 60;
+    const val = Number(m);
+    if (!Number.isFinite(val) || val <= 0) return '0m';
+    const h = Math.floor(val / 60);
+    const min = Math.floor(val % 60);
     if (h > 0 && min > 0) return `${h}hr ${min}m`;
     if (h > 0) return `${h}hr`;
     return `${min}m`;

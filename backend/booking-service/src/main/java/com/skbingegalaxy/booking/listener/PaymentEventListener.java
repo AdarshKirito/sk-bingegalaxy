@@ -32,12 +32,31 @@ public class PaymentEventListener {
     @KafkaListener(topics = KafkaTopics.PAYMENT_SUCCESS, groupId = "booking-group")
     @Transactional
     public void onPaymentSuccess(PaymentEvent event) {
-        String key = "PAYMENT_SUCCESS:" + event.getBookingRef() + ":" + event.getAmount();
+        String key = "PAYMENT_SUCCESS:" + event.getBookingRef() + ":" + event.getTransactionId();
         if (isDuplicate(key)) return;
 
         log.info("Payment success event for booking: {}", event.getBookingRef());
-        bookingService.updatePaymentStatus(event.getBookingRef(), PaymentStatus.SUCCESS, event.getPaymentMethod());
+
+        // Add the amount atomically first, then re-read to make the status decision.
+        // This avoids the stale-read race where two concurrent payment events both read
+        // collectedAmount=0, both compute partial, and both set PARTIALLY_PAID even though
+        // the full amount has been collected. With clearAutomatically=true on the repo
+        // @Modifying, the subsequent getBookingEntity call goes to the DB for a fresh read.
         bookingService.addToCollectedAmount(event.getBookingRef(), event.getAmount());
+
+        Booking booking = bookingService.getBookingEntityForSystem(event.getBookingRef());
+        java.math.BigDecimal collected = booking.getCollectedAmount() != null
+            ? booking.getCollectedAmount() : java.math.BigDecimal.ZERO;
+
+        if (booking.getTotalAmount() != null
+                && collected.compareTo(booking.getTotalAmount()) < 0) {
+            log.info("Partial payment for {}: collected={} of {}",
+                event.getBookingRef(), collected, booking.getTotalAmount());
+            bookingService.updatePaymentStatus(event.getBookingRef(), PaymentStatus.PARTIALLY_PAID, event.getPaymentMethod());
+        } else {
+            bookingService.updatePaymentStatus(event.getBookingRef(), PaymentStatus.SUCCESS, event.getPaymentMethod());
+        }
+
         sagaOrchestrator.advanceTo(event.getBookingRef(),
             SagaState.SagaStatus.PAYMENT_RECEIVED, "PAYMENT_SUCCESS");
         markProcessed(key);
@@ -46,17 +65,19 @@ public class PaymentEventListener {
     @KafkaListener(topics = KafkaTopics.PAYMENT_FAILED, groupId = "booking-group")
     @Transactional
     public void onPaymentFailed(PaymentEvent event) {
-        String key = "PAYMENT_FAILED:" + event.getBookingRef();
+        String key = "PAYMENT_FAILED:" + event.getBookingRef() + ":" + event.getTransactionId();
         if (isDuplicate(key)) return;
 
         log.info("Payment failed event for booking: {}", event.getBookingRef());
         bookingService.updatePaymentStatus(event.getBookingRef(), PaymentStatus.FAILED, null);
 
         try {
-            Booking booking = bookingService.getBookingEntity(event.getBookingRef());
+            Booking booking = bookingService.getBookingEntityForSystem(event.getBookingRef());
             if (booking.getStatus() == BookingStatus.PENDING) {
                 sagaOrchestrator.markCompensating(event.getBookingRef(), "Payment failed");
-                bookingService.cancelBooking(event.getBookingRef());
+                bookingService.cancelBookingForSystem(
+                    event.getBookingRef(),
+                    "Booking auto-cancelled after payment failure");
                 sagaOrchestrator.advanceTo(event.getBookingRef(),
                     SagaState.SagaStatus.COMPENSATED, "BOOKING_CANCELLED_AFTER_PAYMENT_FAIL");
                 log.info("Saga compensation: auto-cancelled PENDING booking {} after payment failure",
@@ -65,8 +86,10 @@ public class PaymentEventListener {
         } catch (Exception e) {
             sagaOrchestrator.markFailed(event.getBookingRef(),
                 "Compensation failed: " + e.getMessage());
-            log.error("Saga compensation FAILED for booking {} after payment failure: {}",
-                event.getBookingRef(), e.getMessage());
+            log.error("Saga compensation FAILED for booking {} after payment failure",
+                event.getBookingRef(), e);
+            throw new IllegalStateException(
+                "Failed to compensate booking after payment failure for " + event.getBookingRef(), e);
         }
         markProcessed(key);
     }
@@ -74,7 +97,7 @@ public class PaymentEventListener {
     @KafkaListener(topics = KafkaTopics.PAYMENT_REFUNDED, groupId = "booking-group")
     @Transactional
     public void onPaymentRefunded(PaymentEvent event) {
-        String key = "PAYMENT_REFUNDED:" + event.getBookingRef() + ":" + event.getRefundAmount();
+        String key = "PAYMENT_REFUNDED:" + event.getBookingRef() + ":" + event.getRefundId();
         if (isDuplicate(key)) return;
 
         log.info("Payment refunded event for booking: {}, status: {}", event.getBookingRef(), event.getStatus());

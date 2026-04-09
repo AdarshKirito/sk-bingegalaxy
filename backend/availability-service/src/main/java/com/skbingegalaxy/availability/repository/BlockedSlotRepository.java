@@ -15,4 +15,5 @@ public interface BlockedSlotRepository extends JpaRepository<BlockedSlot, Long> 
     void deleteByBingeIdAndSlotDateAndStartHour(Long bingeId, LocalDate date, int startHour);
     List<BlockedSlot> findBySlotDateBetween(LocalDate from, LocalDate to);
     List<BlockedSlot> findByBingeIdAndSlotDateBetween(Long bingeId, LocalDate from, LocalDate to);
+    List<BlockedSlot> findByBingeId(Long bingeId);
 }

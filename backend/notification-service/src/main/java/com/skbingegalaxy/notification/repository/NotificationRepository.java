@@ -15,11 +15,19 @@ public interface NotificationRepository extends MongoRepository<Notification, St
 
     List<Notification> findByBookingRefOrderByCreatedAtDesc(String bookingRef);
 
+    List<Notification> findByBookingRefAndRecipientEmailOrderByCreatedAtDesc(String bookingRef, String recipientEmail);
+
     Page<Notification> findByType(String type, Pageable pageable);
 
     List<Notification> findBySentFalseAndRetryCountLessThan(int maxRetries);
 
+    Page<Notification> findBySentFalseAndRetryCountLessThan(int maxRetries, Pageable pageable);
+
     long countBySentTrue();
 
     long countBySentFalse();
+
+    boolean existsByBookingRefAndType(String bookingRef, String type);
+
+    boolean existsByRecipientEmailAndType(String recipientEmail, String type);
 }

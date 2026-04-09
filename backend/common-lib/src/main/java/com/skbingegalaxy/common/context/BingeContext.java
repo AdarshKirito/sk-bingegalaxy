@@ -18,6 +18,18 @@ public final class BingeContext {
         return BINGE_ID.get();
     }
 
+    /**
+     * Returns the Binge ID or throws if not set.
+     * Use in code paths where a binge context is mandatory.
+     */
+    public static Long requireBingeId() {
+        Long id = BINGE_ID.get();
+        if (id == null) {
+            throw new IllegalStateException("BingeContext not set — X-Binge-Id header missing or BingeContextFilter not applied");
+        }
+        return id;
+    }
+
     public static void clear() {
         BINGE_ID.remove();
     }

@@ -4,6 +4,7 @@ import { bookingService, paymentService } from '../services/endpoints';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import SEO from '../components/SEO';
 import { FiArrowRight, FiCreditCard, FiFilter, FiRefreshCw, FiSearch, FiTrendingUp } from 'react-icons/fi';
+import DOMPurify from 'dompurify';
 import './CustomerHub.css';
 
 export default function CustomerPayments() {
@@ -41,7 +42,7 @@ export default function CustomerPayments() {
   }[status] || 'badge-warning');
 
   const formatAmount = (amount) => `₹${Number(amount || 0).toLocaleString()}`;
-  const sortedPayments = [...payments].sort((left, right) => new Date(right.createdAt || right.updatedAt || 0) - new Date(left.createdAt || left.updatedAt || 0));
+  const sortedPayments = [...payments].sort((left, right) => new Date(right.createdAt || right.paidAt || 0) - new Date(left.createdAt || left.paidAt || 0));
   const filteredPayments = sortedPayments.filter(payment => {
     const booking = bookingByRef[payment.bookingRef] || null;
     const searchTarget = [payment.transactionId, payment.bookingRef, booking?.eventType?.name || booking?.eventType, payment.paymentMethod, payment.status]
@@ -209,7 +210,7 @@ export default function CustomerPayments() {
                 </div>
 
                 {payment.failureReason && (
-                  <p className="customer-payment-error">{payment.failureReason}</p>
+                  <p className="customer-payment-error">{DOMPurify.sanitize(payment.failureReason, { ALLOWED_TAGS: [] })}</p>
                 )}
 
                 <div className="customer-booking-actions">

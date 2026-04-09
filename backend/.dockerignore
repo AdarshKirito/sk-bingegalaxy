@@ -1,0 +1,16 @@
+target/
+*.jar
+*.war
+*.class
+.git
+.gitignore
+.idea/
+*.iml
+*.md
+*.txt
+test/
+src/test/
+node_modules/
+.env
+docker-compose*.yml
+Dockerfile

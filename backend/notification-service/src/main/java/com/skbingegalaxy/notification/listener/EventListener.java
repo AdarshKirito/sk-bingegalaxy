@@ -5,6 +5,7 @@ import com.skbingegalaxy.common.enums.NotificationChannel;
 import com.skbingegalaxy.common.event.BookingEvent;
 import com.skbingegalaxy.common.event.NotificationEvent;
 import com.skbingegalaxy.common.event.PaymentEvent;
+import com.skbingegalaxy.notification.repository.NotificationRepository;
 import com.skbingegalaxy.notification.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,129 +21,202 @@ import java.util.Map;
 public class EventListener {
 
     private final NotificationService notificationService;
+    private final NotificationRepository notificationRepository;
 
     @KafkaListener(topics = KafkaTopics.BOOKING_CREATED, groupId = "notification-service")
     public void handleBookingCreated(BookingEvent event) {
-        log.info("Booking created event: {}", event.getBookingRef());
-        Map<String, Object> meta = new HashMap<>();
-        meta.put("eventType", event.getEventTypeName());
-        meta.put("bookingDate", event.getBookingDate().toString());
-        meta.put("startTime", event.getStartTime().toString());
-        meta.put("durationHours", event.getDurationHours());
-        meta.put("totalAmount", event.getTotalAmount().toPlainString());
-        notificationService.sendNotification(
-            "BOOKING_CREATED",
-            NotificationChannel.EMAIL,
-            event.getCustomerEmail(),
-            event.getCustomerPhone(),
-            event.getCustomerName(),
-            "Booking Confirmed - " + event.getBookingRef(),
-            buildBookingCreatedBody(event),
-            event.getBookingRef(),
-            meta
-        );
+        try {
+            log.info("Booking created event: {}", event.getBookingRef());
+            if (event.getCustomerEmail() == null || event.getBookingRef() == null) {
+                log.warn("Skipping BOOKING_CREATED — missing required fields");
+                return;
+            }
+            if (notificationRepository.existsByBookingRefAndType(event.getBookingRef(), "BOOKING_CREATED")) {
+                log.info("Duplicate BOOKING_CREATED for {} — skipping", event.getBookingRef());
+                return;
+            }
+            Map<String, Object> meta = new HashMap<>();
+            meta.put("eventType", event.getEventTypeName());
+            meta.put("bookingDate", event.getBookingDate() != null ? event.getBookingDate().toString() : "");
+            meta.put("startTime", event.getStartTime() != null ? event.getStartTime().toString() : "");
+            meta.put("durationHours", event.getDurationHours());
+            meta.put("totalAmount", event.getTotalAmount() != null ? event.getTotalAmount().toPlainString() : "0");
+            notificationService.sendNotification(
+                "BOOKING_CREATED",
+                NotificationChannel.EMAIL,
+                event.getCustomerEmail(),
+                event.getCustomerPhone(),
+                event.getCustomerName(),
+                "Booking Confirmed - " + event.getBookingRef(),
+                buildBookingCreatedBody(event),
+                event.getBookingRef(),
+                meta
+            );
+        } catch (Exception e) {
+            log.error("Failed to process BOOKING_CREATED event for {}: {}", event.getBookingRef(), e.getMessage(), e);
+        }
     }
 
     @KafkaListener(topics = KafkaTopics.BOOKING_CANCELLED, groupId = "notification-service")
     public void handleBookingCancelled(BookingEvent event) {
-        log.info("Booking cancelled event: {}", event.getBookingRef());
-        notificationService.sendNotification(
-            "BOOKING_CANCELLED",
-            NotificationChannel.EMAIL,
-            event.getCustomerEmail(),
-            event.getCustomerPhone(),
-            event.getCustomerName(),
-            "Booking Cancelled - " + event.getBookingRef(),
-            buildBookingCancelledBody(event),
-            event.getBookingRef(),
-            Map.of("eventType", event.getEventTypeName())
-        );
+        try {
+            log.info("Booking cancelled event: {}", event.getBookingRef());
+            if (event.getCustomerEmail() == null || event.getBookingRef() == null) {
+                log.warn("Skipping BOOKING_CANCELLED — missing required fields");
+                return;
+            }
+            if (notificationRepository.existsByBookingRefAndType(event.getBookingRef(), "BOOKING_CANCELLED")) {
+                log.info("Duplicate BOOKING_CANCELLED for {} — skipping", event.getBookingRef());
+                return;
+            }
+            notificationService.sendNotification(
+                "BOOKING_CANCELLED",
+                NotificationChannel.EMAIL,
+                event.getCustomerEmail(),
+                event.getCustomerPhone(),
+                event.getCustomerName(),
+                "Booking Cancelled - " + event.getBookingRef(),
+                buildBookingCancelledBody(event),
+                event.getBookingRef(),
+                Map.of("eventType", event.getEventTypeName() != null ? event.getEventTypeName() : "")
+            );
+        } catch (Exception e) {
+            log.error("Failed to process BOOKING_CANCELLED event for {}: {}", event.getBookingRef(), e.getMessage(), e);
+        }
     }
 
     @KafkaListener(topics = KafkaTopics.PAYMENT_SUCCESS, groupId = "notification-service")
     public void handlePaymentSuccess(PaymentEvent event) {
-        log.info("Payment success event: {}", event.getBookingRef());
-        Map<String, Object> meta = new HashMap<>();
-        meta.put("transactionId", event.getTransactionId());
-        meta.put("amount", event.getAmount().toPlainString());
-        meta.put("paymentMethod", event.getPaymentMethod());
-        notificationService.sendNotification(
-            "PAYMENT_SUCCESS",
-            NotificationChannel.EMAIL,
-            null, null, null,
-            "Payment Successful - " + event.getBookingRef(),
-            buildPaymentSuccessBody(event),
-            event.getBookingRef(),
-            meta
-        );
+        try {
+            log.info("Payment success event: {}", event.getBookingRef());
+            if (event.getCustomerEmail() == null) {
+                log.warn("Skipping PAYMENT_SUCCESS — missing recipient email");
+                return;
+            }
+            if (notificationRepository.existsByBookingRefAndType(event.getBookingRef(), "PAYMENT_SUCCESS")) {
+                log.info("Duplicate PAYMENT_SUCCESS for {} — skipping", event.getBookingRef());
+                return;
+            }
+            Map<String, Object> meta = new HashMap<>();
+            meta.put("transactionId", event.getTransactionId() != null ? event.getTransactionId() : "");
+            meta.put("amount", event.getAmount() != null ? event.getAmount().toPlainString() : "0");
+            meta.put("paymentMethod", event.getPaymentMethod() != null ? event.getPaymentMethod() : "");
+            notificationService.sendNotification(
+                "PAYMENT_SUCCESS",
+                NotificationChannel.EMAIL,
+                event.getCustomerEmail(), event.getCustomerPhone(), event.getCustomerName(),
+                "Payment Successful - " + event.getBookingRef(),
+                buildPaymentSuccessBody(event),
+                event.getBookingRef(),
+                meta
+            );
+        } catch (Exception e) {
+            log.error("Failed to process PAYMENT_SUCCESS event for {}: {}", event.getBookingRef(), e.getMessage(), e);
+        }
     }
 
     @KafkaListener(topics = KafkaTopics.PAYMENT_FAILED, groupId = "notification-service")
     public void handlePaymentFailed(PaymentEvent event) {
-        log.info("Payment failed event: {}", event.getBookingRef());
-        Map<String, Object> meta = new HashMap<>();
-        meta.put("transactionId", event.getTransactionId());
-        notificationService.sendNotification(
-            "PAYMENT_FAILED",
-            NotificationChannel.EMAIL,
-            null, null, null,
-            "Payment Failed - " + event.getBookingRef(),
-            buildPaymentFailedBody(event),
-            event.getBookingRef(),
-            meta
-        );
+        try {
+            log.info("Payment failed event: {}", event.getBookingRef());
+            if (event.getCustomerEmail() == null) {
+                log.warn("Skipping PAYMENT_FAILED — missing recipient email");
+                return;
+            }
+            if (notificationRepository.existsByBookingRefAndType(event.getBookingRef(), "PAYMENT_FAILED")) {
+                log.info("Duplicate PAYMENT_FAILED for {} — skipping", event.getBookingRef());
+                return;
+            }
+            Map<String, Object> meta = new HashMap<>();
+            meta.put("transactionId", event.getTransactionId() != null ? event.getTransactionId() : "");
+            notificationService.sendNotification(
+                "PAYMENT_FAILED",
+                NotificationChannel.EMAIL,
+                event.getCustomerEmail(), event.getCustomerPhone(), event.getCustomerName(),
+                "Payment Failed - " + event.getBookingRef(),
+                buildPaymentFailedBody(event),
+                event.getBookingRef(),
+                meta
+            );
+        } catch (Exception e) {
+            log.error("Failed to process PAYMENT_FAILED event for {}: {}", event.getBookingRef(), e.getMessage(), e);
+        }
     }
 
     @KafkaListener(topics = KafkaTopics.NOTIFICATION_SEND, groupId = "notification-service")
     public void handleDirectNotification(NotificationEvent event) {
-        log.info("Direct notification event: type={}, to={}", event.getType(), event.getRecipientEmail());
-        NotificationChannel channel = event.getChannel() != null ? event.getChannel() : NotificationChannel.EMAIL;
+        try {
+            log.info("Direct notification event: type={}, to={}", event.getType(), event.getRecipientEmail());
+            NotificationChannel channel = event.getChannel() != null ? event.getChannel() : NotificationChannel.EMAIL;
 
-        notificationService.sendNotification(
-            event.getType(),
-            channel,
-            event.getRecipientEmail(),
-            event.getRecipientPhone(),
-            event.getRecipientName(),
-            event.getSubject(),
-            event.getBody(),
-            event.getBookingRef(),
-            event.getMetadata()
-        );
+            notificationService.sendNotification(
+                event.getType(),
+                channel,
+                event.getRecipientEmail(),
+                event.getRecipientPhone(),
+                event.getRecipientName(),
+                event.getSubject(),
+                event.getBody(),
+                event.getBookingRef(),
+                event.getMetadata()
+            );
+        } catch (Exception e) {
+            log.error("Failed to process NOTIFICATION_SEND event: {}", e.getMessage(), e);
+        }
     }
 
     @KafkaListener(topics = KafkaTopics.USER_REGISTERED, groupId = "notification-service")
     public void handleUserRegistered(NotificationEvent event) {
-        log.info("User registered event: {}", event.getRecipientEmail());
-        notificationService.sendNotification(
-            "USER_REGISTERED",
-            NotificationChannel.EMAIL,
-            event.getRecipientEmail(),
-            event.getRecipientPhone(),
-            event.getRecipientName(),
-            "Welcome to SK Binge Galaxy!",
-            buildWelcomeBody(event),
-            null,
-            null
-        );
+        try {
+            log.info("User registered event: {}", event.getRecipientEmail());
+            if (event.getRecipientEmail() == null) {
+                log.warn("Skipping USER_REGISTERED — missing recipient email");
+                return;
+            }
+            if (notificationRepository.existsByRecipientEmailAndType(event.getRecipientEmail(), "USER_REGISTERED")) {
+                log.info("Duplicate USER_REGISTERED for {} — skipping", event.getRecipientEmail());
+                return;
+            }
+            notificationService.sendNotification(
+                "USER_REGISTERED",
+                NotificationChannel.EMAIL,
+                event.getRecipientEmail(),
+                event.getRecipientPhone(),
+                event.getRecipientName(),
+                "Welcome to SK Binge Galaxy!",
+                buildWelcomeBody(event),
+                null,
+                null
+            );
+        } catch (Exception e) {
+            log.error("Failed to process USER_REGISTERED event for {}: {}", event.getRecipientEmail(), e.getMessage(), e);
+        }
     }
 
     @KafkaListener(topics = KafkaTopics.PASSWORD_RESET, groupId = "notification-service")
     public void handlePasswordReset(NotificationEvent event) {
-        log.info("Password reset event: {}", event.getRecipientEmail());
-        Map<String, Object> meta = event.getMetadata() != null ? new HashMap<>(event.getMetadata()) : new HashMap<>();
-        meta.put("name", event.getRecipientName());
-        notificationService.sendNotification(
-            "PASSWORD_RESET",
-            NotificationChannel.EMAIL,
-            event.getRecipientEmail(),
-            null,
-            event.getRecipientName(),
-            "Password Reset Request - SK Binge Galaxy",
-            event.getBody(),
-            null,
-            meta
-        );
+        try {
+            log.info("Password reset event: {}", event.getRecipientEmail());
+            if (event.getRecipientEmail() == null) {
+                log.warn("Skipping PASSWORD_RESET — missing recipient email");
+                return;
+            }
+            Map<String, Object> meta = event.getMetadata() != null ? new HashMap<>(event.getMetadata()) : new HashMap<>();
+            meta.put("name", event.getRecipientName());
+            notificationService.sendNotification(
+                "PASSWORD_RESET",
+                NotificationChannel.EMAIL,
+                event.getRecipientEmail(),
+                null,
+                event.getRecipientName(),
+                "Password Reset Request - SK Binge Galaxy",
+                event.getBody(),
+                null,
+                meta
+            );
+        } catch (Exception e) {
+            log.error("Failed to process PASSWORD_RESET event for {}: {}", event.getRecipientEmail(), e.getMessage(), e);
+        }
     }
 
     // ---- Body builders ----

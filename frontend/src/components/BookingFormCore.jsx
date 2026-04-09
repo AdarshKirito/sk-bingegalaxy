@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { bookingService, availabilityService, adminService } from '../services/endpoints';
+import { toast } from 'react-toastify';
 import { format, addDays } from 'date-fns';
 
 /**
@@ -27,7 +28,7 @@ export default function BookingFormCore({ form, setForm, isAdmin = false }) {
         setEventTypes(etRes.data.data || []);
         setAddOns(aoRes.data.data || []);
       })
-      .catch(() => {});
+      .catch(() => toast.error('Failed to load booking options'));
   }, []);
 
   useEffect(() => {
@@ -35,7 +36,7 @@ export default function BookingFormCore({ form, setForm, isAdmin = false }) {
     const to = format(addDays(new Date(), isAdmin ? 60 : 30), 'yyyy-MM-dd');
     availabilityService.getDates(from, to)
       .then(res => setAvailability(res.data.data || []))
-      .catch(() => {});
+      .catch(() => toast.error('Failed to load available dates'));
   }, [isAdmin]);
 
   useEffect(() => {

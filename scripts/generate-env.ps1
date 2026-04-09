@@ -33,6 +33,8 @@ $mongoPassword     = New-SecurePassword -Length 24
 $eurekaPassword    = New-SecurePassword -Length 16
 $configPassword    = New-SecurePassword -Length 16
 $jwtSecret         = New-Base64Secret -ByteLength 48
+$internalApiSecret = New-SecurePassword -Length 32
+$redisPassword     = New-SecurePassword -Length 24
 $adminPassword     = New-SecurePassword -Length 18
 
 $timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
@@ -58,8 +60,21 @@ CONFIG_SERVER_PASSWORD=$configPassword
 # -- JWT -------------------------------------------------------
 JWT_SECRET=$jwtSecret
 
+# -- Internal Service-to-Service Auth --------------------------
+INTERNAL_API_SECRET=$internalApiSecret
+REDIS_PASSWORD=$redisPassword
+
+# -- Deploy / Ingress ------------------------------------------
+INGRESS_HOST=skbingegalaxy.com
+TLS_SECRET_NAME=skbingegalaxy-tls
+LETSENCRYPT_EMAIL=admin@skbingegalaxy.com
+STORAGE_CLASS_NAME=gp3
+MANAGED_POSTGRES_HOST=         # TODO: required for production Jenkins/Kubernetes deploys
+BACKUP_S3_BUCKET=             # Optional but recommended for off-cluster backups
+
 # -- Auth Cookies ----------------------------------------------
-COOKIE_SECURE=false
+# IMPORTANT: Default is true for production safety. Set to false ONLY for local HTTP dev.
+COOKIE_SECURE=true
 COOKIE_DOMAIN=
 
 # -- Admin Seeding ---------------------------------------------
@@ -75,7 +90,8 @@ RAZORPAY_KEY_SECRET=              # TODO: paste your Razorpay key secret
 PAYMENT_CALLBACK_URL=https://yourdomain.com/api/v1/payments/callback
 
 # -- CORS (comma-separated origins) ---------------------------
-CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
+# Production-safe default. Add localhost origins only when running over local HTTP.
+CORS_ALLOWED_ORIGINS=https://skbingegalaxy.com
 
 # -- Email / SMTP ----------------------------------------------
 EMAIL_HOST=smtp.gmail.com
@@ -85,9 +101,9 @@ EMAIL_PASS=                       # TODO: SMTP password / app-specific password
 EMAIL_FROM=noreply@skbingegalaxy.com
 
 # -- SMS / WhatsApp --------------------------------------------
-SMS_PROVIDER=mock
+SMS_PROVIDER=disabled
 SMS_API_KEY=
-WHATSAPP_PROVIDER=mock
+WHATSAPP_PROVIDER=disabled
 WHATSAPP_PHONE_ID=
 WHATSAPP_TOKEN=
 "@
@@ -95,4 +111,4 @@ WHATSAPP_TOKEN=
 Set-Content -Path $envFile -Value $content -Encoding UTF8
 
 Write-Host "OK - .env generated with strong random secrets." -ForegroundColor Green
-Write-Host "Fill in GOOGLE_CLIENT_ID, RAZORPAY keys, and EMAIL credentials before starting." -ForegroundColor Cyan
+Write-Host "Fill in GOOGLE_CLIENT_ID, RAZORPAY keys, EMAIL credentials, and set MANAGED_POSTGRES_HOST plus STORAGE_CLASS_NAME before deploying to production. Set BACKUP_S3_BUCKET if you want off-cluster backups." -ForegroundColor Cyan

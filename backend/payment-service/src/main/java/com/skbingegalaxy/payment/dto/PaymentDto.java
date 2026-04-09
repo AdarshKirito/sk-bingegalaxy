@@ -33,4 +33,10 @@ public class PaymentDto {
     private BigDecimal remainingRefundable;
     /** Number of completed refunds issued. */
     private Integer refundCount;
+    /**
+     * Razorpay public key ID — populated for INITIATED payments so the
+     * frontend can open the Razorpay checkout modal. Never populated when
+     * simulation mode is enabled.
+     */
+    private String razorpayKeyId;
 }

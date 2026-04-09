@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { adminService } from '../services/endpoints';
 import { toast } from 'react-toastify';
+import { FiPackage, FiPlus, FiEdit2, FiToggleLeft, FiToggleRight, FiTrash2, FiX, FiImage } from 'react-icons/fi';
+import './AdminPages.css';
 
 const ADDON_CATEGORIES = ['DECORATION', 'BEVERAGE', 'PHOTOGRAPHY', 'EFFECT', 'FOOD', 'EXPERIENCE'];
 
@@ -93,7 +95,23 @@ export default function AdminEventTypes() {
       toast.success(`Event type ${et.active ? 'deactivated' : 'activated'}`);
       fetchAll();
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed');
+      toast.error(err.userMessage || err.response?.data?.message || 'Failed');
+    }
+  };
+
+  const handleDeleteET = async (et) => {
+    if (et.active) {
+      toast.error('Deactivate the event type before deleting it');
+      return;
+    }
+    if (!confirm(`Delete event type "${et.name}" permanently? This cannot be undone.`)) return;
+
+    try {
+      await adminService.deleteEventType(et.id);
+      toast.success('Event type deleted');
+      fetchAll();
+    } catch (err) {
+      toast.error(err.userMessage || err.response?.data?.message || 'Failed to delete event type.');
     }
   };
 
@@ -145,107 +163,146 @@ export default function AdminEventTypes() {
       toast.success(`Add-on ${ao.active ? 'deactivated' : 'activated'}`);
       fetchAll();
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed');
+      toast.error(err.userMessage || err.response?.data?.message || 'Failed');
+    }
+  };
+
+  const handleDeleteAO = async (ao) => {
+    if (ao.active) {
+      toast.error('Deactivate the add-on before deleting it');
+      return;
+    }
+    if (!confirm(`Delete add-on "${ao.name}" permanently? This cannot be undone.`)) return;
+
+    try {
+      await adminService.deleteAddOn(ao.id);
+      toast.success('Add-on deleted');
+      fetchAll();
+    } catch (err) {
+      toast.error(err.userMessage || err.response?.data?.message || 'Failed to delete add-on.');
     }
   };
 
   return (
-    <div className="container">
-      <div className="page-header">
-        <h1>Event Types & Add-Ons</h1>
-        <p>Manage pricing and available packages</p>
+    <div className="container adm-shell">
+      <div className="adm-header">
+        <div className="adm-header-copy">
+          <span className="adm-kicker"><FiPackage /> Catalog</span>
+          <h1>Event Types & Add-Ons</h1>
+          <p>Manage pricing, packages, and available add-ons for your venue.</p>
+        </div>
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
-        <button className={`btn ${tab === 'eventTypes' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
-          onClick={() => setTab('eventTypes')}>Event Types</button>
-        <button className={`btn ${tab === 'addOns' ? 'btn-primary' : 'btn-secondary'} btn-sm`}
-          onClick={() => setTab('addOns')}>Add-Ons</button>
+      <div className="adm-toolbar">
+        <div className="adm-tabs">
+          <button className={`adm-tab${tab === 'eventTypes' ? ' active' : ''}`}
+            onClick={() => setTab('eventTypes')}>Event Types</button>
+          <button className={`adm-tab${tab === 'addOns' ? ' active' : ''}`}
+            onClick={() => setTab('addOns')}>Add-Ons</button>
+        </div>
+        <div className="adm-toolbar-right">
+          {tab === 'eventTypes'
+            ? <button className="btn btn-primary btn-sm" onClick={openCreateET}><FiPlus /> New Event Type</button>
+            : <button className="btn btn-primary btn-sm" onClick={openCreateAO}><FiPlus /> New Add-On</button>}
+        </div>
       </div>
 
       {loading ? (
         <div className="loading"><div className="spinner"></div></div>
       ) : tab === 'eventTypes' ? (
-        <>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
-            <button className="btn btn-primary btn-sm" onClick={openCreateET}>+ New Event Type</button>
+        eventTypes.length === 0 ? (
+          <div className="adm-empty">
+            <span className="adm-empty-icon"><FiPackage /></span>
+            <h3>No event types yet</h3>
+            <p>Create your first event type to start accepting bookings.</p>
           </div>
-          <div className="grid-3">
+        ) : (
+          <div className="adm-grid-3">
             {eventTypes.map(et => (
-              <div key={et.id} className="card" style={{ opacity: et.active ? 1 : 0.6 }}>
+              <div key={et.id} className={`adm-item${et.active ? '' : ' inactive'}`}>
                 {et.imageUrls?.length > 0 && et.imageUrls[0] && (
-                  <div style={{ marginBottom: '0.75rem', borderRadius: 'var(--radius-sm)', overflow: 'hidden', maxHeight: '150px' }}>
-                    <img src={et.imageUrls[0]} alt={et.name} style={{ width: '100%', height: '150px', objectFit: 'cover' }} />
-                    {et.imageUrls.length > 1 && <div style={{ textAlign: 'center', fontSize: '0.7rem', color: 'var(--text-muted)', padding: '0.2rem' }}>+{et.imageUrls.length - 1} more</div>}
-                  </div>
+                  <>
+                    <img src={et.imageUrls[0]} alt={et.name} className="adm-item-img" />
+                    {et.imageUrls.length > 1 && <div className="adm-item-img-more">+{et.imageUrls.length - 1} more</div>}
+                  </>
                 )}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <p style={{ fontWeight: 700, fontSize: '1rem' }}>{et.name}</p>
-                    {!et.active && <span className="badge badge-danger" style={{ marginBottom: '0.25rem' }}>Inactive</span>}
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>{et.description}</p>
+                <div className="adm-item-body">
+                  <span className="adm-item-name">{et.name}</span>
+                  {!et.active && <span className="adm-badge adm-badge-inactive">Inactive</span>}
+                  {et.description && <span className="adm-item-desc">{et.description}</span>}
+                  <div className="adm-item-meta">
+                    <span>Base: <strong>₹{Number(et.basePrice).toLocaleString()}</strong></span>
+                    <span>Hourly: <strong>₹{Number(et.hourlyRate).toLocaleString()}/hr</strong></span>
+                    {Number(et.pricePerGuest) > 0 && <span>Per Guest: <strong>₹{Number(et.pricePerGuest).toLocaleString()}</strong></span>}
+                    <span>Duration: <strong>{et.minHours}–{et.maxHours} hrs</strong></span>
                   </div>
                 </div>
-                <div style={{ marginTop: '0.75rem', fontSize: '0.85rem' }}>
-                  <p>Base: <strong>₹{Number(et.basePrice).toLocaleString()}</strong></p>
-                  <p>Hourly: <strong>₹{Number(et.hourlyRate).toLocaleString()}/hr</strong></p>
-                  {Number(et.pricePerGuest) > 0 && <p>Per Guest: <strong>₹{Number(et.pricePerGuest).toLocaleString()}</strong></p>}
-                  <p>Duration: <strong>{et.minHours}–{et.maxHours} hrs</strong></p>
-                </div>
-                <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.75rem' }}>
-                  <button className="btn btn-sm btn-secondary" onClick={() => openEditET(et)}>Edit</button>
+                <div className="adm-item-footer">
+                  <button className="btn btn-sm btn-secondary" onClick={() => openEditET(et)}><FiEdit2 style={{ marginRight: 3 }} /> Edit</button>
                   <button className={`btn btn-sm ${et.active ? 'btn-danger' : 'btn-primary'}`}
-                    onClick={() => handleToggleET(et)}>{et.active ? 'Deactivate' : 'Activate'}</button>
+                    onClick={() => handleToggleET(et)}>
+                    {et.active ? <><FiToggleLeft style={{ marginRight: 3 }} /> Deactivate</> : <><FiToggleRight style={{ marginRight: 3 }} /> Activate</>}
+                  </button>
+                  {!et.active && (
+                    <button className="btn adm-danger-btn btn-sm" onClick={() => handleDeleteET(et)}>
+                      <FiTrash2 style={{ marginRight: 3 }} /> Delete
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
-            {eventTypes.length === 0 && <p style={{ color: 'var(--text-muted)' }}>No event types found</p>}
           </div>
-        </>
+        )
       ) : (
-        <>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
-            <button className="btn btn-primary btn-sm" onClick={openCreateAO}>+ New Add-On</button>
+        addOns.length === 0 ? (
+          <div className="adm-empty">
+            <span className="adm-empty-icon"><FiPackage /></span>
+            <h3>No add-ons yet</h3>
+            <p>Create add-ons like decorations, beverages, or photography.</p>
           </div>
-          <div className="grid-3">
+        ) : (
+          <div className="adm-grid-3">
             {addOns.map(ao => (
-              <div key={ao.id} className="card" style={{ opacity: ao.active ? 1 : 0.6 }}>
+              <div key={ao.id} className={`adm-item${ao.active ? '' : ' inactive'}`}>
                 {ao.imageUrls?.length > 0 && ao.imageUrls[0] && (
-                  <div style={{ marginBottom: '0.75rem', borderRadius: 'var(--radius-sm)', overflow: 'hidden', maxHeight: '120px' }}>
-                    <img src={ao.imageUrls[0]} alt={ao.name} style={{ width: '100%', height: '120px', objectFit: 'cover' }} />
-                    {ao.imageUrls.length > 1 && <div style={{ textAlign: 'center', fontSize: '0.7rem', color: 'var(--text-muted)', padding: '0.2rem' }}>+{ao.imageUrls.length - 1} more</div>}
-                  </div>
+                  <>
+                    <img src={ao.imageUrls[0]} alt={ao.name} className="adm-item-img" style={{ height: 120 }} />
+                    {ao.imageUrls.length > 1 && <div className="adm-item-img-more">+{ao.imageUrls.length - 1} more</div>}
+                  </>
                 )}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <p style={{ fontWeight: 700, fontSize: '1rem' }}>{ao.name}</p>
-                    <span className="badge badge-info" style={{ fontSize: '0.7rem' }}>{ao.category}</span>
-                    {!ao.active && <span className="badge badge-danger" style={{ marginLeft: '0.3rem', fontSize: '0.7rem' }}>Inactive</span>}
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>{ao.description}</p>
+                <div className="adm-item-body">
+                  <span className="adm-item-name">{ao.name}</span>
+                  <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                    <span className="adm-badge adm-badge-info">{ao.category}</span>
+                    {!ao.active && <span className="adm-badge adm-badge-inactive">Inactive</span>}
                   </div>
+                  {ao.description && <span className="adm-item-desc">{ao.description}</span>}
+                  <span style={{ marginTop: '0.4rem', fontWeight: 700, fontSize: '1.1rem', color: 'var(--text)' }}>₹{Number(ao.price).toLocaleString()}</span>
                 </div>
-                <p style={{ marginTop: '0.5rem', fontWeight: 700 }}>₹{Number(ao.price).toLocaleString()}</p>
-                <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.75rem' }}>
-                  <button className="btn btn-sm btn-secondary" onClick={() => openEditAO(ao)}>Edit</button>
+                <div className="adm-item-footer">
+                  <button className="btn btn-sm btn-secondary" onClick={() => openEditAO(ao)}><FiEdit2 style={{ marginRight: 3 }} /> Edit</button>
                   <button className={`btn btn-sm ${ao.active ? 'btn-danger' : 'btn-primary'}`}
-                    onClick={() => handleToggleAO(ao)}>{ao.active ? 'Deactivate' : 'Activate'}</button>
+                    onClick={() => handleToggleAO(ao)}>
+                    {ao.active ? <><FiToggleLeft style={{ marginRight: 3 }} /> Deactivate</> : <><FiToggleRight style={{ marginRight: 3 }} /> Activate</>}
+                  </button>
+                  {!ao.active && (
+                    <button className="btn adm-danger-btn btn-sm" onClick={() => handleDeleteAO(ao)}>
+                      <FiTrash2 style={{ marginRight: 3 }} /> Delete
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
-            {addOns.length === 0 && <p style={{ color: 'var(--text-muted)' }}>No add-ons found</p>}
           </div>
-        </>
+        )
       )}
 
       {/* Modal */}
       {modal.open && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex',
-          alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem',
-        }}>
-          <div className="card" style={{ width: '100%', maxWidth: '480px', maxHeight: '90vh', overflowY: 'auto' }}>
-            <h3 style={{ marginBottom: '1.25rem' }}>
+        <div className="adm-modal-overlay" onClick={(e) => e.target === e.currentTarget && setModal({ open: false })}>
+          <div className="adm-modal">
+            <h3>
               {modal.mode === 'create' ? 'Create' : 'Edit'} {modal.type === 'et' ? 'Event Type' : 'Add-On'}
             </h3>
 
@@ -257,8 +314,8 @@ export default function AdminEventTypes() {
                 </div>
                 <div className="input-group">
                   <label>Description</label>
-                  <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
-                    placeholder="A short description..." rows={2} style={{ width: '100%', resize: 'vertical', padding: '0.5rem', background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text)' }} />
+                  <textarea className="adm-textarea" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
+                    placeholder="A short description..." rows={2} />
                 </div>
                 <div className="grid-2">
                   <div className="input-group">
@@ -276,7 +333,7 @@ export default function AdminEventTypes() {
                   <label>Price Per Guest (₹)</label>
                   <input type="number" min="0" step="0.01" value={form.pricePerGuest}
                     onChange={e => setForm({ ...form, pricePerGuest: e.target.value })} placeholder="0 (extra guest surcharge)" />
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Charged for each additional guest (2nd guest onward)</span>
+                  <span className="adm-hint">Charged for each additional guest (2nd guest onward)</span>
                 </div>
                 <div className="grid-2">
                   <div className="input-group">
@@ -291,24 +348,24 @@ export default function AdminEventTypes() {
                   </div>
                 </div>
                 <div className="input-group">
-                  <label>Image URLs</label>
+                  <label><FiImage style={{ marginRight: 4, verticalAlign: -2 }} />Image URLs</label>
                   {form.imageUrls.map((url, i) => (
-                    <div key={i} style={{ display: 'flex', gap: '0.3rem', marginBottom: '0.3rem', alignItems: 'center' }}>
+                    <div key={i} className="adm-img-row">
                       <input value={url} onChange={e => { const urls = [...form.imageUrls]; urls[i] = e.target.value; setForm({ ...form, imageUrls: urls }); }}
-                        placeholder="https://example.com/image.jpg" style={{ flex: 1 }} />
-                      {form.imageUrls.length > 1 && <button type="button" className="btn btn-sm btn-danger" onClick={() => { const urls = form.imageUrls.filter((_, j) => j !== i); setForm({ ...form, imageUrls: urls }); }} style={{ padding: '0.2rem 0.5rem' }}>×</button>}
+                        placeholder="https://example.com/image.jpg" />
+                      {form.imageUrls.length > 1 && <button type="button" className="btn btn-sm btn-danger" onClick={() => { const urls = form.imageUrls.filter((_, j) => j !== i); setForm({ ...form, imageUrls: urls }); }} style={{ padding: '0.2rem 0.5rem' }}><FiX /></button>}
                     </div>
                   ))}
-                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => setForm({ ...form, imageUrls: [...form.imageUrls, ''] })} style={{ marginTop: '0.25rem' }}>+ Add Image</button>
+                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => setForm({ ...form, imageUrls: [...form.imageUrls, ''] })} style={{ marginTop: '0.25rem' }}><FiPlus /> Add Image</button>
                   {form.imageUrls.filter(u => u.trim()).length > 0 && (
-                    <div style={{ display: 'flex', gap: '0.3rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                    <div className="adm-img-previews">
                       {form.imageUrls.filter(u => u.trim()).map((url, i) => (
-                        <img key={i} src={url} alt={`Preview ${i+1}`} style={{ height: '60px', borderRadius: 'var(--radius-sm)', objectFit: 'cover' }} />
+                        <img key={i} src={url} alt={`Preview ${i+1}`} />
                       ))}
                     </div>
                   )}
                 </div>
-                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+                <div className="adm-modal-actions">
                   <button type="submit" className="btn btn-primary btn-sm" disabled={saving}>
                     {saving ? 'Saving...' : 'Save'}
                   </button>
@@ -323,8 +380,8 @@ export default function AdminEventTypes() {
                 </div>
                 <div className="input-group">
                   <label>Description</label>
-                  <textarea value={addonForm.description} onChange={e => setAddonForm({ ...addonForm, description: e.target.value })}
-                    placeholder="A short description..." rows={2} style={{ width: '100%', resize: 'vertical', padding: '0.5rem', background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text)' }} />
+                  <textarea className="adm-textarea" value={addonForm.description} onChange={e => setAddonForm({ ...addonForm, description: e.target.value })}
+                    placeholder="A short description..." rows={2} />
                 </div>
                 <div className="grid-2">
                   <div className="input-group">
@@ -340,24 +397,24 @@ export default function AdminEventTypes() {
                   </div>
                 </div>
                 <div className="input-group">
-                  <label>Image URLs</label>
+                  <label><FiImage style={{ marginRight: 4, verticalAlign: -2 }} />Image URLs</label>
                   {addonForm.imageUrls.map((url, i) => (
-                    <div key={i} style={{ display: 'flex', gap: '0.3rem', marginBottom: '0.3rem', alignItems: 'center' }}>
+                    <div key={i} className="adm-img-row">
                       <input value={url} onChange={e => { const urls = [...addonForm.imageUrls]; urls[i] = e.target.value; setAddonForm({ ...addonForm, imageUrls: urls }); }}
-                        placeholder="https://example.com/image.jpg" style={{ flex: 1 }} />
-                      {addonForm.imageUrls.length > 1 && <button type="button" className="btn btn-sm btn-danger" onClick={() => { const urls = addonForm.imageUrls.filter((_, j) => j !== i); setAddonForm({ ...addonForm, imageUrls: urls }); }} style={{ padding: '0.2rem 0.5rem' }}>×</button>}
+                        placeholder="https://example.com/image.jpg" />
+                      {addonForm.imageUrls.length > 1 && <button type="button" className="btn btn-sm btn-danger" onClick={() => { const urls = addonForm.imageUrls.filter((_, j) => j !== i); setAddonForm({ ...addonForm, imageUrls: urls }); }} style={{ padding: '0.2rem 0.5rem' }}><FiX /></button>}
                     </div>
                   ))}
-                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => setAddonForm({ ...addonForm, imageUrls: [...addonForm.imageUrls, ''] })} style={{ marginTop: '0.25rem' }}>+ Add Image</button>
+                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => setAddonForm({ ...addonForm, imageUrls: [...addonForm.imageUrls, ''] })} style={{ marginTop: '0.25rem' }}><FiPlus /> Add Image</button>
                   {addonForm.imageUrls.filter(u => u.trim()).length > 0 && (
-                    <div style={{ display: 'flex', gap: '0.3rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                    <div className="adm-img-previews">
                       {addonForm.imageUrls.filter(u => u.trim()).map((url, i) => (
-                        <img key={i} src={url} alt={`Preview ${i+1}`} style={{ height: '60px', borderRadius: 'var(--radius-sm)', objectFit: 'cover' }} />
+                        <img key={i} src={url} alt={`Preview ${i+1}`} />
                       ))}
                     </div>
                   )}
                 </div>
-                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+                <div className="adm-modal-actions">
                   <button type="submit" className="btn btn-primary btn-sm" disabled={saving}>
                     {saving ? 'Saving...' : 'Save'}
                   </button>

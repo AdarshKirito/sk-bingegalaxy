@@ -1,12 +1,15 @@
 package com.skbingegalaxy.availability.controller;
 
 import com.skbingegalaxy.availability.dto.*;
+import com.skbingegalaxy.availability.service.AvailabilityBingeScopeService;
 import com.skbingegalaxy.availability.service.AvailabilityService;
 import com.skbingegalaxy.common.dto.ApiResponse;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import jakarta.validation.Valid;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -16,7 +19,21 @@ import java.util.List;
 @RequiredArgsConstructor
 public class AvailabilityController {
 
+    private final AvailabilityBingeScopeService scopeService;
     private final AvailabilityService service;
+
+    @ModelAttribute
+    void validateBingeScope(
+            HttpServletRequest request,
+            @RequestHeader(value = "X-User-Id", required = false) Long adminId,
+            @RequestHeader(value = "X-User-Role", required = false) String role) {
+        String uri = request.getRequestURI();
+        if (uri.contains("/admin/")) {
+            scopeService.requireManagedBinge(adminId, role, "managing availability");
+            return;
+        }
+        scopeService.requireSelectedBinge("checking availability");
+    }
 
     // ── Public endpoints ─────────────────────────────────────
 
@@ -58,7 +75,7 @@ public class AvailabilityController {
 
     @PostMapping("/admin/block-date")
     public ResponseEntity<ApiResponse<BlockedDateDto>> blockDate(
-            @RequestBody BlockDateRequest request,
+            @Valid @RequestBody BlockDateRequest request,
             @RequestHeader("X-User-Id") Long adminId) {
         return ResponseEntity.ok(ApiResponse.ok("Date blocked", service.blockDate(request, adminId)));
     }
@@ -72,7 +89,7 @@ public class AvailabilityController {
 
     @PostMapping("/admin/block-slot")
     public ResponseEntity<ApiResponse<BlockedSlotDto>> blockSlot(
-            @RequestBody BlockSlotRequest request,
+            @Valid @RequestBody BlockSlotRequest request,
             @RequestHeader("X-User-Id") Long adminId) {
         return ResponseEntity.ok(ApiResponse.ok("Slot blocked", service.blockSlot(request, adminId)));
     }

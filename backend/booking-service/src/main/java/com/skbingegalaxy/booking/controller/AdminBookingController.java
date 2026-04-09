@@ -2,6 +2,7 @@ package com.skbingegalaxy.booking.controller;
 
 import com.skbingegalaxy.booking.dto.*;
 import com.skbingegalaxy.booking.entity.BookingEventLog;
+import com.skbingegalaxy.booking.service.AdminBingeScopeService;
 import com.skbingegalaxy.booking.service.BookingEventLogService;
 import com.skbingegalaxy.booking.service.BookingService;
 import com.skbingegalaxy.booking.service.SystemSettingsService;
@@ -10,6 +11,7 @@ import com.skbingegalaxy.common.dto.ApiResponse;
 import com.skbingegalaxy.common.dto.PagedResponse;
 import com.skbingegalaxy.common.enums.BookingStatus;
 import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -30,11 +32,30 @@ import java.time.LocalTime;
 @Slf4j
 public class AdminBookingController {
 
+    private final AdminBingeScopeService adminBingeScopeService;
     private final BookingService bookingService;
     private final SystemSettingsService systemSettingsService;
     private final BookingEventLogService eventLogService;
     private final com.skbingegalaxy.booking.service.BookingProjectionService projectionService;
     private final com.skbingegalaxy.booking.service.SagaOrchestrator sagaOrchestrator;
+
+    private static final int MAX_PAGE_SIZE = 100;
+
+    @ModelAttribute
+    void validateManagedBinge(
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role,
+            HttpServletRequest request) {
+        adminBingeScopeService.requireManagedBinge(adminId, role, "managing bookings");
+    }
+
+    private void requireSuperAdmin(String role, String action) {
+        if (!"SUPER_ADMIN".equalsIgnoreCase(role)) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Only super admins can " + action,
+                HttpStatus.FORBIDDEN);
+        }
+    }
 
     @GetMapping
     public ResponseEntity<ApiResponse<PagedResponse<BookingDto>>> getAllBookings(
@@ -42,6 +63,7 @@ public class AdminBookingController {
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "createdAt") String sortBy,
             @RequestParam(defaultValue = "desc") String direction) {
+        size = Math.min(size, MAX_PAGE_SIZE);
         Sort sort = direction.equalsIgnoreCase("asc") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
         Page<BookingDto> result = bookingService.getAllBookings(PageRequest.of(page, size, sort));
         return ResponseEntity.ok(ApiResponse.ok(toPagedResponse(result)));
@@ -52,6 +74,7 @@ public class AdminBookingController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate) {
+        size = Math.min(size, MAX_PAGE_SIZE);
         Page<BookingDto> result = bookingService.getTodayBookings(clientDate,
             PageRequest.of(page, size, Sort.by("startTime").ascending()));
         return ResponseEntity.ok(ApiResponse.ok(toPagedResponse(result)));
@@ -62,6 +85,7 @@ public class AdminBookingController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate) {
+        size = Math.min(size, MAX_PAGE_SIZE);
         Page<BookingDto> result = bookingService.getUpcomingBookings(clientDate,
             PageRequest.of(page, size, Sort.by("bookingDate").ascending().and(Sort.by("startTime").ascending())));
         return ResponseEntity.ok(ApiResponse.ok(toPagedResponse(result)));
@@ -72,6 +96,7 @@ public class AdminBookingController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
+        size = Math.min(size, MAX_PAGE_SIZE);
         Page<BookingDto> result = bookingService.getBookingsByDate(date,
             PageRequest.of(page, size, Sort.by("startTime").ascending()));
         return ResponseEntity.ok(ApiResponse.ok(toPagedResponse(result)));
@@ -83,8 +108,15 @@ public class AdminBookingController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate) {
+        size = Math.min(size, MAX_PAGE_SIZE);
+        BookingStatus bookingStatus;
+        try {
+            bookingStatus = BookingStatus.valueOf(status.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new com.skbingegalaxy.common.exception.BusinessException("Invalid booking status: " + status);
+        }
         Page<BookingDto> result = bookingService.getBookingsByStatusForToday(
-            BookingStatus.valueOf(status.toUpperCase()), clientDate,
+            bookingStatus, clientDate,
             PageRequest.of(page, size, Sort.by("startTime").ascending()));
         return ResponseEntity.ok(ApiResponse.ok(toPagedResponse(result)));
     }
@@ -95,6 +127,7 @@ public class AdminBookingController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate) {
+        size = Math.min(size, MAX_PAGE_SIZE);
         Page<BookingDto> result = bookingService.searchBookingsForToday(q, clientDate, PageRequest.of(page, size));
         return ResponseEntity.ok(ApiResponse.ok(toPagedResponse(result)));
     }
@@ -102,7 +135,7 @@ public class AdminBookingController {
     @PatchMapping("/{bookingRef}")
     public ResponseEntity<ApiResponse<BookingDto>> updateBooking(
             @PathVariable String bookingRef,
-            @RequestBody UpdateBookingRequest request) {
+            @Valid @RequestBody UpdateBookingRequest request) {
         return ResponseEntity.ok(ApiResponse.ok("Booking updated", bookingService.updateBooking(bookingRef, request)));
     }
 
@@ -236,10 +269,16 @@ public class AdminBookingController {
         return ResponseEntity.ok(ApiResponse.ok("Event type updated", bookingService.updateEventType(id, req)));
     }
 
-    @DeleteMapping("/event-types/{id}")
+    @PatchMapping("/event-types/{id}/toggle-active")
     public ResponseEntity<ApiResponse<Void>> toggleEventType(@PathVariable Long id) {
         bookingService.deactivateEventType(id);
         return ResponseEntity.ok(ApiResponse.ok("Event type toggled", null));
+    }
+
+    @DeleteMapping("/event-types/{id}")
+    public ResponseEntity<ApiResponse<Void>> deleteEventType(@PathVariable Long id) {
+        bookingService.deleteEventType(id);
+        return ResponseEntity.ok(ApiResponse.ok("Event type deleted", null));
     }
 
     // ── Add-On management ────────────────────────────────────
@@ -261,10 +300,16 @@ public class AdminBookingController {
         return ResponseEntity.ok(ApiResponse.ok("Add-on updated", bookingService.updateAddOn(id, req)));
     }
 
-    @DeleteMapping("/add-ons/{id}")
+    @PatchMapping("/add-ons/{id}/toggle-active")
     public ResponseEntity<ApiResponse<Void>> toggleAddOn(@PathVariable Long id) {
         bookingService.deactivateAddOn(id);
         return ResponseEntity.ok(ApiResponse.ok("Add-on toggled", null));
+    }
+
+    @DeleteMapping("/add-ons/{id}")
+    public ResponseEntity<ApiResponse<Void>> deleteAddOn(@PathVariable Long id) {
+        bookingService.deleteAddOn(id);
+        return ResponseEntity.ok(ApiResponse.ok("Add-on deleted", null));
     }
 
     // ── Reports ──────────────────────────────────────────────
@@ -342,6 +387,7 @@ public class AdminBookingController {
             @PathVariable String bookingRef,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
+        bookingService.getBookingEntity(bookingRef);
         Page<BookingEventLogDto> events = eventLogService
             .getEventHistory(bookingRef, PageRequest.of(page, size))
             .map(e -> BookingEventLogDto.builder()
@@ -364,12 +410,15 @@ public class AdminBookingController {
 
     @PostMapping("/{bookingRef}/replay")
     public ResponseEntity<ApiResponse<String>> replayBooking(@PathVariable String bookingRef) {
+        bookingService.getBookingEntity(bookingRef);
         projectionService.replayBooking(bookingRef);
         return ResponseEntity.ok(ApiResponse.ok("Projection rebuilt for " + bookingRef));
     }
 
     @PostMapping("/replay-all")
-    public ResponseEntity<ApiResponse<String>> replayAll() {
+    public ResponseEntity<ApiResponse<String>> replayAll(
+            @RequestHeader("X-User-Role") String role) {
+        requireSuperAdmin(role, "replay all bookings");
         int count = projectionService.replayAll();
         return ResponseEntity.ok(ApiResponse.ok("Projection rebuilt for " + count + " bookings"));
     }
@@ -377,12 +426,16 @@ public class AdminBookingController {
     // ── Saga monitoring ──────────────────────────────────────
 
     @GetMapping("/sagas/failed")
-    public ResponseEntity<ApiResponse<java.util.List<com.skbingegalaxy.booking.entity.SagaState>>> getFailedSagas() {
+    public ResponseEntity<ApiResponse<java.util.List<com.skbingegalaxy.booking.entity.SagaState>>> getFailedSagas(
+            @RequestHeader("X-User-Role") String role) {
+        requireSuperAdmin(role, "view global saga failures");
         return ResponseEntity.ok(ApiResponse.ok(sagaOrchestrator.getFailedSagas()));
     }
 
     @GetMapping("/sagas/compensating")
-    public ResponseEntity<ApiResponse<java.util.List<com.skbingegalaxy.booking.entity.SagaState>>> getCompensatingSagas() {
+    public ResponseEntity<ApiResponse<java.util.List<com.skbingegalaxy.booking.entity.SagaState>>> getCompensatingSagas(
+            @RequestHeader("X-User-Role") String role) {
+        requireSuperAdmin(role, "view global compensating sagas");
         return ResponseEntity.ok(ApiResponse.ok(sagaOrchestrator.getCompensatingSagas()));
     }
 

@@ -175,7 +175,7 @@ public class AvailabilityService {
     // ── Admin: list all blocked slots ────────────────────────
     public List<BlockedSlotDto> getAllBlockedSlots() {
         Long bid = BingeContext.getBingeId();
-        return (bid != null ? blockedSlotRepository.findByBingeIdAndSlotDateBetween(bid, LocalDate.now().minusYears(1), LocalDate.now().plusYears(1)) : blockedSlotRepository.findAll())
+        return (bid != null ? blockedSlotRepository.findByBingeId(bid) : blockedSlotRepository.findAll())
             .stream().map(this::toBlockedSlotDto).toList();
     }
 
@@ -189,7 +189,7 @@ public class AvailabilityService {
         List<BlockedSlot> blocked = bid != null
             ? blockedSlotRepository.findByBingeIdAndSlotDate(bid, date)
             : blockedSlotRepository.findBySlotDate(date);
-        // Build set of blocked 30-min indices
+        // Build set of blocked 30-min indices (startHour/endHour store minutes; divide by 30 for half-hour index)
         Set<Integer> blockedHalfHours = blocked.stream()
             .flatMap(s -> java.util.stream.IntStream.range(s.getStartHour() / 30, s.getEndHour() / 30).boxed())
             .collect(Collectors.toSet());
@@ -204,7 +204,7 @@ public class AvailabilityService {
 
     // ── Helpers ──────────────────────────────────────────────
     private DayAvailabilityDto buildDayAvailability(LocalDate date, List<BlockedSlot> blockedSlots) {
-        // Build set of blocked half-hour indices from minute-based startHour/endHour
+        // Build set of blocked half-hour indices (startHour/endHour store minutes; divide by 30 for half-hour index)
         Set<Integer> blockedHalfHours = blockedSlots.stream()
             .flatMap(s -> java.util.stream.IntStream.range(s.getStartHour() / 30, s.getEndHour() / 30).boxed())
             .collect(Collectors.toSet());
