@@ -26,5 +26,9 @@ public class AddPaymentRequest {
     @NotNull(message = "Payment method is required")
     private PaymentMethod paymentMethod;
 
+    /** Optional: the booking's totalAmount. When provided, the backend rejects payments
+     *  that would push cumulative collected above this ceiling. */
+    private BigDecimal bookingTotalAmount;
+
     private String notes;
 }

@@ -5,6 +5,7 @@ import com.skbingegalaxy.notification.dto.NotificationDto;
 import com.skbingegalaxy.notification.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -12,6 +13,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/notifications")
 @RequiredArgsConstructor
+@Validated
 public class NotificationController {
 
     private final NotificationService notificationService;

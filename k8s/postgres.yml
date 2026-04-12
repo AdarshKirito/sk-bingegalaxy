@@ -111,6 +111,26 @@ data:
     SELECT 'CREATE DATABASE availability_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'availability_db')\gexec
     SELECT 'CREATE DATABASE booking_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'booking_db')\gexec
     SELECT 'CREATE DATABASE payment_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'payment_db')\gexec
+
+    -- Per-service users (least privilege)
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'auth_svc') THEN
+        CREATE ROLE auth_svc WITH LOGIN PASSWORD current_setting('app.auth_svc_pw', true);
+      END IF;
+      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'availability_svc') THEN
+        CREATE ROLE availability_svc WITH LOGIN PASSWORD current_setting('app.availability_svc_pw', true);
+      END IF;
+      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'booking_svc') THEN
+        CREATE ROLE booking_svc WITH LOGIN PASSWORD current_setting('app.booking_svc_pw', true);
+      END IF;
+      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'payment_svc') THEN
+        CREATE ROLE payment_svc WITH LOGIN PASSWORD current_setting('app.payment_svc_pw', true);
+      END IF;
+    END $$;
+
+    GRANT CONNECT ON DATABASE availability_db TO availability_svc;
+    GRANT CONNECT ON DATABASE booking_db TO booking_svc;
+    GRANT CONNECT ON DATABASE payment_db TO payment_svc;
 ---
 # ── Managed PostgreSQL (production) ──────────────────────────────────────────
 # Uncomment the Service below and disable the StatefulSet above when switching

@@ -58,8 +58,8 @@ export default function AdminEventTypes() {
   const handleSaveET = async (e) => {
     e.preventDefault();
     if (!form.name.trim()) { toast.error('Event type name is required.'); return; }
-    if (!form.basePrice || Number(form.basePrice) < 0) { toast.error('Base price must be a positive number.'); return; }
-    if (!form.hourlyRate || Number(form.hourlyRate) < 0) { toast.error('Hourly rate must be a positive number.'); return; }
+    if (!form.basePrice || isNaN(Number(form.basePrice)) || Number(form.basePrice) < 0) { toast.error('Base price must be a valid positive number.'); return; }
+    if (!form.hourlyRate || isNaN(Number(form.hourlyRate)) || Number(form.hourlyRate) < 0) { toast.error('Hourly rate must be a valid positive number.'); return; }
     if (Number(form.minHours) >= Number(form.maxHours)) { toast.error('Min hours must be less than max hours.'); return; }
     setSaving(true);
     try {
@@ -313,8 +313,8 @@ export default function AdminEventTypes() {
                   <input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Birthday Party" />
                 </div>
                 <div className="input-group">
-                  <label>Description</label>
-                  <textarea className="adm-textarea" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
+                  <label>Description <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>({form.description.length}/500)</span></label>
+                  <textarea className="adm-textarea" value={form.description} maxLength={500} onChange={e => setForm({ ...form, description: e.target.value })}
                     placeholder="A short description..." rows={2} />
                 </div>
                 <div className="grid-2">
@@ -351,7 +351,7 @@ export default function AdminEventTypes() {
                   <label><FiImage style={{ marginRight: 4, verticalAlign: -2 }} />Image URLs</label>
                   {form.imageUrls.map((url, i) => (
                     <div key={i} className="adm-img-row">
-                      <input value={url} onChange={e => { const urls = [...form.imageUrls]; urls[i] = e.target.value; setForm({ ...form, imageUrls: urls }); }}
+                      <input value={url} maxLength={1000} onChange={e => { const urls = [...form.imageUrls]; urls[i] = e.target.value; setForm({ ...form, imageUrls: urls }); }}
                         placeholder="https://example.com/image.jpg" />
                       {form.imageUrls.length > 1 && <button type="button" className="btn btn-sm btn-danger" onClick={() => { const urls = form.imageUrls.filter((_, j) => j !== i); setForm({ ...form, imageUrls: urls }); }} style={{ padding: '0.2rem 0.5rem' }}><FiX /></button>}
                     </div>
@@ -379,8 +379,8 @@ export default function AdminEventTypes() {
                   <input required value={addonForm.name} onChange={e => setAddonForm({ ...addonForm, name: e.target.value })} placeholder="Rose Decoration" />
                 </div>
                 <div className="input-group">
-                  <label>Description</label>
-                  <textarea className="adm-textarea" value={addonForm.description} onChange={e => setAddonForm({ ...addonForm, description: e.target.value })}
+                  <label>Description <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>({addonForm.description.length}/300)</span></label>
+                  <textarea className="adm-textarea" value={addonForm.description} maxLength={300} onChange={e => setAddonForm({ ...addonForm, description: e.target.value })}
                     placeholder="A short description..." rows={2} />
                 </div>
                 <div className="grid-2">
@@ -400,7 +400,7 @@ export default function AdminEventTypes() {
                   <label><FiImage style={{ marginRight: 4, verticalAlign: -2 }} />Image URLs</label>
                   {addonForm.imageUrls.map((url, i) => (
                     <div key={i} className="adm-img-row">
-                      <input value={url} onChange={e => { const urls = [...addonForm.imageUrls]; urls[i] = e.target.value; setAddonForm({ ...addonForm, imageUrls: urls }); }}
+                      <input value={url} maxLength={1000} onChange={e => { const urls = [...addonForm.imageUrls]; urls[i] = e.target.value; setAddonForm({ ...addonForm, imageUrls: urls }); }}
                         placeholder="https://example.com/image.jpg" />
                       {addonForm.imageUrls.length > 1 && <button type="button" className="btn btn-sm btn-danger" onClick={() => { const urls = addonForm.imageUrls.filter((_, j) => j !== i); setAddonForm({ ...addonForm, imageUrls: urls }); }} style={{ padding: '0.2rem 0.5rem' }}><FiX /></button>}
                     </div>

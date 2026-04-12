@@ -114,6 +114,11 @@ public class BookingService {
             throw new BusinessException("Selected date/time slot is not available");
         }
 
+        // Acquire advisory lock on (bingeId, date) to serialise concurrent booking
+        // attempts for the same slot.  This closes the race window where two requests
+        // both see zero existing rows and both INSERT successfully.
+        bookingRepository.acquireSlotLock(slotLockKey(bingeId, request.getBookingDate()));
+
         // Check for double-booking with existing reservations
         if (hasTimeConflict(request.getBookingDate(), startMinute, durMin)) {
             throw new BusinessException("Selected time slot conflicts with an existing booking");
@@ -202,11 +207,13 @@ public class BookingService {
     }
 
     // ── Get booking by ref ───────────────────────────────────
+    @Transactional(readOnly = true)
     public BookingDto getByRef(String bookingRef) {
         return toDto(findScopedBookingByRef(bookingRef));
     }
 
     // ── Customer: my bookings ────────────────────────────────
+    @Transactional(readOnly = true)
     public List<BookingDto> getCustomerBookings(Long customerId) {
         Long bid = BingeContext.getBingeId();
         List<Booking> list = bid != null
@@ -215,11 +222,16 @@ public class BookingService {
         return list.stream().map(this::toDto).toList();
     }
 
+    @Transactional(readOnly = true)
     public List<BookingDto> getCustomerBookingsByStatus(Long customerId, BookingStatus status) {
-        return bookingRepository.findByCustomerIdAndStatus(customerId, status)
+        Long bid = BingeContext.getBingeId();
+        return (bid != null
+            ? bookingRepository.findByBingeIdAndCustomerIdAndStatus(bid, customerId, status)
+            : bookingRepository.findByCustomerIdAndStatus(customerId, status))
             .stream().map(this::toDto).toList();
     }
 
+    @Transactional(readOnly = true)
     public List<BookingDto> getCustomerCurrentBookings(Long customerId, LocalDate clientToday) {
         LocalDate today = clientToday != null ? clientToday : LocalDate.now();
         Long bid = BingeContext.getBingeId();
@@ -229,6 +241,7 @@ public class BookingService {
         return list.stream().map(this::toDto).toList();
     }
 
+    @Transactional(readOnly = true)
     public List<BookingDto> getCustomerPastBookings(Long customerId, LocalDate clientToday) {
         LocalDate today = clientToday != null ? clientToday : LocalDate.now();
         Long bid = BingeContext.getBingeId();
@@ -239,12 +252,14 @@ public class BookingService {
     }
 
     // ── Admin: all bookings (paginated) ──────────────────────
+    @Transactional(readOnly = true)
     public Page<BookingDto> getAllBookings(Pageable pageable) {
         Long bid = BingeContext.getBingeId();
         return (bid != null ? bookingRepository.findByBingeId(bid, pageable) : bookingRepository.findAll(pageable)).map(this::toDto);
     }
 
     // ── Admin: today's bookings (paginated) ──────────────────
+    @Transactional(readOnly = true)
     public Page<BookingDto> getTodayBookings(LocalDate clientToday, Pageable pageable) {
         Long bid = BingeContext.getBingeId();
         LocalDate today = systemSettingsService.getOperationalDate(bid, clientToday);
@@ -252,6 +267,7 @@ public class BookingService {
     }
 
     // ── Admin: upcoming bookings (today+future, PENDING or CONFIRMED only) ─
+    @Transactional(readOnly = true)
     public Page<BookingDto> getUpcomingBookings(LocalDate clientToday, Pageable pageable) {
         Long bid = BingeContext.getBingeId();
         LocalDate today = systemSettingsService.getOperationalDate(bid, clientToday);
@@ -259,18 +275,21 @@ public class BookingService {
     }
 
     // ── Admin: by date ─────────────────────────────────────────
+    @Transactional(readOnly = true)
     public Page<BookingDto> getBookingsByDate(LocalDate date, Pageable pageable) {
         Long bid = BingeContext.getBingeId();
         return (bid != null ? bookingRepository.findByBingeIdAndBookingDate(bid, date, pageable) : bookingRepository.findByBookingDate(date, pageable)).map(this::toDto);
     }
 
     // ── Admin: by status ───────────────────────────────────────
+    @Transactional(readOnly = true)
     public Page<BookingDto> getBookingsByStatus(BookingStatus status, Pageable pageable) {
         Long bid = BingeContext.getBingeId();
         return (bid != null ? bookingRepository.findByBingeIdAndStatus(bid, status, pageable) : bookingRepository.findByStatus(status, pageable)).map(this::toDto);
     }
 
     // ── Admin: by status scoped to operational day ────────────
+    @Transactional(readOnly = true)
     public Page<BookingDto> getBookingsByStatusForToday(BookingStatus status, LocalDate clientToday, Pageable pageable) {
         Long bid = BingeContext.getBingeId();
         LocalDate today = systemSettingsService.getOperationalDate(bid, clientToday);
@@ -280,17 +299,23 @@ public class BookingService {
     }
 
     // ── Admin: by date range ──────────────────────────────────
+    @Transactional(readOnly = true)
     public Page<BookingDto> getBookingsByDateRange(LocalDate from, LocalDate to, Pageable pageable) {
-        return bookingRepository.findByBookingDateBetween(from, to, pageable).map(this::toDto);
+        Long bid = BingeContext.getBingeId();
+        return (bid != null
+            ? bookingRepository.findByBingeIdAndBookingDateBetween(bid, from, to, pageable)
+            : bookingRepository.findByBookingDateBetween(from, to, pageable)).map(this::toDto);
     }
 
     // ── Admin: search ────────────────────────────────────────
+    @Transactional(readOnly = true)
     public Page<BookingDto> searchBookings(String query, Pageable pageable) {
         Long bid = BingeContext.getBingeId();
         return (bid != null ? bookingRepository.searchBookingsByBinge(bid, query, pageable) : bookingRepository.searchBookings(query, pageable)).map(this::toDto);
     }
 
     // ── Admin: search scoped to operational day ───────────────
+    @Transactional(readOnly = true)
     public Page<BookingDto> searchBookingsForToday(String query, LocalDate clientToday, Pageable pageable) {
         Long bid = BingeContext.getBingeId();
         LocalDate today = systemSettingsService.getOperationalDate(bid, clientToday);
@@ -381,6 +406,7 @@ public class BookingService {
             dateTimeChanged = true;
         }
         if (dateTimeChanged) {
+            bookingRepository.acquireSlotLock(slotLockKey(booking.getBingeId(), booking.getBookingDate()));
             int startMinute = booking.getStartTime().getHour() * 60 + booking.getStartTime().getMinute();
             int durMin = resolveDurationMinutes(booking.getDurationMinutes(), booking.getDurationHours());
             if (hasTimeConflict(booking.getBookingDate(), startMinute, durMin, booking.getId())) {
@@ -398,6 +424,40 @@ public class BookingService {
         // Add-on changes
         if (request.getAddOns() != null) {
             pricingChanged = true;
+        }
+
+        // ── Direct admin price override (takes priority over recalculation) ──
+        boolean directPriceOverride = request.getBaseAmount() != null
+            || request.getAddOnAmount() != null
+            || request.getGuestAmount() != null;
+
+        if (directPriceOverride) {
+            BigDecimal oldTotal = booking.getTotalAmount();
+            if (request.getBaseAmount() != null)  booking.setBaseAmount(request.getBaseAmount());
+            if (request.getAddOnAmount() != null) booking.setAddOnAmount(request.getAddOnAmount());
+            if (request.getGuestAmount() != null) booking.setGuestAmount(request.getGuestAmount());
+
+            BigDecimal base = booking.getBaseAmount() != null ? booking.getBaseAmount() : BigDecimal.ZERO;
+            BigDecimal addOn = booking.getAddOnAmount() != null ? booking.getAddOnAmount() : BigDecimal.ZERO;
+            BigDecimal guest = booking.getGuestAmount() != null ? booking.getGuestAmount() : BigDecimal.ZERO;
+            BigDecimal newTotal = base.add(addOn).add(guest);
+            booking.setTotalAmount(newTotal);
+            booking.setPricingSource("ADMIN_OVERRIDE");
+
+            String reason = (request.getPriceAdjustmentReason() != null && !request.getPriceAdjustmentReason().isBlank())
+                ? request.getPriceAdjustmentReason()
+                : "Admin price adjustment";
+            BigDecimal diff = newTotal.subtract(oldTotal);
+            String diffNote = String.format("PRICE OVERRIDE: ₹%s → ₹%s (%s₹%s). Reason: %s",
+                oldTotal.toPlainString(), newTotal.toPlainString(),
+                diff.compareTo(BigDecimal.ZERO) >= 0 ? "+" : "-",
+                diff.abs().toPlainString(), reason);
+            String existing = booking.getAdminNotes() != null ? booking.getAdminNotes() + " | " : "";
+            booking.setAdminNotes(existing + diffNote);
+
+            log.info("Booking {} price overridden by admin: {} → {} (reason: {})",
+                bookingRef, oldTotal, newTotal, reason);
+            pricingChanged = false; // Skip system recalculation
         }
 
         // ── Recalculate pricing when relevant fields changed ──
@@ -485,8 +545,11 @@ public class BookingService {
         BookingEventType eventType = booking.getStatus().name().equals(previousStatus)
             ? BookingEventType.MODIFIED
             : BookingEventType.valueOf(booking.getStatus().name());
-        eventLogService.logEvent(updated, eventType, previousStatus, null, "ADMIN",
-            "Booking updated by admin");
+        String eventDesc = directPriceOverride
+            ? "Price adjusted by admin: " + (request.getPriceAdjustmentReason() != null && !request.getPriceAdjustmentReason().isBlank()
+                ? request.getPriceAdjustmentReason() : "Admin price adjustment")
+            : "Booking updated by admin";
+        eventLogService.logEvent(updated, eventType, previousStatus, null, "ADMIN", eventDesc);
         return toDto(updated);
     }
 
@@ -504,6 +567,20 @@ public class BookingService {
     @Transactional
     public BookingDto cancelBooking(String bookingRef) {
         return cancelBooking(findScopedBookingByRef(bookingRef), "ADMIN", "Booking cancelled by admin");
+    }
+
+    // ── Customer: cancel own PENDING booking ─────────────────
+    @Transactional
+    public BookingDto cancelBookingByCustomer(String bookingRef, Long customerId) {
+        Booking booking = findScopedBookingByRef(bookingRef);
+        if (!booking.getCustomerId().equals(customerId)) {
+            throw new BusinessException("Not authorised to cancel this booking");
+        }
+        if (booking.getStatus() != BookingStatus.PENDING) {
+            throw new BusinessException(
+                "Only PENDING bookings can be cancelled by the customer. Current status: " + booking.getStatus());
+        }
+        return cancelBooking(booking, "CUSTOMER", "Booking cancelled by customer");
     }
 
     // ── System: cancel booking without request-scoped binge context ──
@@ -569,7 +646,7 @@ public class BookingService {
     // ── Collected amount tracking (called by payment-service via Kafka) ──
     @Transactional
     public void addToCollectedAmount(String bookingRef, java.math.BigDecimal amount) {
-        if (amount == null || amount.compareTo(java.math.BigDecimal.ZERO) == 0) return;
+        if (amount == null || amount.compareTo(java.math.BigDecimal.ZERO) <= 0) return;
         int updated = bookingRepository.addToCollectedAmount(bookingRef, amount);
         if (updated > 0) {
             bookingRepository.findByBookingRef(bookingRef).ifPresent(b -> {
@@ -584,7 +661,7 @@ public class BookingService {
 
     @Transactional
     public void subtractFromCollectedAmount(String bookingRef, java.math.BigDecimal amount) {
-        if (amount == null || amount.compareTo(java.math.BigDecimal.ZERO) == 0) return;
+        if (amount == null || amount.compareTo(java.math.BigDecimal.ZERO) <= 0) return;
         bookingRepository.subtractFromCollectedAmount(bookingRef, amount);
     }
 
@@ -863,7 +940,7 @@ public class BookingService {
         }
 
         var ps = booking.getPaymentStatus();
-        if (ps == PaymentStatus.PENDING || ps == PaymentStatus.FAILED || ps == PaymentStatus.REFUNDED) {
+        if (ps == PaymentStatus.PENDING || ps == PaymentStatus.FAILED) {
             throw new BusinessException(
                 "Cannot checkout — no valid payment on this booking. Collect payment before checking out.");
         }
@@ -949,6 +1026,10 @@ public class BookingService {
 
         // Check for double-booking with existing reservations
         int startMinute = request.getStartTime().getHour() * 60 + request.getStartTime().getMinute();
+        Long adminBingeId = BingeContext.getBingeId();
+        if (adminBingeId != null) {
+            bookingRepository.acquireSlotLock(slotLockKey(adminBingeId, request.getBookingDate()));
+        }
         if (hasTimeConflict(request.getBookingDate(), startMinute, durMin)) {
             throw new BusinessException("Selected time slot conflicts with an existing booking");
         }
@@ -1125,20 +1206,20 @@ public class BookingService {
     // ── Event types & add-ons (public) ──────────────────────
     public List<EventTypeDto> getActiveEventTypes() {
         Long bid = requireSelectedBinge("viewing event types");
-        return eventTypeRepository.findByBingeIdOrGlobalAndActiveTrue(bid)
+        return eventTypeRepository.findByBingeIdAndActiveTrue(bid)
             .stream().map(this::toEventTypeDto).toList();
     }
 
     public List<AddOnDto> getActiveAddOns() {
         Long bid = requireSelectedBinge("viewing add-ons");
-        return addOnRepository.findByBingeIdOrGlobalAndActiveTrue(bid)
+        return addOnRepository.findByBingeIdAndActiveTrue(bid)
             .stream().map(this::toAddOnDto).toList();
     }
 
     // ── Admin: Event type CRUD ─────────────────────────────
     public List<EventTypeDto> getAllEventTypes() {
         Long bid = requireSelectedBinge("managing event types");
-        return eventTypeRepository.findByBingeIdOrGlobal(bid)
+        return eventTypeRepository.findByBingeId(bid)
             .stream().map(this::toEventTypeDto).toList();
     }
 
@@ -1205,7 +1286,7 @@ public class BookingService {
     // ── Admin: Add-on CRUD ───────────────────────────────────
     public List<AddOnDto> getAllAddOns() {
         Long bid = requireSelectedBinge("managing add-ons");
-        return addOnRepository.findByBingeIdOrGlobal(bid)
+        return addOnRepository.findByBingeId(bid)
             .stream().map(this::toAddOnDto).toList();
     }
 
@@ -1280,13 +1361,13 @@ public class BookingService {
 
     private EventType findBookableEventType(Long id) {
         Long bid = requireSelectedBinge("using event types");
-        return eventTypeRepository.findAccessibleById(id, bid)
+        return eventTypeRepository.findByIdAndBingeId(id, bid)
             .orElseThrow(() -> new ResourceNotFoundException("EventType", "id", id));
     }
 
     private AddOn findBookableAddOn(Long id) {
         Long bid = requireSelectedBinge("using add-ons");
-        return addOnRepository.findAccessibleById(id, bid)
+        return addOnRepository.findByIdAndBingeId(id, bid)
             .orElseThrow(() -> new ResourceNotFoundException("AddOn", "id", id));
     }
 
@@ -1304,13 +1385,13 @@ public class BookingService {
 
     private EventType findAccessibleEventType(Long id) {
         Long bid = requireSelectedBinge("using event types");
-        return eventTypeRepository.findAccessibleById(id, bid)
+        return eventTypeRepository.findByIdAndBingeId(id, bid)
             .orElseThrow(() -> new ResourceNotFoundException("EventType", "id", id));
     }
 
     private AddOn findAccessibleAddOn(Long id) {
         Long bid = requireSelectedBinge("using add-ons");
-        return addOnRepository.findAccessibleById(id, bid)
+        return addOnRepository.findByIdAndBingeId(id, bid)
             .orElseThrow(() -> new ResourceNotFoundException("AddOn", "id", id));
     }
 
@@ -1323,6 +1404,18 @@ public class BookingService {
     }
 
     // ── Helpers ──────────────────────────────────────────────
+
+    /**
+     * Deterministic lock key for {@code pg_advisory_xact_lock}.
+     * Combines bingeId and bookingDate into a single {@code long} so that
+     * all booking-creation attempts for the same venue + day serialise.
+     */
+    private static long slotLockKey(Long bingeId, LocalDate date) {
+        // Upper 32 bits: bingeId, lower 32 bits: date epoch-day hash
+        long binge = bingeId != null ? bingeId : 0L;
+        return (binge << 32) | (date.toEpochDay() & 0xFFFFFFFFL);
+    }
+
     private String generateBookingRef() {
         String year = String.valueOf(Year.now().getValue()).substring(2);
         String random = UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase();

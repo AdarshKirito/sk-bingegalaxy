@@ -40,7 +40,7 @@ export default function Modal({ open, onClose, title, children, style }) {
         boxShadow: 'var(--shadow-lg)', ...style,
       }}
     >
-      <div style={{ padding: '1.5rem' }}>
+      <div style={{ padding: '1.5rem', maxHeight: 'calc(90vh - 2px)', overflowY: 'auto' }}>
         {title && (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
             <h2 style={{ margin: 0 }}>{title}</h2>

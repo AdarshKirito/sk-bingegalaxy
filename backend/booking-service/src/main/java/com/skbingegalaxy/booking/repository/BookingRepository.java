@@ -82,13 +82,13 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
 
     long countByStatus(BookingStatus status);
 
-    @Query("SELECT COALESCE(SUM(COALESCE(b.collectedAmount, 0)), 0) FROM Booking b WHERE b.paymentStatus = 'SUCCESS'")
+    @Query("SELECT COALESCE(SUM(COALESCE(b.collectedAmount, 0)), 0) FROM Booking b WHERE b.paymentStatus IN ('SUCCESS', 'PARTIALLY_PAID', 'PARTIALLY_REFUNDED')")
     java.math.BigDecimal totalRevenue();
 
-    @Query("SELECT COALESCE(SUM(COALESCE(b.collectedAmount, 0)), 0) FROM Booking b WHERE b.paymentStatus = 'SUCCESS' AND b.bookingDate = :date")
+    @Query("SELECT COALESCE(SUM(COALESCE(b.collectedAmount, 0)), 0) FROM Booking b WHERE b.paymentStatus IN ('SUCCESS', 'PARTIALLY_PAID', 'PARTIALLY_REFUNDED') AND b.bookingDate = :date")
     java.math.BigDecimal totalRevenueByDate(@Param("date") LocalDate date);
 
-    @Query("SELECT COALESCE(SUM(COALESCE(b.collectedAmount, 0)), 0) FROM Booking b WHERE b.paymentStatus = 'SUCCESS' AND b.bookingDate BETWEEN :from AND :to")
+    @Query("SELECT COALESCE(SUM(COALESCE(b.collectedAmount, 0)), 0) FROM Booking b WHERE b.paymentStatus IN ('SUCCESS', 'PARTIALLY_PAID', 'PARTIALLY_REFUNDED') AND b.bookingDate BETWEEN :from AND :to")
     java.math.BigDecimal totalRevenueByDateRange(@Param("from") LocalDate from, @Param("to") LocalDate to);
 
     long countByBookingDateBetween(LocalDate from, LocalDate to);
@@ -108,11 +108,11 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     @Query("SELECT COALESCE(SUM(COALESCE(b.totalAmount, 0)), 0) FROM Booking b WHERE b.bookingDate BETWEEN :from AND :to AND b.status <> 'CANCELLED'")
     java.math.BigDecimal estimatedRevenueByDateRange(@Param("from") LocalDate from, @Param("to") LocalDate to);
 
-    // Actual revenue: sum of collected amounts for non-cancelled bookings with successful payment
-    @Query("SELECT COALESCE(SUM(COALESCE(b.collectedAmount, 0)), 0) FROM Booking b WHERE b.bookingDate = :date AND b.status <> 'CANCELLED' AND b.paymentStatus IN ('SUCCESS', 'PARTIALLY_REFUNDED')")
+    // Actual revenue: sum of collected amounts for non-cancelled bookings with any successful payment
+    @Query("SELECT COALESCE(SUM(COALESCE(b.collectedAmount, 0)), 0) FROM Booking b WHERE b.bookingDate = :date AND b.status <> 'CANCELLED' AND b.paymentStatus IN ('SUCCESS', 'PARTIALLY_PAID', 'PARTIALLY_REFUNDED')")
     java.math.BigDecimal actualRevenueByDate(@Param("date") LocalDate date);
 
-    @Query("SELECT COALESCE(SUM(COALESCE(b.collectedAmount, 0)), 0) FROM Booking b WHERE b.bookingDate BETWEEN :from AND :to AND b.status <> 'CANCELLED' AND b.paymentStatus IN ('SUCCESS', 'PARTIALLY_REFUNDED')")
+    @Query("SELECT COALESCE(SUM(COALESCE(b.collectedAmount, 0)), 0) FROM Booking b WHERE b.bookingDate BETWEEN :from AND :to AND b.status <> 'CANCELLED' AND b.paymentStatus IN ('SUCCESS', 'PARTIALLY_PAID', 'PARTIALLY_REFUNDED')")
     java.math.BigDecimal actualRevenueByDateRange(@Param("from") LocalDate from, @Param("to") LocalDate to);
 
     // House accounts: pending payment bookings
@@ -137,6 +137,8 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     Page<Booking> findByBingeIdAndBookingDate(Long bingeId, LocalDate date, Pageable pageable);
     Page<Booking> findByBingeIdAndStatus(Long bingeId, BookingStatus status, Pageable pageable);
     Page<Booking> findByBingeIdAndBookingDateAndStatus(Long bingeId, LocalDate date, BookingStatus status, Pageable pageable);
+    Page<Booking> findByBingeIdAndBookingDateBetween(Long bingeId, LocalDate from, LocalDate to, Pageable pageable);
+    List<Booking> findByBingeIdAndCustomerIdAndStatus(Long bingeId, Long customerId, BookingStatus status);
 
     @Query("SELECT b FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate >= :date AND b.status IN ('PENDING', 'CONFIRMED')")
     Page<Booking> findUpcomingBookingsByBinge(@Param("bid") Long bingeId, @Param("date") LocalDate date, Pageable pageable);
@@ -187,7 +189,7 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     long countByBingeAndDateAndCheckedIn(@Param("bid") Long bingeId, @Param("date") LocalDate date, @Param("ci") boolean checkedIn);
 
     // Revenue (binge-scoped)
-    @Query("SELECT COALESCE(SUM(COALESCE(b.collectedAmount, 0)), 0) FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate = :date AND b.status <> 'CANCELLED' AND b.paymentStatus IN ('SUCCESS', 'PARTIALLY_REFUNDED')")
+    @Query("SELECT COALESCE(SUM(COALESCE(b.collectedAmount, 0)), 0) FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate = :date AND b.status <> 'CANCELLED' AND b.paymentStatus IN ('SUCCESS', 'PARTIALLY_PAID', 'PARTIALLY_REFUNDED')")
     java.math.BigDecimal actualRevenueByBingeAndDate(@Param("bid") Long bingeId, @Param("date") LocalDate date);
 
     @Query("SELECT COALESCE(SUM(COALESCE(b.totalAmount, 0)), 0) FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate = :date AND b.status <> 'CANCELLED'")
@@ -199,7 +201,7 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     @Query("SELECT COUNT(b) FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate BETWEEN :from AND :to AND b.status <> 'CANCELLED'")
     long countNonCancelledByBingeAndDateRange(@Param("bid") Long bingeId, @Param("from") LocalDate from, @Param("to") LocalDate to);
 
-    @Query("SELECT COALESCE(SUM(COALESCE(b.collectedAmount, 0)), 0) FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate BETWEEN :from AND :to AND b.status <> 'CANCELLED' AND b.paymentStatus IN ('SUCCESS', 'PARTIALLY_REFUNDED')")
+    @Query("SELECT COALESCE(SUM(COALESCE(b.collectedAmount, 0)), 0) FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate BETWEEN :from AND :to AND b.status <> 'CANCELLED' AND b.paymentStatus IN ('SUCCESS', 'PARTIALLY_PAID', 'PARTIALLY_REFUNDED')")
     java.math.BigDecimal actualRevenueByBingeAndDateRange(@Param("bid") Long bingeId, @Param("from") LocalDate from, @Param("to") LocalDate to);
 
     @Query("SELECT COALESCE(SUM(COALESCE(b.totalAmount, 0)), 0) FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate BETWEEN :from AND :to AND b.status <> 'CANCELLED'")
@@ -220,6 +222,16 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     // Anti-abuse: count bookings auto-cancelled due to payment timeout in the recent window
     @Query("SELECT COUNT(b) FROM Booking b WHERE b.customerId = :cid AND b.status = 'CANCELLED' AND b.paymentStatus = 'PENDING' AND b.updatedAt > :since")
     long countRecentTimeoutCancellations(@Param("cid") Long customerId, @Param("since") LocalDateTime since);
+
+    /**
+     * Acquires a transaction-scoped advisory lock keyed on (bingeId, date).
+     * Serialises all booking-creation attempts for the same binge + date so that
+     * the subsequent {@code hasTimeConflict} check and INSERT are atomic —
+     * eliminating the "first booking of the day" race where no rows exist to
+     * pessimistic-lock.  The lock is automatically released at transaction commit.
+     */
+    @Query(value = "SELECT pg_advisory_xact_lock(:lockKey)", nativeQuery = true)
+    void acquireSlotLock(@Param("lockKey") long lockKey);
 
     // Atomic collected-amount updates (avoids read-modify-write race conditions)
     @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)

@@ -15,8 +15,20 @@ spec:
         app: kafka
     spec:
       terminationGracePeriodSeconds: 60
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: kafka
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           image: confluentinc/cp-kafka:7.6.0
           ports:
             - containerPort: 9092

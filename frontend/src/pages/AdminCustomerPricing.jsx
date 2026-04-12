@@ -137,15 +137,17 @@ export default function AdminCustomerPricing() {
   const handleBulkAssign = async () => {
     const ids = [...checkedIds];
     if (ids.length === 0) { toast.error('Select at least one customer'); return; }
+    if (!bulkRateCodeId) { toast.error('Select a rate code first'); return; }
     try {
-      await adminService.bulkAssignRateCode({ customerIds: ids, rateCodeId: bulkRateCodeId || null });
+      await adminService.bulkAssignRateCode({ customerIds: ids, rateCodeId: bulkRateCodeId });
       toast.success(`Rate code assigned to ${ids.length} customer(s)`);
       // Update local state
       const rc = rateCodes.find(r => r.id === Number(bulkRateCodeId));
       setSelectedCustomers(prev => prev.map(c => {
         if (!ids.includes(c.id)) return c;
-        return { ...c, rateCodeId: bulkRateCodeId || '', rateCodeName: rc ? rc.name : '', dirty: true };
+        return { ...c, rateCodeId: bulkRateCodeId, rateCodeName: rc ? rc.name : '', dirty: true };
       }));
+      setCheckedIds(new Set());
     } catch (err) {
       toast.error(err.response?.data?.message || 'Bulk assign failed');
     }

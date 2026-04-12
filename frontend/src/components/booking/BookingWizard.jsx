@@ -202,8 +202,9 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
     const editRef = editBookingData?.bookingRef;
     bookedSlots.forEach(bs => {
       if (editRef && bs.bookingRef === editRef) return;
-      const start = bs.startMinute != null ? bs.startMinute : bs.startHour * 60;
-      const dur = bs.durationMinutes != null ? bs.durationMinutes : bs.durationHours * 60;
+      const start = bs.startMinute != null ? bs.startMinute : ((bs.startHour || 0) * 60);
+      const dur = bs.durationMinutes != null ? bs.durationMinutes : ((bs.durationHours || 0) * 60);
+      if (!dur) return;
       for (let m = start; m < start + dur; m += 30) bookedHalfHours.add(Math.floor(m / 30));
     });
     const slots = [];

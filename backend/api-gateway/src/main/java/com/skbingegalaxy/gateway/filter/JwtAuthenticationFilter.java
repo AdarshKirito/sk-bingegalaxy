@@ -84,6 +84,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         // Try Authorization header first, then fall back to httpOnly cookie
         String token = extractToken(request);
         if (token == null) {
+            log.warn("No JWT token found for secured path {}", path);
             exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
             return exchange.getResponse().setComplete();
         }
@@ -100,6 +101,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
             }
 
             if (isAdminPath(path) && !"ADMIN".equals(role) && !"SUPER_ADMIN".equals(role)) {
+                log.warn("Non-admin role '{}' accessing admin path {}", role, path);
                 exchange.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
                 return exchange.getResponse().setComplete();
             }

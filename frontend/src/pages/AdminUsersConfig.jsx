@@ -1,1142 +1,775 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { adminService, authService } from '../services/endpoints';
+import { authService, adminService } from '../services/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
-import {
-  FiChevronDown,
-  FiChevronUp,
-  FiCreditCard,
-  FiEye,
-  FiEyeOff,
-  FiMapPin,
-  FiPlus,
-  FiSave,
-  FiSearch,
-  FiSettings,
-  FiShield,
-  FiTag,
-  FiTrash2,
-  FiUser,
-  FiUsers,
-} from 'react-icons/fi';
+import DOMPurify from 'dompurify';
 import './AdminPages.css';
+import './AdminBookings.css';
+import './AdminUsersConfig.css';
 
+/* ─── Constants ────────────────────────────────────────── */
+const MAIN_TABS = [
+  { key: 'users', label: 'Customers' },
+  { key: 'admins', label: 'Admins' },
+  { key: 'config', label: 'Rate Codes' },
+];
+
+const USER_DETAIL_TABS = [
+  { key: 'info', label: 'Info' },
+  { key: 'pricing', label: 'Pricing & Rate Code' },
+  { key: 'reservations', label: 'Reservations' },
+  { key: 'audit', label: 'Rate Code Audit' },
+];
+
+const STATUS_BADGE = {
+  PENDING: 'adm-badge adm-badge-info',
+  CONFIRMED: 'adm-badge adm-badge-active',
+  CHECKED_IN: 'adm-badge adm-badge-active',
+  COMPLETED: 'adm-badge adm-badge-active',
+  CANCELLED: 'adm-badge adm-badge-inactive',
+  NO_SHOW: 'adm-badge adm-badge-inactive',
+};
+
+/* ─── Helpers ──────────────────────────────────────────── */
+const sanitize = (v) => (typeof v === 'string' ? DOMPurify.sanitize(v) : v);
+const fmtDate = (d) => (d ? new Date(d).toLocaleDateString() : '—');
+const fmtDateTime = (d) => (d ? new Date(d).toLocaleString() : '—');
+const fmtMoney = (n) => (n != null ? `₹${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—');
+
+/* ═══════════════════════════════════════════════════════════
+   AdminUsersConfig – Users, Admins & Config management
+   ═══════════════════════════════════════════════════════════ */
 export default function AdminUsersConfig() {
-  const { userId } = useParams();
+  const { userId: routeUserId } = useParams();
   const navigate = useNavigate();
-  const { isSuperAdmin } = useAuth();
+  const { user: me } = useAuth();
+  const isSuperAdmin = me?.role === 'SUPER_ADMIN';
 
-  /* ── shared reference data ── */
-  const [eventTypes, setEventTypes] = useState([]);
-  const [addOns, setAddOns] = useState([]);
+  /* ── Main tab ───────────────────────────────────────── */
+  const [mainTab, setMainTab] = useState('users');
+
+  /* ── Customers state ────────────────────────────────── */
+  const [customers, setCustomers] = useState([]);
+  const [custLoading, setCustLoading] = useState(false);
+  const [custSearch, setCustSearch] = useState('');
+  const [selectedCustIds, setSelectedCustIds] = useState(new Set());
+
+  /* ── Admins state ───────────────────────────────────── */
+  const [admins, setAdmins] = useState([]);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminSearch, setAdminSearch] = useState('');
+  const [selectedAdminIds, setSelectedAdminIds] = useState(new Set());
+
+  /* ── Rate codes state (config tab) ──────────────────── */
   const [rateCodes, setRateCodes] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [rcLoading, setRcLoading] = useState(false);
 
-  /* ── section toggle ── */
-  const [section, setSection] = useState('users'); // users | admins | rate-codes
+  /* ── User detail modal ──────────────────────────────── */
+  const [detailUser, setDetailUser] = useState(null);
+  const [detailTab, setDetailTab] = useState('info');
+  const [customerDetail, setCustomerDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
-  /* ── users section ── */
-  const [allCustomers, setAllCustomers] = useState([]);
-  const [filterText, setFilterText] = useState('');
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [customerTab, setCustomerTab] = useState('details'); // details | pricing
+  /* ── Bulk assign rate code ──────────────────────────── */
+  const [bulkRateCodeId, setBulkRateCodeId] = useState('');
+  const [bulkMemberLabel, setBulkMemberLabel] = useState('');
+  const [bulkBusy, setBulkBusy] = useState(false);
 
-  /* ── admins section (super admin only) ── */
-  const [allAdmins, setAllAdmins] = useState([]);
-  const [adminFilterText, setAdminFilterText] = useState('');
-  const [selectedAdmin, setSelectedAdmin] = useState(null);
-  const [adminEditForm, setAdminEditForm] = useState({ firstName: '', lastName: '', email: '', phone: '', password: '' });
-  const [adminShowPassword, setAdminShowPassword] = useState(false);
-  const [adminSaving, setAdminSaving] = useState(false);
-  const [adminBinges, setAdminBinges] = useState([]);
-  const [adminTab, setAdminTab] = useState('details'); // details | binges
+  /* ── Edit user inline ───────────────────────────────── */
+  const [editingUser, setEditingUser] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [editingMemberLabel, setEditingMemberLabel] = useState(false);
+  const [memberLabelValue, setMemberLabelValue] = useState('');
 
-  /* ── delete confirmation ── */
-  const [deleteConfirm, setDeleteConfirm] = useState(null); // { id, name, role }
+  /* ═══ Data Loading ══════════════════════════════════════ */
+  const loadCustomers = useCallback(async () => {
+    setCustLoading(true);
+    try {
+      const res = await authService.getAllCustomers();
+      const payload = res.data?.data;
+      setCustomers(Array.isArray(payload) ? payload : (payload?.content ?? []));
+    } catch { toast.error('Failed to load customers'); }
+    finally { setCustLoading(false); }
+  }, []);
 
-  /* ── customer edit (details) ── */
-  const [editForm, setEditForm] = useState({ firstName: '', lastName: '', email: '', phone: '', password: '' });
-  const [showPassword, setShowPassword] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const loadAdmins = useCallback(async () => {
+    setAdminLoading(true);
+    try {
+      const res = await authService.getAllAdmins();
+      setAdmins(res.data?.data || []);
+    } catch { toast.error('Failed to load admins'); }
+    finally { setAdminLoading(false); }
+  }, []);
 
-  /* ── customer pricing ── */
-  const [custPricing, setCustPricing] = useState(null);
+  const loadRateCodes = useCallback(async () => {
+    setRcLoading(true);
+    try {
+      const res = await adminService.getRateCodes();
+      setRateCodes(res.data?.data || []);
+    } catch { toast.error('Failed to load rate codes'); }
+    finally { setRcLoading(false); }
+  }, []);
 
-  /* ── rate codes section ── */
-  const [showRCForm, setShowRCForm] = useState(false);
-  const [editingRC, setEditingRC] = useState(null);
-  const [rcExpandedId, setRcExpandedId] = useState(null);
-  const [rcForm, setRcForm] = useState({ name: '', description: '', eventPricings: [], addonPricings: [] });
+  useEffect(() => {
+    loadCustomers();
+    if (isSuperAdmin) loadAdmins();
+    loadRateCodes();
+  }, [loadCustomers, loadAdmins, loadRateCodes, isSuperAdmin]);
 
-  const buildEmptyCustomerPricing = () => ({
-    rateCodeId: '',
-    rateCodeName: '',
-    scopedProfile: false,
-    eventPricings: eventTypes.map((eventType) => ({
-      eventTypeId: eventType.id,
-      eventTypeName: eventType.name,
-      basePrice: '',
-      hourlyRate: '',
-      pricePerGuest: '',
-    })),
-    addonPricings: addOns.map((addOn) => ({
-      addOnId: addOn.id,
-      addOnName: addOn.name,
-      price: '',
-    })),
-    dirty: false,
+  /* Deep-link to a user */
+  useEffect(() => {
+    if (routeUserId && customers.length) {
+      const cust = customers.find(c => String(c.id) === String(routeUserId));
+      if (cust) openDetail(cust);
+    }
+  }, [routeUserId, customers]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ═══ Customer detail loader ════════════════════════════ */
+  const loadCustomerDetail = useCallback(async (customerId) => {
+    setDetailLoading(true);
+    setCustomerDetail(null);
+    try {
+      const res = await adminService.getCustomerDetail(customerId);
+      setCustomerDetail(res.data?.data || res.data);
+    } catch { /* detail tabs will show empty state */ }
+    finally { setDetailLoading(false); }
+  }, []);
+
+  const openDetail = useCallback((user) => {
+    setDetailUser(user);
+    setDetailTab('info');
+    setEditingUser(null);
+    const isAdmin = user.role === 'ADMIN' || user.role === 'SUPER_ADMIN';
+    if (!isAdmin) loadCustomerDetail(user.id);
+    else setCustomerDetail(null);
+  }, [loadCustomerDetail]);
+
+  const closeDetail = useCallback(() => {
+    setDetailUser(null);
+    setCustomerDetail(null);
+    setEditingUser(null);
+    if (routeUserId) navigate('/admin/users-config', { replace: true });
+  }, [routeUserId, navigate]);
+
+  /* ═══ Filtered lists ════════════════════════════════════ */
+  const filteredCustomers = useMemo(() => {
+    if (!custSearch.trim()) return customers;
+    const q = custSearch.toLowerCase();
+    return customers.filter(c =>
+      (c.firstName || '').toLowerCase().includes(q) ||
+      (c.lastName || '').toLowerCase().includes(q) ||
+      (c.email || '').toLowerCase().includes(q) ||
+      (c.phone || '').includes(q)
+    );
+  }, [customers, custSearch]);
+
+  const filteredAdmins = useMemo(() => {
+    if (!adminSearch.trim()) return admins;
+    const q = adminSearch.toLowerCase();
+    return admins.filter(a =>
+      (a.firstName || '').toLowerCase().includes(q) ||
+      (a.lastName || '').toLowerCase().includes(q) ||
+      (a.email || '').toLowerCase().includes(q)
+    );
+  }, [admins, adminSearch]);
+
+  /* ═══ Selection helpers ═════════════════════════════════ */
+  const toggleCust = (id) => setSelectedCustIds(prev => {
+    const n = new Set(prev);
+    n.has(id) ? n.delete(id) : n.add(id);
+    return n;
   });
 
-  const hydrateCustomerPricing = (pricing) => {
-    const epMap = {};
-    (pricing.eventPricings || []).forEach((eventPricing) => { epMap[eventPricing.eventTypeId] = eventPricing; });
-    const apMap = {};
-    (pricing.addonPricings || []).forEach((addonPricing) => { apMap[addonPricing.addOnId] = addonPricing; });
-
-    return {
-      rateCodeId: pricing.rateCodeId || '',
-      rateCodeName: pricing.rateCodeName || '',
-      scopedProfile: Boolean(pricing.scopedProfile),
-      eventPricings: eventTypes.map((eventType) => {
-        const existing = epMap[eventType.id];
-        return {
-          eventTypeId: eventType.id,
-          eventTypeName: eventType.name,
-          basePrice: existing ? String(existing.basePrice) : '',
-          hourlyRate: existing ? String(existing.hourlyRate) : '',
-          pricePerGuest: existing ? String(existing.pricePerGuest) : '',
-        };
-      }),
-      addonPricings: addOns.map((addOn) => {
-        const existing = apMap[addOn.id];
-        return {
-          addOnId: addOn.id,
-          addOnName: addOn.name,
-          price: existing ? String(existing.price) : '',
-        };
-      }),
-      dirty: false,
-    };
-  };
-
-  /* ── initial load ── */
-  useEffect(() => {
-    const promises = [
-      adminService.getAllEventTypes(),
-      adminService.getAllAddOns(),
-      adminService.getRateCodes(),
-      authService.getAllCustomers(),
-    ];
-    if (isSuperAdmin) promises.push(authService.getAllAdmins());
-    Promise.all(promises)
-      .then(([etRes, aoRes, rcRes, custRes, adminRes]) => {
-        setEventTypes(etRes.data.data || []);
-        setAddOns(aoRes.data.data || []);
-        setRateCodes(rcRes.data.data || []);
-        const custData = custRes.data.data;
-        setAllCustomers(Array.isArray(custData) ? custData : custData?.content || []);
-        if (adminRes) setAllAdmins(adminRes.data.data || adminRes.data || []);
-      })
-      .catch(() => toast.error('Failed to load data'))
-      .finally(() => setLoading(false));
-  }, [isSuperAdmin]);
-
-  /* ── if navigated with userId param, auto-select ── */
-  useEffect(() => {
-    if (userId && allCustomers.length > 0) {
-      const c = allCustomers.find(c => String(c.id) === String(userId));
-      if (c) selectCustomer(c);
-    }
-  }, [userId, allCustomers]);
-
-  /* ── select customer ── */
-  const selectCustomer = async (cust) => {
-    setSelectedCustomer(cust);
-    setCustomerTab('details');
-    setEditForm({ firstName: cust.firstName || '', lastName: cust.lastName || '', email: cust.email || '', phone: cust.phone || '', password: '' });
-    setShowPassword(false);
-    setCustPricing(null);
-    // Navigate to keep URL in sync (without reloading)
-    if (String(cust.id) !== String(userId)) {
-      navigate(`/admin/users-config/${cust.id}`, { replace: true });
+  const toggleAllCust = () => {
+    if (selectedCustIds.size === filteredCustomers.length) {
+      setSelectedCustIds(new Set());
+    } else {
+      setSelectedCustIds(new Set(filteredCustomers.map(c => c.id)));
     }
   };
 
-  /* ── load customer pricing on demand ── */
-  const loadCustomerPricing = async () => {
-    if (!selectedCustomer) return;
+  const toggleAdmin = (id) => setSelectedAdminIds(prev => {
+    const n = new Set(prev);
+    n.has(id) ? n.delete(id) : n.add(id);
+    return n;
+  });
+
+  const toggleAllAdmin = () => {
+    if (selectedAdminIds.size === filteredAdmins.length) {
+      setSelectedAdminIds(new Set());
+    } else {
+      setSelectedAdminIds(new Set(filteredAdmins.map(a => a.id)));
+    }
+  };
+
+  /* ═══ Bulk Actions ══════════════════════════════════════ */
+  const handleBulkBan = async (ids, type) => {
+    if (!ids.size) return;
+    const action = type === 'ban' ? 'ban' : 'unban';
+    if (!window.confirm(`${action === 'ban' ? 'Ban' : 'Unban'} ${ids.size} user(s)?`)) return;
+    setBulkBusy(true);
     try {
-      const res = await adminService.getCustomerPricing(selectedCustomer.id);
-      const p = res.data.data || res.data;
-      setCustPricing(hydrateCustomerPricing(p));
-    } catch {
-      toast.error('Failed to load pricing');
-    }
+      const arr = [...ids];
+      if (action === 'ban') await authService.bulkBan(arr);
+      else await authService.bulkUnban(arr);
+      toast.success(`${ids.size} user(s) ${action === 'ban' ? 'banned' : 'unbanned'}`);
+      setSelectedCustIds(new Set());
+      setSelectedAdminIds(new Set());
+      loadCustomers();
+      if (isSuperAdmin) loadAdmins();
+    } catch (e) { toast.error(e.response?.data?.message || `Failed to ${action}`); }
+    finally { setBulkBusy(false); }
   };
 
-  useEffect(() => {
-    if (customerTab === 'pricing' && selectedCustomer && !custPricing) {
-      loadCustomerPricing();
-    }
-  }, [customerTab, selectedCustomer]);
-
-  /* ── save customer details ── */
-  const handleSaveDetails = async () => {
-    if (!editForm.firstName.trim()) { toast.error('First name is required'); return; }
-    if (!editForm.lastName.trim()) { toast.error('Last name is required'); return; }
-    if (!editForm.email.trim()) { toast.error('Email is required'); return; }
-    if (!editForm.phone.trim()) { toast.error('Phone is required'); return; }
-    setSaving(true);
+  const handleBulkDelete = async (ids) => {
+    if (!ids.size) return;
+    if (!isSuperAdmin) { toast.error('Only super admins can bulk delete'); return; }
+    if (!window.confirm(`Permanently delete ${ids.size} user(s)? This cannot be undone.`)) return;
+    setBulkBusy(true);
     try {
-      const payload = { firstName: editForm.firstName, lastName: editForm.lastName, email: editForm.email, phone: editForm.phone };
-      if (editForm.password.trim()) payload.password = editForm.password.trim();
-      await authService.adminUpdateCustomer(selectedCustomer.id, payload);
-      toast.success('Customer updated');
-      // refresh in list
-      setAllCustomers(prev => prev.map(c => c.id === selectedCustomer.id ? { ...c, ...payload } : c));
-      setSelectedCustomer(prev => ({ ...prev, ...payload }));
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to update');
-    } finally { setSaving(false); }
+      await authService.bulkDelete([...ids]);
+      toast.success(`${ids.size} user(s) deleted`);
+      setSelectedCustIds(new Set());
+      setSelectedAdminIds(new Set());
+      loadCustomers();
+      if (isSuperAdmin) loadAdmins();
+    } catch (e) { toast.error(e.response?.data?.message || 'Delete failed'); }
+    finally { setBulkBusy(false); }
   };
 
-  /* ── save customer pricing ── */
-  const handleSavePricing = async () => {
-    if (!selectedCustomer || !custPricing) return;
-    const payload = {
-      customerId: selectedCustomer.id,
-      rateCodeId: custPricing.rateCodeId || null,
-      eventPricings: custPricing.eventPricings
-        .filter(ep => ep.basePrice !== '' || ep.hourlyRate !== '' || ep.pricePerGuest !== '')
-        .map(ep => ({ eventTypeId: ep.eventTypeId, basePrice: Number(ep.basePrice) || 0, hourlyRate: Number(ep.hourlyRate) || 0, pricePerGuest: Number(ep.pricePerGuest) || 0 })),
-      addonPricings: custPricing.addonPricings
-        .filter(ap => ap.price !== '')
-        .map(ap => ({ addOnId: ap.addOnId, price: Number(ap.price) || 0 })),
-    };
-    try {
-      await adminService.saveCustomerPricing(payload);
-      toast.success(`Pricing saved for ${selectedCustomer.firstName} ${selectedCustomer.lastName}`);
-      setCustPricing(prev => ({ ...prev, dirty: false, scopedProfile: true }));
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Save failed');
-    }
-  };
-
-  const handleDeletePricing = async () => {
-    if (!selectedCustomer || !custPricing?.scopedProfile) return;
-    if (!confirm(`Delete the pricing profile for "${selectedCustomer.firstName} ${selectedCustomer.lastName}" in this binge?`)) return;
-
-    try {
-      await adminService.deleteCustomerPricing(selectedCustomer.id);
-      toast.success(`Pricing deleted for ${selectedCustomer.firstName} ${selectedCustomer.lastName}`);
-      await loadCustomerPricing();
-    } catch (err) {
-      toast.error(err.userMessage || err.response?.data?.message || 'Delete failed');
-    }
-  };
-
-  /* ── rate code helpers ── */
-  const reloadRateCodes = () => {
-    adminService.getRateCodes().then(res => setRateCodes(res.data.data || [])).catch(() => {});
-  };
-
-  const openRCCreate = () => {
-    setEditingRC(null);
-    setRcForm({
-      name: '', description: '',
-      eventPricings: eventTypes.map(et => ({ eventTypeId: et.id, eventTypeName: et.name, basePrice: '', hourlyRate: '', pricePerGuest: '' })),
-      addonPricings: addOns.map(a => ({ addOnId: a.id, addOnName: a.name, price: '' })),
-    });
-    setShowRCForm(true);
-  };
-
-  const openRCEdit = (rc) => {
-    setEditingRC(rc);
-    const epMap = {};
-    (rc.eventPricings || []).forEach(ep => { epMap[ep.eventTypeId] = ep; });
-    const apMap = {};
-    (rc.addonPricings || []).forEach(ap => { apMap[ap.addOnId] = ap; });
-    setRcForm({
-      name: rc.name, description: rc.description || '',
-      eventPricings: eventTypes.map(et => {
-        const ex = epMap[et.id];
-        return { eventTypeId: et.id, eventTypeName: et.name, basePrice: ex ? ex.basePrice : '', hourlyRate: ex ? ex.hourlyRate : '', pricePerGuest: ex ? ex.pricePerGuest : '' };
-      }),
-      addonPricings: addOns.map(a => {
-        const ex = apMap[a.id];
-        return { addOnId: a.id, addOnName: a.name, price: ex ? ex.price : '' };
-      }),
-    });
-    setShowRCForm(true);
-  };
-
-  const handleSaveRC = async () => {
-    if (!rcForm.name.trim()) { toast.error('Name is required'); return; }
-    const payload = {
-      name: rcForm.name.trim(), description: rcForm.description.trim(),
-      eventPricings: rcForm.eventPricings
-        .filter(ep => ep.basePrice !== '' || ep.hourlyRate !== '' || ep.pricePerGuest !== '')
-        .map(ep => ({ eventTypeId: ep.eventTypeId, basePrice: Number(ep.basePrice) || 0, hourlyRate: Number(ep.hourlyRate) || 0, pricePerGuest: Number(ep.pricePerGuest) || 0 })),
-      addonPricings: rcForm.addonPricings
-        .filter(ap => ap.price !== '')
-        .map(ap => ({ addOnId: ap.addOnId, price: Number(ap.price) || 0 })),
-    };
-    try {
-      if (editingRC) {
-        await adminService.updateRateCode(editingRC.id, payload);
-        toast.success('Rate code updated');
-      } else {
-        await adminService.createRateCode(payload);
-        toast.success('Rate code created');
-      }
-      setShowRCForm(false);
-      reloadRateCodes();
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Save failed');
-    }
-  };
-
-  const handleToggleRC = async (id) => {
-    try {
-      await adminService.toggleRateCode(id);
-      toast.success('Rate code toggled');
-      reloadRateCodes();
-    } catch (err) { toast.error(err.userMessage || 'Toggle failed'); }
-  };
-
-  const handleDeleteRC = async (rateCode) => {
-    if (rateCode.active) {
-      toast.error('Deactivate the rate code before deleting it');
+  const handleBulkAssignRateCode = async () => {
+    if (!selectedCustIds.size || !bulkRateCodeId) {
+      toast.warn('Select customers and a rate code');
       return;
     }
-    if (!confirm(`Delete rate code "${rateCode.name}" permanently? This cannot be undone.`)) return;
-
+    setBulkBusy(true);
     try {
-      await adminService.deleteRateCode(rateCode.id);
-      toast.success('Rate code deleted');
-      reloadRateCodes();
-    } catch (err) {
-      toast.error(err.userMessage || err.response?.data?.message || 'Delete failed');
-    }
+      await adminService.bulkAssignRateCode({
+        customerIds: [...selectedCustIds],
+        rateCodeId: Number(bulkRateCodeId),
+        memberLabel: bulkMemberLabel.trim() || null,
+      });
+      toast.success(`Rate code assigned to ${selectedCustIds.size} customer(s)`);
+      setSelectedCustIds(new Set());
+      setBulkRateCodeId('');
+      setBulkMemberLabel('');
+    } catch (e) { toast.error(e.response?.data?.message || 'Bulk assign failed'); }
+    finally { setBulkBusy(false); }
   };
 
-  /* ── delete user (super admin) ── */
-  const handleDeleteUser = async () => {
-    if (!deleteConfirm) return;
+  /* ═══ Single user actions ═══════════════════════════════ */
+  const handleToggleBan = async (user) => {
+    const action = user.active ? 'ban' : 'unban';
+    if (!window.confirm(`${action === 'ban' ? 'Ban' : 'Unban'} ${user.firstName} ${user.lastName || ''}?`)) return;
     try {
-      await authService.deleteUser(deleteConfirm.id);
-      toast.success(`${deleteConfirm.name} deleted`);
-      if (deleteConfirm.role === 'admin') {
-        setAllAdmins(prev => prev.filter(a => a.id !== deleteConfirm.id));
-        if (selectedAdmin?.id === deleteConfirm.id) { setSelectedAdmin(null); setAdminBinges([]); }
-      } else {
-        setAllCustomers(prev => prev.filter(c => c.id !== deleteConfirm.id));
-        if (selectedCustomer?.id === deleteConfirm.id) setSelectedCustomer(null);
+      if (action === 'ban') await authService.bulkBan([user.id]);
+      else await authService.bulkUnban([user.id]);
+      toast.success(`User ${action === 'ban' ? 'banned' : 'unbanned'}`);
+      loadCustomers();
+      if (isSuperAdmin) loadAdmins();
+      if (detailUser?.id === user.id) {
+        setDetailUser(prev => prev ? { ...prev, active: !prev.active } : prev);
       }
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Delete failed');
-    } finally {
-      setDeleteConfirm(null);
-    }
+    } catch (e) { toast.error(e.response?.data?.message || 'Failed'); }
   };
 
-  /* ── select admin ── */
-  const selectAdmin = async (admin) => {
-    setSelectedAdmin(admin);
-    setAdminTab('details');
-    setAdminEditForm({ firstName: admin.firstName || '', lastName: admin.lastName || '', email: admin.email || '', phone: admin.phone || '', password: '' });
-    setAdminShowPassword(false);
-    setAdminBinges([]);
-    // Pre-load binges
+  const handleDeleteUser = async (user) => {
+    if (!window.confirm(`Delete ${user.firstName} ${user.lastName || ''}? This cannot be undone.`)) return;
     try {
-      const res = await adminService.getBingesByAdmin(admin.id);
-      setAdminBinges(res.data.data || res.data || []);
-    } catch { /* ignore – binges are optional */ }
+      await authService.deleteUser(user.id);
+      toast.success('User deleted');
+      closeDetail();
+      loadCustomers();
+      if (isSuperAdmin) loadAdmins();
+    } catch (e) { toast.error(e.response?.data?.message || 'Delete failed'); }
   };
 
-  /* ── save admin details ── */
-  const handleSaveAdmin = async () => {
-    if (!selectedAdmin) return;
-    setAdminSaving(true);
+  /* ── Inline edit ────────────────────────────────────── */
+  const startEdit = (user) => {
+    setEditingUser(user.id);
+    setEditForm({
+      firstName: user.firstName || '',
+      lastName: user.lastName || '',
+      email: user.email || '',
+      phone: user.phone || '',
+    });
+  };
+
+  const saveEdit = async () => {
     try {
-      const payload = { firstName: adminEditForm.firstName, lastName: adminEditForm.lastName, email: adminEditForm.email, phone: adminEditForm.phone };
-      if (adminEditForm.password?.trim()) payload.password = adminEditForm.password;
-      const res = await authService.updateAdmin(selectedAdmin.id, payload);
-      const updated = res.data.data || res.data;
-      setAllAdmins(prev => prev.map(a => a.id === updated.id ? updated : a));
-      setSelectedAdmin(updated);
-      toast.success('Admin updated');
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Update failed');
-    } finally {
-      setAdminSaving(false);
-    }
+      if (detailUser?.role === 'ADMIN' || detailUser?.role === 'SUPER_ADMIN') {
+        await authService.updateAdmin(editingUser, editForm);
+      } else {
+        await authService.adminUpdateCustomer(editingUser, editForm);
+      }
+      toast.success('User updated');
+      setEditingUser(null);
+      loadCustomers();
+      if (isSuperAdmin) loadAdmins();
+      // refresh detail
+      const res = await authService.getCustomerById(editingUser);
+      setDetailUser(res.data?.data || res.data);
+    } catch (e) { toast.error(e.response?.data?.message || 'Update failed'); }
   };
 
-  /* ── filtered admin list ── */
-  const filteredAdmins = adminFilterText.trim()
-    ? allAdmins.filter(a => {
-        const q = adminFilterText.toLowerCase();
-        return (a.firstName + ' ' + a.lastName).toLowerCase().includes(q) ||
-          (a.email || '').toLowerCase().includes(q) ||
-          (a.phone || '').includes(q);
-      })
-    : allAdmins;
+  const saveMemberLabel = async (customerId) => {
+    try {
+      await adminService.updateMemberLabel(customerId, memberLabelValue.trim() || null);
+      toast.success('Member label updated');
+      setEditingMemberLabel(false);
+      loadCustomerDetail(customerId);
+    } catch (e) { toast.error(e.response?.data?.message || 'Failed to update label'); }
+  };
 
-  /* ── filtered customer list ── */
-  const filteredCustomers = filterText.trim()
-    ? allCustomers.filter(c => {
-        const q = filterText.toLowerCase();
-        return (c.firstName + ' ' + c.lastName).toLowerCase().includes(q) ||
-          (c.email || '').toLowerCase().includes(q) ||
-          (c.phone || '').includes(q);
-      })
-    : allCustomers;
+  /* ═══════════════════════════════════════════════════════
+     RENDER
+     ═══════════════════════════════════════════════════════ */
 
-  if (loading) {
-    return <div className="container"><div className="loading"><div className="spinner"></div></div></div>;
-  }
+  /* ── Bulk action toolbar ────────────────────────────── */
+  const renderBulkToolbar = (selectedIds, isAdmin = false) => {
+    if (!selectedIds.size) return null;
+    return (
+      <div className="auc-bulk-toolbar">
+        <span className="auc-bulk-count">{selectedIds.size} selected</span>
 
-  return (
-    <div className="container adm-shell">
-      <div className="adm-header">
-        <div className="adm-header-copy">
-          <span className="adm-kicker"><FiSettings /> Admin workspace</span>
-          <h1>Users & Config</h1>
-          <p>Manage customers, admin access, and pricing templates in one premium control surface.</p>
-        </div>
-      </div>
-
-      <div className="adm-tabs">
-        <button className={`adm-tab${section === 'users' ? ' active' : ''}`} onClick={() => setSection('users')}>
-          <FiUsers /> Users
+        <button className="btn btn-sm btn-secondary" disabled={bulkBusy}
+          onClick={() => handleBulkBan(selectedIds, 'ban')}>
+          Ban
         </button>
+        <button className="btn btn-sm btn-secondary" disabled={bulkBusy}
+          onClick={() => handleBulkBan(selectedIds, 'unban')}>
+          Unban
+        </button>
+
+        {!isAdmin && (
+          <>
+            <select className="auc-bulk-rc-select" value={bulkRateCodeId}
+              onChange={e => setBulkRateCodeId(e.target.value)}>
+              <option value="">Assign Rate Code…</option>
+              {rateCodes.filter(rc => rc.active !== false).map(rc => (
+                <option key={rc.id} value={rc.id}>{rc.name}</option>
+              ))}
+            </select>
+            <input className="ab-input auc-bulk-label-input" placeholder="Member label…"
+              value={bulkMemberLabel} onChange={e => setBulkMemberLabel(e.target.value)} />
+            <button className="btn btn-sm btn-primary" disabled={bulkBusy || !bulkRateCodeId}
+              onClick={handleBulkAssignRateCode}>
+              Apply Rate Code
+            </button>
+          </>
+        )}
+
         {isSuperAdmin && (
-          <button className={`adm-tab${section === 'admins' ? ' active' : ''}`} onClick={() => setSection('admins')}>
-            <FiShield /> Admins
+          <button className="btn btn-sm btn-danger" disabled={bulkBusy}
+            onClick={() => handleBulkDelete(selectedIds)}>
+            Delete Selected
           </button>
         )}
-        <button className={`adm-tab${section === 'rate-codes' ? ' active' : ''}`} onClick={() => setSection('rate-codes')}>
-          <FiTag /> Rate Codes
+
+        <button className="btn btn-sm btn-secondary auc-bulk-clear"
+          onClick={() => isAdmin ? setSelectedAdminIds(new Set()) : setSelectedCustIds(new Set())}>
+          Clear
         </button>
       </div>
+    );
+  };
 
-      {section === 'users' && (
-        <div className="adm-split-layout adm-split-layout-wide">
-          <aside className="adm-panel-stack">
-            <div className="adm-card adm-list-card">
-              <div className="input-group" style={{ marginBottom: '0.75rem' }}>
-                <label><FiSearch style={{ marginRight: 6, verticalAlign: -2 }} />Find customer</label>
-                <input
-                  value={filterText}
-                  onChange={(e) => setFilterText(e.target.value)}
-                  placeholder="Filter users by name, email, or phone..."
-                />
-              </div>
-              <div className="adm-list">
-                {filteredCustomers.length === 0 ? (
-                  <div className="adm-empty compact">
-                    <span className="adm-empty-icon"><FiUsers /></span>
-                    <h3>No customers found</h3>
-                    <p>Try a different name, email, or phone number.</p>
-                  </div>
-                ) : filteredCustomers.map((customer) => (
-                  <button
-                    type="button"
-                    key={customer.id}
-                    className={`adm-list-item${selectedCustomer?.id === customer.id ? ' active' : ''}`}
-                    onClick={() => selectCustomer(customer)}
-                  >
-                    <span className="adm-list-item-title">{customer.firstName} {customer.lastName}</span>
-                    <span className="adm-list-item-meta">{customer.email || 'No email'}</span>
-                    <span className="adm-list-item-meta">{customer.phone || 'No phone'}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </aside>
+  /* ── Customers Tab ──────────────────────────────────── */
+  const renderCustomersTab = () => (
+    <>
+      <div className="ab-filter-row">
+        <input className="ab-input ab-input-search" placeholder="Search name, email or phone…"
+          value={custSearch} onChange={e => setCustSearch(e.target.value)} />
+      </div>
 
-          <section className="adm-panel-stack">
-            {!selectedCustomer ? (
-              <div className="adm-empty">
-                <span className="adm-empty-icon"><FiUser /></span>
-                <h3>Select a customer</h3>
-                <p>Choose a customer from the left to edit account details or pricing overrides.</p>
-              </div>
-            ) : (
-              <>
-                <div className="adm-summary">
-                  <div className="adm-summary-copy">
-                    <span className="adm-summary-title">{selectedCustomer.firstName} {selectedCustomer.lastName}</span>
-                    <span className="adm-summary-text">
-                      {selectedCustomer.email || 'No email'}
-                      {selectedCustomer.phone ? ` • ${selectedCustomer.phone}` : ''}
+      {renderBulkToolbar(selectedCustIds)}
+
+      {custLoading ? <p className="auc-loading">Loading customers…</p> : (
+        <div className="ab-table-wrap">
+          <table className="ab-table auc-table">
+            <thead>
+              <tr>
+                <th className="auc-th-check">
+                  <input type="checkbox"
+                    checked={filteredCustomers.length > 0 && selectedCustIds.size === filteredCustomers.length}
+                    onChange={toggleAllCust} />
+                </th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredCustomers.length === 0 ? (
+                <tr><td colSpan={6} className="ab-empty"><p>No customers found</p></td></tr>
+              ) : filteredCustomers.map(c => (
+                <tr key={c.id} className={selectedCustIds.has(c.id) ? 'auc-row-selected' : ''}>
+                  <td className="auc-td-check" onClick={e => e.stopPropagation()}>
+                    <input type="checkbox" checked={selectedCustIds.has(c.id)}
+                      onChange={() => toggleCust(c.id)} />
+                  </td>
+                  <td onClick={() => openDetail(c)}>
+                    <span className="ab-customer-name">{sanitize(c.firstName)} {sanitize(c.lastName || '')}</span>
+                  </td>
+                  <td onClick={() => openDetail(c)}>{sanitize(c.email)}</td>
+                  <td onClick={() => openDetail(c)}>{sanitize(c.phone || '—')}</td>
+                  <td onClick={() => openDetail(c)}>
+                    <span className={c.active ? 'adm-badge adm-badge-active' : 'adm-badge adm-badge-inactive'}>
+                      {c.active ? 'Active' : 'Banned'}
                     </span>
-                  </div>
-                  <div className="adm-inline-actions">
-                    <span className="adm-badge adm-badge-info"><FiUser /> Customer</span>
-                    {custPricing?.dirty && <span className="adm-badge adm-badge-info"><FiCreditCard /> Unsaved pricing</span>}
-                  </div>
-                </div>
-
-                <div className="adm-subtabs">
-                  <button className={`adm-subtab${customerTab === 'details' ? ' active' : ''}`} onClick={() => setCustomerTab('details')}>
-                    Details
-                  </button>
-                  <button className={`adm-subtab${customerTab === 'pricing' ? ' active' : ''}`} onClick={() => setCustomerTab('pricing')}>
-                    Pricing
-                  </button>
-                </div>
-
-                {customerTab === 'details' && (
-                  <div className="adm-form">
-                    <h3>Edit Customer</h3>
-                    <div className="adm-field-grid">
-                      <div className="input-group">
-                        <label>First Name *</label>
-                        <input value={editForm.firstName} onChange={(e) => setEditForm({ ...editForm, firstName: e.target.value })} />
-                      </div>
-                      <div className="input-group">
-                        <label>Last Name *</label>
-                        <input value={editForm.lastName} onChange={(e) => setEditForm({ ...editForm, lastName: e.target.value })} />
-                      </div>
-                      <div className="input-group adm-field-span">
-                        <label>Email *</label>
-                        <input type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} />
-                      </div>
-                      <div className="input-group adm-field-span">
-                        <label>Phone *</label>
-                        <input value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} />
-                      </div>
-                      <div className="input-group adm-field-span">
-                        <label>Change Password</label>
-                        <div className="adm-password-wrap">
-                          <input
-                            type={showPassword ? 'text' : 'password'}
-                            value={editForm.password}
-                            onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
-                            placeholder="Enter a new password to reset the account"
-                            autoComplete="off"
-                          />
-                          <button type="button" className="adm-password-toggle" onClick={() => setShowPassword(!showPassword)}>
-                            {showPassword ? <><FiEyeOff /> Hide</> : <><FiEye /> Show</>}
-                          </button>
-                        </div>
-                        <span className="adm-hint">Leave blank to keep the existing password unchanged.</span>
-                      </div>
-                    </div>
-                    <div className="adm-form-actions">
-                      {isSuperAdmin && (
-                        <button
-                          className="btn adm-danger-btn push-left"
-                          onClick={() => setDeleteConfirm({ id: selectedCustomer.id, name: `${selectedCustomer.firstName} ${selectedCustomer.lastName}`, role: 'customer' })}
-                        >
-                          <FiTrash2 /> Delete Account
-                        </button>
-                      )}
-                      <button className="btn btn-primary" onClick={handleSaveDetails} disabled={saving}>
-                        <FiSave /> {saving ? 'Saving...' : 'Save Changes'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {customerTab === 'pricing' && (
-                  <div className="adm-card">
-                    <div className="adm-summary" style={{ marginBottom: '1rem' }}>
-                      <div className="adm-summary-copy">
-                        <span className="adm-summary-title">Customer Pricing</span>
-                        <span className="adm-summary-text">Override event and add-on pricing for this customer.</span>
-                      </div>
-                      {custPricing?.dirty && <span className="adm-badge adm-badge-info"><FiCreditCard /> Unsaved changes</span>}
-                    </div>
-
-                    {!custPricing ? (
-                      <div className="adm-empty compact">
-                        <span className="adm-empty-icon"><FiCreditCard /></span>
-                        <h3>Loading pricing</h3>
-                        <p>Preparing the customer pricing profile.</p>
-                      </div>
-                    ) : (
-                      <div className="adm-panel-stack">
-                        <div className="input-group" style={{ maxWidth: '320px' }}>
-                          <label>Assigned Rate Code</label>
-                          <select
-                            value={custPricing.rateCodeId}
-                            onChange={(e) => setCustPricing((prev) => ({ ...prev, rateCodeId: e.target.value, dirty: true }))}
-                          >
-                            <option value="">None (Default Pricing)</option>
-                            {rateCodes.filter((rateCode) => rateCode.active).map((rateCode) => (
-                              <option key={rateCode.id} value={rateCode.id}>{rateCode.name}</option>
-                            ))}
-                          </select>
-                          <span className="adm-hint">Customer-specific overrides below take priority over the assigned rate code.</span>
-                        </div>
-
-                        <div>
-                          <h4 style={{ marginBottom: '0.5rem' }}>Event Type Overrides</h4>
-                          <div className="adm-table-wrap">
-                            <table className="adm-table">
-                              <thead>
-                                <tr>
-                                  <th>Event Type</th>
-                                  <th>Base Price</th>
-                                  <th>Hourly Rate</th>
-                                  <th>Price / Guest</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {custPricing.eventPricings.map((eventPricing, index) => {
-                                  const defaultEvent = eventTypes.find((eventType) => eventType.id === eventPricing.eventTypeId);
-                                  return (
-                                    <tr key={eventPricing.eventTypeId}>
-                                      <td>
-                                        {eventPricing.eventTypeName}
-                                        {defaultEvent && (
-                                          <span className="adm-table-note">
-                                            Default: ₹{defaultEvent.basePrice} base / ₹{defaultEvent.hourlyRate}/hr / ₹{defaultEvent.pricePerGuest}/guest
-                                          </span>
-                                        )}
-                                      </td>
-                                      <td>
-                                        <input
-                                          type="number"
-                                          step="0.01"
-                                          className="input-compact"
-                                          value={eventPricing.basePrice}
-                                          placeholder={defaultEvent?.basePrice ?? ''}
-                                          onChange={(e) => {
-                                            const next = [...custPricing.eventPricings];
-                                            next[index] = { ...next[index], basePrice: e.target.value };
-                                            setCustPricing((prev) => ({ ...prev, eventPricings: next, dirty: true }));
-                                          }}
-                                        />
-                                      </td>
-                                      <td>
-                                        <input
-                                          type="number"
-                                          step="0.01"
-                                          className="input-compact"
-                                          value={eventPricing.hourlyRate}
-                                          placeholder={defaultEvent?.hourlyRate ?? ''}
-                                          onChange={(e) => {
-                                            const next = [...custPricing.eventPricings];
-                                            next[index] = { ...next[index], hourlyRate: e.target.value };
-                                            setCustPricing((prev) => ({ ...prev, eventPricings: next, dirty: true }));
-                                          }}
-                                        />
-                                      </td>
-                                      <td>
-                                        <input
-                                          type="number"
-                                          step="0.01"
-                                          className="input-compact"
-                                          value={eventPricing.pricePerGuest}
-                                          placeholder={defaultEvent?.pricePerGuest ?? ''}
-                                          onChange={(e) => {
-                                            const next = [...custPricing.eventPricings];
-                                            next[index] = { ...next[index], pricePerGuest: e.target.value };
-                                            setCustPricing((prev) => ({ ...prev, eventPricings: next, dirty: true }));
-                                          }}
-                                        />
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-
-                        <div>
-                          <h4 style={{ marginBottom: '0.5rem' }}>Add-On Overrides</h4>
-                          <div className="adm-table-wrap">
-                            <table className="adm-table">
-                              <thead>
-                                <tr>
-                                  <th>Add-On</th>
-                                  <th>Price</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {custPricing.addonPricings.map((addonPricing, index) => {
-                                  const defaultAddon = addOns.find((addOn) => addOn.id === addonPricing.addOnId);
-                                  return (
-                                    <tr key={addonPricing.addOnId}>
-                                      <td>
-                                        {addonPricing.addOnName}
-                                        {defaultAddon && <span className="adm-table-note">Default: ₹{defaultAddon.price}</span>}
-                                      </td>
-                                      <td>
-                                        <input
-                                          type="number"
-                                          step="0.01"
-                                          className="input-compact"
-                                          value={addonPricing.price}
-                                          placeholder={defaultAddon?.price ?? ''}
-                                          onChange={(e) => {
-                                            const next = [...custPricing.addonPricings];
-                                            next[index] = { ...next[index], price: e.target.value };
-                                            setCustPricing((prev) => ({ ...prev, addonPricings: next, dirty: true }));
-                                          }}
-                                        />
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-
-                        <div className="adm-form-actions">
-                          {custPricing.scopedProfile ? (
-                            <button className="btn adm-danger-btn push-left" onClick={handleDeletePricing}>
-                              <FiTrash2 /> Delete Pricing Profile
-                            </button>
-                          ) : (
-                            <span className="adm-hint push-left">Only pricing saved in this binge can be deleted here.</span>
-                          )}
-                          {custPricing.dirty && <span className="adm-hint">Unsaved changes are ready to save.</span>}
-                          <button className="btn btn-primary" onClick={handleSavePricing} disabled={!custPricing.dirty}>
-                            <FiSave /> Save Pricing
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-          </section>
-        </div>
-      )}
-
-      {section === 'admins' && isSuperAdmin && (
-        <div className="adm-split-layout">
-          <aside className="adm-panel-stack">
-            <div className="adm-card adm-list-card">
-              <div className="input-group" style={{ marginBottom: '0.75rem' }}>
-                <label><FiSearch style={{ marginRight: 6, verticalAlign: -2 }} />Find admin</label>
-                <input value={adminFilterText} onChange={(e) => setAdminFilterText(e.target.value)} placeholder="Filter admins by name or email..." />
-              </div>
-              <div className="adm-list compact">
-                {filteredAdmins.length === 0 ? (
-                  <div className="adm-empty compact">
-                    <span className="adm-empty-icon"><FiShield /></span>
-                    <h3>No admins found</h3>
-                    <p>Try a different filter.</p>
-                  </div>
-                ) : filteredAdmins.map((admin) => (
-                  <button
-                    type="button"
-                    key={admin.id}
-                    className={`adm-list-item${selectedAdmin?.id === admin.id ? ' active' : ''}`}
-                    onClick={() => selectAdmin(admin)}
-                  >
-                    <span className="adm-list-item-title">{admin.firstName} {admin.lastName}</span>
-                    <span className="adm-list-item-meta">{admin.email || 'No email'}</span>
-                    <span className={`adm-list-item-status ${admin.active ? 'success' : 'danger'}`}>
-                      {admin.active ? 'Active' : 'Inactive'} • {admin.role === 'SUPER_ADMIN' ? 'Super Admin' : 'Admin'}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </aside>
-
-          <section className="adm-panel-stack">
-            {!selectedAdmin ? (
-              <div className="adm-empty">
-                <span className="adm-empty-icon"><FiShield /></span>
-                <h3>Select an admin</h3>
-                <p>Choose an admin profile to update access details or review their venues.</p>
-              </div>
-            ) : (
-              <>
-                <div className="adm-summary">
-                  <div className="adm-summary-copy">
-                    <span className="adm-summary-title">{selectedAdmin.firstName} {selectedAdmin.lastName}</span>
-                    <span className="adm-summary-text">
-                      {selectedAdmin.email || 'No email'} • Joined {selectedAdmin.createdAt ? new Date(selectedAdmin.createdAt).toLocaleDateString() : '—'}
-                    </span>
-                  </div>
-                  <div className="adm-inline-actions">
-                    <span className={`adm-badge ${selectedAdmin.active ? 'adm-badge-active' : 'adm-badge-inactive'}`}>
-                      {selectedAdmin.active ? 'Active' : 'Inactive'}
-                    </span>
-                    <span className="adm-badge adm-badge-info">{selectedAdmin.role === 'SUPER_ADMIN' ? 'Super Admin' : 'Admin'}</span>
-                    <button
-                      className="btn adm-danger-btn adm-compact-btn"
-                      onClick={() => setDeleteConfirm({ id: selectedAdmin.id, name: `${selectedAdmin.firstName} ${selectedAdmin.lastName}`, role: 'admin' })}
-                    >
-                      <FiTrash2 /> Delete
-                    </button>
-                  </div>
-                </div>
-
-                <div className="adm-subtabs">
-                  <button className={`adm-subtab${adminTab === 'details' ? ' active' : ''}`} onClick={() => setAdminTab('details')}>
-                    Details
-                  </button>
-                  <button className={`adm-subtab${adminTab === 'binges' ? ' active' : ''}`} onClick={() => setAdminTab('binges')}>
-                    Binges ({adminBinges.length})
-                  </button>
-                </div>
-
-                {adminTab === 'details' && (
-                  <div className="adm-form">
-                    <h3>Edit Admin Profile</h3>
-                    <div className="adm-field-grid">
-                      <div className="input-group">
-                        <label>First Name</label>
-                        <input value={adminEditForm.firstName} onChange={(e) => setAdminEditForm({ ...adminEditForm, firstName: e.target.value })} />
-                      </div>
-                      <div className="input-group">
-                        <label>Last Name</label>
-                        <input value={adminEditForm.lastName} onChange={(e) => setAdminEditForm({ ...adminEditForm, lastName: e.target.value })} />
-                      </div>
-                      <div className="input-group">
-                        <label>Email</label>
-                        <input type="email" value={adminEditForm.email} onChange={(e) => setAdminEditForm({ ...adminEditForm, email: e.target.value })} />
-                      </div>
-                      <div className="input-group">
-                        <label>Phone</label>
-                        <input value={adminEditForm.phone} onChange={(e) => setAdminEditForm({ ...adminEditForm, phone: e.target.value })} />
-                      </div>
-                      <div className="input-group adm-field-span">
-                        <label>Reset Password</label>
-                        <div className="adm-password-wrap">
-                          <input
-                            type={adminShowPassword ? 'text' : 'password'}
-                            value={adminEditForm.password}
-                            onChange={(e) => setAdminEditForm({ ...adminEditForm, password: e.target.value })}
-                            placeholder="Leave blank to keep current password"
-                          />
-                          <button type="button" className="adm-password-toggle" onClick={() => setAdminShowPassword(!adminShowPassword)}>
-                            {adminShowPassword ? <><FiEyeOff /> Hide</> : <><FiEye /> Show</>}
-                          </button>
-                        </div>
-                        <span className="adm-hint">Only fill this in when you need to reset the admin password.</span>
-                      </div>
-                    </div>
-                    <div className="adm-form-actions">
-                      <button className="btn btn-primary" onClick={handleSaveAdmin} disabled={adminSaving}>
-                        <FiSave /> {adminSaving ? 'Saving...' : 'Save Changes'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {adminTab === 'binges' && (
-                  adminBinges.length === 0 ? (
-                    <div className="adm-empty compact">
-                      <span className="adm-empty-icon"><FiMapPin /></span>
-                      <h3>No binges yet</h3>
-                      <p>This admin has not created any venues.</p>
-                    </div>
-                  ) : (
-                    <div className="adm-panel-stack">
-                      {adminBinges.map((binge) => (
-                        <div key={binge.id} className="adm-mini-card">
-                          <div className="adm-inline-actions" style={{ justifyContent: 'space-between' }}>
-                            <div>
-                              <div className="adm-mini-card-title">{binge.name}</div>
-                              {binge.address && <div className="adm-mini-card-meta">{binge.address}</div>}
-                            </div>
-                            <span className={`adm-badge ${binge.active ? 'adm-badge-active' : 'adm-badge-inactive'}`}>
-                              {binge.active ? 'Active' : 'Inactive'}
-                            </span>
-                          </div>
-                          <div className="adm-mini-card-meta">
-                            Created {binge.createdAt ? new Date(binge.createdAt).toLocaleDateString() : '—'}
-                            {binge.operationalDate ? ` • Op. Date: ${binge.operationalDate}` : ''}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )
-                )}
-              </>
-            )}
-          </section>
-        </div>
-      )}
-
-      {deleteConfirm && (
-        <div className="adm-modal-overlay" onClick={(e) => e.target === e.currentTarget && setDeleteConfirm(null)}>
-          <div className="adm-modal" style={{ maxWidth: '440px', textAlign: 'center' }}>
-            <h3 style={{ color: 'var(--danger)' }}>Delete Account</h3>
-            <p style={{ marginBottom: '1.5rem', fontSize: '0.9rem' }}>
-              Are you sure you want to permanently delete <strong>{deleteConfirm.name}</strong>'s {deleteConfirm.role} account? This action cannot be undone.
-            </p>
-            <div className="adm-modal-actions" style={{ justifyContent: 'center' }}>
-              <button className="btn btn-secondary" onClick={() => setDeleteConfirm(null)}>Cancel</button>
-              <button className="btn adm-danger-btn" onClick={handleDeleteUser}><FiTrash2 /> Delete</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {section === 'rate-codes' && !showRCForm && (
-        <div className="adm-panel-stack">
-          <div className="adm-toolbar">
-            <div className="adm-header-copy">
-              <span className="adm-kicker"><FiTag /> Pricing templates</span>
-              <h1 style={{ fontSize: '1.45rem' }}>Rate Codes</h1>
-              <p>Named pricing templates that can be assigned to customer accounts.</p>
-            </div>
-            <button className="btn btn-primary" onClick={openRCCreate}><FiPlus /> New Rate Code</button>
-          </div>
-
-          {rateCodes.length === 0 ? (
-            <div className="adm-empty">
-              <span className="adm-empty-icon"><FiTag /></span>
-              <h3>No rate codes yet</h3>
-              <p>Create pricing templates for VIP, corporate, or custom account tiers.</p>
-            </div>
-          ) : (
-            <div className="adm-panel-stack">
-              {rateCodes.map((rateCode) => (
-                <div key={rateCode.id} className="adm-card" style={!rateCode.active ? { opacity: 0.58 } : undefined}>
-                  <div className="adm-toolbar">
-                    <div className="adm-summary-copy">
-                      <span className="adm-summary-title">{rateCode.name}</span>
-                      {rateCode.description && <span className="adm-summary-text">{rateCode.description}</span>}
-                      <div className="adm-inline-actions">
-                        <span className={`adm-badge ${rateCode.active ? 'adm-badge-active' : 'adm-badge-inactive'}`}>
-                          {rateCode.active ? 'Active' : 'Inactive'}
-                        </span>
-                        <span className="adm-badge adm-badge-info">
-                          {(rateCode.eventPricings || []).length} event pricing{(rateCode.eventPricings || []).length !== 1 ? 's' : ''}
-                          {' • '}
-                          {(rateCode.addonPricings || []).length} add-on pricing{(rateCode.addonPricings || []).length !== 1 ? 's' : ''}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="adm-inline-actions">
-                      <button className="btn btn-secondary adm-compact-btn" onClick={() => setRcExpandedId(rcExpandedId === rateCode.id ? null : rateCode.id)}>
-                        {rcExpandedId === rateCode.id ? <><FiChevronUp /> Hide</> : <><FiChevronDown /> Details</>}
-                      </button>
-                      <button className="btn btn-secondary adm-compact-btn" onClick={() => openRCEdit(rateCode)}>Edit</button>
-                      <button className="btn btn-secondary adm-compact-btn" onClick={() => handleToggleRC(rateCode.id)}>
-                        {rateCode.active ? 'Deactivate' : 'Activate'}
-                      </button>
-                      {!rateCode.active && (
-                        <button className="btn adm-danger-btn adm-compact-btn" onClick={() => handleDeleteRC(rateCode)}>
-                          <FiTrash2 /> Delete
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {rcExpandedId === rateCode.id && (
-                    <div className="adm-panel-stack" style={{ marginTop: '1rem' }}>
-                      {(rateCode.eventPricings || []).length > 0 && (
-                        <div className="adm-table-wrap">
-                          <table className="adm-table">
-                            <thead>
-                              <tr>
-                                <th>Event</th>
-                                <th>Base</th>
-                                <th>Hourly</th>
-                                <th>Per Guest</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {rateCode.eventPricings.map((eventPricing) => (
-                                <tr key={eventPricing.eventTypeId}>
-                                  <td>{eventPricing.eventTypeName}</td>
-                                  <td>₹{eventPricing.basePrice}</td>
-                                  <td>₹{eventPricing.hourlyRate}/hr</td>
-                                  <td>₹{eventPricing.pricePerGuest}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-
-                      {(rateCode.addonPricings || []).length > 0 && (
-                        <div className="adm-table-wrap">
-                          <table className="adm-table">
-                            <thead>
-                              <tr>
-                                <th>Add-On</th>
-                                <th>Price</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {rateCode.addonPricings.map((addonPricing) => (
-                                <tr key={addonPricing.addOnId}>
-                                  <td>{addonPricing.addOnName}</td>
-                                  <td>₹{addonPricing.price}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-
-                      {(rateCode.eventPricings || []).length === 0 && (rateCode.addonPricings || []).length === 0 && (
-                        <span className="adm-hint">No custom pricing defined for this rate code.</span>
-                      )}
-                    </div>
-                  )}
-                </div>
+                  </td>
+                  <td onClick={e => e.stopPropagation()}>
+                    <button className="btn btn-sm btn-secondary" onClick={() => openDetail(c)}>View</button>
+                  </td>
+                </tr>
               ))}
-            </div>
-          )}
+            </tbody>
+          </table>
         </div>
       )}
+    </>
+  );
 
-      {section === 'rate-codes' && showRCForm && (
-        <div className="adm-panel-stack">
-          <div className="adm-summary">
-            <div className="adm-summary-copy">
-              <span className="adm-summary-title">{editingRC ? 'Edit Rate Code' : 'Create Rate Code'}</span>
-              <span className="adm-summary-text">Build reusable pricing templates and leave blanks where defaults should apply.</span>
-            </div>
-          </div>
+  /* ── Admins Tab ─────────────────────────────────────── */
+  const renderAdminsTab = () => (
+    <>
+      <div className="ab-filter-row">
+        <input className="ab-input ab-input-search" placeholder="Search name or email…"
+          value={adminSearch} onChange={e => setAdminSearch(e.target.value)} />
+      </div>
 
-          <div className="adm-form">
-            <div className="adm-field-grid">
-              <div className="input-group">
-                <label>Rate Code Name *</label>
-                <input value={rcForm.name} onChange={(e) => setRcForm({ ...rcForm, name: e.target.value })} placeholder="e.g. VIP, Corporate, Student" />
-              </div>
-              <div className="input-group">
-                <label>Description</label>
-                <input value={rcForm.description} onChange={(e) => setRcForm({ ...rcForm, description: e.target.value })} placeholder="Optional description" />
-              </div>
-            </div>
+      {isSuperAdmin && renderBulkToolbar(selectedAdminIds, true)}
 
-            <div style={{ marginTop: '1.5rem' }}>
-              <h3 style={{ marginBottom: '0.5rem' }}>Event Type Pricing</h3>
-              <p className="adm-hint" style={{ marginBottom: '0.75rem' }}>Leave blank to use default event pricing.</p>
-              <div className="adm-table-wrap">
-                <table className="adm-table">
-                  <thead>
-                    <tr>
-                      <th>Event Type</th>
-                      <th>Base Price</th>
-                      <th>Hourly Rate</th>
-                      <th>Price / Guest</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rcForm.eventPricings.map((eventPricing, index) => {
-                      const defaultEvent = eventTypes.find((eventType) => eventType.id === eventPricing.eventTypeId);
-                      return (
-                        <tr key={eventPricing.eventTypeId}>
-                          <td>
-                            {eventPricing.eventTypeName}
-                            {defaultEvent && (
-                              <span className="adm-table-note">
-                                Default: ₹{defaultEvent.basePrice} / ₹{defaultEvent.hourlyRate}/hr / ₹{defaultEvent.pricePerGuest}/guest
-                              </span>
-                            )}
-                          </td>
-                          <td>
-                            <input
-                              type="number"
-                              step="0.01"
-                              className="input-compact"
-                              value={eventPricing.basePrice}
-                              placeholder={defaultEvent?.basePrice ?? ''}
-                              onChange={(e) => {
-                                const next = [...rcForm.eventPricings];
-                                next[index] = { ...next[index], basePrice: e.target.value };
-                                setRcForm({ ...rcForm, eventPricings: next });
-                              }}
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="number"
-                              step="0.01"
-                              className="input-compact"
-                              value={eventPricing.hourlyRate}
-                              placeholder={defaultEvent?.hourlyRate ?? ''}
-                              onChange={(e) => {
-                                const next = [...rcForm.eventPricings];
-                                next[index] = { ...next[index], hourlyRate: e.target.value };
-                                setRcForm({ ...rcForm, eventPricings: next });
-                              }}
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="number"
-                              step="0.01"
-                              className="input-compact"
-                              value={eventPricing.pricePerGuest}
-                              placeholder={defaultEvent?.pricePerGuest ?? ''}
-                              onChange={(e) => {
-                                const next = [...rcForm.eventPricings];
-                                next[index] = { ...next[index], pricePerGuest: e.target.value };
-                                setRcForm({ ...rcForm, eventPricings: next });
-                              }}
-                            />
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div style={{ marginTop: '1.5rem' }}>
-              <h3 style={{ marginBottom: '0.5rem' }}>Add-On Pricing</h3>
-              <p className="adm-hint" style={{ marginBottom: '0.75rem' }}>Leave blank to use default add-on pricing.</p>
-              <div className="adm-table-wrap">
-                <table className="adm-table">
-                  <thead>
-                    <tr>
-                      <th>Add-On</th>
-                      <th>Price</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rcForm.addonPricings.map((addonPricing, index) => {
-                      const defaultAddon = addOns.find((addOn) => addOn.id === addonPricing.addOnId);
-                      return (
-                        <tr key={addonPricing.addOnId}>
-                          <td>
-                            {addonPricing.addOnName}
-                            {defaultAddon && <span className="adm-table-note">Default: ₹{defaultAddon.price}</span>}
-                          </td>
-                          <td>
-                            <input
-                              type="number"
-                              step="0.01"
-                              className="input-compact"
-                              value={addonPricing.price}
-                              placeholder={defaultAddon?.price ?? ''}
-                              onChange={(e) => {
-                                const next = [...rcForm.addonPricings];
-                                next[index] = { ...next[index], price: e.target.value };
-                                setRcForm({ ...rcForm, addonPricings: next });
-                              }}
-                            />
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className="adm-form-actions">
-              <button className="btn btn-secondary" onClick={() => setShowRCForm(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleSaveRC}><FiSave /> {editingRC ? 'Update' : 'Create'}</button>
-            </div>
-          </div>
+      {adminLoading ? <p className="auc-loading">Loading admins…</p> : (
+        <div className="ab-table-wrap">
+          <table className="ab-table auc-table">
+            <thead>
+              <tr>
+                {isSuperAdmin && (
+                  <th className="auc-th-check">
+                    <input type="checkbox"
+                      checked={filteredAdmins.length > 0 && selectedAdminIds.size === filteredAdmins.length}
+                      onChange={toggleAllAdmin} />
+                  </th>
+                )}
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Status</th>
+                {isSuperAdmin && <th>Actions</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {filteredAdmins.length === 0 ? (
+                <tr><td colSpan={isSuperAdmin ? 6 : 4} className="ab-empty"><p>No admins found</p></td></tr>
+              ) : filteredAdmins.map(a => (
+                <tr key={a.id} className={selectedAdminIds.has(a.id) ? 'auc-row-selected' : ''}>
+                  {isSuperAdmin && (
+                    <td className="auc-td-check" onClick={e => e.stopPropagation()}>
+                      <input type="checkbox" checked={selectedAdminIds.has(a.id)}
+                        onChange={() => toggleAdmin(a.id)} />
+                    </td>
+                  )}
+                  <td onClick={() => openDetail(a)}>
+                    <span className="ab-customer-name">{sanitize(a.firstName)} {sanitize(a.lastName || '')}</span>
+                  </td>
+                  <td onClick={() => openDetail(a)}>{sanitize(a.email)}</td>
+                  <td onClick={() => openDetail(a)}>
+                    <span className="adm-badge adm-badge-info">{a.role}</span>
+                  </td>
+                  <td onClick={() => openDetail(a)}>
+                    <span className={a.active ? 'adm-badge adm-badge-active' : 'adm-badge adm-badge-inactive'}>
+                      {a.active ? 'Active' : 'Banned'}
+                    </span>
+                  </td>
+                  {isSuperAdmin && (
+                    <td onClick={e => e.stopPropagation()}>
+                      <button className="btn btn-sm btn-secondary" onClick={() => openDetail(a)}>View</button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
+    </>
+  );
+
+  /* ── Config (Rate Codes) quick-list ─────────────────── */
+  const renderConfigTab = () => (
+    <>
+      <p className="auc-config-hint">
+        Manage rate code details on the dedicated <a href="/admin/rate-codes">Rate Codes page</a>.
+        Below is a quick overview.
+      </p>
+      {rcLoading ? <p className="auc-loading">Loading…</p> : (
+        <div className="ab-table-wrap">
+          <table className="ab-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Description</th>
+                <th>Status</th>
+                <th>Event Pricings</th>
+                <th>Add-on Pricings</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rateCodes.length === 0 ? (
+                <tr><td colSpan={5} className="ab-empty"><p>No rate codes</p></td></tr>
+              ) : rateCodes.map(rc => (
+                <tr key={rc.id}>
+                  <td><strong>{sanitize(rc.name)}</strong></td>
+                  <td>{sanitize(rc.description || '—')}</td>
+                  <td>
+                    <span className={rc.active !== false ? 'adm-badge adm-badge-active' : 'adm-badge adm-badge-inactive'}>
+                      {rc.active !== false ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                  <td>{rc.eventPricings?.length || 0}</td>
+                  <td>{rc.addonPricings?.length || 0}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+
+  /* ── User Detail Modal ──────────────────────────────── */
+  const renderDetailModal = () => {
+    if (!detailUser) return null;
+    const u = detailUser;
+    const isAdminUser = u.role === 'ADMIN' || u.role === 'SUPER_ADMIN';
+    const cd = customerDetail;
+
+    return (
+      <div className="ab-modal-overlay" onClick={closeDetail}>
+        <div className="ab-modal-card adm-flow-card auc-detail-modal" onClick={e => e.stopPropagation()}>
+          {/* Header */}
+          <div className="ab-modal-header">
+            <h3>{sanitize(u.firstName)} {sanitize(u.lastName || '')}</h3>
+            <button className="ab-modal-close" onClick={closeDetail}>×</button>
+          </div>
+
+          {/* Detail tabs */}
+          <div className="ab-detail-tabs">
+            {USER_DETAIL_TABS.filter(t => !isAdminUser || t.key === 'info').map(t => (
+              <button key={t.key} className={`ab-detail-tab ${detailTab === t.key ? 'active' : ''}`}
+                onClick={() => setDetailTab(t.key)}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Body */}
+          <div className="ab-modal-body">
+            {/* ── Info tab ──────────────────────── */}
+            {detailTab === 'info' && (
+              <>
+                {isSuperAdmin && editingUser === u.id ? (
+                  <div className="auc-edit-form">
+                    <label>First Name
+                      <input className="ab-input" value={editForm.firstName}
+                        onChange={e => setEditForm(p => ({ ...p, firstName: e.target.value }))} />
+                    </label>
+                    <label>Last Name
+                      <input className="ab-input" value={editForm.lastName}
+                        onChange={e => setEditForm(p => ({ ...p, lastName: e.target.value }))} />
+                    </label>
+                    <label>Email
+                      <input className="ab-input" type="email" value={editForm.email}
+                        onChange={e => setEditForm(p => ({ ...p, email: e.target.value }))} />
+                    </label>
+                    <label>Phone
+                      <input className="ab-input" value={editForm.phone}
+                        onChange={e => setEditForm(p => ({ ...p, phone: e.target.value }))} />
+                    </label>
+                    <div className="ab-action-row">
+                      <button className="btn btn-sm btn-primary" onClick={saveEdit}>Save</button>
+                      <button className="btn btn-sm btn-secondary" onClick={() => setEditingUser(null)}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="ab-detail-row"><span className="ab-detail-label">ID</span><span>{u.id}</span></div>
+                    <div className="ab-detail-row"><span className="ab-detail-label">Name</span><span>{sanitize(u.firstName)} {sanitize(u.lastName || '')}</span></div>
+                    <div className="ab-detail-row"><span className="ab-detail-label">Email</span><span>{sanitize(u.email)}</span></div>
+                    <div className="ab-detail-row"><span className="ab-detail-label">Phone</span><span>{sanitize(u.phone || '—')}</span></div>
+                    <div className="ab-detail-row"><span className="ab-detail-label">Role</span><span className="adm-badge adm-badge-info">{u.role}</span></div>
+                    <div className="ab-detail-row">
+                      <span className="ab-detail-label">Status</span>
+                      <span className={u.active ? 'adm-badge adm-badge-active' : 'adm-badge adm-badge-inactive'}>
+                        {u.active ? 'Active' : 'Banned'}
+                      </span>
+                    </div>
+                    <div className="ab-action-row">
+                      {isSuperAdmin && (
+                        <button className="btn btn-sm btn-secondary" onClick={() => startEdit(u)}>Edit</button>
+                      )}
+                      <button className="btn btn-sm btn-secondary" onClick={() => handleToggleBan(u)}>
+                        {u.active ? 'Ban' : 'Unban'}
+                      </button>
+                      {isSuperAdmin && (
+                        <button className="btn btn-sm btn-danger" onClick={() => handleDeleteUser(u)}>Delete</button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+
+            {/* ── Pricing & Rate Code tab ───────── */}
+            {detailTab === 'pricing' && (
+              <>
+                {detailLoading ? <p className="auc-loading">Loading pricing…</p> : cd ? (
+                  <>
+                    <div className="ab-detail-row">
+                      <span className="ab-detail-label">Current Rate Code</span>
+                      <span className={cd.currentRateCodeName ? 'adm-badge adm-badge-info' : ''}>
+                        {cd.currentRateCodeName || 'None (base pricing)'}
+                      </span>
+                    </div>
+                    <div className="ab-detail-row">
+                      <span className="ab-detail-label">Rate Code ID</span>
+                      <span>{cd.currentRateCodeId || '—'}</span>
+                    </div>
+                    <div className="ab-detail-row">
+                      <span className="ab-detail-label">Member Label</span>
+                      {editingMemberLabel ? (
+                        <span className="auc-label-edit-row">
+                          <input className="ab-input ab-detail-edit-input" value={memberLabelValue}
+                            onChange={e => setMemberLabelValue(e.target.value)}
+                            placeholder="Display name for member snapshot" />
+                          <button className="btn btn-sm btn-primary" onClick={() => saveMemberLabel(u.id)}>Save</button>
+                          <button className="btn btn-sm btn-secondary" onClick={() => setEditingMemberLabel(false)}>Cancel</button>
+                        </span>
+                      ) : (
+                        <span>
+                          {cd.memberLabel || <em style={{ color: 'var(--text-muted)' }}>Not set</em>}
+                          {' '}
+                          <button className="btn btn-sm btn-secondary" onClick={() => {
+                            setEditingMemberLabel(true);
+                            setMemberLabelValue(cd.memberLabel || '');
+                          }}>Edit</button>
+                        </span>
+                      )}
+                    </div>
+                    <div className="ab-detail-row">
+                      <span className="ab-detail-label">Total Reservations</span>
+                      <span><strong>{cd.totalReservations}</strong></span>
+                    </div>
+                    <div className="ab-action-row">
+                      <button className="btn btn-sm btn-secondary"
+                        onClick={() => navigate(`/admin/customer-pricing?customerId=${u.id}`)}>
+                        Edit Full Pricing →
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <p className="auc-empty-hint">No pricing data available for this binge.</p>
+                )}
+              </>
+            )}
+
+            {/* ── Reservations tab ──────────────── */}
+            {detailTab === 'reservations' && (
+              <>
+                {detailLoading ? <p className="auc-loading">Loading…</p> : cd?.reservations?.length ? (
+                  <div className="ab-table-wrap">
+                    <table className="ab-table auc-res-table">
+                      <thead>
+                        <tr>
+                          <th>Ref</th>
+                          <th>Event</th>
+                          <th>Date</th>
+                          <th>Status</th>
+                          <th>Total</th>
+                          <th>Rate Code</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cd.reservations.map(r => (
+                          <tr key={r.bookingRef} onClick={() => navigate(`/admin/bookings?search=${r.bookingRef}`)}>
+                            <td><span className="ab-ref">{r.bookingRef}</span></td>
+                            <td>{sanitize(r.eventTypeName)}</td>
+                            <td>{fmtDate(r.bookingDate)}</td>
+                            <td><span className={STATUS_BADGE[r.status] || 'adm-badge'}>{r.status}</span></td>
+                            <td className="ab-amount">{fmtMoney(r.totalAmount)}</td>
+                            <td>{sanitize(r.rateCodeName || 'Base')}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="auc-empty-hint">No reservations found for this customer in the current binge.</p>
+                )}
+              </>
+            )}
+
+            {/* ── Rate Code Audit tab ───────────── */}
+            {detailTab === 'audit' && (
+              <>
+                {detailLoading ? <p className="auc-loading">Loading…</p> : cd?.rateCodeChanges?.length ? (
+                  <div className="auc-audit-list">
+                    {cd.rateCodeChanges.map((ch, i) => (
+                      <div key={ch.id || i} className="auc-audit-entry">
+                        <div className="auc-audit-header">
+                          <span className="auc-audit-type">{ch.changeType}</span>
+                          <span className="auc-audit-time">{fmtDateTime(ch.changedAt)}</span>
+                        </div>
+                        <div className="auc-audit-detail">
+                          {ch.previousRateCodeName && (
+                            <span className="auc-audit-from">From: <strong>{sanitize(ch.previousRateCodeName)}</strong></span>
+                          )}
+                          <span className="auc-audit-arrow">→</span>
+                          <span className="auc-audit-to">To: <strong>{sanitize(ch.newRateCodeName) || 'None'}</strong></span>
+                        </div>
+                        {ch.changedByAdminId && (
+                          <div className="auc-audit-meta">By Admin ID: {ch.changedByAdminId}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="auc-empty-hint">No rate code changes recorded.</p>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  /* ── Main render ────────────────────────────────────── */
+  return (
+    <div className="adm-shell adm-flow-shell">
+      <div className="adm-flow-card" style={{ padding: 0 }}>
+        {/* Main Tabs */}
+        <div className="ab-tabs ab-tabs--no-margin">
+          {MAIN_TABS.filter(t => t.key !== 'admins' || isSuperAdmin).map(t => (
+            <button key={t.key} className={`ab-tab ${mainTab === t.key ? 'active' : ''}`}
+              onClick={() => setMainTab(t.key)}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ padding: '1.25rem' }}>
+          {mainTab === 'users' && renderCustomersTab()}
+          {mainTab === 'admins' && isSuperAdmin && renderAdminsTab()}
+          {mainTab === 'config' && renderConfigTab()}
+        </div>
+      </div>
+
+      {renderDetailModal()}
     </div>
   );
 }

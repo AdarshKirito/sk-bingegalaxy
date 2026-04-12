@@ -2,13 +2,16 @@ package com.skbingegalaxy.booking.controller;
 
 import com.skbingegalaxy.booking.dto.BingeDto;
 import com.skbingegalaxy.booking.dto.BingeSaveRequest;
+import com.skbingegalaxy.booking.dto.CustomerDashboardExperienceDto;
 import com.skbingegalaxy.booking.service.BingeService;
 import com.skbingegalaxy.common.dto.ApiResponse;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -18,6 +21,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/bookings")
 @RequiredArgsConstructor
+@Validated
 public class BingeController {
 
     private final BingeService bingeService;
@@ -32,6 +36,11 @@ public class BingeController {
     @GetMapping("/binges/{id}")
     public ResponseEntity<ApiResponse<BingeDto>> getBinge(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.ok(bingeService.getBingeById(id)));
+    }
+
+    @GetMapping("/binges/{id}/customer-dashboard")
+    public ResponseEntity<ApiResponse<CustomerDashboardExperienceDto>> getCustomerDashboardExperience(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.ok(bingeService.getCustomerDashboardExperience(id)));
     }
 
     // ── Admin: list admin's binges ───────────────────────────
@@ -66,6 +75,25 @@ public class BingeController {
             @RequestHeader("X-User-Id") Long adminId,
             @RequestHeader("X-User-Role") String role) {
         return ResponseEntity.ok(ApiResponse.ok("Binge updated", bingeService.updateBinge(id, request, adminId, role)));
+    }
+
+    @GetMapping("/admin/binges/{id}/customer-dashboard")
+    public ResponseEntity<ApiResponse<CustomerDashboardExperienceDto>> getAdminCustomerDashboardExperience(
+            @PathVariable Long id,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        return ResponseEntity.ok(ApiResponse.ok(bingeService.getAdminCustomerDashboardExperience(id, adminId, role)));
+    }
+
+    @PutMapping("/admin/binges/{id}/customer-dashboard")
+    public ResponseEntity<ApiResponse<CustomerDashboardExperienceDto>> updateCustomerDashboardExperience(
+            @PathVariable Long id,
+            @Valid @RequestBody CustomerDashboardExperienceDto request,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        return ResponseEntity.ok(ApiResponse.ok(
+            "Customer dashboard experience updated",
+            bingeService.updateCustomerDashboardExperience(id, request, adminId, role)));
     }
 
     // ── Admin: toggle active ─────────────────────────────────

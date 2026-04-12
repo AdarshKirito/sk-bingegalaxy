@@ -17,6 +17,7 @@ public class ResolvedPricingDto {
     private Long customerId;
     private String pricingSource;     // DEFAULT, RATE_CODE, CUSTOMER
     private String rateCodeName;      // null when DEFAULT or CUSTOMER
+    private String memberLabel;       // admin-defined display name for member snapshot
 
     private List<EventPricing> eventPricings;
     private List<AddonPricing> addonPricings;

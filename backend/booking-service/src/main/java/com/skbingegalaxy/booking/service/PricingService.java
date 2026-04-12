@@ -26,6 +26,19 @@ public class PricingService {
     private final CustomerPricingProfileRepository customerPricingProfileRepository;
     private final EventTypeRepository eventTypeRepository;
     private final AddOnRepository addOnRepository;
+    private final RateCodeChangeLogRepository rateCodeChangeLogRepository;
+    private final BookingRepository bookingRepository;
+
+    /** Thread-local admin ID for audit logging (set by controllers). */
+    private static final ThreadLocal<Long> currentAdminId = new ThreadLocal<>();
+
+    public void setCurrentAdminId(Long adminId) {
+        currentAdminId.set(adminId);
+    }
+
+    public void clearCurrentAdminId() {
+        currentAdminId.remove();
+    }
 
     // ═══════════════════════════════════════════════════════════
     //  RATE CODE CRUD
@@ -151,13 +164,16 @@ public class PricingService {
                 return customerPricingProfileRepository.save(p);
             });
 
-        // Assign/unassign rate code
+        // Assign/unassign rate code (with audit logging)
+        RateCode oldRateCode = profile.getRateCode();
+        RateCode newRateCode = null;
         if (request.getRateCodeId() != null) {
-            RateCode rc = findScopedRateCode(request.getRateCodeId());
-            profile.setRateCode(rc);
+            newRateCode = findScopedRateCode(request.getRateCodeId());
+            profile.setRateCode(newRateCode);
         } else {
             profile.setRateCode(null);
         }
+        logRateCodeChange(request.getCustomerId(), bid, oldRateCode, newRateCode);
 
         // Clear and re-apply custom event pricing
         profile.getEventPricings().clear();
@@ -204,6 +220,22 @@ public class PricingService {
     }
 
     @Transactional
+    public void updateMemberLabel(Long customerId, String label) {
+        Long bid = requireSelectedBinge("updating member label");
+        CustomerPricingProfile profile = findWritableCustomerProfile(customerId, bid)
+            .orElseGet(() -> {
+                CustomerPricingProfile p = CustomerPricingProfile.builder()
+                    .customerId(customerId)
+                    .bingeId(bid)
+                    .build();
+                return customerPricingProfileRepository.save(p);
+            });
+        profile.setMemberLabel(label != null && !label.isBlank() ? label.trim() : null);
+        customerPricingProfileRepository.save(profile);
+        log.info("Updated member label for customer {} to '{}'", customerId, label);
+    }
+
+    @Transactional
     public int bulkAssignRateCode(BulkRateCodeAssignRequest request) {
         Long bid = requireSelectedBinge("bulk assigning rate codes");
         RateCode rateCode = null;
@@ -221,8 +253,13 @@ public class PricingService {
                         .build();
                     return customerPricingProfileRepository.save(p);
                 });
+            RateCode oldRateCode = profile.getRateCode();
             profile.setRateCode(rateCode);
+            if (request.getMemberLabel() != null) {
+                profile.setMemberLabel(request.getMemberLabel().isBlank() ? null : request.getMemberLabel().trim());
+            }
             customerPricingProfileRepository.save(profile);
+            logRateCodeChange(customerId, bid, oldRateCode, rateCode, "BULK_ASSIGN");
             count++;
         }
         log.info("Bulk rate code assignment: {} customers -> rateCodeId={}", count, request.getRateCodeId());
@@ -240,8 +277,8 @@ public class PricingService {
      */
     public ResolvedPricingDto resolveCustomerPricing(Long customerId) {
         Long bid = requireSelectedBinge("resolving customer pricing");
-        List<EventType> allEvents = eventTypeRepository.findByBingeIdOrGlobalAndActiveTrue(bid);
-        List<AddOn> allAddOns = addOnRepository.findByBingeIdOrGlobalAndActiveTrue(bid);
+        List<EventType> allEvents = eventTypeRepository.findByBingeIdAndActiveTrue(bid);
+        List<AddOn> allAddOns = addOnRepository.findByBingeIdAndActiveTrue(bid);
 
         Optional<CustomerPricingProfile> profileOpt = findReadableCustomerProfile(customerId, bid);
 
@@ -249,10 +286,12 @@ public class PricingService {
         Map<Long, CustomerEventPricing> custEventMap = new HashMap<>();
         Map<Long, CustomerAddonPricing> custAddonMap = new HashMap<>();
         RateCode rateCode = null;
+        String memberLabel = null;
 
         if (profileOpt.isPresent()) {
             CustomerPricingProfile profile = profileOpt.get();
             rateCode = profile.getRateCode();
+            memberLabel = profile.getMemberLabel();
             profile.getEventPricings().forEach(ep -> custEventMap.put(ep.getEventType().getId(), ep));
             profile.getAddonPricings().forEach(ap -> custAddonMap.put(ap.getAddOn().getId(), ap));
         }
@@ -321,6 +360,7 @@ public class PricingService {
             .customerId(customerId)
             .pricingSource(overallSource)
             .rateCodeName(rateCodeName)
+            .memberLabel(memberLabel)
             .eventPricings(eventPricings)
             .addonPricings(addonPricings)
             .build();
@@ -428,8 +468,8 @@ public class PricingService {
         }
 
         Long bid = requireSelectedBinge("resolving rate code pricing");
-        List<EventType> allEvents = eventTypeRepository.findByBingeIdOrGlobalAndActiveTrue(bid);
-        List<AddOn> allAddOns = addOnRepository.findByBingeIdOrGlobalAndActiveTrue(bid);
+        List<EventType> allEvents = eventTypeRepository.findByBingeIdAndActiveTrue(bid);
+        List<AddOn> allAddOns = addOnRepository.findByBingeIdAndActiveTrue(bid);
 
         Map<Long, RateCodeEventPricing> rcEventMap = new HashMap<>();
         Map<Long, RateCodeAddonPricing> rcAddonMap = new HashMap<>();
@@ -507,13 +547,13 @@ public class PricingService {
 
     private EventType findAccessibleEventType(Long id) {
         Long bid = requireSelectedBinge("using event types");
-        return eventTypeRepository.findAccessibleById(id, bid)
+        return eventTypeRepository.findByIdAndBingeId(id, bid)
             .orElseThrow(() -> new ResourceNotFoundException("EventType", "id", id));
     }
 
     private AddOn findAccessibleAddOn(Long id) {
         Long bid = requireSelectedBinge("using add-ons");
-        return addOnRepository.findAccessibleById(id, bid)
+        return addOnRepository.findByIdAndBingeId(id, bid)
             .orElseThrow(() -> new ResourceNotFoundException("AddOn", "id", id));
     }
 
@@ -571,6 +611,97 @@ public class PricingService {
                     .price(ap.getPrice())
                     .build()).toList())
             .updatedAt(profile.getUpdatedAt())
+            .build();
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  RATE CODE CHANGE AUDIT LOG
+    // ═══════════════════════════════════════════════════════════
+
+    private void logRateCodeChange(Long customerId, Long bingeId, RateCode oldRC, RateCode newRC) {
+        String changeType;
+        if (oldRC == null && newRC != null) changeType = "ASSIGN";
+        else if (oldRC != null && newRC == null) changeType = "UNASSIGN";
+        else if (oldRC != null && !oldRC.getId().equals(newRC != null ? newRC.getId() : null)) changeType = "REASSIGN";
+        else return; // no change
+        logRateCodeChange(customerId, bingeId, oldRC, newRC, changeType);
+    }
+
+    private void logRateCodeChange(Long customerId, Long bingeId, RateCode oldRC, RateCode newRC, String changeType) {
+        Long adminId = currentAdminId.get();
+        rateCodeChangeLogRepository.save(RateCodeChangeLog.builder()
+            .customerId(customerId)
+            .bingeId(bingeId)
+            .previousRateCodeId(oldRC != null ? oldRC.getId() : null)
+            .previousRateCodeName(oldRC != null ? oldRC.getName() : null)
+            .newRateCodeId(newRC != null ? newRC.getId() : null)
+            .newRateCodeName(newRC != null ? newRC.getName() : null)
+            .changeType(changeType)
+            .changedByAdminId(adminId)
+            .build());
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  CUSTOMER DETAIL (rate code + reservations)
+    // ═══════════════════════════════════════════════════════════
+
+    public CustomerDetailDto getCustomerDetail(Long customerId) {
+        Long bid = requireSelectedBinge("viewing customer detail");
+
+        // Current rate code
+        Optional<CustomerPricingProfile> profileOpt = findReadableCustomerProfile(customerId, bid);
+        Long currentRateCodeId = null;
+        String currentRateCodeName = null;
+        String memberLabel = null;
+        if (profileOpt.isPresent()) {
+            memberLabel = profileOpt.get().getMemberLabel();
+            if (profileOpt.get().getRateCode() != null) {
+                currentRateCodeId = profileOpt.get().getRateCode().getId();
+                currentRateCodeName = profileOpt.get().getRateCode().getName();
+            }
+        }
+
+        // Rate code change audit
+        List<RateCodeChangeLog> changes = rateCodeChangeLogRepository
+            .findByCustomerIdAndBingeIdOrderByChangedAtDesc(customerId, bid);
+        List<CustomerDetailDto.RateCodeChange> changeList = changes.stream().map(c ->
+            CustomerDetailDto.RateCodeChange.builder()
+                .id(c.getId())
+                .previousRateCodeName(c.getPreviousRateCodeName())
+                .newRateCodeName(c.getNewRateCodeName())
+                .changeType(c.getChangeType())
+                .changedByAdminId(c.getChangedByAdminId())
+                .changedAt(c.getChangedAt())
+                .build()
+        ).toList();
+
+        // Reservation history for this binge
+        List<Booking> bookings = bookingRepository.findByBingeIdAndCustomerIdOrderByCreatedAtDesc(bid, customerId);
+        List<CustomerDetailDto.ReservationSummary> reservations = bookings.stream().map(b ->
+            CustomerDetailDto.ReservationSummary.builder()
+                .bookingRef(b.getBookingRef())
+                .eventTypeName(b.getEventType() != null ? b.getEventType().getName() : "—")
+                .bookingDate(b.getBookingDate())
+                .startTime(b.getStartTime())
+                .durationMinutes(b.getDurationMinutes() != null ? b.getDurationMinutes() : b.getDurationHours() * 60)
+                .status(b.getStatus().name())
+                .paymentStatus(b.getPaymentStatus().name())
+                .totalAmount(b.getTotalAmount())
+                .collectedAmount(b.getCollectedAmount())
+                .pricingSource(b.getPricingSource())
+                .rateCodeName(b.getRateCodeName())
+                .createdAt(b.getCreatedAt())
+                .build()
+        ).toList();
+
+        return CustomerDetailDto.builder()
+            .customerId(customerId)
+            .currentRateCodeId(currentRateCodeId)
+            .currentRateCodeName(currentRateCodeName)
+            .memberLabel(memberLabel)
+            .rateCodeChanges(changeList)
+            .totalReservations(bookings.size())
+            .reservations(reservations)
             .build();
     }
 }

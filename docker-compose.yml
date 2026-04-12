@@ -148,6 +148,11 @@ services:
       interval: 15s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.50"
 
   config-server:
     build: ./backend/config-server
@@ -166,6 +171,11 @@ services:
       interval: 15s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.50"
 
   api-gateway:
     build: ./backend/api-gateway
@@ -189,6 +199,11 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://skbingegalaxy.com,http://localhost:3000,http://localhost:8080}
       JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.50"
 
   # ── Application Services ───────────────────────────────────
   auth-service:

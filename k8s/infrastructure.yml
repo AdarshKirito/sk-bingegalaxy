@@ -1,10 +1,12 @@
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: discovery-server
   namespace: sk-binge-galaxy
 spec:
-  replicas: 1  # Single Eureka node; multi-replica requires headless peer config — use replicas:1 or replace with Spring Cloud K8s discovery
+  serviceName: discovery-server
+  replicas: 2
+  podManagementPolicy: Parallel
   selector:
     matchLabels:
       app: discovery-server
@@ -14,10 +16,21 @@ spec:
         app: discovery-server
     spec:
       serviceAccountName: spring-cloud-kubernetes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: discovery-server
+                topologyKey: kubernetes.io/hostname
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: discovery-server
           image: skbingegalaxy/discovery-server:IMAGE_TAG  # Set by CI/CD
@@ -34,6 +47,15 @@ spec:
           envFrom:
             - secretRef:
                 name: app-secrets
+          env:
+            - name: EUREKA_INSTANCE_HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: EUREKA_PEER_ENABLED
+              value: "true"
+            - name: EUREKA_PEER_URLS
+              value: "http://eureka:$(EUREKA_PASSWORD)@discovery-server-0.discovery-server.sk-binge-galaxy.svc.cluster.local:8761/eureka/,http://eureka:$(EUREKA_PASSWORD)@discovery-server-1.discovery-server.sk-binge-galaxy.svc.cluster.local:8761/eureka/"
           resources:
             requests:
               memory: "256Mi"
@@ -77,11 +99,13 @@ metadata:
   name: discovery-server
   namespace: sk-binge-galaxy
 spec:
+  clusterIP: None  # Headless service for StatefulSet peer discovery
   selector:
     app: discovery-server
   ports:
     - port: 8761
       targetPort: 8761
+      name: http
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -103,6 +127,8 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: config-server
           image: skbingegalaxy/config-server:IMAGE_TAG  # Set by CI/CD
@@ -186,10 +212,13 @@ spec:
       labels:
         app: redis
     spec:
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1001
         fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: redis
           image: redis:7-alpine
@@ -271,6 +300,8 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: api-gateway
           image: skbingegalaxy/api-gateway:IMAGE_TAG  # Set by CI/CD

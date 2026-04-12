@@ -26,6 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -389,5 +390,58 @@ class AuthControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"token\":\"reset-token\",\"newPassword\":\"NewPass@123\"}"))
                 .andExpect(status().isOk());
+    }
+
+    // ── Bulk ban endpoint ────────────────────────────────
+
+    @Test
+    void bulkBan_success_returns200() throws Exception {
+        when(authService.bulkSetActive(any(), eq(false))).thenReturn(2);
+
+        mockMvc.perform(post("/api/v1/auth/admin/bulk-ban")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("[1, 2]"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").value(2))
+                .andExpect(jsonPath("$.message").value("2 users banned"));
+    }
+
+    // ── Bulk unban endpoint ──────────────────────────────
+
+    @Test
+    void bulkUnban_success_returns200() throws Exception {
+        when(authService.bulkSetActive(any(), eq(true))).thenReturn(3);
+
+        mockMvc.perform(post("/api/v1/auth/admin/bulk-unban")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("[3, 4, 5]"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").value(3))
+                .andExpect(jsonPath("$.message").value("3 users unbanned"));
+    }
+
+    // ── Bulk delete endpoint ─────────────────────────────
+
+    @Test
+    void bulkDelete_success_returns200() throws Exception {
+        when(authService.bulkDeleteUsers(any())).thenReturn(1);
+
+        mockMvc.perform(post("/api/v1/auth/admin/bulk-delete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("[10]"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").value(1))
+                .andExpect(jsonPath("$.message").value("1 users deleted"));
+    }
+
+    @Test
+    void bulkBan_emptyList_returns200WithZero() throws Exception {
+        when(authService.bulkSetActive(any(), eq(false))).thenReturn(0);
+
+        mockMvc.perform(post("/api/v1/auth/admin/bulk-ban")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("[]"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").value(0));
     }
 }

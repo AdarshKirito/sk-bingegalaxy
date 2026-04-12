@@ -5,9 +5,11 @@ import com.skbingegalaxy.booking.service.AdminBingeScopeService;
 import com.skbingegalaxy.booking.service.PricingService;
 import com.skbingegalaxy.common.dto.ApiResponse;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -15,6 +17,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/bookings/admin/pricing")
 @RequiredArgsConstructor
+@Validated
 public class AdminPricingController {
 
     private final AdminBingeScopeService adminBingeScopeService;
@@ -22,6 +25,7 @@ public class AdminPricingController {
 
     private void validatePricingScope(Long adminId, String role) {
         adminBingeScopeService.requireManagedBinge(adminId, role);
+        pricingService.setCurrentAdminId(adminId);
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -108,7 +112,7 @@ public class AdminPricingController {
 
     @PostMapping("/customer")
     public ResponseEntity<ApiResponse<CustomerPricingDto>> saveCustomerPricing(
-            @RequestBody CustomerPricingSaveRequest request,
+            @Valid @RequestBody CustomerPricingSaveRequest request,
             @RequestHeader("X-User-Id") Long adminId,
             @RequestHeader("X-User-Role") String role) {
         validatePricingScope(adminId, role);
@@ -127,12 +131,23 @@ public class AdminPricingController {
 
     @PostMapping("/bulk-assign-rate-code")
     public ResponseEntity<ApiResponse<Integer>> bulkAssignRateCode(
-            @RequestBody BulkRateCodeAssignRequest request,
+            @Valid @RequestBody BulkRateCodeAssignRequest request,
             @RequestHeader("X-User-Id") Long adminId,
             @RequestHeader("X-User-Role") String role) {
         validatePricingScope(adminId, role);
         int count = pricingService.bulkAssignRateCode(request);
         return ResponseEntity.ok(ApiResponse.ok(count + " customers updated", count));
+    }
+
+    @PatchMapping("/customer/{customerId}/member-label")
+    public ResponseEntity<ApiResponse<Void>> updateMemberLabel(
+            @PathVariable Long customerId,
+            @RequestBody java.util.Map<String, String> body,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        validatePricingScope(adminId, role);
+        pricingService.updateMemberLabel(customerId, body.get("memberLabel"));
+        return ResponseEntity.ok(ApiResponse.ok("Member label updated", null));
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -155,5 +170,18 @@ public class AdminPricingController {
             @RequestHeader("X-User-Role") String role) {
         validatePricingScope(adminId, role);
         return ResponseEntity.ok(ApiResponse.ok(pricingService.resolveRateCodePricing(rateCodeId)));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  CUSTOMER DETAIL (rate code audit + reservations)
+    // ═══════════════════════════════════════════════════════════
+
+    @GetMapping("/customer-detail/{customerId}")
+    public ResponseEntity<ApiResponse<CustomerDetailDto>> getCustomerDetail(
+            @PathVariable Long customerId,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        validatePricingScope(adminId, role);
+        return ResponseEntity.ok(ApiResponse.ok(pricingService.getCustomerDetail(customerId)));
     }
 }

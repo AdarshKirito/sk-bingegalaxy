@@ -43,10 +43,13 @@ spec:
       labels:
         app: zipkin
     spec:
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: zipkin
           securityContext:
@@ -128,10 +131,13 @@ spec:
       labels:
         app: grafana
     spec:
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 472
         fsGroup: 472
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: grafana
           image: grafana/grafana:11.1.4
@@ -197,7 +203,20 @@ spec:
           configMap:
             name: grafana-datasources
         - name: data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: grafana-data-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-data-pvc
+  namespace: sk-binge-galaxy
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: __STORAGE_CLASS_NAME__
+  resources:
+    requests:
+      storage: 2Gi
 ---
 apiVersion: v1
 kind: Service
@@ -213,3 +232,95 @@ spec:
     - port: 3000
       targetPort: 3000
       name: http
+---
+# Prometheus alerting rules for critical production conditions
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: sk-binge-galaxy-alerts
+  namespace: sk-binge-galaxy
+  labels:
+    release: prometheus
+spec:
+  groups:
+    - name: gateway-errors
+      rules:
+        - alert: HighGateway5xxRate
+          expr: |
+            (
+              sum(rate(http_server_requests_seconds_count{namespace="sk-binge-galaxy", app="api-gateway", status=~"5.."}[5m]))
+              /
+              sum(rate(http_server_requests_seconds_count{namespace="sk-binge-galaxy", app="api-gateway"}[5m]))
+            ) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "API Gateway 5xx error rate above 5%"
+            description: "{{ $value | humanizePercentage }} of gateway requests are returning 5xx errors."
+    - name: pod-health
+      rules:
+        - alert: PodCrashLooping
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="sk-binge-galaxy"}[15m]) > 3
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Pod {{ $labels.pod }} is crash-looping"
+            description: "{{ $labels.pod }} in {{ $labels.namespace }} restarted {{ $value }} times in 15 min."
+        - alert: PodNotReady
+          expr: |
+            kube_pod_status_ready{namespace="sk-binge-galaxy", condition="true"} == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ $labels.pod }} not ready for 10 min"
+    - name: hpa-saturation
+      rules:
+        - alert: HPAAtMaxReplicas
+          expr: |
+            kube_horizontalpodautoscaler_status_current_replicas{namespace="sk-binge-galaxy"}
+            ==
+            kube_horizontalpodautoscaler_spec_max_replicas{namespace="sk-binge-galaxy"}
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "HPA {{ $labels.horizontalpodautoscaler }} at max replicas for 15 min"
+            description: "Cannot scale further — consider raising maxReplicas or optimizing the service."
+    - name: database-health
+      rules:
+        - alert: HikariPoolExhausted
+          expr: |
+            hikaricp_connections_active{namespace="sk-binge-galaxy"}
+            >=
+            hikaricp_connections_max{namespace="sk-binge-galaxy"} * 0.9
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.app }} HikariCP pool >90% utilised"
+            description: "Active: {{ $value }}. Consider increasing pool size or investigating slow queries."
+    - name: kafka-health
+      rules:
+        - alert: KafkaConsumerLag
+          expr: |
+            kafka_consumer_lag_sum{namespace="sk-binge-galaxy"} > 1000
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kafka consumer group {{ $labels.group }} lag exceeds 1000"
+    - name: circuit-breaker
+      rules:
+        - alert: CircuitBreakerOpen
+          expr: |
+            resilience4j_circuitbreaker_state{namespace="sk-binge-galaxy", state="open"} == 1
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Circuit breaker {{ $labels.name }} is OPEN on {{ $labels.app }}"
+            description: "Downstream service may be unavailable. Check logs and dependencies."

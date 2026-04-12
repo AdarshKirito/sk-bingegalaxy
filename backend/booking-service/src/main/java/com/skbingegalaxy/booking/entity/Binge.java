@@ -36,6 +36,9 @@ public class Binge {
     @Column
     private LocalDate operationalDate;
 
+    @Column(columnDefinition = "TEXT")
+    private String customerDashboardConfigJson;
+
     @CreationTimestamp
     @Column(updatable = false)
     private LocalDateTime createdAt;

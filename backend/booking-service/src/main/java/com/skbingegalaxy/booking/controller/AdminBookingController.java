@@ -11,6 +11,7 @@ import com.skbingegalaxy.common.dto.ApiResponse;
 import com.skbingegalaxy.common.dto.PagedResponse;
 import com.skbingegalaxy.common.enums.BookingStatus;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Positive;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,10 +26,12 @@ import org.springframework.web.bind.annotation.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import org.springframework.validation.annotation.Validated;
 
 @RestController
 @RequestMapping("/api/v1/bookings/admin")
 @RequiredArgsConstructor
+@Validated
 @Slf4j
 public class AdminBookingController {
 
@@ -164,6 +167,15 @@ public class AdminBookingController {
         if (booking.getStatus() != com.skbingegalaxy.common.enums.BookingStatus.CONFIRMED) {
             throw new com.skbingegalaxy.common.exception.BusinessException(
                 "Cannot check in — booking must be CONFIRMED first. Current status: " + booking.getStatus());
+        }
+        // Warn (but allow) check-in when payment is not yet collected.
+        // Admin may have legitimate reasons (VIP, external payment, etc.)
+        var ps = booking.getPaymentStatus();
+        if (ps == com.skbingegalaxy.common.enums.PaymentStatus.PENDING
+                || ps == com.skbingegalaxy.common.enums.PaymentStatus.FAILED
+                || ps == com.skbingegalaxy.common.enums.PaymentStatus.INITIATED) {
+            log.warn("Check-in for {} with paymentStatus={} — payment not yet collected",
+                bookingRef, ps);
         }
         UpdateBookingRequest req = new UpdateBookingRequest();
         req.setCheckedIn(true);

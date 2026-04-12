@@ -27,7 +27,7 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
 
     private static final int MAX_BUCKETS = 10_000;
     private static final int STANDARD_RATE_LIMIT = 100;
-    private static final int AUTH_RATE_LIMIT = 10;
+    private static final int AUTH_RATE_LIMIT = 30;
     private static final Duration RATE_LIMIT_WINDOW = Duration.ofMinutes(1);
     private static final Duration REDIS_COUNTER_TTL = RATE_LIMIT_WINDOW.plusSeconds(5);
     private static final long REDIS_FALLBACK_LOG_WINDOW_MS = 60_000;

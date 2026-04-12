@@ -40,6 +40,7 @@ export default function AdminBookingCreate() {
       amount,
       customerId,
       paymentMethod,
+      bookingTotalAmount: booking.totalAmount || 0,
       notes: `${paymentMethod} payment recorded during admin booking creation`,
     });
   };
@@ -83,7 +84,21 @@ export default function AdminBookingCreate() {
       const somethingChanged = dateChanged || timeChanged || durationChanged || eventChanged || addOnsChanged || guestsChanged;
 
       if (!somethingChanged) {
-        // Nothing changed — just update notes / customer info in place
+        // Check if customer info / notes actually changed
+        const infoChanged =
+          (payload.customerName || '') !== (editBookingData.customerName || '') ||
+          (payload.customerEmail || '') !== (editBookingData.customerEmail || '') ||
+          (payload.customerPhone || '') !== (editBookingData.customerPhone || '') ||
+          (payload.specialNotes || '') !== (editBookingData.specialNotes || '') ||
+          (payload.adminNotes || '') !== (editBookingData.adminNotes || '');
+
+        if (!infoChanged) {
+          toast.info('No changes detected');
+          navigate('/admin/bookings');
+          return;
+        }
+
+        // Only notes / customer info changed — update in place
         try {
           await adminService.updateBooking(editBookingData.bookingRef, {
             adminNotes: payload.adminNotes || editBookingData.adminNotes,
@@ -95,7 +110,7 @@ export default function AdminBookingCreate() {
           toast.success('Reservation updated (no reschedule needed)');
           navigate('/admin/bookings');
         } catch (err) {
-          toast.error(err.userMessage || 'Update failed');
+          toast.error(err.response?.data?.message || err.userMessage || 'Update failed');
         }
         return;
       }
@@ -157,6 +172,12 @@ export default function AdminBookingCreate() {
     const paymentMethod = payload.paymentMethod || 'CASH';
     const paymentLabel = paymentMethod.replace(/_/g, ' ').toLowerCase();
 
+    if (paymentMethod === 'COLLECT_LATER') {
+      toast.success(`Booking ${ref} created — payment pending. Record it from Bookings when collected.`);
+      navigate('/admin/bookings');
+      return;
+    }
+
     try {
       await syncAdminPaymentRecord(booking, paymentMethod);
       const syncedBooking = await waitForBookingPaymentSync(ref);
@@ -188,6 +209,7 @@ export default function AdminBookingCreate() {
           amount: priceDiff.diff,
           customerId: priceDiff.customerId,
           paymentMethod: chargeMethod,
+          bookingTotalAmount: priceDiff.newTotal || 0,
           notes: `Additional charge: price updated ₹${priceDiff.oldTotal.toLocaleString()} → ₹${priceDiff.newTotal.toLocaleString()}`,
         });
         toast.success(`Additional ₹${priceDiff.diff.toLocaleString()} collected (${chargeMethod})`);

@@ -1,0 +1,360 @@
+/* ── Entrance Dashboard (pre-binge-selection) ──────────────────────────── */
+.entrance {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* ── Hero / Welcome ────────────────────────────────────────────────────── */
+.entrance-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.95fr);
+  gap: 1.2rem;
+}
+
+.entrance-welcome,
+.entrance-profile {
+  position: relative;
+  overflow: hidden;
+  border-radius: 28px;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  background:
+    radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.05), transparent 26%),
+    linear-gradient(150deg, rgba(var(--primary-rgb), 0.1), rgba(14, 165, 233, 0.04) 52%, var(--bg-card));
+  box-shadow: 0 14px 32px rgba(var(--primary-rgb), 0.06), var(--shadow-sm);
+}
+
+[data-theme="dark"] .entrance-welcome,
+[data-theme="dark"] .entrance-profile {
+  background:
+    radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.04), transparent 24%),
+    linear-gradient(150deg, rgba(var(--primary-rgb), 0.14), rgba(14, 165, 233, 0.08) 55%, var(--bg-card));
+}
+
+.entrance-welcome::before,
+.entrance-profile::before,
+.entrance-panel::before,
+.entrance-stat-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(var(--primary-rgb), 0), rgba(var(--primary-rgb), 0.35), rgba(var(--accent-rgb), 0.18), rgba(var(--primary-rgb), 0));
+  pointer-events: none;
+}
+
+.entrance-kicker {
+  display: inline-flex;
+  margin-bottom: 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--primary);
+  padding: 0.42rem 0.78rem;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--primary-rgb), 0.14);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.08), rgba(var(--accent-rgb), 0.03));
+}
+
+.entrance-welcome h1 {
+  margin-bottom: 0.5rem;
+}
+
+.entrance-welcome p,
+.entrance-profile p {
+  color: var(--text-secondary);
+}
+
+.entrance-welcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.entrance-profile {
+  display: flex;
+  flex-direction: column;
+}
+
+.entrance-profile h2 {
+  margin-bottom: 0.5rem;
+}
+
+.entrance-profile-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-top: 0.75rem;
+}
+
+.entrance-profile-list div {
+  padding: 0.8rem;
+  border-radius: 14px;
+  border: 1px solid rgba(var(--primary-rgb), 0.08);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.03), transparent 70%), var(--bg-card);
+}
+
+.entrance-profile-list span {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.entrance-profile-list strong {
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.entrance-profile-inline-actions {
+  display: flex;
+  gap: 0.65rem;
+  margin-top: auto;
+  padding-top: 1rem;
+}
+
+/* ── Stats row ─────────────────────────────────────────────────────────── */
+.entrance-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.entrance-stat-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 1.25rem;
+  border-radius: 20px;
+  border: 1px solid rgba(var(--primary-rgb), 0.08);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.03), transparent 24%), var(--bg-card);
+  box-shadow: 0 12px 28px rgba(var(--primary-rgb), 0.04), var(--shadow-sm);
+}
+
+.entrance-stat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.14), rgba(var(--accent-rgb), 0.06));
+  color: var(--primary);
+  box-shadow: inset 0 0 0 1px rgba(var(--primary-rgb), 0.12);
+}
+
+.entrance-stat-card strong {
+  font-size: 1.35rem;
+  line-height: 1.1;
+  color: color-mix(in srgb, var(--primary) 84%, var(--accent) 16%);
+}
+
+.entrance-stat-card p {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+/* ── Panel (venues / binges grid) ──────────────────────────────────────── */
+.entrance-panel {
+  position: relative;
+  border-radius: 24px;
+  padding: 1.25rem;
+  border: 1px solid rgba(var(--primary-rgb), 0.08);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.03), transparent 24%), var(--bg-card);
+  box-shadow: 0 12px 28px rgba(var(--primary-rgb), 0.04), var(--shadow-sm);
+}
+
+.entrance-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.entrance-inline-link {
+  color: var(--primary-dark);
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.entrance-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.entrance-venue-card {
+  position: relative;
+  padding: 1.2rem;
+  border-radius: 18px;
+  border: 1px solid rgba(var(--primary-rgb), 0.1);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.04), transparent 65%), var(--bg-card);
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.entrance-venue-card:hover,
+.entrance-venue-card:focus-visible {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(var(--primary-rgb), 0.12);
+}
+
+.entrance-venue-card h3 {
+  margin-bottom: 0.35rem;
+}
+
+.entrance-venue-card p {
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+}
+
+.entrance-venue-enter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+}
+
+.entrance-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+}
+
+.entrance-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(var(--primary-rgb), 0.08);
+  color: var(--primary);
+  font-size: 1.4rem;
+}
+
+.entrance-empty h3 {
+  color: var(--text);
+}
+
+.entrance-empty p {
+  color: var(--text-secondary);
+}
+
+/* ── Quick navigation cards ────────────────────────────────────────────── */
+.entrance-nav-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+.entrance-nav-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 1.2rem;
+  border-radius: 18px;
+  border: 1px solid rgba(var(--primary-rgb), 0.08);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.04), transparent 65%), var(--bg-card);
+  text-decoration: none;
+  color: var(--text);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.entrance-nav-card:hover,
+.entrance-nav-card:focus-visible {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(var(--primary-rgb), 0.1);
+  color: var(--text);
+}
+
+.entrance-nav-card h3 {
+  font-size: 0.95rem;
+}
+
+.entrance-nav-card h3 svg {
+  vertical-align: -2px;
+  margin-right: 0.35rem;
+  color: var(--primary);
+}
+
+.entrance-nav-card p {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+/* ── Admin badges row ──────────────────────────────────────────────────── */
+.entrance-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 0.65rem;
+}
+
+.entrance-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid rgba(var(--primary-rgb), 0.12);
+  background: rgba(var(--primary-rgb), 0.06);
+  color: var(--primary);
+}
+
+.entrance-badge-success {
+  border-color: rgba(var(--success-rgb, 34, 197, 94), 0.2);
+  background: rgba(var(--success-rgb, 34, 197, 94), 0.08);
+  color: var(--success, #22c55e);
+}
+
+.entrance-badge-warning {
+  border-color: rgba(var(--warning-rgb, 234, 179, 8), 0.2);
+  background: rgba(var(--warning-rgb, 234, 179, 8), 0.08);
+  color: var(--warning, #eab308);
+}
+
+.entrance-badge-muted {
+  border-color: var(--border);
+  background: rgba(var(--primary-rgb), 0.03);
+  color: var(--text-secondary);
+}
+
+/* ── Responsive ────────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .entrance-hero {
+    grid-template-columns: 1fr;
+  }
+  .entrance-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .entrance-stats {
+    grid-template-columns: 1fr;
+  }
+  .entrance-profile-list {
+    grid-template-columns: 1fr;
+  }
+  .entrance-nav-grid {
+    grid-template-columns: 1fr;
+  }
+}

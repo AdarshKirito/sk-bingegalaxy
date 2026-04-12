@@ -175,6 +175,7 @@
                             docker push ${DOCKER_REGISTRY}/${svc}:${GIT_COMMIT_SHORT}
                         done
                     '''
+                    sh 'docker logout'
                 }
             }
         }
@@ -268,13 +269,13 @@
                             set +a
 
                             echo "Waiting for rollouts to complete..."
-                            for stateful in mongodb kafka; do
+                            for stateful in discovery-server mongodb kafka; do
                                 kubectl rollout status statefulset/${stateful} -n sk-binge-galaxy --timeout=300s
                             done
                             kubectl delete job mongodb-rs-init -n sk-binge-galaxy --ignore-not-found=true
                             kubectl apply -f .rendered-k8s/mongodb.yml
                             kubectl wait --for=condition=complete job/mongodb-rs-init -n sk-binge-galaxy --timeout=300s
-                            for svc in discovery-server config-server api-gateway auth-service availability-service booking-service payment-service notification-service frontend; do
+                            for svc in config-server api-gateway auth-service availability-service booking-service payment-service notification-service frontend; do
                                 kubectl rollout status deployment/${svc} -n sk-binge-galaxy --timeout=180s || {
                                     echo "ROLLBACK: ${svc} deployment failed, rolling back..."
                                     kubectl rollout undo deployment/${svc} -n sk-binge-galaxy

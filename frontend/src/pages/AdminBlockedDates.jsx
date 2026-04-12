@@ -122,6 +122,7 @@ export default function AdminBlockedDates() {
   };
 
   const handleUnblockSlot = async (date, startHour) => {
+    if (!window.confirm(`Unblock the ${startHour}:00 slot on ${date}?`)) return;
     try {
       await adminService.unblockSlot(date, startHour);
       toast.success('Slot unblocked');

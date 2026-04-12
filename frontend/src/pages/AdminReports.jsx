@@ -66,7 +66,7 @@ export default function AdminReports() {
     setLoading(true);
     adminService.getReportByDateRange(fromDate, toDate)
       .then(res => setReport(res.data.data || res.data))
-      .catch(err => toast.error(err.response?.data?.message || 'Failed to load report'))
+      .catch(err => toast.error(err.response?.data?.message || err.userMessage || 'Failed to load report'))
       .finally(() => setLoading(false));
   };
 
@@ -79,7 +79,7 @@ export default function AdminReports() {
       toast.success('Audit completed — operational date advanced to ' + result.newOperationalDate);
       fetchOpInfo(); // Refresh the operational date info
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Audit failed');
+      toast.error(err.response?.data?.message || err.userMessage || 'Audit failed');
     }
     setAuditing(false);
   };

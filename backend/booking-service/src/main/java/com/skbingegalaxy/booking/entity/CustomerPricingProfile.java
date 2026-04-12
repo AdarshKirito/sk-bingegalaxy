@@ -29,6 +29,9 @@ public class CustomerPricingProfile {
     @JoinColumn(name = "rate_code_id")
     private RateCode rateCode;
 
+    @Column(length = 120)
+    private String memberLabel;
+
     @OneToMany(mappedBy = "customerPricingProfile", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<CustomerEventPricing> eventPricings = new ArrayList<>();

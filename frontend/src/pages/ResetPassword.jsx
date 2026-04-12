@@ -15,7 +15,11 @@ export default function ResetPassword() {
     setError('');
     if (!form.otp.trim()) { setError('OTP code is required'); toast.error('Please enter the OTP code'); return; }
     if (!/^\d{6,8}$/.test(form.otp.trim())) { setError('OTP must be 6–8 digits'); toast.error('OTP must be 6–8 digits'); return; }
-    if (form.newPassword.length < 10) { setError('Password must be at least 10 characters'); toast.error('Password must be at least 10 characters'); return; }
+    const PW_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#.\-_~+^]{10,}$/;
+    if (!PW_REGEX.test(form.newPassword)) {
+      const msg = 'Password must be at least 10 characters with uppercase, lowercase, number & special character (@$!%*?&#)';
+      setError(msg); toast.error(msg); return;
+    }
     if (form.newPassword !== form.confirmPassword) {
       setError('Passwords do not match');
       toast.error('Passwords do not match');
@@ -48,7 +52,7 @@ export default function ResetPassword() {
             <label>OTP Code</label>
             <input required value={form.otp}
               onChange={(e) => setForm({ ...form, otp: e.target.value })}
-              placeholder="8-digit code" maxLength={8} />
+              placeholder="6–8 digit code" maxLength={8} />
           </div>
           <div className="input-group">
             <label>New Password</label>

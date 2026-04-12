@@ -31,12 +31,23 @@
 .app-main-admin .adm-list-item,
 .app-main-admin .adm-stat,
 .app-main-admin .adm-table-wrap,
-.app-main-admin .adm-modal,
 .app-main-admin .adm-flow-copy,
 .app-main-admin .adm-flow-card,
 .app-main-admin .adm-venue-card {
   position: relative;
   overflow: hidden;
+  border-color: rgba(var(--primary-rgb), 0.1);
+  background:
+    radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.02), transparent 24%),
+    linear-gradient(180deg, rgba(var(--primary-rgb), 0.04), transparent 28%),
+    var(--bg-card);
+  box-shadow: 0 14px 30px rgba(var(--primary-rgb), 0.04), var(--shadow-sm);
+}
+
+.app-main-admin .adm-modal {
+  position: relative;
+  overflow-x: hidden;
+  overflow-y: auto;
   border-color: rgba(var(--primary-rgb), 0.1);
   background:
     radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.02), transparent 24%),

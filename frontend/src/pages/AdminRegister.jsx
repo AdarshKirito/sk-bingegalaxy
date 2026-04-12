@@ -11,15 +11,29 @@ export default function AdminRegister() {
   const [touched, setTouched] = useState({});
   const [showPw, setShowPw] = useState(false);
   const [showCpw, setShowCpw] = useState(false);
+  const [generatedPw, setGeneratedPw] = useState('');
+
+  const generatePassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*';
+    const arr = new Uint8Array(16);
+    crypto.getRandomValues(arr);
+    const pw = Array.from(arr, b => chars[b % chars.length]).join('');
+    setForm(f => ({ ...f, password: pw, confirmPassword: pw }));
+    setGeneratedPw(pw);
+    setShowPw(true);
+    setShowCpw(true);
+  };
 
   const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
   const handleBlur = (field) => () => setTouched(t => ({ ...t, [field]: true }));
 
+  const PW_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#.\-_~+^]{10,}$/;
+
   const fieldErrors = {
     firstName: touched.firstName && !form.firstName.trim() ? 'First name is required' : '',
     email: touched.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email) ? 'Enter a valid email' : '',
-    phone: touched.phone && !/^[6-9]\d{9}$/.test(form.phone) ? 'Enter a valid 10-digit phone' : '',
-    password: touched.password && form.password.length < 8 ? 'Min 8 characters' : '',
+    phone: touched.phone && !/^[6-9]\d{9}$/.test(form.phone.replace(/\D/g, '').slice(-10)) ? 'Enter a valid 10-digit phone' : '',
+    password: touched.password ? (form.password.length < 10 ? 'Min 10 characters' : !PW_REGEX.test(form.password) ? 'Must include uppercase, lowercase, number & special character (@$!%*?&#)' : '') : '',
     confirmPassword: touched.confirmPassword && form.password !== form.confirmPassword ? 'Passwords do not match' : '',
   };
 
@@ -33,13 +47,21 @@ export default function AdminRegister() {
       toast.error(message);
       return;
     }
-    if (form.password.length < 8) {
-      const message = 'Password must be at least 8 characters long';
+    if (form.password.length < 10) {
+      const message = 'Password must be at least 10 characters long';
       setError(message);
       toast.error(message);
       return;
     }
-    if (!/^[6-9]\d{9}$/.test(form.phone)) {
+    const PW_CHECK = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#.\-_~+^]{10,}$/;
+    if (!PW_CHECK.test(form.password)) {
+      const message = 'Password must include uppercase, lowercase, number & special character (@$!%*?&#)';
+      setError(message);
+      toast.error(message);
+      return;
+    }
+    const cleanPhone = form.phone.replace(/\D/g, '').slice(-10);
+    if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
       const message = 'Enter a valid 10-digit Indian phone number';
       setError(message);
       toast.error(message);
@@ -48,11 +70,15 @@ export default function AdminRegister() {
     setLoading(true);
     try {
       const { confirmPassword, ...data } = form;
+      data.phone = cleanPhone;
       await authService.adminRegister(data);
       toast.success('New admin account created successfully!');
       setForm({ firstName: '', lastName: '', email: '', phone: '', password: '', confirmPassword: '' });
       setTouched({});
       setError('');
+      setGeneratedPw('');
+      setShowPw(false);
+      setShowCpw(false);
     } catch (err) {
       const message = err.userMessage || 'Registration failed';
       setError(message);
@@ -122,13 +148,24 @@ export default function AdminRegister() {
                 {fieldErrors.phone && <span className="field-error">{fieldErrors.phone}</span>}
               </div>
               <div className={`input-group ${fieldErrors.password ? 'has-error' : ''}`}>
-                <label>Password</label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  Password
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={generatePassword}
+                    style={{ fontSize: '0.7rem', padding: '0.15rem 0.5rem', lineHeight: 1.4 }}>
+                    Generate
+                  </button>
+                </label>
                 <div className="input-password-wrap">
-                  <input type={showPw ? 'text' : 'password'} name="password" value={form.password} onChange={handleChange} onBlur={handleBlur('password')} required placeholder="••••••••" minLength={8} />
+                  <input type={showPw ? 'text' : 'password'} name="password" value={form.password} onChange={(e) => { handleChange(e); setGeneratedPw(''); }} onBlur={handleBlur('password')} required placeholder="••••••••" minLength={8} />
                   <button type="button" className="pw-toggle" onClick={() => setShowPw(v => !v)} aria-label={showPw ? 'Hide password' : 'Show password'} tabIndex={-1}>
                     {showPw ? <FiEyeOff /> : <FiEye />}
                   </button>
                 </div>
+                {generatedPw && (
+                  <span className="field-hint" style={{ fontSize: '0.75rem', color: 'var(--success, #22c55e)', display: 'flex', alignItems: 'center', gap: '0.3rem', marginTop: '0.25rem' }}>
+                    Generated — copy and share with the new admin before submitting
+                  </span>
+                )}
                 {fieldErrors.password && <span className="field-error">{fieldErrors.password}</span>}
               </div>
               <div className={`input-group ${fieldErrors.confirmPassword ? 'has-error' : ''}`}>

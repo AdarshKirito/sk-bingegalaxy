@@ -60,11 +60,30 @@ WHATSAPP_PHONE_ID=${WHATSAPP_PHONE_ID:-}
 WHATSAPP_TOKEN=${WHATSAPP_TOKEN:-}
 BACKUP_S3_BUCKET=${BACKUP_S3_BUCKET:-}
 
+# ── Per-service database credentials (least privilege) ────────────────────
+# If per-service passwords are not explicitly set, derive them from POSTGRES_PASSWORD + service name.
+AUTH_DB_USERNAME=${AUTH_DB_USERNAME:-auth_svc}
+AUTH_DB_PASSWORD=${AUTH_DB_PASSWORD:-$(echo -n "${POSTGRES_PASSWORD}_auth" | openssl dgst -sha256 -hex | cut -c1-32)}
+AVAILABILITY_DB_USERNAME=${AVAILABILITY_DB_USERNAME:-availability_svc}
+AVAILABILITY_DB_PASSWORD=${AVAILABILITY_DB_PASSWORD:-$(echo -n "${POSTGRES_PASSWORD}_availability" | openssl dgst -sha256 -hex | cut -c1-32)}
+BOOKING_DB_USERNAME=${BOOKING_DB_USERNAME:-booking_svc}
+BOOKING_DB_PASSWORD=${BOOKING_DB_PASSWORD:-$(echo -n "${POSTGRES_PASSWORD}_booking" | openssl dgst -sha256 -hex | cut -c1-32)}
+PAYMENT_DB_USERNAME=${PAYMENT_DB_USERNAME:-payment_svc}
+PAYMENT_DB_PASSWORD=${PAYMENT_DB_PASSWORD:-$(echo -n "${POSTGRES_PASSWORD}_payment" | openssl dgst -sha256 -hex | cut -c1-32)}
+
 kubectl get namespace "$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$NAMESPACE"
 
 kubectl -n "$NAMESPACE" create secret generic db-secrets \
   --from-literal=POSTGRES_USER=skbg_admin \
   --from-literal=POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+  --from-literal=AUTH_DB_USERNAME="$AUTH_DB_USERNAME" \
+  --from-literal=AUTH_DB_PASSWORD="$AUTH_DB_PASSWORD" \
+  --from-literal=AVAILABILITY_DB_USERNAME="$AVAILABILITY_DB_USERNAME" \
+  --from-literal=AVAILABILITY_DB_PASSWORD="$AVAILABILITY_DB_PASSWORD" \
+  --from-literal=BOOKING_DB_USERNAME="$BOOKING_DB_USERNAME" \
+  --from-literal=BOOKING_DB_PASSWORD="$BOOKING_DB_PASSWORD" \
+  --from-literal=PAYMENT_DB_USERNAME="$PAYMENT_DB_USERNAME" \
+  --from-literal=PAYMENT_DB_PASSWORD="$PAYMENT_DB_PASSWORD" \
   --from-literal=MONGO_USER=skbg_admin \
   --from-literal=MONGO_PASSWORD="$MONGO_PASSWORD" \
   --from-literal=SPRING_DATASOURCE_USERNAME=skbg_admin \
@@ -98,6 +117,8 @@ kubectl -n "$NAMESPACE" create secret generic app-secrets \
   --from-literal=WHATSAPP_TOKEN="$WHATSAPP_TOKEN" \
   --from-literal=BACKUP_S3_BUCKET="$BACKUP_S3_BUCKET" \
   --from-literal=REDIS_PASSWORD="${REDIS_PASSWORD:-}" \
+  --from-literal=SPRING_DATA_REDIS_PASSWORD="${REDIS_PASSWORD:-}" \
+  --from-literal=SPRING_CLOUD_CONFIG_PASSWORD="${CONFIG_SERVER_PASSWORD}" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 echo "Synchronized Kubernetes secrets in namespace $NAMESPACE"

@@ -31,8 +31,14 @@ const AdminEventTypes = lazy(() => import('./pages/AdminEventTypes'));
 const AdminReports = lazy(() => import('./pages/AdminReports'));
 const AdminBookingCreate = lazy(() => import('./pages/AdminBookingCreate'));
 const AdminUsersConfig = lazy(() => import('./pages/AdminUsersConfig'));
+const AdminRateCodes = lazy(() => import('./pages/AdminRateCodes'));
+const AdminCustomerPricing = lazy(() => import('./pages/AdminCustomerPricing'));
 const BingeManagement = lazy(() => import('./pages/BingeManagement'));
 const BingeSelector = lazy(() => import('./pages/BingeSelector'));
+const PlatformDashboard = lazy(() => import('./pages/PlatformDashboard'));
+const AdminEntranceDashboard = lazy(() => import('./pages/AdminEntranceDashboard'));
+const AdminAccount = lazy(() => import('./pages/AdminAccount'));
+const AdminAllUsers = lazy(() => import('./pages/AdminAllUsers'));
 const CompleteProfile = lazy(() => import('./pages/CompleteProfile'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 
@@ -48,8 +54,8 @@ function PageLoader() {
 }
 
 function resolveAuthenticatedLanding(isAdmin, user) {
-  if (isAdmin) return '/admin/binges';
-  return user?.phone ? '/binges' : '/complete-profile';
+  if (isAdmin) return '/admin/platform';
+  return user?.phone ? '/platform' : '/complete-profile';
 }
 
 function PublicOnlyRoute({ children }) {
@@ -65,8 +71,8 @@ function CompleteProfileRoute({ children }) {
   const { isAuthenticated, isAdmin, user, loading } = useAuth();
   if (loading) return <PageLoader />;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
-  if (isAdmin) return <Navigate to="/admin/binges" replace />;
-  if (user?.phone) return <Navigate to="/binges" replace />;
+  if (isAdmin) return <Navigate to="/admin/platform" replace />;
+  if (user?.phone) return <Navigate to="/platform" replace />;
   return children;
 }
 
@@ -75,7 +81,7 @@ function ProtectedRoute({ children }) {
   if (loading) return <PageLoader />;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   if (user && !user.active) return <Navigate to="/login" replace />;
-  if (isAdmin) return <Navigate to="/admin/binges" replace />;
+  if (isAdmin) return <Navigate to="/admin/platform" replace />;
   if (!user?.phone) return <Navigate to="/complete-profile" replace />;
   return children;
 }
@@ -94,7 +100,7 @@ function SuperAdminRoute({ children }) {
   if (loading) return <PageLoader />;
   if (!isAuthenticated) return <Navigate to="/admin/login" replace />;
   if (!isAdmin) return <Navigate to="/" replace />;
-  if (!isSuperAdmin) return <Navigate to="/admin/binges" replace />;
+  if (!isSuperAdmin) return <Navigate to="/admin/platform" replace />;
   return children;
 }
 
@@ -103,7 +109,7 @@ function BingeRequired({ children }) {
   const { isAuthenticated } = useAuth();
   const { selectedBinge } = useBinge();
   if (!isAuthenticated) return <Navigate to="/login" replace />;
-  if (!selectedBinge) return <Navigate to="/binges" replace />;
+  if (!selectedBinge) return <Navigate to="/platform" replace />;
   return children;
 }
 
@@ -112,7 +118,7 @@ function AdminBingeRequired({ children }) {
   const { selectedBinge } = useBinge();
   if (!isAuthenticated) return <Navigate to="/admin/login" replace />;
   if (!isAdmin) return <Navigate to="/" replace />;
-  if (!selectedBinge) return <Navigate to="/admin/binges" replace />;
+  if (!selectedBinge) return <Navigate to="/admin/platform" replace />;
   return children;
 }
 
@@ -139,6 +145,7 @@ function AppFrame() {
           <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPassword /></PublicOnlyRoute>} />
           <Route path="/reset-password" element={<PublicOnlyRoute><ResetPassword /></PublicOnlyRoute>} />
           <Route path="/complete-profile" element={<CompleteProfileRoute><CompleteProfile /></CompleteProfileRoute>} />
+          <Route path="/platform" element={<ProtectedRoute><PlatformDashboard /></ProtectedRoute>} />
           <Route path="/binges" element={<ProtectedRoute><BingeSelector /></ProtectedRoute>} />
 
           <Route path="/dashboard" element={<BingeRequired><Dashboard /></BingeRequired>} />
@@ -151,11 +158,16 @@ function AppFrame() {
 
           <Route path="/admin/login" element={<AdminLogin />} />
           <Route path="/admin/register" element={<SuperAdminRoute><AdminRegister /></SuperAdminRoute>} />
+          <Route path="/admin/platform" element={<AdminRoute><AdminEntranceDashboard /></AdminRoute>} />
+          <Route path="/admin/account" element={<AdminRoute><AdminAccount /></AdminRoute>} />
+          <Route path="/admin/all-users" element={<SuperAdminRoute><AdminAllUsers /></SuperAdminRoute>} />
           <Route path="/admin/binges" element={<AdminRoute><BingeManagement /></AdminRoute>} />
           <Route path="/admin/dashboard" element={<AdminBingeRequired><AdminDashboard /></AdminBingeRequired>} />
           <Route path="/admin/bookings" element={<AdminBingeRequired><AdminBookings /></AdminBingeRequired>} />
           <Route path="/admin/blocked-dates" element={<AdminBingeRequired><AdminBlockedDates /></AdminBingeRequired>} />
           <Route path="/admin/event-types" element={<AdminBingeRequired><AdminEventTypes /></AdminBingeRequired>} />
+          <Route path="/admin/rate-codes" element={<AdminBingeRequired><AdminRateCodes /></AdminBingeRequired>} />
+          <Route path="/admin/customer-pricing" element={<AdminBingeRequired><AdminCustomerPricing /></AdminBingeRequired>} />
           <Route path="/admin/reports" element={<AdminBingeRequired><AdminReports /></AdminBingeRequired>} />
           <Route path="/admin/book" element={<AdminBingeRequired><AdminBookingCreate /></AdminBingeRequired>} />
           <Route path="/admin/users-config" element={<AdminBingeRequired><AdminUsersConfig /></AdminBingeRequired>} />

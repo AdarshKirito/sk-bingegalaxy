@@ -130,11 +130,19 @@
 
 .ab-input {
   padding: 0.5rem 0.8rem;
+  min-height: 42px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg-input);
   color: var(--text);
   font-size: 0.85rem;
+  line-height: 1.35;
+  box-shadow: inset 0 1px 0 rgba(var(--primary-rgb), 0.03);
+}
+
+.ab-input::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
 }
 
 .ab-input-search {
@@ -162,10 +170,12 @@
   font-size: 0.8rem;
   color: var(--text-secondary);
   font-weight: 600;
+  vertical-align: top;
 }
 
 .ab-table td {
   padding: 0.75rem;
+  vertical-align: top;
 }
 
 .ab-table tbody tr {
@@ -186,12 +196,16 @@
 }
 
 .ab-table .ab-customer-name {
+  display: block;
   font-weight: 600;
+  line-height: 1.35;
 }
 
 .ab-table .ab-customer-detail {
+  display: block;
   font-size: 0.72rem;
   color: var(--text-muted);
+  line-height: 1.45;
 }
 
 .ab-table .ab-amount {
@@ -214,42 +228,82 @@
   inset: 0;
   background: rgba(0, 0, 0, 0.7);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  z-index: 1000;
-  padding: 1rem;
+  z-index: 10000;
+  padding: calc(70px + 1rem) 1rem 1rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .ab-modal-card {
   width: 100%;
   max-width: 620px;
-  max-height: 90vh;
+  max-height: calc(100dvh - 70px - 2rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.ab-modal-body {
+  flex: 1 1 auto;
   overflow-y: auto;
+  min-height: 0;
+  padding: 0 1.25rem 1.25rem;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
 }
 
 .ab-modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
+  gap: 1rem;
+  margin-bottom: 0;
+  padding: 1.15rem 1.25rem 1rem;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 94%, rgba(var(--primary-rgb), 0.06) 6%), var(--bg-card));
+  border-bottom: 1px solid var(--border);
 }
 
 .ab-modal-header h3 {
   margin: 0;
+  flex: 1;
+  min-width: 0;
 }
 
 .ab-modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
   background: none;
   border: none;
-  color: var(--text);
+  border-radius: 999px;
+  color: var(--text-secondary);
   font-size: 1.3rem;
   cursor: pointer;
+  transition: var(--transition);
+}
+
+.ab-modal-close:hover,
+.ab-modal-close:focus-visible {
+  color: var(--text);
+  background: rgba(var(--primary-rgb), 0.08);
 }
 
 /* Notes Modal */
 .ab-notes-modal {
   width: 100%;
   max-width: 420px;
+  max-height: calc(100dvh - 70px - 2rem);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .ab-notes-modal textarea {
@@ -417,8 +471,98 @@
   font-size: 1rem;
 }
 
+/* ── Event Log Tab ─────────────────────────────── */
+.ab-event-log-entry {
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.ab-event-log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.25rem;
+}
+
+.ab-event-log-type {
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.ab-event-log-time {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.ab-event-log-status {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.ab-event-log-status strong {
+  font-weight: 600;
+}
+
+.ab-event-log-desc {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-top: 0.15rem;
+}
+
+.ab-event-log-meta {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.15rem;
+}
+
+.ab-event-log-pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.ab-event-log-pagination span {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  padding: 0.35rem 0;
+}
+
+.ab-event-log-replay {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.ab-event-log-replay .replay-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.ab-event-log-empty {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 1rem;
+}
+
 /* Responsive */
 @media (max-width: 640px) {
+  .ab-modal-overlay {
+    padding: calc(70px + 0.75rem) 0.75rem 0.75rem;
+  }
+
+  .ab-modal-body,
+  .ab-modal-header {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
   .ab-stat-cards {
     gap: 0.5rem;
   }

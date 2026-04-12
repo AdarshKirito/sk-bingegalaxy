@@ -51,6 +51,24 @@ api.interceptors.request.use(async (config) => {
 });
 
 /**
+ * Convert "already exists" duplicate messages into user-friendly text.
+ * Strips the actual value (email/phone) to avoid leaking it in logs or UI.
+ */
+function friendlyDuplicateMessage(msg) {
+  if (!msg || typeof msg !== 'string') return null;
+  if (/already.*exists.*email|email.*already|email.*unique/i.test(msg)) {
+    return 'An account with this email already exists. Try signing in or use a different email.';
+  }
+  if (/already.*exists.*phone|phone.*already|phone.*unique/i.test(msg)) {
+    return 'This phone number is already registered. Please use a different number.';
+  }
+  if (/already.*exists|already.*registered/i.test(msg)) {
+    return 'An account with this information already exists. Please check and try again.';
+  }
+  return null;
+}
+
+/**
  * Extract a user-friendly error message from backend responses.
  * Sanitizes messages to avoid leaking internal details to the UI.
  */
@@ -63,22 +81,27 @@ function extractErrorMessage(err) {
   }
   // Our ApiResponse wrapper: { message: '...' } or Spring's { error: '...', message: '...' }
   if (typeof data === 'string') return data;
-  // Return generic validation message without exposing field-level details
+  // Extract field-level validation errors from { errors: { field: 'msg', ... } }
+  const errorMap = data.errors && typeof data.errors === 'object' ? data.errors : null;
+  if (errorMap) {
+    const fieldMessages = Object.values(errorMap).filter(v => typeof v === 'string' && v.trim());
+    if (fieldMessages.length) return fieldMessages.join('. ');
+  }
+  // Legacy: check data.data for validation details
   const validationDetails = data.data && typeof data.data === 'object'
     ? Object.values(data.data).find((value) => typeof value === 'string' && value.trim())
     : null;
   if (validationDetails) {
-    // Strip any internal details — only show validation-safe messages
-    const msg = validationDetails;
-    if (/email.*unique|already.*registered|already.*exists/i.test(msg)) {
-      return 'Please check your information and try again.';
-    }
-    return msg;
+    const friendly = friendlyDuplicateMessage(validationDetails);
+    if (friendly) return friendly;
+    return validationDetails;
   }
   const message = data.message || data.error || 'Something went wrong. Please try again.';
-  // Suppress messages that could leak user-enumeration info
-  if (/email.*unique|already.*registered|already.*exists/i.test(message)) {
-    return 'Please check your information and try again.';
+  const friendly = friendlyDuplicateMessage(message);
+  if (friendly) return friendly;
+  // Provide a clear message for 403 Forbidden responses
+  if (err.response?.status === 403) {
+    return 'You do not have permission to perform this action.';
   }
   return message;
 }

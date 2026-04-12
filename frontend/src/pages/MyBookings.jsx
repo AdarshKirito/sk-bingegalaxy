@@ -15,6 +15,7 @@ import {
 } from '../services/customerExperience';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import Pagination from '../components/ui/Pagination';
+import { toast } from 'react-toastify';
 import SEO from '../components/SEO';
 import {
   FiArrowRight,
@@ -74,10 +75,17 @@ export default function MyBookings() {
   const paymentBadge = (paymentStatus) => ({
     SUCCESS: 'badge-success',
     PARTIALLY_REFUNDED: 'badge-info',
+    PARTIALLY_PAID: 'badge-warning',
     FAILED: 'badge-danger',
     PENDING: 'badge-warning',
     INITIATED: 'badge-warning',
+    REFUNDED: 'badge-info',
   }[paymentStatus] || 'badge-warning');
+
+  const paymentLabel = (paymentStatus) => ({
+    PARTIALLY_PAID: 'Partially Paid',
+    PARTIALLY_REFUNDED: 'Partially Refunded',
+  }[paymentStatus] || paymentStatus || 'PENDING');
 
   const formatAmount = (amount) => `Rs ${Number(amount || 0).toLocaleString()}`;
   const formatDuration = (booking) => {
@@ -155,6 +163,17 @@ export default function MyBookings() {
     },
   });
 
+  const handleCancelBooking = async (bookingRef) => {
+    if (!window.confirm('Cancel this booking? This cannot be undone.')) return;
+    try {
+      await bookingService.cancelBooking(bookingRef);
+      toast.success('Booking cancelled');
+      setCurrentBookings(prev => prev.map(b => b.bookingRef === bookingRef ? { ...b, status: 'CANCELLED' } : b));
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to cancel booking');
+    }
+  };
+
   return (
     <div className="container customer-hub">
       <SEO title="My Bookings" description="Control reservations, finish pending balances, repeat favorites, download summaries, and get support from one booking command center." />
@@ -180,7 +199,7 @@ export default function MyBookings() {
               <p>{nextBooking.bookingDate} at {nextBooking.startTime} for {formatDuration(nextBooking)}</p>
               <div className="customer-hub-highlight-meta">
                 <span className={`badge ${statusBadge(nextBooking.status)}`}>{nextBooking.status}</span>
-                <span className={`badge ${paymentBadge(nextBooking.paymentStatus)}`}>{nextBooking.paymentStatus || 'PENDING'}</span>
+                <span className={`badge ${paymentBadge(nextBooking.paymentStatus)}`}>{paymentLabel(nextBooking.paymentStatus)}</span>
               </div>
               <strong>{formatAmount(nextBooking.totalAmount)}</strong>
               <div className="customer-hub-inline-actions">
@@ -361,7 +380,7 @@ export default function MyBookings() {
               <article key={booking.bookingRef} className="card customer-booking-card customer-booking-card-rich">
                 <div className="customer-booking-topline">
                   <span className={`badge ${statusBadge(booking.status)}`}>{booking.status}</span>
-                  <span className={`badge ${paymentBadge(booking.paymentStatus)}`}>{booking.paymentStatus || 'PENDING'}</span>
+                  <span className={`badge ${paymentBadge(booking.paymentStatus)}`}>{paymentLabel(booking.paymentStatus)}</span>
                 </div>
 
                 <div className="customer-booking-head">
@@ -390,6 +409,9 @@ export default function MyBookings() {
 
                 <div className="customer-booking-actions">
                   <Link to={`/booking/${booking.bookingRef}`} className="btn btn-secondary btn-sm">View Details</Link>
+                  {booking.status === 'PENDING' && booking.paymentStatus === 'PENDING' && (
+                    <button type="button" className="btn btn-danger btn-sm" onClick={() => handleCancelBooking(booking.bookingRef)}>Cancel Booking</button>
+                  )}
                   {booking.paymentStatus !== 'SUCCESS' && booking.status !== 'CANCELLED' && (
                     <Link to={`/payment/${booking.bookingRef}`} className="btn btn-primary btn-sm">Pay Pending Balance</Link>
                   )}

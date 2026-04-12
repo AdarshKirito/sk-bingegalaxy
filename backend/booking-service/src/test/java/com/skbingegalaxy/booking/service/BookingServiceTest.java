@@ -108,7 +108,7 @@ class BookingServiceTest {
                 .durationHours(3)
                 .build();
 
-        when(eventTypeRepository.findAccessibleById(1L, 11L)).thenReturn(Optional.of(eventType));
+        when(eventTypeRepository.findByIdAndBingeId(1L, 11L)).thenReturn(Optional.of(eventType));
         when(bookingRepository.findActiveBookingsByBingeAndDate(eq(11L), any(java.time.LocalDate.class))).thenReturn(List.of());
         when(availabilityClient.checkSlotAvailable(anyString(), any(java.time.LocalDate.class), anyLong(), anyInt(), anyInt()))
                 .thenReturn(Boolean.TRUE);
@@ -136,7 +136,7 @@ class BookingServiceTest {
                 .durationMinutes(15) // below 30-min minimum
                 .build();
 
-        when(eventTypeRepository.findAccessibleById(1L, 11L)).thenReturn(Optional.of(eventType));
+        when(eventTypeRepository.findByIdAndBingeId(1L, 11L)).thenReturn(Optional.of(eventType));
 
         assertThatThrownBy(() -> bookingService.createBooking(
                 request, 1L, "John", "john@example.com", "9876543210"))
@@ -155,7 +155,7 @@ class BookingServiceTest {
                 .durationHours(3)
                 .build();
 
-        when(eventTypeRepository.findAccessibleById(1L, 11L)).thenReturn(Optional.of(eventType));
+        when(eventTypeRepository.findByIdAndBingeId(1L, 11L)).thenReturn(Optional.of(eventType));
         when(availabilityClient.checkSlotAvailable(anyString(), any(LocalDate.class), anyLong(), anyInt(), anyInt()))
                 .thenReturn(Boolean.FALSE);
 
@@ -172,7 +172,7 @@ class BookingServiceTest {
         CreateBookingRequest request = CreateBookingRequest.builder()
                 .eventTypeId(99L).build();
 
-        when(eventTypeRepository.findAccessibleById(99L, 11L)).thenReturn(Optional.empty());
+        when(eventTypeRepository.findByIdAndBingeId(99L, 11L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> bookingService.createBooking(
                 request, 1L, "John", "john@example.com", "9876543210"))
@@ -304,7 +304,7 @@ class BookingServiceTest {
     @Test
     void getActiveEventTypes_returnsList() {
                 BingeContext.setBingeId(11L);
-                when(eventTypeRepository.findByBingeIdOrGlobalAndActiveTrue(11L)).thenReturn(List.of(eventType));
+                when(eventTypeRepository.findByBingeIdAndActiveTrue(11L)).thenReturn(List.of(eventType));
 
         List<EventTypeDto> result = bookingService.getActiveEventTypes();
 
@@ -323,7 +323,7 @@ class BookingServiceTest {
                 .durationHours(3)
                 .build();
 
-        when(eventTypeRepository.findAccessibleById(99L, 11L)).thenReturn(Optional.empty());
+        when(eventTypeRepository.findByIdAndBingeId(99L, 11L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> bookingService.createBooking(
                 request, 1L, "John", "john@example.com", "9876543210"))

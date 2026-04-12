@@ -16,10 +16,13 @@ spec:
         app: mongodb
     spec:
       terminationGracePeriodSeconds: 60
+      automountServiceAccountToken: false
       securityContext:
         runAsUser: 999
         runAsGroup: 999
         fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: mongodb
           image: mongo:7.0

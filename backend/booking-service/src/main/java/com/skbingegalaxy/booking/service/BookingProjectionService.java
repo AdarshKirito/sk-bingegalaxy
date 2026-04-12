@@ -61,6 +61,7 @@ public class BookingProjectionService {
     @Transactional
     public void replayBooking(String bookingRef) {
         readModelRepository.deleteByBookingRef(bookingRef);
+        readModelRepository.flush();
 
         List<BookingEventLog> events = eventLogRepository
             .findByBookingRefOrderByCreatedAtAsc(bookingRef);
@@ -92,6 +93,7 @@ public class BookingProjectionService {
     @Transactional
     public int replayAll() {
         readModelRepository.deleteAll();
+        readModelRepository.flush();
 
         List<BookingEventLog> allEvents = eventLogRepository.findAll();
 

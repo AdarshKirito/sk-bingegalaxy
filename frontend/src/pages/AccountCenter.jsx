@@ -67,8 +67,8 @@ export default function AccountCenter() {
   const customer = profile || user || {};
   const support = mergeSupportContact(supportContact);
   const hasVenueSelected = Boolean(selectedBinge);
-  const primaryLink = hasVenueSelected ? '/my-bookings' : '/binges';
-  const primaryLabel = hasVenueSelected ? 'Open Booking Control Center' : 'Choose Venue';
+  const primaryLink = hasVenueSelected ? '/my-bookings' : '/platform';
+  const primaryLabel = hasVenueSelected ? 'Open Booking Control Center' : 'Go to Dashboard';
   const secondaryLink = hasVenueSelected ? '/payments' : '/binges';
   const secondaryLabel = hasVenueSelected ? 'Review Payments' : 'Browse Venues';
 
@@ -77,7 +77,11 @@ export default function AccountCenter() {
   const totalSpend = successfulPayments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
   const pendingPayments = currentBookings.filter((booking) => booking.paymentStatus !== 'SUCCESS' && booking.status !== 'CANCELLED');
   const memberTier = useMemo(() => getMemberTier(completedCount, totalSpend), [completedCount, totalSpend]);
-  const pricingLabel = myPricing?.rateCodeName || memberTier;
+  const pricingLabel = myPricing?.pricingSource === 'CUSTOMER'
+    ? (myPricing.memberLabel || 'Custom')
+    : myPricing?.pricingSource === 'RATE_CODE'
+      ? (myPricing.memberLabel || myPricing.rateCodeName || 'Rate Code')
+      : memberTier;
   const reminderSummary = buildReminderSummary(preferences);
 
   const updatePreference = (key, value) => {
@@ -131,8 +135,16 @@ export default function AccountCenter() {
 
         <aside className="customer-hub-highlight card">
           <span className="customer-hub-panel-label">Member snapshot</span>
-          <h2>{memberTier}</h2>
-          <p>{hasVenueSelected ? `${pricingLabel} pricing is currently the best available plan on your account.` : 'Choose a venue to unlock your booking timeline, payments, and venue-specific pricing view.'}</p>
+          <h2>{myPricing?.pricingSource === 'CUSTOMER' && !myPricing.memberLabel ? 'Custom Pricing'
+            : pricingLabel === memberTier ? `${memberTier} Circle`
+            : pricingLabel}</h2>
+          <p>{!hasVenueSelected
+            ? 'Choose a venue to unlock your booking timeline, payments, and venue-specific pricing view.'
+            : myPricing?.pricingSource === 'CUSTOMER'
+              ? 'Personalized pricing has been configured for your account.'
+              : myPricing?.pricingSource === 'RATE_CODE'
+                ? `${myPricing.memberLabel || myPricing.rateCodeName || 'Rate code'} pricing is active on your account.`
+                : `Your pricing matches your ${memberTier.toLowerCase()} member tier.`}</p>
           <div className="customer-hub-highlight-meta">
             <span className="badge badge-success">{completedCount} completed visits</span>
             <span className="badge badge-info">{pendingPayments.length} active booking items</span>
@@ -369,7 +381,7 @@ export default function AccountCenter() {
             ))}
           </ol>
           <div className="customer-hub-inline-actions">
-            <Link to={hasVenueSelected ? '/book' : '/binges'} className="btn btn-primary btn-sm">{hasVenueSelected ? 'Plan the next one' : 'Choose a venue first'} <FiArrowRight /></Link>
+            <Link to={hasVenueSelected ? '/book' : '/platform'} className="btn btn-primary btn-sm">{hasVenueSelected ? 'Plan the next one' : 'Go to Dashboard'} <FiArrowRight /></Link>
           </div>
         </article>
       </section>

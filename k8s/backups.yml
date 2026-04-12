@@ -62,13 +62,13 @@ spec:
                   find /backups -name "*.sql.gz" -mtime +14 -delete
                   # Sync to off-cluster object storage
                   if [ -n "${BACKUP_S3_BUCKET:-}" ]; then
-                    if command -v aws >/dev/null 2>&1; then
-                      aws s3 sync /backups/ "s3://${BACKUP_S3_BUCKET}/postgres/" \
-                        --storage-class STANDARD_IA --only-show-errors
-                      echo "PostgreSQL backups synced to s3://${BACKUP_S3_BUCKET}/postgres/"
-                    else
-                      echo "WARNING: BACKUP_S3_BUCKET is set but aws CLI is not available in the backup image. Skipping off-cluster sync."
+                    if ! command -v aws >/dev/null 2>&1; then
+                      echo "Installing AWS CLI..."
+                      apk add --no-cache aws-cli >/dev/null 2>&1
                     fi
+                    aws s3 sync /backups/ "s3://${BACKUP_S3_BUCKET}/postgres/" \
+                      --storage-class STANDARD_IA --only-show-errors
+                    echo "PostgreSQL backups synced to s3://${BACKUP_S3_BUCKET}/postgres/"
                   else
                     echo "WARNING: BACKUP_S3_BUCKET not set — backups are local-only."
                   fi
@@ -163,13 +163,13 @@ spec:
                   find /backups -name "*.gz" -mtime +14 -delete
                   # Sync to off-cluster object storage
                   if [ -n "${BACKUP_S3_BUCKET:-}" ]; then
-                    if command -v aws >/dev/null 2>&1; then
-                      aws s3 sync /backups/ "s3://${BACKUP_S3_BUCKET}/mongodb/" \
-                        --storage-class STANDARD_IA --only-show-errors
-                      echo "MongoDB backups synced to s3://${BACKUP_S3_BUCKET}/mongodb/"
-                    else
-                      echo "WARNING: BACKUP_S3_BUCKET is set but aws CLI is not available in the backup image. Skipping off-cluster sync."
+                    if ! command -v aws >/dev/null 2>&1; then
+                      echo "Installing AWS CLI..."
+                      apt-get update -qq && apt-get install -y -qq awscli >/dev/null 2>&1
                     fi
+                    aws s3 sync /backups/ "s3://${BACKUP_S3_BUCKET}/mongodb/" \
+                      --storage-class STANDARD_IA --only-show-errors
+                    echo "MongoDB backups synced to s3://${BACKUP_S3_BUCKET}/mongodb/"
                   else
                     echo "WARNING: BACKUP_S3_BUCKET not set — backups are local-only."
                   fi
@@ -200,3 +200,87 @@ spec:
   resources:
     requests:
       storage: 10Gi
+---
+# Monthly backup verification: restores latest PostgreSQL backup to a temp database
+# to confirm backup integrity. Runs 1st of each month at 5 AM UTC.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-verify
+  namespace: sk-binge-galaxy
+spec:
+  schedule: "0 5 1 * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 600
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            fsGroup: 999
+          containers:
+            - name: backup-verify
+              image: postgres:16-alpine
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+              env:
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: db-secrets
+                      key: SPRING_DATASOURCE_USERNAME
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: db-secrets
+                      key: SPRING_DATASOURCE_PASSWORD
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  LATEST=$(ls -t /backups/auth_db_*.sql.gz 2>/dev/null | head -1)
+                  if [ -z "$LATEST" ]; then
+                    echo "ERROR: No auth_db backup files found in /backups/"
+                    exit 1
+                  fi
+                  echo "Verifying backup: $LATEST"
+                  # Create temp verify database
+                  psql -h postgres -U "$PGUSER" -d postgres -c "DROP DATABASE IF EXISTS _backup_verify;"
+                  psql -h postgres -U "$PGUSER" -d postgres -c "CREATE DATABASE _backup_verify;"
+                  # Restore
+                  gunzip -c "$LATEST" | psql -h postgres -U "$PGUSER" -d _backup_verify --quiet
+                  # Basic integrity check: count tables
+                  TABLE_COUNT=$(psql -h postgres -U "$PGUSER" -d _backup_verify -t -c \
+                    "SELECT count(*) FROM information_schema.tables WHERE table_schema='public';")
+                  echo "Restored $TABLE_COUNT tables successfully."
+                  # Cleanup
+                  psql -h postgres -U "$PGUSER" -d postgres -c "DROP DATABASE _backup_verify;"
+                  if [ "$TABLE_COUNT" -lt 1 ]; then
+                    echo "ERROR: Backup appears empty (0 tables)."
+                    exit 1
+                  fi
+                  echo "Backup verification PASSED."
+              volumeMounts:
+                - name: backup-storage
+                  mountPath: /backups
+              resources:
+                requests:
+                  memory: "128Mi"
+                  cpu: "100m"
+                limits:
+                  memory: "256Mi"
+                  cpu: "250m"
+          volumes:
+            - name: backup-storage
+              persistentVolumeClaim:
+                claimName: postgres-backup-pvc

@@ -12,7 +12,11 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.util.List;
 
-@Component
+/**
+ * Disabled: per-binge scoping means admins create their own event types / add-ons.
+ * Kept for reference only.
+ */
+// @Component
 @RequiredArgsConstructor
 @Slf4j
 public class DataSeeder implements CommandLineRunner {

@@ -1,29 +1,49 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { adminService } from '../services/endpoints';
-import { FiCalendar, FiDollarSign, FiUsers, FiTrendingUp, FiClock, FiClipboard, FiPlusCircle, FiSlash, FiStar, FiBarChart2 } from 'react-icons/fi';
+import { useAuth } from '../context/AuthContext';
+import { toast } from 'react-toastify';
+import { FiCalendar, FiDollarSign, FiUsers, FiTrendingUp, FiClock, FiClipboard, FiPlusCircle, FiSlash, FiStar, FiBarChart2, FiAlertTriangle, FiRefreshCw, FiBell, FiActivity } from 'react-icons/fi';
 import { SkeletonStatCard } from '../components/ui/Skeleton';
 import './AdminDashboard.css';
 
 export default function AdminDashboard() {
+  const { isSuperAdmin } = useAuth();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [now, setNow] = useState(new Date());
   const [operationalDate, setOperationalDate] = useState(null);
+  const [opDateError, setOpDateError] = useState(false);
+  const [auditAvailable, setAuditAvailable] = useState(false);
+  const [runningAudit, setRunningAudit] = useState(false);
+  const [retryingNotifications, setRetryingNotifications] = useState(false);
+  const [failedSagas, setFailedSagas] = useState([]);
+  const [compensatingSagas, setCompensatingSagas] = useState([]);
+
+  const fetchOpDate = () => {
+    setOpDateError(false);
+    adminService.getOperationalDate()
+      .then(res => {
+        const d = res.data.data || res.data;
+        if (d?.operationalDate) setOperationalDate(d.operationalDate);
+        if (d?.auditAvailable) setAuditAvailable(true);
+        else setAuditAvailable(false);
+      })
+      .catch(() => setOpDateError(true));
+  };
 
   useEffect(() => {
     adminService.getDashboardStats()
       .then(res => setStats(res.data.data))
       .catch(() => setError('Failed to load dashboard stats'))
       .finally(() => setLoading(false));
-    adminService.getOperationalDate()
-      .then(res => {
-        const d = res.data.data || res.data;
-        if (d?.operationalDate) setOperationalDate(d.operationalDate);
-      })
-      .catch(() => {});
-  }, []);
+    fetchOpDate();
+    if (isSuperAdmin) {
+      adminService.getFailedSagas().then(res => setFailedSagas(res.data.data || res.data || [])).catch(() => {});
+      adminService.getCompensatingSagas().then(res => setCompensatingSagas(res.data.data || res.data || [])).catch(() => {});
+    }
+  }, [isSuperAdmin]);
 
   // Live clock
   useEffect(() => {
@@ -54,6 +74,27 @@ export default function AdminDashboard() {
   const dateStr = now.toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const timeStr = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
 
+  const handleRunAudit = async () => {
+    if (!confirm('Run end-of-day audit? This will resolve no-shows and finalize today\'s bookings.')) return;
+    setRunningAudit(true);
+    try {
+      await adminService.runAudit();
+      toast.success('Audit completed — operational date advanced');
+      fetchOpDate();
+      window.location.reload();
+    } catch (err) { toast.error(err.response?.data?.message || err.userMessage || 'Audit failed'); }
+    setRunningAudit(false);
+  };
+
+  const handleRetryNotifications = async () => {
+    setRetryingNotifications(true);
+    try {
+      await adminService.retryFailedNotifications();
+      toast.success('Failed notifications retried');
+    } catch (err) { toast.error(err.response?.data?.message || err.userMessage || 'Retry failed'); }
+    setRetryingNotifications(false);
+  };
+
   return (
     <div className="container admin-dash">
       <div className="page-header">
@@ -75,9 +116,35 @@ export default function AdminDashboard() {
               <div className="admin-dash-banner-value">{operationalDate}</div>
             </div>
           )}
+          {opDateError && !operationalDate && (
+            <div className="admin-dash-banner-meta" style={{ color: 'var(--warning, orange)' }}>
+              <div className="admin-dash-banner-label">Operational Day</div>
+              <div className="admin-dash-banner-value" style={{ fontSize: '0.85rem' }}>
+                <FiAlertTriangle style={{ verticalAlign: '-2px', marginRight: 4 }} />
+                Failed to load
+              </div>
+            </div>
+          )}
           <div className="admin-dash-banner-link">Reports &amp; Audit →</div>
         </div>
       </Link>
+
+      {/* Audit + Operations Row */}
+      <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+        {opDateError && (
+          <button className="btn btn-secondary btn-sm" onClick={fetchOpDate} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+            <FiRefreshCw size={14} /> Retry Operational Date
+          </button>
+        )}
+        {auditAvailable && (
+          <button className="btn btn-primary btn-sm" onClick={handleRunAudit} disabled={runningAudit} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+            <FiActivity size={14} /> {runningAudit ? 'Running Audit...' : 'Run End-of-Day Audit'}
+          </button>
+        )}
+        <button className="btn btn-secondary btn-sm" onClick={handleRetryNotifications} disabled={retryingNotifications} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+          <FiBell size={14} /> {retryingNotifications ? 'Retrying...' : 'Retry Failed Notifications'}
+        </button>
+      </div>
 
       <div className="grid-4 stat-cards">
         <StatCard icon={<FiCalendar />} label="Today's Bookings" value={stats?.todayTotal || 0} color="var(--primary)" to="/admin/bookings?tab=today&sub=all" />
@@ -110,11 +177,49 @@ export default function AdminDashboard() {
           <h3><FiStar style={{ verticalAlign: '-2px' }} /> Event Types & Add-Ons</h3>
           <p>Manage packages and pricing</p>
         </Link>
+        <Link to="/admin/rate-codes" className="card admin-nav-card">
+          <h3><FiStar style={{ verticalAlign: '-2px' }} /> Rate Codes</h3>
+          <p>Edit pricing tiers and rate codes</p>
+        </Link>
+        <Link to="/admin/customer-pricing" className="card admin-nav-card">
+          <h3><FiStar style={{ verticalAlign: '-2px' }} /> Customer Pricing</h3>
+          <p>Assign custom pricing profiles</p>
+        </Link>
         <Link to="/admin/reports" className="card admin-nav-card">
           <h3><FiBarChart2 style={{ verticalAlign: '-2px' }} /> Reports</h3>
           <p>Revenue and booking analytics by period</p>
         </Link>
       </div>
+
+      {/* Super Admin: Saga Monitoring */}
+      {isSuperAdmin && (failedSagas.length > 0 || compensatingSagas.length > 0) && (
+        <div style={{ marginTop: '1.5rem' }}>
+          <h2 style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>
+            <FiAlertTriangle style={{ verticalAlign: '-2px', marginRight: 6, color: 'var(--warning)' }} />
+            System Health
+          </h2>
+          <div className="grid-4 stat-cards">
+            {failedSagas.length > 0 && (
+              <div className="card stat-card" style={{ borderLeft: '3px solid var(--danger, #e74c3c)' }}>
+                <div className="stat-icon" style={{ color: 'var(--danger)' }}><FiAlertTriangle /></div>
+                <div>
+                  <p className="stat-value">{failedSagas.length}</p>
+                  <p className="stat-label">Failed Sagas</p>
+                </div>
+              </div>
+            )}
+            {compensatingSagas.length > 0 && (
+              <div className="card stat-card" style={{ borderLeft: '3px solid var(--warning, orange)' }}>
+                <div className="stat-icon" style={{ color: 'var(--warning)' }}><FiRefreshCw /></div>
+                <div>
+                  <p className="stat-value">{compensatingSagas.length}</p>
+                  <p className="stat-label">Compensating Sagas</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

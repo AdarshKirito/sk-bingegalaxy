@@ -14,12 +14,12 @@ spring:
 
 eureka:
   instance:
-    hostname: ${EUREKA_HOSTNAME:localhost}
+    hostname: ${EUREKA_INSTANCE_HOSTNAME:localhost}
   client:
-    register-with-eureka: false
-    fetch-registry: false
+    register-with-eureka: ${EUREKA_PEER_ENABLED:false}
+    fetch-registry: ${EUREKA_PEER_ENABLED:false}
     service-url:
-      defaultZone: http://${spring.security.user.name}:${spring.security.user.password}@${EUREKA_HOSTNAME:localhost}:${server.port}/eureka/
+      defaultZone: ${EUREKA_PEER_URLS:http://${spring.security.user.name}:${spring.security.user.password}@localhost:${server.port}/eureka/}
 
 management:
   endpoints:

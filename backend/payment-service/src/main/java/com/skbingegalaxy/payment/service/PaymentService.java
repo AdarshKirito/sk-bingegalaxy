@@ -71,6 +71,9 @@ public class PaymentService {
     public PaymentDto initiatePayment(InitiatePaymentRequest request, Long customerId, String customerEmail, String customerName) {
         log.info("Initiating payment for booking: {}, amount: {}", request.getBookingRef(), request.getAmount());
 
+        // Serialise concurrent initiations for the same booking to prevent duplicate INITIATED payments
+        paymentRepository.acquirePaymentLock(request.getBookingRef().hashCode());
+
         // Guard 1: payment already succeeded for this booking — reject duplicate attempt
         if (!findSuccessfulPaymentsForCurrentBinge(request.getBookingRef()).isEmpty()) {
             throw new BusinessException("Payment already completed for booking " + request.getBookingRef(), HttpStatus.CONFLICT);
@@ -129,6 +132,15 @@ public class PaymentService {
                 || payment.getStatus() == PaymentStatus.PARTIALLY_REFUNDED) {
             log.info("Callback ignored — payment already in terminal state: {}", payment.getStatus());
             return toPaymentDtoWithRefunds(payment);
+        }
+
+        // Reject callbacks for payments that were already cancelled with the booking.
+        // If money was actually captured by Razorpay, a manual refund may be needed.
+        if (payment.getStatus() == PaymentStatus.FAILED
+                && "Booking cancelled".equals(payment.getFailureReason())) {
+            log.warn("Callback rejected — payment {} was cancelled with its booking. "
+                    + "If the gateway captured funds, a manual refund is required.", payment.getTransactionId());
+            throw new BusinessException("Payment was cancelled because the booking was cancelled", HttpStatus.CONFLICT);
         }
 
         // Reject stale callbacks — payment must have been initiated within the last 24 hours
@@ -418,11 +430,19 @@ public class PaymentService {
             return toPaymentDtoWithRefunds(recentDupes.get(0));
         }
 
-        // Over-collection guard: warn if cumulative payments already exceed original amount
+        // Over-collection guard: reject if cumulative payments would exceed booking total
         BigDecimal existingTotal = sumSuccessfulPaymentsForCurrentBinge(request.getBookingRef());
-        if (existingTotal != null && existingTotal.compareTo(BigDecimal.ZERO) > 0) {
-            BigDecimal projectedTotal = existingTotal.add(request.getAmount());
-            log.warn("Over-collection check for booking {}: existing={}, adding={}, projected={}",
+        if (existingTotal == null) existingTotal = BigDecimal.ZERO;
+        BigDecimal projectedTotal = existingTotal.add(request.getAmount());
+        if (request.getBookingTotalAmount() != null
+                && projectedTotal.compareTo(request.getBookingTotalAmount()) > 0) {
+            throw new BusinessException(
+                String.format("Payment rejected — would over-collect: existing ₹%s + ₹%s = ₹%s exceeds booking total ₹%s",
+                    existingTotal, request.getAmount(), projectedTotal, request.getBookingTotalAmount()),
+                HttpStatus.CONFLICT);
+        }
+        if (projectedTotal.compareTo(existingTotal) > 0 && existingTotal.compareTo(BigDecimal.ZERO) > 0) {
+            log.info("Over-collection check for booking {}: existing={}, adding={}, projected={}",
                     request.getBookingRef(), existingTotal, request.getAmount(), projectedTotal);
         }
 

@@ -30,6 +30,7 @@
 }
 
 :root {
+  color-scheme: light;
   --primary-rgb: 99, 102, 241;
   --accent-rgb: 245, 166, 35;
   --success-rgb: 16, 185, 129;
@@ -72,6 +73,7 @@
 
 /* Dark mode */
 [data-theme="dark"] {
+  color-scheme: dark;
   --bg: #111827;
   --bg-card: #1f2937;
   --bg-card-hover: #374151;
@@ -143,7 +145,6 @@ body::after {
 
 #main-content {
   position: relative;
-  isolation: isolate;
 }
 
 #main-content::before,
@@ -155,6 +156,7 @@ body::after {
   border-radius: 999px;
   filter: blur(8px);
   opacity: 0.9;
+  z-index: -1;
 }
 
 #main-content::before {
@@ -189,6 +191,26 @@ button {
 
 input, select, textarea {
   font-family: inherit;
+  color: var(--text);
+  caret-color: var(--primary);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+select {
+  color: var(--text);
+  background-color: var(--bg-input);
+  -webkit-text-fill-color: var(--text);
+}
+
+select option,
+select optgroup {
+  color: var(--text);
+  background-color: var(--bg-card);
 }
 
 .container {
@@ -301,6 +323,7 @@ input, select, textarea {
   background: var(--bg-input);
   color: var(--text);
   font-size: 0.95rem;
+  line-height: 1.4;
   transition: var(--transition);
 }
 

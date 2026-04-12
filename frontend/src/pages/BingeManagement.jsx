@@ -1,9 +1,16 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { adminService } from '../services/endpoints';
+import {
+  createDashboardSlide,
+  DASHBOARD_LAYOUT_OPTIONS,
+  DASHBOARD_THEME_OPTIONS,
+  normalizeDashboardExperience,
+  sanitizeDashboardExperienceForSave,
+} from '../services/dashboardExperience';
 import { useBinge } from '../context/BingeContext';
 import { toast } from 'react-toastify';
-import { FiActivity, FiArrowRight, FiCompass, FiEdit2, FiMapPin, FiPlus, FiToggleLeft, FiToggleRight, FiTrash2, FiX } from 'react-icons/fi';
+import { FiActivity, FiArrowRight, FiCompass, FiEdit2, FiImage, FiMapPin, FiPlus, FiToggleLeft, FiToggleRight, FiTrash2, FiUpload, FiX } from 'react-icons/fi';
 import './AdminPages.css';
 
 export default function BingeManagement() {
@@ -12,6 +19,10 @@ export default function BingeManagement() {
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
   const [form, setForm] = useState({ name: '', address: '' });
+  const [dashboardEditor, setDashboardEditor] = useState({ open: false, binge: null });
+  const [dashboardForm, setDashboardForm] = useState(() => normalizeDashboardExperience(null));
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [dashboardSaving, setDashboardSaving] = useState(false);
   const { clearBinge, selectBinge, selectedBinge } = useBinge();
   const navigate = useNavigate();
 
@@ -32,6 +43,13 @@ export default function BingeManagement() {
     setForm({ name: '', address: '' });
     setShowForm(false);
     setEditId(null);
+  };
+
+  const resetDashboardEditor = () => {
+    setDashboardEditor({ open: false, binge: null });
+    setDashboardForm(normalizeDashboardExperience(null));
+    setDashboardLoading(false);
+    setDashboardSaving(false);
   };
 
   const openCreateForm = () => {
@@ -61,6 +79,83 @@ export default function BingeManagement() {
     setEditId(b.id);
     setForm({ name: b.name, address: b.address || '' });
     setShowForm(true);
+  };
+
+  const handleOpenDashboardEditor = async (binge) => {
+    setDashboardEditor({ open: true, binge });
+    setDashboardLoading(true);
+    try {
+      const res = await adminService.getBingeDashboardExperience(binge.id);
+      setDashboardForm(normalizeDashboardExperience(res.data.data || res.data || null));
+    } catch (err) {
+      toast.error(err.userMessage || 'Failed to load customer dashboard setup');
+      setDashboardEditor({ open: false, binge: null });
+    } finally {
+      setDashboardLoading(false);
+    }
+  };
+
+  const updateDashboardField = (field, value) => {
+    setDashboardForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const updateDashboardSlide = (index, field, value) => {
+    setDashboardForm((prev) => ({
+      ...prev,
+      slides: prev.slides.map((slide, slideIndex) => (
+        slideIndex === index ? { ...slide, [field]: value } : slide
+      )),
+    }));
+  };
+
+  const handleSlideImageUpload = async (index, file) => {
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await adminService.uploadMedia(formData);
+      const url = res.data?.data?.url;
+      if (url) {
+        updateDashboardSlide(index, 'imageUrl', url);
+        toast.success('Image uploaded');
+      }
+    } catch (err) {
+      toast.error(err.userMessage || 'Image upload failed');
+    }
+  };
+
+  const addDashboardSlide = () => {
+    setDashboardForm((prev) => {
+      if (prev.slides.length >= 6) return prev;
+      return { ...prev, slides: [...prev.slides, createDashboardSlide()] };
+    });
+  };
+
+  const removeDashboardSlide = (index) => {
+    setDashboardForm((prev) => ({
+      ...prev,
+      slides: prev.slides.filter((_, slideIndex) => slideIndex !== index),
+    }));
+  };
+
+  const handleSaveDashboardExperience = async (event) => {
+    event.preventDefault();
+    if (!dashboardEditor.binge) return;
+
+    setDashboardSaving(true);
+    try {
+      await adminService.updateBingeDashboardExperience(
+        dashboardEditor.binge.id,
+        sanitizeDashboardExperienceForSave(dashboardForm),
+      );
+      toast.success('Customer dashboard setup updated');
+      resetDashboardEditor();
+      fetchBinges();
+    } catch (err) {
+      toast.error(err.userMessage || 'Failed to save customer dashboard setup');
+    } finally {
+      setDashboardSaving(false);
+    }
   };
 
   const handleToggle = async (id) => {
@@ -179,6 +274,214 @@ export default function BingeManagement() {
         </section>
       )}
 
+      {dashboardEditor.open && (
+        <section className="adm-form adm-dashboard-editor">
+          <div className="adm-dashboard-editor-top">
+            <div>
+              <h3>Customer dashboard design</h3>
+              <p className="adm-form-intro">
+                Adjust the experiences section shown on the customer dashboard for <strong>{dashboardEditor.binge?.name}</strong>.
+                Switch between a carousel and a grid, then write the slides you want customers to notice first.
+              </p>
+            </div>
+            <div className="adm-flow-actions">
+              <button type="button" className="btn btn-secondary" onClick={resetDashboardEditor}>Close</button>
+            </div>
+          </div>
+
+          {dashboardLoading ? (
+            <div className="adm-dashboard-empty">
+              <h3>Loading current setup...</h3>
+              <p>Fetching the latest customer dashboard content for this venue.</p>
+            </div>
+          ) : (
+            <form onSubmit={handleSaveDashboardExperience}>
+              <div className="adm-grid-2">
+                <div className="input-group">
+                  <label>Section eyebrow</label>
+                  <input
+                    value={dashboardForm.sectionEyebrow}
+                    onChange={(e) => updateDashboardField('sectionEyebrow', e.target.value)}
+                    placeholder="Explore Experiences"
+                  />
+                </div>
+                <div className="input-group">
+                  <label>Layout</label>
+                  <select
+                    value={dashboardForm.layout}
+                    onChange={(e) => updateDashboardField('layout', e.target.value)}
+                  >
+                    {DASHBOARD_LAYOUT_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                  <div className="adm-hint">Carousel turns this section into a focused, swipeable spotlight.</div>
+                </div>
+              </div>
+
+              <div className="input-group">
+                <label>Section title</label>
+                <input
+                  value={dashboardForm.sectionTitle}
+                  onChange={(e) => updateDashboardField('sectionTitle', e.target.value)}
+                  placeholder="Pick a setup that matches the mood"
+                />
+              </div>
+
+              <div className="input-group">
+                <label>Section subtitle</label>
+                <textarea
+                  className="adm-textarea"
+                  rows={3}
+                  value={dashboardForm.sectionSubtitle}
+                  onChange={(e) => updateDashboardField('sectionSubtitle', e.target.value)}
+                  placeholder="Optional supporting line below the section title"
+                />
+              </div>
+
+              <div className="adm-dashboard-editor-actions">
+                <div>
+                  <h4>Slides</h4>
+                  <p className="adm-hint">Add up to 6 curated slides. Leave this empty to keep the live event cards as the fallback.</p>
+                </div>
+                <div className="adm-flow-actions">
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setDashboardForm((prev) => ({ ...prev, slides: [] }))}
+                  >
+                    Use event card fallback
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={addDashboardSlide}
+                    disabled={dashboardForm.slides.length >= 6}
+                  >
+                    Add Slide
+                  </button>
+                </div>
+              </div>
+
+              {dashboardForm.slides.length === 0 ? (
+                <div className="adm-dashboard-empty">
+                  <h3>No custom slides yet</h3>
+                  <p>The customer portal will keep using the existing experience cards until you save at least one slide.</p>
+                </div>
+              ) : (
+                <div className="adm-dashboard-slides">
+                  {dashboardForm.slides.map((slide, index) => (
+                    <article key={`${dashboardEditor.binge?.id || 'binge'}-${index}`} className="adm-dashboard-slide">
+                      <div className="adm-dashboard-slide-head">
+                        <div>
+                          <strong>Slide {index + 1}</strong>
+                          <div className="adm-dashboard-slide-meta">
+                            <span className="adm-badge adm-badge-info">{slide.theme}</span>
+                            <span className="adm-hint">{slide.badge || 'Featured badge'}</span>
+                          </div>
+                        </div>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => removeDashboardSlide(index)}>
+                          Remove
+                        </button>
+                      </div>
+
+                      <div className="adm-grid-2">
+                        <div className="input-group">
+                          <label>Badge</label>
+                          <input
+                            value={slide.badge}
+                            onChange={(e) => updateDashboardSlide(index, 'badge', e.target.value)}
+                            placeholder="Featured"
+                          />
+                        </div>
+                        <div className="input-group">
+                          <label>Theme</label>
+                          <select
+                            value={slide.theme}
+                            onChange={(e) => updateDashboardSlide(index, 'theme', e.target.value)}
+                          >
+                            {DASHBOARD_THEME_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="input-group">
+                        <label>Headline</label>
+                        <input
+                          value={slide.headline}
+                          onChange={(e) => updateDashboardSlide(index, 'headline', e.target.value)}
+                          placeholder="Date-night takeover"
+                        />
+                      </div>
+
+                      <div className="input-group">
+                        <label>Description</label>
+                        <textarea
+                          className="adm-textarea"
+                          rows={3}
+                          value={slide.description}
+                          onChange={(e) => updateDashboardSlide(index, 'description', e.target.value)}
+                          placeholder="Describe the feeling or setup you want to surface in the customer portal"
+                        />
+                      </div>
+
+                      <div className="input-group">
+                        <label>Button label</label>
+                        <input
+                          value={slide.ctaLabel}
+                          onChange={(e) => updateDashboardSlide(index, 'ctaLabel', e.target.value)}
+                          placeholder="Open Booking"
+                        />
+                      </div>
+
+                      <div className="input-group">
+                        <label>Slide Image</label>
+                        <div className="adm-slide-image-upload">
+                          {slide.imageUrl ? (
+                            <div className="adm-slide-image-preview">
+                              <img src={slide.imageUrl} alt={`Slide ${index + 1}`} />
+                              <button type="button" className="btn btn-secondary btn-sm" onClick={() => updateDashboardSlide(index, 'imageUrl', '')}>
+                                <FiX /> Remove
+                              </button>
+                            </div>
+                          ) : (
+                            <label className="adm-slide-image-dropzone">
+                              <FiUpload />
+                              <span>Upload image (max 5 MB)</span>
+                              <input
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp,image/gif"
+                                style={{ display: 'none' }}
+                                onChange={(e) => handleSlideImageUpload(index, e.target.files[0])}
+                              />
+                            </label>
+                          )}
+                          <input
+                            value={slide.imageUrl || ''}
+                            onChange={(e) => updateDashboardSlide(index, 'imageUrl', e.target.value)}
+                            placeholder="Or paste an image URL"
+                            className="adm-slide-image-url-input"
+                          />
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+
+              <div className="adm-form-actions">
+                <button type="button" className="btn btn-secondary" onClick={resetDashboardEditor}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={dashboardSaving}>
+                  {dashboardSaving ? 'Saving...' : 'Save Customer Dashboard'}
+                </button>
+              </div>
+            </form>
+          )}
+        </section>
+      )}
+
       {binges.length === 0 ? (
         <div className="adm-empty adm-flow-card adm-flow-empty">
           <span className="adm-empty-icon"><FiMapPin /></span>
@@ -218,6 +521,9 @@ export default function BingeManagement() {
                     Enter <FiArrowRight />
                   </button>
                 )}
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleOpenDashboardEditor(b)}>
+                  Dashboard design
+                </button>
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleEdit(b)}>
                   <FiEdit2 style={{ marginRight: 3 }} /> Edit
                 </button>

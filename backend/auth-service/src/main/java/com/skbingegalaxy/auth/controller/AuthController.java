@@ -10,11 +10,13 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/v1/auth")
 @RequiredArgsConstructor
+@Validated
 public class AuthController {
 
     private final AuthService authService;
@@ -115,6 +117,14 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.ok(profile));
     }
 
+    @PutMapping("/change-password")
+    public ResponseEntity<ApiResponse<Void>> changePassword(
+            @RequestHeader("X-User-Id") Long userId,
+            @Valid @RequestBody ChangePasswordRequest request) {
+        authService.changePassword(userId, request);
+        return ResponseEntity.ok(ApiResponse.ok("Password changed successfully", null));
+    }
+
     @PutMapping("/profile/preferences")
     public ResponseEntity<ApiResponse<UserDto>> updateAccountPreferences(
             @RequestHeader("X-User-Id") Long userId,
@@ -203,6 +213,24 @@ public class AuthController {
     public ResponseEntity<ApiResponse<Void>> deleteUser(@PathVariable Long id) {
         authService.deleteUser(id);
         return ResponseEntity.ok(ApiResponse.ok("User deleted", null));
+    }
+
+    @PostMapping("/admin/bulk-ban")
+    public ResponseEntity<ApiResponse<Integer>> bulkBan(@RequestBody java.util.List<Long> userIds) {
+        int count = authService.bulkSetActive(userIds, false);
+        return ResponseEntity.ok(ApiResponse.ok(count + " users banned", count));
+    }
+
+    @PostMapping("/admin/bulk-unban")
+    public ResponseEntity<ApiResponse<Integer>> bulkUnban(@RequestBody java.util.List<Long> userIds) {
+        int count = authService.bulkSetActive(userIds, true);
+        return ResponseEntity.ok(ApiResponse.ok(count + " users unbanned", count));
+    }
+
+    @PostMapping("/admin/bulk-delete")
+    public ResponseEntity<ApiResponse<Integer>> bulkDelete(@RequestBody java.util.List<Long> userIds) {
+        int count = authService.bulkDeleteUsers(userIds);
+        return ResponseEntity.ok(ApiResponse.ok(count + " users deleted", count));
     }
 
     // ── Cookie helpers ───────────────────────────────────────

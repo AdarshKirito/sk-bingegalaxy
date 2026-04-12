@@ -531,4 +531,121 @@ class AuthServiceTest {
                 assertThat(dto.isWeekendAlerts()).isTrue();
                 assertThat(dto.isConciergeSupport()).isFalse();
         }
+
+    // ── Bulk ban / unban tests ──────────────────────────
+
+    @Test
+    void bulkSetActive_bansMultipleUsers() {
+        User user1 = User.builder().id(1L).firstName("Alice").email("a@test.com")
+                .role(UserRole.CUSTOMER).active(true).build();
+        User user2 = User.builder().id(2L).firstName("Bob").email("b@test.com")
+                .role(UserRole.CUSTOMER).active(true).build();
+
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user1));
+        when(userRepository.findById(2L)).thenReturn(Optional.of(user2));
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        int count = authService.bulkSetActive(java.util.List.of(1L, 2L), false);
+
+        assertThat(count).isEqualTo(2);
+        assertThat(user1.isActive()).isFalse();
+        assertThat(user2.isActive()).isFalse();
+        verify(userRepository, times(2)).save(any(User.class));
+    }
+
+    @Test
+    void bulkSetActive_unbansUsers() {
+        User user = User.builder().id(3L).firstName("Charlie").email("c@test.com")
+                .role(UserRole.CUSTOMER).active(false).build();
+
+        when(userRepository.findById(3L)).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        int count = authService.bulkSetActive(java.util.List.of(3L), true);
+
+        assertThat(count).isEqualTo(1);
+        assertThat(user.isActive()).isTrue();
+    }
+
+    @Test
+    void bulkSetActive_skipsSuperAdmin() {
+        User superAdmin = User.builder().id(10L).firstName("Super").email("super@test.com")
+                .role(UserRole.SUPER_ADMIN).active(true).build();
+
+        when(userRepository.findById(10L)).thenReturn(Optional.of(superAdmin));
+
+        int count = authService.bulkSetActive(java.util.List.of(10L), false);
+
+        assertThat(count).isEqualTo(0);
+        assertThat(superAdmin.isActive()).isTrue(); // not changed
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void bulkSetActive_skipsNonexistentUsers() {
+        when(userRepository.findById(999L)).thenReturn(Optional.empty());
+
+        int count = authService.bulkSetActive(java.util.List.of(999L), false);
+
+        assertThat(count).isEqualTo(0);
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    // ── Bulk delete tests ───────────────────────────────
+
+    @Test
+    void bulkDeleteUsers_deletesMultiple() {
+        User user1 = User.builder().id(1L).firstName("Alice").email("a@test.com")
+                .role(UserRole.CUSTOMER).active(true).build();
+        User user2 = User.builder().id(2L).firstName("Bob").email("b@test.com")
+                .role(UserRole.ADMIN).active(true).build();
+
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user1));
+        when(userRepository.findById(2L)).thenReturn(Optional.of(user2));
+
+        int count = authService.bulkDeleteUsers(java.util.List.of(1L, 2L));
+
+        assertThat(count).isEqualTo(2);
+        verify(userRepository, times(2)).delete(any(User.class));
+    }
+
+    @Test
+    void bulkDeleteUsers_skipsSuperAdmin() {
+        User superAdmin = User.builder().id(10L).firstName("Super").email("super@test.com")
+                .role(UserRole.SUPER_ADMIN).active(true).build();
+
+        when(userRepository.findById(10L)).thenReturn(Optional.of(superAdmin));
+
+        int count = authService.bulkDeleteUsers(java.util.List.of(10L));
+
+        assertThat(count).isEqualTo(0);
+        verify(userRepository, never()).delete(any(User.class));
+    }
+
+    @Test
+    void bulkDeleteUsers_skipsNonexistent() {
+        when(userRepository.findById(999L)).thenReturn(Optional.empty());
+
+        int count = authService.bulkDeleteUsers(java.util.List.of(999L));
+
+        assertThat(count).isEqualTo(0);
+        verify(userRepository, never()).delete(any(User.class));
+    }
+
+    @Test
+    void bulkDeleteUsers_mixedList_deletesOnlyValid() {
+        User customer = User.builder().id(1L).firstName("Alice").email("a@test.com")
+                .role(UserRole.CUSTOMER).active(true).build();
+        User superAdmin = User.builder().id(10L).firstName("Super").email("super@test.com")
+                .role(UserRole.SUPER_ADMIN).active(true).build();
+
+        when(userRepository.findById(1L)).thenReturn(Optional.of(customer));
+        when(userRepository.findById(10L)).thenReturn(Optional.of(superAdmin));
+        when(userRepository.findById(999L)).thenReturn(Optional.empty());
+
+        int count = authService.bulkDeleteUsers(java.util.List.of(1L, 10L, 999L));
+
+        assertThat(count).isEqualTo(1); // only customer deleted
+        verify(userRepository, times(1)).delete(customer);
+    }
 }

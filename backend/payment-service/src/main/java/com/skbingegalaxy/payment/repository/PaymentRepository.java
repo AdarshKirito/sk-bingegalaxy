@@ -86,4 +86,11 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
         @Query("SELECT COALESCE(SUM(p.amount), 0) FROM Payment p WHERE p.bookingRef = :bookingRef AND p.status = 'SUCCESS' AND p.bingeId = :bingeId")
         BigDecimal sumSuccessfulPaymentsByBookingRefAndBingeId(@Param("bookingRef") String bookingRef,
                                        @Param("bingeId") Long bingeId);
+
+    /**
+     * Acquires a transaction-scoped advisory lock keyed on the booking ref hash.
+     * Used to serialise concurrent payment initiations for the same booking.
+     */
+    @Query(value = "SELECT pg_advisory_xact_lock(:lockKey)", nativeQuery = true)
+    void acquirePaymentLock(@Param("lockKey") long lockKey);
 }

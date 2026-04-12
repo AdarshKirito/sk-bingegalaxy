@@ -73,12 +73,16 @@ export default function StepReview({
                   <option value="CARD">Card</option>
                   <option value="BANK_TRANSFER">Bank Transfer</option>
                   <option value="WALLET">Wallet</option>
+                  <option value="COLLECT_LATER">Collect Later</option>
                 </select>
               </div>
               {form.paymentMethod === 'CASH' && (
                 <p style={{ fontSize: '0.8rem', color: 'var(--success)', marginTop: '0.3rem' }}>Cash payment — booking will be auto-confirmed and recorded immediately</p>
               )}
-              {form.paymentMethod !== 'CASH' && (
+              {form.paymentMethod === 'COLLECT_LATER' && (
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>Booking will stay pending until you record a payment from the Bookings page.</p>
+              )}
+              {form.paymentMethod !== 'CASH' && form.paymentMethod !== 'COLLECT_LATER' && (
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>This records the payment immediately after the booking is created.</p>
               )}
             </>

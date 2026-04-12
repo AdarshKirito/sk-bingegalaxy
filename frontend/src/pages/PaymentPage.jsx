@@ -1,14 +1,51 @@
 import { useState, useEffect } from 'react';
-import { Link, useParams, useNavigate } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { bookingService, paymentService } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import SEO from '../components/SEO';
-import { FiAlertCircle, FiCheckCircle, FiClock, FiCreditCard, FiRefreshCw } from 'react-icons/fi';
+import {
+  FiAlertCircle,
+  FiArrowRight,
+  FiCalendar,
+  FiCheckCircle,
+  FiClock,
+  FiCreditCard,
+  FiHash,
+  FiLayers,
+  FiMail,
+  FiMapPin,
+  FiRefreshCw,
+  FiShield,
+  FiUsers,
+} from 'react-icons/fi';
+import useBingeStore from '../stores/bingeStore';
 import './CustomerHub.css';
+
+const formatAmount = (value) => `₹${Number(value || 0).toLocaleString()}`;
+
+const formatLabel = (value, fallback = 'Pending') => {
+  if (!value) return fallback;
+  return String(value)
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
+const formatDuration = (booking) => {
+  const minutes = booking?.durationMinutes || (booking?.durationHours ? booking.durationHours * 60 : 0);
+  if (!minutes) return 'Not set';
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+
+  if (hours > 0 && remainingMinutes > 0) return `${hours}hr ${remainingMinutes}m`;
+  if (hours > 0) return `${hours}hr`;
+  return `${remainingMinutes}m`;
+};
 
 export default function PaymentPage() {
   const { ref } = useParams();
-  const navigate = useNavigate();
+  const { selectedBinge } = useBingeStore();
   const [booking, setBooking] = useState(null);
   const [paymentMethod, setPaymentMethod] = useState('UPI');
   const [payment, setPayment] = useState(null);
@@ -24,9 +61,13 @@ export default function PaymentPage() {
       try {
         const payRes = await paymentService.getByBooking(ref);
         const payments = payRes.data.data || [];
+        const sortedPayments = [...payments].sort(
+          (left, right) => new Date(right.createdAt || right.updatedAt || right.paidAt || 0) - new Date(left.createdAt || left.updatedAt || left.paidAt || 0)
+        );
         const existing =
-          payments.find(p => p.status === 'SUCCESS' || p.status === 'REFUNDED' || p.status === 'PARTIALLY_REFUNDED') ||
-          payments.find(p => p.status === 'INITIATED');
+          sortedPayments.find((entry) => entry.status === 'SUCCESS' || entry.status === 'REFUNDED' || entry.status === 'PARTIALLY_REFUNDED') ||
+          sortedPayments.find((entry) => entry.status === 'INITIATED') ||
+          sortedPayments.find((entry) => entry.status === 'FAILED');
         setPayment(existing || null);
       } catch {
         setPayment(null);
@@ -53,6 +94,10 @@ export default function PaymentPage() {
     });
 
   const handleInitiate = async () => {
+    if (!booking.totalAmount || booking.totalAmount <= 0) {
+      toast.error('Booking amount is invalid. Please contact support.');
+      return;
+    }
     setProcessing(true);
     try {
       const res = await paymentService.initiate({
@@ -89,7 +134,15 @@ export default function PaymentPage() {
               toast.success('Payment successful!');
               await loadData();
             } catch (err) {
-              toast.error(err.response?.data?.message || 'Payment verification failed. Contact support.');
+              const status = err.response?.status;
+              const serverMsg = err.response?.data?.message;
+              if (!err.response) {
+                toast.error('Network error during payment verification. Your payment may have succeeded — please refresh.');
+              } else if (status === 403) {
+                toast.error('Payment signature invalid. Contact support with ref: ' + ref);
+              } else {
+                toast.error(serverMsg || 'Payment verification failed. Contact support.');
+              }
             } finally {
               setProcessing(false);
             }
@@ -118,7 +171,20 @@ export default function PaymentPage() {
         setProcessing(false);
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Payment failed');
+      const status = err.response?.status;
+      const serverMsg = err.response?.data?.message;
+      if (!err.response) {
+        toast.error('Network error — check your connection and try again.');
+      } else if (status === 409) {
+        toast.error(serverMsg || 'Payment already completed for this booking.');
+        await loadData();
+      } else if (status === 403) {
+        toast.error(serverMsg || 'Not authorised to initiate this payment.');
+      } else if (status >= 500) {
+        toast.error('Server error — please try again later or contact support.');
+      } else {
+        toast.error(serverMsg || 'Payment failed');
+      }
       setProcessing(false);
     }
   };
@@ -126,20 +192,168 @@ export default function PaymentPage() {
   if (loading) return <div className="loading"><div className="spinner"></div></div>;
   if (!booking) return <div className="container customer-flow-shell customer-flow-shell-narrow"><div className="customer-flow-card customer-flow-empty"><h2>Booking not found</h2></div></div>;
 
-  const isSuccess = payment?.status === 'SUCCESS' || payment?.status === 'REFUNDED' || payment?.status === 'PARTIALLY_REFUNDED';
-  const isInitiated = payment?.status === 'INITIATED';
-  const isFailed = payment?.status === 'FAILED';
-  const amountLabel = `₹${booking.totalAmount?.toLocaleString()}`;
+  const eventLabel = booking.eventType?.name ?? booking.eventType ?? 'Private screening';
+  const venueLabel = selectedBinge?.name || booking.venueName || booking.bingeName || 'Selected venue';
+  const paymentState = String(payment?.status || booking.paymentStatus || 'PENDING').toUpperCase();
+  const paymentStatusLabel = formatLabel(paymentState, 'Awaiting Payment');
+  const isSuccess = paymentState === 'SUCCESS' || paymentState === 'REFUNDED' || paymentState === 'PARTIALLY_REFUNDED';
+  const isInitiated = paymentState === 'INITIATED';
+  const isFailed = paymentState === 'FAILED';
+  const amountLabel = formatAmount(booking.totalAmount);
+  const durationLabel = formatDuration(booking);
+  const addOnsLabel = (booking.addOns || []).map((item) => item.name ?? item.addOnName).filter(Boolean).join(', ');
+  const bookingDetails = [
+    { icon: <FiLayers />, label: 'Event', value: eventLabel },
+    { icon: <FiCalendar />, label: 'Date', value: booking.bookingDate || 'Not set' },
+    { icon: <FiClock />, label: 'Start time', value: booking.startTime || 'Not set' },
+    { icon: <FiHash />, label: 'Duration', value: durationLabel },
+    { icon: <FiUsers />, label: 'Guests', value: `${booking.numberOfGuests || 1} guest${Number(booking.numberOfGuests || 1) === 1 ? '' : 's'}` },
+    { icon: <FiMapPin />, label: 'Venue', value: venueLabel },
+  ];
+  const summaryFacts = [
+    { label: 'Total payable', value: amountLabel },
+    { label: 'Status', value: paymentStatusLabel },
+    { label: 'Booking ref', value: ref, mono: true },
+    { label: 'Transaction', value: payment?.transactionId || payment?.gatewayOrderId || (isSuccess ? 'Recorded on booking' : 'Created after initiation'), mono: true },
+  ];
+  const breakdownRows = [
+    { label: 'Base amount', value: formatAmount(booking.baseAmount ?? booking.totalAmount ?? 0) },
+    { label: 'Add-on amount', value: formatAmount(booking.addOnAmount || 0) },
+  ];
+
+  if ((booking.guestAmount || 0) > 0) {
+    breakdownRows.push({ label: 'Guest charge', value: formatAmount(booking.guestAmount || 0) });
+  }
+
+  const actionFacts = [
+    { label: 'Method in focus', value: formatLabel(payment?.paymentMethod || paymentMethod, formatLabel(paymentMethod)) },
+    { label: 'Receipt email', value: booking.customerEmail || 'Linked to your account' },
+    { label: 'Booking status', value: formatLabel(booking.status, 'Pending') },
+    { label: 'Customer name', value: booking.customerName || 'Primary account holder' },
+  ];
+  const paymentBannerClass = isSuccess
+    ? 'customer-flow-note-success'
+    : isInitiated
+      ? 'customer-flow-note-warning'
+      : isFailed
+        ? 'customer-flow-note-danger'
+        : 'customer-flow-note-info';
+  const paymentBannerTitle = isSuccess
+    ? paymentState === 'SUCCESS'
+      ? 'Payment captured for this reservation'
+      : `Payment marked ${paymentStatusLabel.toLowerCase()}`
+    : isInitiated
+      ? 'Payment handoff already started'
+      : isFailed
+        ? 'The last payment attempt did not complete'
+        : 'Choose a method and continue when ready';
+  const paymentBannerBody = isSuccess
+    ? 'You can move directly to the booking confirmation page or review the full payment trail from the payments hub.'
+    : isInitiated
+      ? 'If you just completed the provider step, refresh once. Start a new payment only if the previous handoff was abandoned.'
+      : isFailed
+        ? (payment?.failureReason || 'Retry with the same method or switch to another one for a cleaner attempt.')
+        : 'This screen keeps the booking details, amount, and transaction status together so you do not have to cross-check another page before paying.';
+  const nextSteps = isSuccess
+    ? [
+        {
+          title: 'Open the booking confirmation',
+          body: 'Use the confirmation page as the clean handoff from payment into the final reservation summary.',
+        },
+        {
+          title: 'Keep the reference visible',
+          body: `Your booking reference is ${ref}. It is the fastest way to identify this reservation later.`,
+        },
+        {
+          title: 'Use My Bookings for follow-up',
+          body: 'Future changes, support conversations, and reminders are easier from the timeline view.',
+        },
+      ]
+    : isInitiated
+      ? [
+          {
+            title: 'Finish the provider step',
+            body: 'Complete the open transaction in the payment app or gateway window before starting anything new.',
+          },
+          {
+            title: 'Refresh this screen once',
+            body: 'The booking updates after the callback lands. A single refresh is usually enough to confirm the new state.',
+          },
+          {
+            title: 'Only restart when the first attempt is abandoned',
+            body: 'That keeps the transaction trail cleaner and avoids confusion around duplicate pending attempts.',
+          },
+        ]
+      : isFailed
+        ? [
+            {
+              title: 'Pick the retry route',
+              body: 'If the bank or wallet blocked the first attempt, switch methods before creating the next transaction.',
+            },
+            {
+              title: 'Create one fresh payment',
+              body: 'A new initiation creates a clean payment record against the same booking reference.',
+            },
+            {
+              title: 'Return to confirmation after success',
+              body: 'Once the payment lands, the booking summary becomes the next stable page in the flow.',
+            },
+          ]
+        : [
+            {
+              title: 'Review the reservation details',
+              body: 'Check the event, date, time, guests, and add-ons here before you hand off to the gateway.',
+            },
+            {
+              title: 'Choose a payment method and pay',
+              body: 'The payment window opens after initiation and returns the result back to this screen.',
+            },
+            {
+              title: 'Use the confirmation page next',
+              body: 'After payment succeeds, the booking confirmation page becomes the best page for final review.',
+            },
+          ];
+  const stages = [
+    {
+      title: 'Reservation',
+      caption: `Booking ${ref} is already created.`,
+      icon: <FiHash />,
+      state: 'complete',
+    },
+    {
+      title: 'Payment',
+      caption: isSuccess ? 'Captured and synced.' : isInitiated ? 'In progress with the provider.' : isFailed ? 'Needs a retry.' : 'Waiting for checkout.',
+      icon: <FiCreditCard />,
+      state: isSuccess ? 'complete' : 'active',
+    },
+    {
+      title: 'Confirmation',
+      caption: isSuccess ? 'Ready for final review.' : 'Unlocks after successful payment.',
+      icon: isSuccess ? <FiCheckCircle /> : <FiArrowRight />,
+      state: isSuccess ? 'active' : 'pending',
+    },
+  ];
 
   return (
-    <div className="container customer-flow-shell customer-flow-shell-narrow">
+    <div className="container customer-flow-shell customer-flow-shell-wide">
       <SEO title="Payment" description="Review booking amount, retry pending payments, and continue payment flow for your booking." />
 
       <section className="customer-flow-hero">
         <div className="customer-flow-copy">
-          <span className="customer-flow-kicker">Payment flow</span>
-          <h1>Review the amount, choose a method, and close the booking cleanly.</h1>
-          <p>Use this screen to initiate a payment, refresh an in-progress transaction, or confirm that the booking has already been paid.</p>
+          <span className="customer-flow-kicker">Payment desk</span>
+          <h1>Finish this reservation with a clearer payment handoff and a cleaner final review.</h1>
+          <p>This page now keeps the booking blueprint, payment state, and next actions in one place so you do not have to bounce between screens to understand what is happening.</p>
+          <div className="customer-flow-stagebar">
+            {stages.map((stage) => (
+              <article key={stage.title} className={`customer-flow-stage customer-flow-stage--${stage.state}`}>
+                <div className="customer-flow-stage-top">
+                  <span className="customer-flow-stage-icon">{stage.icon}</span>
+                  <strong>{stage.title}</strong>
+                </div>
+                <small>{stage.caption}</small>
+              </article>
+            ))}
+          </div>
           <div className="customer-flow-inline">
             <Link to="/payments" className="btn btn-secondary btn-sm">Payment History</Link>
             <Link to="/my-bookings" className="btn btn-secondary btn-sm">Booking Timeline</Link>
@@ -147,85 +361,168 @@ export default function PaymentPage() {
         </div>
 
         <aside className="customer-flow-summary">
-          <span className="customer-flow-kicker">Booking summary</span>
-          <h2>{booking.eventType?.name ?? booking.eventType}</h2>
+          <span className="customer-flow-kicker">Live payment state</span>
+          <h2>{eventLabel}</h2>
           <p>{booking.bookingDate} at {booking.startTime}</p>
           <div className="customer-flow-badges">
             <span className="badge badge-info">Ref {ref}</span>
             <span className={`badge ${isSuccess ? 'badge-success' : isInitiated ? 'badge-warning' : isFailed ? 'badge-danger' : 'badge-info'}`}>
-              {payment?.status || 'Awaiting payment'}
+              {paymentStatusLabel}
             </span>
           </div>
           <strong>{amountLabel}</strong>
+          <div className="customer-flow-fact-grid">
+            {summaryFacts.map((fact) => (
+              <div key={fact.label} className="customer-flow-fact">
+                <span>{fact.label}</span>
+                <strong className={fact.mono ? 'customer-flow-mono' : ''}>{fact.value}</strong>
+              </div>
+            ))}
+          </div>
         </aside>
       </section>
 
-      <section className="customer-flow-card">
-        <div className="customer-flow-list">
-          <div className="customer-flow-row">
-            <span>Event</span>
-            <strong>{booking.eventType?.name ?? booking.eventType}</strong>
+      <section className="customer-flow-grid">
+        <article className="customer-flow-card customer-flow-stack">
+          <div className="customer-flow-card-head">
+            <div>
+              <span className="customer-flow-section-label">Reservation snapshot</span>
+              <h2>Everything tied to this payment is visible up front.</h2>
+              <p>Review the reservation details before sending the customer into the gateway flow.</p>
+            </div>
+            <span className="customer-booking-ref">{ref}</span>
           </div>
-          <div className="customer-flow-row">
-            <span>Date</span>
-            <strong>{booking.bookingDate} at {booking.startTime}</strong>
-          </div>
-          <div className="customer-flow-total">
-            <span>Total payable</span>
-            <strong className="customer-flow-amount">{amountLabel}</strong>
-          </div>
-        </div>
-      </section>
 
-      {isSuccess ? (
-        <section className="customer-flow-card customer-flow-empty">
-          <span className="customer-flow-icon"><FiCheckCircle /></span>
-          <h2>Payment {payment.status === 'SUCCESS' ? 'successful' : payment.status.replace(/_/g, ' ').toLowerCase()}</h2>
-          <p>Transaction: {payment.transactionId}</p>
-          <div className="customer-flow-actions">
-            <button className="btn btn-primary" onClick={() => navigate(`/booking/${ref}`)}>View Booking</button>
+          <div className="customer-flow-detail-grid">
+            {bookingDetails.map((detail) => (
+              <div key={detail.label} className="customer-flow-detail-item">
+                <span>{detail.icon}{detail.label}</span>
+                <strong>{detail.value}</strong>
+              </div>
+            ))}
           </div>
-        </section>
-      ) : isInitiated ? (
-        <section className="customer-flow-card customer-flow-empty">
-          <span className="customer-flow-icon"><FiClock /></span>
-          <h2>Payment already initiated</h2>
-          <p>Transaction: {payment.transactionId}</p>
-          <div className="customer-flow-actions">
-            <button className="btn btn-primary" onClick={loadData} disabled={loading || processing}>
-              <FiRefreshCw /> {loading ? 'Refreshing...' : 'Refresh Payment Status'}
-            </button>
-            <button className="btn btn-secondary btn-sm" onClick={() => setPayment(null)} disabled={processing}>
-              Start Over with New Payment
-            </button>
-          </div>
-        </section>
-      ) : (
-        <section className="customer-flow-card customer-flow-stack">
-          {isFailed && (
-            <div className="customer-flow-alert customer-flow-alert-danger">
-              <strong><FiAlertCircle /> Previous payment failed</strong>
-              <p>{payment.failureReason || 'Please try a new payment method or start a fresh transaction.'}</p>
+
+          {addOnsLabel && (
+            <div className="customer-flow-note customer-flow-note-info">
+              <strong><FiLayers /> Add-ons already included</strong>
+              <p>{addOnsLabel}</p>
             </div>
           )}
 
-          <label className="customer-flow-select">
-            <span className="customer-flow-helper">Payment method</span>
-            <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
-              <option value="UPI">UPI</option>
-              <option value="CARD">Credit/Debit Card</option>
-              <option value="BANK_TRANSFER">Bank Transfer</option>
-              <option value="WALLET">Wallet</option>
-            </select>
-          </label>
+          <div className="customer-flow-note customer-flow-note-info">
+            <strong><FiMail /> Receipt destination</strong>
+            <p>{booking.customerEmail || 'Payment updates stay tied to the account email on this reservation.'}</p>
+          </div>
 
-          <button className="btn btn-primary" onClick={handleInitiate} disabled={processing}>
-            <FiCreditCard /> {processing ? 'Processing...' : `${isFailed ? 'Retry Payment' : 'Pay'} ${amountLabel}`}
-          </button>
+          <div className="customer-flow-list">
+            {breakdownRows.map((row) => (
+              <div key={row.label} className="customer-flow-row">
+                <span>{row.label}</span>
+                <strong>{row.value}</strong>
+              </div>
+            ))}
+            <div className="customer-flow-total">
+              <span>Total payable</span>
+              <strong className="customer-flow-amount">{amountLabel}</strong>
+            </div>
+          </div>
+        </article>
 
-          <p className="customer-flow-helper">Payment status updates here after the gateway callback is received.</p>
-        </section>
-      )}
+        <article className="customer-flow-card customer-flow-stack">
+          <div className="customer-flow-card-head">
+            <div>
+              <span className="customer-flow-section-label">Payment action</span>
+              <h2>Make the next move without second-guessing the status.</h2>
+              <p>The actions below adapt to the current payment state instead of leaving the screen looking identical in every scenario.</p>
+            </div>
+            <strong className="customer-flow-amount">{amountLabel}</strong>
+          </div>
+
+          <div className={`customer-flow-note ${paymentBannerClass}`}>
+            <strong>{isSuccess ? <FiCheckCircle /> : isInitiated ? <FiClock /> : isFailed ? <FiAlertCircle /> : <FiCreditCard />}{paymentBannerTitle}</strong>
+            <p>{paymentBannerBody}</p>
+          </div>
+
+          {isFailed && payment?.failureReason && (
+            <div className="customer-flow-note customer-flow-note-danger">
+              <strong><FiAlertCircle /> Failure detail</strong>
+              <p>{payment.failureReason}</p>
+            </div>
+          )}
+
+          {!isSuccess && !isInitiated && (
+            <label className="customer-flow-select">
+              <span className="customer-flow-helper">Payment method</span>
+              <select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
+                <option value="UPI">UPI</option>
+                <option value="CARD">Credit/Debit Card</option>
+                <option value="BANK_TRANSFER">Bank Transfer</option>
+                <option value="WALLET">Wallet</option>
+              </select>
+            </label>
+          )}
+
+          <div className="customer-flow-fact-grid">
+            {actionFacts.map((fact) => (
+              <div key={fact.label} className="customer-flow-fact">
+                <span>{fact.label}</span>
+                <strong>{fact.value}</strong>
+              </div>
+            ))}
+          </div>
+
+          {isSuccess ? (
+            <div className="customer-flow-actions customer-flow-actions-left">
+              <Link className="btn btn-primary" to={`/booking/${ref}`}>Open Booking Summary <FiArrowRight /></Link>
+              <Link className="btn btn-secondary" to="/payments">View Payment History</Link>
+            </div>
+          ) : isInitiated ? (
+            <div className="customer-flow-actions customer-flow-actions-left">
+              <button className="btn btn-primary" onClick={loadData} disabled={loading || processing}>
+                <FiRefreshCw /> {loading ? 'Refreshing...' : 'Refresh Payment Status'}
+              </button>
+              <button className="btn btn-secondary" onClick={() => setPayment(null)} disabled={processing}>
+                Start Fresh Payment
+              </button>
+              <Link className="btn btn-secondary" to={`/booking/${ref}`}>Review Booking</Link>
+            </div>
+          ) : (
+            <div className="customer-flow-actions customer-flow-actions-left">
+              <button className="btn btn-primary" onClick={handleInitiate} disabled={processing}>
+                <FiCreditCard /> {processing ? 'Processing...' : `${isFailed ? 'Retry Payment' : 'Pay'} ${amountLabel}`}
+              </button>
+              <Link className="btn btn-secondary" to={`/booking/${ref}`}>Review Booking</Link>
+            </div>
+          )}
+
+          <p className="customer-flow-helper">Payment status refreshes here after the gateway callback is received by the booking system.</p>
+        </article>
+      </section>
+
+      <section className="customer-flow-grid">
+        <article className="customer-flow-card customer-flow-card-span customer-flow-stack">
+          <div className="customer-flow-card-head">
+            <div>
+              <span className="customer-flow-section-label">What happens next</span>
+              <h2>Keep the last part of the flow predictable.</h2>
+              <p>The screen now makes the immediate next steps explicit instead of hiding them inside a generic payment state message.</p>
+            </div>
+            <span className="customer-flow-section-label"><FiShield /> One page for payment clarity</span>
+          </div>
+
+          <div className="customer-flow-step-list">
+            {nextSteps.map((step, index) => (
+              <div key={step.title} className="customer-flow-step">
+                <span className="customer-flow-step-index">{index + 1}</span>
+                <div className="customer-flow-step-copy">
+                  <strong>{step.title}</strong>
+                  <p>{step.body}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </article>
+      </section>
     </div>
   );
 }

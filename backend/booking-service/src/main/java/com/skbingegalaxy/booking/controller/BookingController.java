@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -18,6 +19,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/bookings")
 @RequiredArgsConstructor
+@Validated
 public class BookingController {
 
     private final AdminBingeScopeService adminBingeScopeService;
@@ -90,6 +92,14 @@ public class BookingController {
     public ResponseEntity<ApiResponse<List<BookedSlotDto>>> getBookedSlots(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) java.time.LocalDate date) {
         return ResponseEntity.ok(ApiResponse.ok(bookingService.getBookedSlotsForDate(date)));
+    }
+
+    @PostMapping("/{bookingRef}/cancel")
+    public ResponseEntity<ApiResponse<BookingDto>> cancelMyBooking(
+            @PathVariable String bookingRef,
+            @RequestHeader("X-User-Id") Long userId) {
+        BookingDto cancelled = bookingService.cancelBookingByCustomer(bookingRef, userId);
+        return ResponseEntity.ok(ApiResponse.ok("Booking cancelled", cancelled));
     }
 
     @GetMapping("/my-pricing")

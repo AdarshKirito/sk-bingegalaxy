@@ -73,7 +73,15 @@ public class PaymentEventListener {
 
         try {
             Booking booking = bookingService.getBookingEntityForSystem(event.getBookingRef());
-            if (booking.getStatus() == BookingStatus.PENDING) {
+            if (booking.getStatus() == BookingStatus.CANCELLED) {
+                // Already cancelled (e.g. by the pending-timeout scheduler) — compensation is done.
+                sagaOrchestrator.advanceTo(event.getBookingRef(),
+                    SagaState.SagaStatus.COMPENSATING, "PAYMENT_FAILED_BOOKING_ALREADY_CANCELLED");
+                sagaOrchestrator.advanceTo(event.getBookingRef(),
+                    SagaState.SagaStatus.COMPENSATED, "BOOKING_ALREADY_CANCELLED");
+                log.info("Booking {} already cancelled — saga marked compensated after payment failure",
+                    event.getBookingRef());
+            } else if (booking.getStatus() == BookingStatus.PENDING) {
                 sagaOrchestrator.markCompensating(event.getBookingRef(), "Payment failed");
                 bookingService.cancelBookingForSystem(
                     event.getBookingRef(),

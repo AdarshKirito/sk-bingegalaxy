@@ -11,19 +11,19 @@ import java.util.List;
 @AllArgsConstructor
 public class AddOnSaveRequest {
 
-    @NotBlank
-    @Size(max = 100)
+    @NotBlank(message = "Add-on name is required")
+    @Size(max = 100, message = "Add-on name must be under 100 characters")
     private String name;
 
-    @Size(max = 300)
+    @Size(max = 300, message = "Description must be under 300 characters")
     private String description;
 
-    @NotNull
-    @DecimalMin("0.0")
+    @NotNull(message = "Add-on price is required")
+    @DecimalMin(value = "0.0", message = "Add-on price cannot be negative")
     private BigDecimal price;
 
-    @NotBlank
-    @Size(max = 50)
+    @NotBlank(message = "Add-on category is required")
+    @Size(max = 50, message = "Category must be under 50 characters")
     private String category;
 
     private List<String> imageUrls;

@@ -1,98 +1,243 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { useAuth } from '../context/AuthContext';
-import { authService, bookingService, paymentService } from '../services/endpoints';
+import { authService, bookingService } from '../services/endpoints';
+import { normalizeDashboardExperience } from '../services/dashboardExperience';
 import useBingeStore from '../stores/bingeStore';
+import { getMemberTier, mergeSupportContact } from '../services/customerExperience';
 import {
-  EXPERIENCE_STEPS,
-  getMemberTier,
-  HELP_FAQS,
-  mergeSupportContact,
-  MEMBER_OFFERS,
-} from '../services/customerExperience';
-import { FiCalendar, FiClock, FiArrowRight, FiCreditCard, FiMapPin, FiDollarSign, FiTag, FiGift, FiHeart, FiStar, FiFilm, FiBriefcase, FiSmile, FiRepeat, FiShield, FiUser, FiMessageCircle } from 'react-icons/fi';
+  FiArrowLeft,
+  FiArrowRight,
+  FiBriefcase,
+  FiCalendar,
+  FiClock,
+  FiCreditCard,
+  FiFilm,
+  FiGift,
+  FiHeart,
+  FiMapPin,
+  FiSmile,
+  FiStar,
+} from 'react-icons/fi';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import Pagination from '../components/ui/Pagination';
 import SEO from '../components/SEO';
 import './Dashboard.css';
 
+const formatStatusLabel = (value, fallback = 'Pending') => {
+  if (!value) return fallback;
+  return String(value)
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+};
+
+const bookingStatusBadge = (status) => ({
+  PENDING: 'badge-warning',
+  CONFIRMED: 'badge-info',
+  CHECKED_IN: 'badge-info',
+  COMPLETED: 'badge-success',
+  CANCELLED: 'badge-danger',
+  NO_SHOW: 'badge-danger',
+}[status] || 'badge-info');
+
+const paymentStatusBadge = (status) => ({
+  PENDING: 'badge-warning',
+  INITIATED: 'badge-warning',
+  PARTIALLY_PAID: 'badge-warning',
+  SUCCESS: 'badge-success',
+  FAILED: 'badge-danger',
+  REFUNDED: 'badge-info',
+  PARTIALLY_REFUNDED: 'badge-info',
+}[status] || 'badge-info');
+
 export default function Dashboard() {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const { selectedBinge } = useBingeStore();
   const [currentBookings, setCurrentBookings] = useState([]);
   const [pastBookings, setPastBookings] = useState([]);
-  const [payments, setPayments] = useState([]);
   const [eventTypes, setEventTypes] = useState([]);
+  const [dashboardExperience, setDashboardExperience] = useState(() => normalizeDashboardExperience(null));
   const [myPricing, setMyPricing] = useState(null);
   const [supportContact, setSupportContact] = useState(null);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [experienceIndex, setExperienceIndex] = useState(0);
   const perPage = 4;
 
   useEffect(() => {
+    let isActive = true;
+
+    const setIfActive = (setter, value) => {
+      if (isActive) setter(value);
+    };
+
+    setLoading(true);
+
     const loads = [
-      authService.getSupportContact().then(r => setSupportContact(r.data.data || null)).catch(() => null),
-      bookingService.getCurrentBookings().then(r => setCurrentBookings(r.data.data || [])).catch(() => null),
-      bookingService.getPastBookings().then(r => setPastBookings(r.data.data || [])).catch(() => null),
-      paymentService.getMyPayments().then(r => setPayments(r.data.data || [])).catch(() => null),
-      bookingService.getEventTypes().then(r => setEventTypes((r.data.data || r.data || []).filter(e => e.active !== false))).catch(() => null),
-      bookingService.getMyPricing().then(r => setMyPricing(r.data.data || null)).catch(() => null),
+      authService.getSupportContact()
+        .then((response) => {
+          setIfActive(setSupportContact, response.data.data || null);
+          return true;
+        })
+        .catch(() => null),
+      bookingService.getCurrentBookings()
+        .then((response) => {
+          setIfActive(setCurrentBookings, response.data.data || []);
+          return true;
+        })
+        .catch(() => null),
+      bookingService.getPastBookings()
+        .then((response) => {
+          setIfActive(setPastBookings, response.data.data || []);
+          return true;
+        })
+        .catch(() => null),
+      bookingService.getEventTypes()
+        .then((response) => {
+          const items = (response.data.data || response.data || []).filter((item) => item.active !== false);
+          setIfActive(setEventTypes, items);
+          return true;
+        })
+        .catch(() => null),
+      selectedBinge?.id
+        ? bookingService.getBingeDashboardExperience(selectedBinge.id)
+          .then((response) => {
+            setIfActive(setDashboardExperience, normalizeDashboardExperience(response.data.data || response.data || null));
+            return true;
+          })
+          .catch(() => null)
+        : Promise.resolve().then(() => {
+          setIfActive(setDashboardExperience, normalizeDashboardExperience(null));
+          return true;
+        }),
+      bookingService.getMyPricing()
+        .then((response) => {
+          setIfActive(setMyPricing, response.data.data || null);
+          return true;
+        })
+        .catch(() => null),
     ];
-    Promise.allSettled(loads).then(results => {
-      const failed = results.filter(r => r.status === 'rejected' || r.value === null).length;
-      if (failed > 0) toast.error('Some dashboard data could not be loaded.');
-    }).finally(() => setLoading(false));
-  }, []);
 
-  const sortedCurrentBookings = [...currentBookings].sort((left, right) => {
-    const leftTime = new Date(`${left.bookingDate}T${left.startTime || '00:00'}`).getTime();
-    const rightTime = new Date(`${right.bookingDate}T${right.startTime || '00:00'}`).getTime();
-    return leftTime - rightTime;
-  });
+    Promise.allSettled(loads)
+      .then((results) => {
+        if (!isActive) return;
+        const failed = results.filter((result) => result.status === 'rejected' || result.value === null).length;
+        if (failed > 0) toast.error('Some dashboard data could not be loaded.');
+      })
+      .finally(() => {
+        if (isActive) setLoading(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [selectedBinge?.id]);
+
+  const sortedCurrentBookings = useMemo(() => (
+    [...currentBookings].sort((left, right) => {
+      const leftTime = new Date(`${left.bookingDate}T${left.startTime || '00:00'}`).getTime();
+      const rightTime = new Date(`${right.bookingDate}T${right.startTime || '00:00'}`).getTime();
+      return leftTime - rightTime;
+    })
+  ), [currentBookings]);
+
   const totalPages = Math.ceil(sortedCurrentBookings.length / perPage);
-  const paged = sortedCurrentBookings.slice((page - 1) * perPage, page * perPage);
-
+  const pagedBookings = sortedCurrentBookings.slice((page - 1) * perPage, page * perPage);
   const upcomingCount = currentBookings.length;
   const pastCount = pastBookings.length;
   const totalSpend = pastBookings
-    .filter(b => b.paymentStatus === 'SUCCESS')
-    .reduce((sum, b) => sum + (b.totalAmount || 0), 0);
+    .filter((booking) => booking.paymentStatus === 'SUCCESS')
+    .reduce((sum, booking) => sum + (booking.totalAmount || 0), 0);
   const support = mergeSupportContact(supportContact);
   const memberTier = useMemo(() => getMemberTier(pastCount, totalSpend), [pastCount, totalSpend]);
-  const pricingLabel = myPricing?.rateCodeName || 'Standard';
-  const pricingSourceLabel = myPricing?.pricingSource === 'RATE_CODE'
-    ? 'Rate code pricing is active on your account.'
-    : myPricing?.pricingSource === 'CUSTOM'
-      ? 'Custom pricing is active on your account.'
-      : 'You are currently on standard customer pricing.';
 
-  const pendingPayments = payments.filter(p => p.status === 'INITIATED');
-  const lastPayment = payments.length > 0 ? payments[0] : null;
-  const pendingBookings = currentBookings.filter(b => b.status === 'PENDING' && b.paymentStatus !== 'SUCCESS');
+  const pricingLabel = myPricing?.pricingSource === 'CUSTOMER'
+    ? (myPricing.memberLabel || 'Custom')
+    : myPricing?.pricingSource === 'RATE_CODE'
+      ? (myPricing.memberLabel || myPricing.rateCodeName || 'Rate Code')
+      : memberTier;
+
+  const pricingSourceLabel = myPricing?.pricingSource === 'CUSTOMER'
+    ? 'Personalized pricing has been configured for your account.'
+    : myPricing?.pricingSource === 'RATE_CODE'
+      ? `${myPricing.memberLabel || myPricing.rateCodeName || 'Rate code'} pricing is active on your account.`
+      : `You are on ${memberTier.toLowerCase()} member pricing.`;
+
+  const pendingBooking = sortedCurrentBookings.find((booking) => booking.status === 'PENDING' && booking.paymentStatus !== 'SUCCESS') || null;
   const nextBooking = sortedCurrentBookings[0] || null;
-  const heroBooking = pendingBookings[0] || nextBooking || null;
+  const focusBooking = pendingBooking || nextBooking;
 
-  const expIcons = {
-    'Birthday': <FiGift />, 'Anniversary': <FiHeart />, 'Proposal': <FiStar />,
-    'Screening': <FiFilm />, 'HD': <FiFilm />, 'Corporate': <FiBriefcase />,
-    'Baby': <FiSmile />, 'default': <FiStar />,
-  };
-  const getExpIcon = (name) => {
-    const key = Object.keys(expIcons).find(k => name?.toLowerCase().includes(k.toLowerCase()));
-    return key ? expIcons[key] : expIcons.default;
-  };
+  useEffect(() => {
+    if (totalPages === 0 && page !== 1) {
+      setPage(1);
+      return;
+    }
+
+    if (totalPages > 0 && page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+
   const getExperienceTone = (name = '') => {
     const lowerName = name.toLowerCase();
-    if (lowerName.includes('birthday')) return { tag: 'Celebrations', blurb: 'Cake, music, memories, and a room that is fully yours.' };
-    if (lowerName.includes('anniversary') || lowerName.includes('proposal')) return { tag: 'Romance', blurb: 'Build a quieter, more personal setup for milestone moments.' };
-    if (lowerName.includes('corporate')) return { tag: 'Teams', blurb: 'Present, celebrate wins, or host a private watch party with your crew.' };
-    if (lowerName.includes('baby')) return { tag: 'Family', blurb: 'A softer, family-first setup for shared moments and photos.' };
-    if (lowerName.includes('hd') || lowerName.includes('screen')) return { tag: 'Movie Night', blurb: 'Keep it simple and cinematic with a focused private-screening setup.' };
-    return { tag: 'Private Event', blurb: 'Shape the room around your plan instead of fitting into a public showtime.' };
+    if (lowerName.includes('birthday')) return { tag: 'Celebration', blurb: 'A flexible setup for parties and milestone moments.', theme: 'celebration' };
+    if (lowerName.includes('anniversary') || lowerName.includes('proposal')) return { tag: 'Romance', blurb: 'A quieter setup for intimate private screenings.', theme: 'romance' };
+    if (lowerName.includes('corporate')) return { tag: 'Team', blurb: 'Built for presentations, launches, and group sessions.', theme: 'team' };
+    if (lowerName.includes('baby')) return { tag: 'Family', blurb: 'A softer setup for family-first celebrations.', theme: 'family' };
+    if (lowerName.includes('hd') || lowerName.includes('screen')) return { tag: 'Cinema', blurb: 'A simple private-screening option with a cinematic focus.', theme: 'cinema' };
+    return { tag: 'Private Event', blurb: 'A straightforward setup for your next private event.', theme: 'luxury' };
   };
+
+  const getExperienceIcon = (name = '') => {
+    const lowerName = name.toLowerCase();
+    if (lowerName.includes('birthday')) return <FiGift />;
+    if (lowerName.includes('anniversary') || lowerName.includes('proposal')) return <FiHeart />;
+    if (lowerName.includes('corporate')) return <FiBriefcase />;
+    if (lowerName.includes('baby')) return <FiSmile />;
+    if (lowerName.includes('hd') || lowerName.includes('screen')) return <FiFilm />;
+    return <FiStar />;
+  };
+
+  const getThemeIcon = (theme = 'celebration') => {
+    switch (theme) {
+      case 'romance':
+        return <FiHeart />;
+      case 'cinema':
+        return <FiFilm />;
+      case 'team':
+        return <FiBriefcase />;
+      case 'family':
+        return <FiSmile />;
+      case 'luxury':
+        return <FiStar />;
+      case 'celebration':
+      default:
+        return <FiGift />;
+    }
+  };
+
+  const getThemeLabel = (theme = 'celebration') => {
+    switch (theme) {
+      case 'romance':
+        return 'Romance';
+      case 'cinema':
+        return 'Cinema';
+      case 'team':
+        return 'Team';
+      case 'family':
+        return 'Family';
+      case 'luxury':
+        return 'Luxury';
+      case 'celebration':
+      default:
+        return 'Celebration';
+    }
+  };
+
   const formatAmount = (amount) => `Rs ${Number(amount || 0).toLocaleString()}`;
+
   const formatDuration = (booking) => {
     const totalMinutes = booking?.durationMinutes || ((booking?.durationHours || 0) * 60);
     if (!totalMinutes) return 'Flexible duration';
@@ -103,372 +248,376 @@ export default function Dashboard() {
     return `${minutes}m`;
   };
 
+  const customExperienceItems = useMemo(() => (
+    dashboardExperience.slides.map((slide, index) => ({
+      key: `custom-${index}`,
+      badge: slide.badge || getThemeLabel(slide.theme),
+      title: slide.headline || 'Featured setup',
+      description: slide.description || 'A featured private-screening setup for your next booking.',
+      ctaLabel: slide.ctaLabel || 'Open booking',
+      theme: slide.theme || 'celebration',
+      imageUrl: slide.imageUrl || '',
+      icon: getThemeIcon(slide.theme),
+      linkState: undefined,
+    }))
+  ), [dashboardExperience.slides]);
+
+  const defaultExperienceItems = useMemo(() => (
+    eventTypes.slice(0, 6).map((eventType) => {
+      const tone = getExperienceTone(eventType.name);
+      return {
+        key: `event-${eventType.id}`,
+        badge: tone.tag,
+        title: eventType.name,
+        description: eventType.description || tone.blurb,
+        ctaLabel: 'Book this',
+        theme: tone.theme,
+        imageUrl: '',
+        icon: getExperienceIcon(eventType.name),
+        price: formatAmount(eventType.basePrice),
+        linkState: { eventTypeId: eventType.id, eventTypeName: eventType.name },
+      };
+    })
+  ), [eventTypes]);
+
+  const experienceItems = customExperienceItems.length > 0 ? customExperienceItems : defaultExperienceItems;
+  const useExperienceCarousel = dashboardExperience.layout === 'CAROUSEL';
+  const activeExperience = experienceItems[experienceIndex] || null;
+
+  useEffect(() => {
+    setExperienceIndex(0);
+  }, [experienceItems.length, dashboardExperience.layout, dashboardExperience.sectionTitle]);
+
+  const handlePreviousExperience = () => {
+    if (experienceItems.length <= 1) return;
+    setExperienceIndex((current) => (current === 0 ? experienceItems.length - 1 : current - 1));
+  };
+
+  const handleNextExperience = () => {
+    if (experienceItems.length <= 1) return;
+    setExperienceIndex((current) => (current + 1) % experienceItems.length);
+  };
+
+  const supportLinks = [
+    support.email ? { label: 'Email support', href: `mailto:${support.email}` } : null,
+    support.whatsappRaw
+      ? { label: 'WhatsApp', href: `https://wa.me/${String(support.whatsappRaw).replace(/\D/g, '')}`, external: true }
+      : null,
+    support.phoneRaw ? { label: 'Call support', href: `tel:${support.phoneRaw}` } : null,
+  ].filter(Boolean);
+
+  const renderExperienceCard = (item, featured = false) => (
+    <article
+      key={item.key}
+      className={`card dash-experience-card${featured ? ' dash-experience-card-featured' : ''}${item.imageUrl ? ' dash-experience-card-has-image' : ''}`}
+    >
+      {item.imageUrl && (
+        <div className="dash-experience-image">
+          <img src={item.imageUrl} alt={item.title} />
+        </div>
+      )}
+
+      <div className="dash-experience-body">
+        <div className="dash-experience-top">
+          <span className="dash-pill">{item.badge}</span>
+          {!item.imageUrl && <span className="dash-experience-icon" aria-hidden="true">{item.icon}</span>}
+        </div>
+
+        <h3>{item.title}</h3>
+        <p>{item.description}</p>
+
+        <div className="dash-experience-footer">
+          <strong>{item.price || getThemeLabel(item.theme)}</strong>
+          <Link to="/book" state={item.linkState} className="btn btn-secondary btn-sm">
+            {item.ctaLabel} <FiArrowRight />
+          </Link>
+        </div>
+      </div>
+    </article>
+  );
+
   return (
     <div className="container dashboard">
       <SEO title="Dashboard" />
-      <section className="dash-hero">
-        <div className="dash-hero-copy">
-          <span className="dash-eyebrow">Customer Dashboard</span>
-          <h1>Hello, {user?.firstName}! Plan the next private screening without the clutter.</h1>
-          <p>
+
+      <section className="dash-header">
+        <div>
+          <p className="dash-overline">Customer dashboard</p>
+          <h1>Hello, {user?.firstName || 'there'}</h1>
+          <p className="dash-intro">
             {selectedBinge
-              ? `You are currently booking at ${selectedBinge.name}. Track reservations, finish pending payments, and jump straight into the next celebration from one place.`
-              : 'Track reservations, finish pending payments, and jump straight into the next celebration from one place.'}
+              ? `Manage your bookings, payments, and pricing for ${selectedBinge.name} from one place.`
+              : 'Manage your bookings, payments, and pricing from one place.'}
           </p>
-          <div className="dash-hero-actions">
-            <Link to="/book" className="btn btn-primary">Start a New Booking</Link>
-            <Link to="/my-bookings" className="btn btn-secondary">Review My Bookings</Link>
-            <Link to="/account" className="btn btn-secondary">Open Account</Link>
-          </div>
         </div>
 
-        <aside className="dash-highlight-card">
-          <div className="dash-highlight-meta">
-            <span className="dash-highlight-label">
-              {loading
-                ? 'Loading'
-                : pendingBookings.length > 0
-                  ? 'Next Action'
-                  : nextBooking
-                    ? 'Coming Up'
-                    : 'Start Here'}
-            </span>
-            {!loading && heroBooking && (
-              <span className={`badge ${pendingBookings.length > 0 ? 'badge-warning' : 'badge-success'}`}>
-                {pendingBookings.length > 0 ? 'Payment Needed' : 'Scheduled'}
+        <div className="dash-header-actions">
+          <Link to="/book" className="btn btn-primary">Start booking</Link>
+          <Link to="/my-bookings" className="btn btn-secondary">My bookings</Link>
+          <Link to="/payments" className="btn btn-secondary">Payments</Link>
+        </div>
+      </section>
+
+      <section className="dash-main-grid">
+        <article className="card dash-panel dash-focus-card">
+          <div className="dash-panel-head">
+            <div>
+              <p className="dash-overline">
+                {loading
+                  ? 'Loading'
+                  : pendingBooking
+                    ? 'Payment pending'
+                    : nextBooking
+                      ? 'Next booking'
+                      : 'Start here'}
+              </p>
+              <h2>{focusBooking ? (focusBooking.eventType?.name ?? focusBooking.eventType) : 'No active booking'}</h2>
+            </div>
+
+            {!loading && focusBooking && (
+              <span className={`badge ${pendingBooking ? 'badge-warning' : bookingStatusBadge(focusBooking.status)}`}>
+                {pendingBooking ? 'Action needed' : formatStatusLabel(focusBooking.status)}
               </span>
             )}
           </div>
 
           {loading ? (
-            <div className="dash-highlight-body">
-              <h2>Preparing your dashboard...</h2>
-              <p>Fetching bookings, payments, and experience options.</p>
-            </div>
-          ) : heroBooking ? (
-            <div className="dash-highlight-body">
-              <h2>{heroBooking.eventType?.name ?? heroBooking.eventType}</h2>
-              <p>{heroBooking.bookingDate} at {heroBooking.startTime} for {formatDuration(heroBooking)}</p>
-              <div className="dash-highlight-amount">{formatAmount(heroBooking.totalAmount)}</div>
-              <div className="dash-inline-actions">
-                {pendingBookings.length > 0 ? (
-                  <button className="btn btn-primary btn-sm" onClick={() => navigate(`/payment/${heroBooking.bookingRef}`)}>
-                    Finish Payment <FiArrowRight />
-                  </button>
+            <p className="dash-muted">Loading the current booking details.</p>
+          ) : focusBooking ? (
+            <>
+              <div className="dash-focus-meta">
+                <span><FiCalendar /> {focusBooking.bookingDate || 'Date not set'}</span>
+                <span><FiClock /> {focusBooking.startTime || 'Time not set'}</span>
+                <span>{formatDuration(focusBooking)}</span>
+              </div>
+
+              <div className="dash-focus-tags">
+                <span className={`badge ${bookingStatusBadge(focusBooking.status)}`}>
+                  {formatStatusLabel(focusBooking.status)}
+                </span>
+                <span className={`badge ${paymentStatusBadge(focusBooking.paymentStatus)}`}>
+                  {formatStatusLabel(focusBooking.paymentStatus, 'Pending')}
+                </span>
+              </div>
+
+              <div className="dash-focus-total">{formatAmount(focusBooking.totalAmount)}</div>
+
+              <p className="dash-muted">
+                {pendingBooking
+                  ? 'The booking is created, but the payment still needs to be completed.'
+                  : 'Open the booking to review the reservation details or payment history.'}
+              </p>
+
+              <div className="dash-actions-row">
+                {pendingBooking ? (
+                  <Link to={`/payment/${focusBooking.bookingRef}`} className="btn btn-primary btn-sm">
+                    <FiCreditCard /> Pay now
+                  </Link>
                 ) : (
-                  <Link to={`/booking/${heroBooking.bookingRef}`} className="btn btn-primary btn-sm">
-                    View Reservation <FiArrowRight />
+                  <Link to={`/booking/${focusBooking.bookingRef}`} className="btn btn-primary btn-sm">
+                    View booking <FiArrowRight />
                   </Link>
                 )}
-                <Link to="/my-bookings" className="btn btn-secondary btn-sm">Open Timeline</Link>
+
+                <Link to="/my-bookings" className="btn btn-secondary btn-sm">Open timeline</Link>
               </div>
-            </div>
+            </>
           ) : (
-            <div className="dash-highlight-body">
-              <h2>No active reservation yet</h2>
-              <p>Pick an experience, choose a slot, and turn this page into your planning hub.</p>
-              <div className="dash-inline-actions">
-                <Link to="/book" className="btn btn-primary btn-sm">
-                  Book Your First Slot <FiArrowRight />
-                </Link>
+            <>
+              <p className="dash-muted">Book when you are ready. This page will keep the key details visible once you do.</p>
+              <div className="dash-actions-row">
+                <Link to="/book" className="btn btn-primary btn-sm">Start your first booking</Link>
               </div>
-            </div>
+            </>
           )}
+        </article>
 
-          {!loading && (
-            <div className="dash-highlight-footer">
-              <span>{upcomingCount} upcoming booking{upcomingCount === 1 ? '' : 's'}</span>
-              <span>{pendingPayments.length} in-progress payment{pendingPayments.length === 1 ? '' : 's'}</span>
+        <article className="card dash-panel dash-overview-card">
+          <div className="dash-panel-head">
+            <div>
+              <p className="dash-overline">Overview</p>
+              <h2>Only the essentials</h2>
             </div>
-          )}
-        </aside>
-      </section>
 
-      <section className="dash-summary-grid">
-        <article className="dash-summary-card">
-          <div className="dash-summary-icon"><FiCalendar /></div>
-          <span className="dash-summary-label">Upcoming</span>
-          <strong className="dash-summary-value">{loading ? '–' : upcomingCount}</strong>
-          <p>{loading ? 'Loading reservations' : upcomingCount > 0 ? 'Reservations waiting on your calendar.' : 'No reservation locked in yet.'}</p>
-        </article>
-
-        <article className="dash-summary-card">
-          <div className="dash-summary-icon"><FiClock /></div>
-          <span className="dash-summary-label">Past Visits</span>
-          <strong className="dash-summary-value">{loading ? '–' : pastCount}</strong>
-          <p>{loading ? 'Loading visit history' : pastCount > 0 ? 'A quick view of how often you have booked with us.' : 'Your history starts with the next experience.'}</p>
-        </article>
-
-        <article className="dash-summary-card">
-          <div className="dash-summary-icon"><FiDollarSign /></div>
-          <span className="dash-summary-label">Total Spend</span>
-          <strong className="dash-summary-value">{loading ? '–' : formatAmount(totalSpend)}</strong>
-          <p>{loading ? 'Calculating spend' : totalSpend > 0 ? 'Based on successfully paid completed bookings.' : 'No completed paid bookings recorded yet.'}</p>
-        </article>
-
-        <article className="dash-summary-card dash-summary-card-accent">
-          <div className="dash-summary-icon"><FiTag /></div>
-          <span className="dash-summary-label">Your Pricing</span>
-          <strong className="dash-summary-value">{loading ? '–' : pricingLabel}</strong>
-          <p>{loading ? 'Loading pricing profile' : pricingSourceLabel}</p>
-        </article>
-      </section>
-
-      <section className="grid-3 dash-actions">
-        <Link to="/book" className="dash-action-card">
-          <div className="dash-icon"><FiCalendar /></div>
-          <span className="dash-card-kicker">Fastest path</span>
-          <h3>Book Now</h3>
-          <p>Jump straight into the booking flow and lock your preferred slot.</p>
-          <FiArrowRight className="dash-arrow" />
-        </Link>
-
-        <Link to="/my-bookings" className="dash-action-card">
-          <div className="dash-icon"><FiClock /></div>
-          <span className="dash-card-kicker">Timeline</span>
-          <h3>My Bookings</h3>
-          <p>See upcoming plans, past visits, booking downloads, and support shortcuts in one place.</p>
-          <FiArrowRight className="dash-arrow" />
-        </Link>
-
-        <div className="dash-action-card dash-payments-card">
-          <div className="dash-icon dash-icon-success">
-            <FiCreditCard />
+            {selectedBinge && (
+              <span className="dash-venue-chip">
+                <FiMapPin /> {selectedBinge.name}
+              </span>
+            )}
           </div>
-          <span className="dash-card-kicker">Payments</span>
-          <h3>Payments</h3>
-          {loading ? (
-            <p className="dash-card-muted">Loading payment activity...</p>
-          ) : pendingBookings.length > 0 ? (
-            <>
-              <p className="dash-payments-pending">{pendingBookings.length} booking{pendingBookings.length > 1 ? 's' : ''} still needs payment.</p>
-              <p className="dash-card-muted">Finish the current transaction without reopening the booking flow.</p>
-              <div className="dash-inline-actions">
-                <Link to="/payments" className="btn btn-primary btn-sm dash-pay-btn">Open Payments Hub</Link>
-                <button className="btn btn-secondary btn-sm dash-pay-btn" onClick={() => navigate(`/payment/${pendingBookings[0].bookingRef}`)}>
-                  Continue Payment <FiArrowRight />
-                </button>
-              </div>
-            </>
-          ) : lastPayment ? (
-            <>
-              <p className="dash-card-muted">Latest payment snapshot</p>
-              <p className="dash-payment-status-line">
-                <span className={`badge ${lastPayment.status === 'SUCCESS' ? 'badge-success' : lastPayment.status === 'INITIATED' ? 'badge-warning' : 'badge-danger'}`}>
-                {lastPayment.status}
-                </span>
-                <strong>{formatAmount(lastPayment.amount)}</strong>
-              </p>
-              <Link to="/payments" className="btn btn-secondary btn-sm dash-pay-btn">Review Payment History</Link>
-            </>
-          ) : (
-            <>
-              <p className="dash-card-muted">No payments recorded yet.</p>
-              <Link to="/payments" className="btn btn-secondary btn-sm dash-pay-btn">Open Payments Hub</Link>
-            </>
-          )}
-        </div>
+
+          <div className="dash-overview-list">
+            <div className="dash-overview-row">
+              <span>Venue</span>
+              <strong>{selectedBinge?.name || 'Not selected'}</strong>
+            </div>
+            <div className="dash-overview-row">
+              <span>Upcoming bookings</span>
+              <strong>{loading ? '�' : upcomingCount}</strong>
+            </div>
+            <div className="dash-overview-row">
+              <span>Past visits</span>
+              <strong>{loading ? '�' : pastCount}</strong>
+            </div>
+            <div className="dash-overview-row">
+              <span>Total spend</span>
+              <strong>{loading ? '�' : formatAmount(totalSpend)}</strong>
+            </div>
+          </div>
+
+          <div className="dash-overview-note">
+            <span>Pricing plan</span>
+            <strong>{loading ? 'Loading pricing...' : pricingLabel}</strong>
+            <p>{loading ? 'Checking your pricing details.' : pricingSourceLabel}</p>
+          </div>
+
+          {selectedBinge && <Link to="/binges" className="dash-inline-link">Change venue</Link>}
+        </article>
       </section>
 
-      <section className="dash-insights-grid">
-        {selectedBinge && (
-          <article className="dash-venue-card card">
-            <div className="dash-venue-head">
-              <div className="dash-venue-left">
-                <div className="dash-venue-icon"><FiMapPin /></div>
-                <div>
-                  <span className="dash-card-kicker">Selected Venue</span>
-                  <h3>{selectedBinge.name}</h3>
-                  {selectedBinge.address && <p className="dash-venue-address">{selectedBinge.address}</p>}
+      {!loading && experienceItems.length > 0 && (
+        <section className="dash-section">
+          <div className="dash-section-header">
+            <div className="dash-section-copy">
+              <p className="dash-overline">{dashboardExperience.sectionEyebrow}</p>
+              <h2>{dashboardExperience.sectionTitle}</h2>
+              {dashboardExperience.sectionSubtitle && (
+                <p className="dash-section-subtitle">{dashboardExperience.sectionSubtitle}</p>
+              )}
+            </div>
+
+            <div className="dash-section-actions">
+              {useExperienceCarousel && experienceItems.length > 1 && (
+                <div className="dash-experience-nav" aria-label="Experience carousel controls">
+                  <button type="button" onClick={handlePreviousExperience} aria-label="Previous experience">
+                    <FiArrowLeft />
+                  </button>
+                  <span>{experienceIndex + 1} / {experienceItems.length}</span>
+                  <button type="button" onClick={handleNextExperience} aria-label="Next experience">
+                    <FiArrowRight />
+                  </button>
                 </div>
-              </div>
-              <button className="btn btn-secondary btn-sm dash-venue-change" onClick={() => navigate('/binges')}>
-                <FiRepeat /> Change Venue
-              </button>
-            </div>
+              )}
 
-            <p className="dash-venue-copy">
-              Keep this venue as your base if you want the fastest path through booking, pricing, and confirmations.
-            </p>
-
-            <div className="dash-venue-tags">
-              <span className="badge badge-info">Private screening</span>
-              <span className="badge badge-success">Celebration ready</span>
-              <span className="badge badge-info">Flexible add-ons</span>
-            </div>
-          </article>
-        )}
-
-        <article className="dash-member-card card">
-          <span className="dash-card-kicker">Pricing Snapshot</span>
-          <h3>{loading ? 'Checking your plan...' : `${memberTier} tier`}</h3>
-          <p>{loading ? 'We are resolving your current customer pricing.' : `${pricingLabel} pricing is paired with your ${memberTier.toLowerCase()} member status.`}</p>
-          <div className="dash-member-metrics">
-            <div>
-              <span>Completed visits</span>
-              <strong>{loading ? '–' : pastCount}</strong>
-            </div>
-            <div>
-              <span>Paid bookings</span>
-              <strong>{loading ? '–' : pastBookings.filter(b => b.paymentStatus === 'SUCCESS').length}</strong>
+              <Link to="/book" className="dash-inline-link">Open booking flow</Link>
             </div>
           </div>
-        </article>
-      </section>
 
-      <section className="dash-retention-grid">
-        <article className="dash-loyalty-card card">
-          <div className="dash-section-header">
-            <div>
-              <span className="dash-section-kicker">Loyalty</span>
-              <h2>Reasons to keep booking through your account</h2>
+          {useExperienceCarousel && activeExperience ? (
+            renderExperienceCard(activeExperience, true)
+          ) : (
+            <div className="dash-experience-grid">
+              {experienceItems.map((item) => renderExperienceCard(item))}
             </div>
-            <Link to="/account" className="dash-inline-link">Account center</Link>
-          </div>
-          <div className="dash-loyalty-offers">
-            {MEMBER_OFFERS.map((offer) => (
-              <article key={offer.title} className="dash-loyalty-offer">
-                <span className="dash-card-kicker">{offer.title}</span>
-                <h3>{offer.title}</h3>
-                <p>{offer.description}</p>
-              </article>
-            ))}
-          </div>
-        </article>
-
-        <article className="dash-help-card card">
-          <div className="dash-section-header">
-            <div>
-              <span className="dash-section-kicker">Help and trust</span>
-              <h2>Support is visible before anything goes wrong</h2>
-            </div>
-          </div>
-          <div className="dash-help-points">
-            <p><FiShield /> Payment, cancellation, and schedule questions are easiest to resolve before the booking date.</p>
-            <p><FiMessageCircle /> WhatsApp support is the fastest route for booking changes during {support.hours}.</p>
-            <p><FiUser /> Account preferences and celebration reminders now live in one dedicated account area.</p>
-          </div>
-          <div className="dash-inline-actions">
-            <Link to="/account" className="btn btn-primary btn-sm">Manage Account</Link>
-            <Link to="/my-bookings" className="btn btn-secondary btn-sm">Open Booking Control</Link>
-          </div>
-        </article>
-      </section>
-
-      {!loading && eventTypes.length > 0 && (
-        <section className="dash-experiences">
-          <div className="dash-section-header">
-            <div>
-              <span className="dash-section-kicker">Explore Experiences</span>
-              <h2>Pick a setup that matches the mood</h2>
-            </div>
-            <Link to="/book" className="dash-inline-link">Open booking flow</Link>
-          </div>
-
-          <div className="dash-exp-grid">
-            {eventTypes.slice(0, 6).map(evt => {
-              const tone = getExperienceTone(evt.name);
-              return (
-                <article key={evt.id} className="dash-exp-card card">
-                  <div className="dash-exp-topline">
-                    <span className="dash-exp-pill">{tone.tag}</span>
-                    <div className="dash-exp-icon">{getExpIcon(evt.name)}</div>
-                  </div>
-                  <h3>{evt.name}</h3>
-                  <p className="dash-exp-desc">{evt.description || tone.blurb}</p>
-                  <div className="dash-exp-footer">
-                    <div>
-                      <span className="dash-exp-price-label">Starts from</span>
-                      <strong className="dash-exp-price">{formatAmount(evt.basePrice)}</strong>
-                    </div>
-                    <Link
-                      to="/book"
-                      state={{ eventTypeId: evt.id, eventTypeName: evt.name }}
-                      className="btn btn-primary btn-sm dash-exp-btn"
-                    >
-                      Build This <FiArrowRight />
-                    </Link>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
+          )}
         </section>
       )}
 
-      <section className="dash-upcoming">
-        <div className="dash-section-header">
-          <div>
-            <span className="dash-section-kicker">Upcoming</span>
-            <h2>Your reservation timeline</h2>
-          </div>
-          <Link to="/my-bookings" className="dash-inline-link">See all bookings</Link>
-        </div>
+      <section className="dash-bottom-grid">
+        <article className="card dash-panel dash-bookings-card">
+          <div className="dash-panel-head">
+            <div>
+              <p className="dash-overline">Upcoming bookings</p>
+              <h2>Your reservation list</h2>
+            </div>
 
-        {loading ? (
-          <SkeletonGrid count={4} columns={2} />
-        ) : currentBookings.length === 0 ? (
-          <div className="card dash-empty-state">
-            <p>No upcoming bookings</p>
-            <span>Your next reservation will appear here with payment and timing details.</span>
-            <Link to="/book" className="btn btn-primary btn-sm">Make a Booking</Link>
+            <Link to="/my-bookings" className="dash-inline-link">See all</Link>
           </div>
-        ) : (
-          <>
-            <div className="grid-2">
-              {paged.map(b => (
-                <Link to={`/booking/${b.bookingRef}`} key={b.bookingRef} className="card booking-preview-card">
-                  <div className="bpc-header">
-                    <span className="badge badge-info">{b.status}</span>
-                    <span className="bpc-ref">{b.bookingRef}</span>
-                  </div>
-                  <h4>{b.eventType?.name ?? b.eventType}</h4>
-                  <p>{b.bookingDate} at {b.startTime} • {formatDuration(b)}</p>
-                  <div className="bpc-footer">
-                    <span className="bpc-amount">{formatAmount(b.totalAmount)}</span>
-                    {b.status === 'PENDING' && b.paymentStatus !== 'SUCCESS' && (
-                      <span className="badge badge-warning">Unpaid</span>
-                    )}
-                  </div>
-                </Link>
+
+          {loading ? (
+            <SkeletonGrid count={4} columns={2} />
+          ) : currentBookings.length === 0 ? (
+            <div className="dash-empty-state">
+              <p>No upcoming bookings yet.</p>
+              <span>The next booking you create will show here with its payment status and amount.</span>
+              <Link to="/book" className="btn btn-primary btn-sm">Start booking</Link>
+            </div>
+          ) : (
+            <>
+              <div className="dash-bookings-list">
+                {pagedBookings.map((booking) => (
+                  <article key={booking.bookingRef} className="dash-booking-item">
+                    <div className="dash-booking-top">
+                      <div className="dash-booking-title">
+                        <strong>{booking.eventType?.name ?? booking.eventType}</strong>
+                        <span className="dash-focus-ref">{booking.bookingRef}</span>
+                      </div>
+
+                      <div className="dash-booking-badges">
+                        <span className={`badge ${bookingStatusBadge(booking.status)}`}>
+                          {formatStatusLabel(booking.status)}
+                        </span>
+                        <span className={`badge ${paymentStatusBadge(booking.paymentStatus)}`}>
+                          {formatStatusLabel(booking.paymentStatus, 'Pending')}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="dash-booking-meta">
+                      <span><FiCalendar /> {booking.bookingDate || 'Date not set'}</span>
+                      <span><FiClock /> {booking.startTime || 'Time not set'}</span>
+                      <span>{formatDuration(booking)}</span>
+                    </div>
+
+                    <div className="dash-booking-footer">
+                      <strong>{formatAmount(booking.totalAmount)}</strong>
+
+                      <div className="dash-actions-row">
+                        <Link to={`/booking/${booking.bookingRef}`} className="btn btn-secondary btn-sm">View</Link>
+                        {booking.status === 'PENDING' && booking.paymentStatus !== 'SUCCESS' && (
+                          <Link to={`/payment/${booking.bookingRef}`} className="btn btn-primary btn-sm">
+                            <FiCreditCard /> Pay
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+
+              {totalPages > 1 && (
+                <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+              )}
+            </>
+          )}
+        </article>
+
+        <aside className="card dash-panel dash-support-card">
+          <div className="dash-panel-head">
+            <div>
+              <p className="dash-overline">Support</p>
+              <h2>Need help?</h2>
+            </div>
+          </div>
+
+          <p className="dash-muted">
+            Use support for payment questions, booking changes, or anything that needs a quick follow-up. Available during {support.hours}.
+          </p>
+
+          {supportLinks.length > 0 ? (
+            <div className="dash-support-list">
+              {supportLinks.map((item) => (
+                <a
+                  key={item.label}
+                  className="dash-support-link"
+                  href={item.href}
+                  target={item.external ? '_blank' : undefined}
+                  rel={item.external ? 'noreferrer' : undefined}
+                >
+                  {item.label}
+                </a>
               ))}
             </div>
-            <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
-          </>
-        )}
-      </section>
+          ) : (
+            <p className="dash-muted">Support details are not available right now.</p>
+          )}
 
-      <section className="dash-trust-grid">
-        <article className="dash-help-card card">
-          <div className="dash-section-header">
-            <div>
-              <span className="dash-section-kicker">Frequently asked</span>
-              <h2>Common answers without extra back-and-forth</h2>
-            </div>
+          <div className="dash-support-note">
+            <span>Current pricing</span>
+            <strong>{loading ? 'Loading pricing...' : pricingLabel}</strong>
+            <p>{loading ? 'Checking your pricing details.' : pricingSourceLabel}</p>
           </div>
-          <div className="dash-faq-list">
-            {HELP_FAQS.slice(0, 3).map((item) => (
-              <article key={item.question} className="dash-faq-item">
-                <h3>{item.question}</h3>
-                <p>{item.answer}</p>
-              </article>
-            ))}
-          </div>
-        </article>
-
-        <article className="dash-help-card card">
-          <div className="dash-section-header">
-            <div>
-              <span className="dash-section-kicker">How it works</span>
-              <h2>A simple path from idea to private screening</h2>
-            </div>
-          </div>
-          <ol className="dash-steps-list">
-            {EXPERIENCE_STEPS.map((step) => (
-              <li key={step}>{step}</li>
-            ))}
-          </ol>
-        </article>
+        </aside>
       </section>
     </div>
   );

@@ -15,11 +15,14 @@ export default function Register() {
   const [showCpw, setShowCpw] = useState(false);
   const { register } = useAuth();
 
+  const PW_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#.\-_~+^]{10,}$/;
+
   const fieldErrors = {
     firstName: touched.firstName && !form.firstName.trim() ? 'First name is required' : '',
+    lastName: touched.lastName && !form.lastName.trim() ? 'Last name is required' : '',
     email: touched.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email) ? 'Enter a valid email' : '',
     phone: touched.phone && !/^[6-9]\d{9}$/.test(form.phone.replace(/\D/g, '').slice(-10)) ? 'Enter a valid 10-digit phone' : '',
-    password: touched.password && form.password.length < 10 ? 'Min 10 characters' : '',
+    password: touched.password ? (form.password.length < 10 ? 'Min 10 characters' : !PW_REGEX.test(form.password) ? 'Must include uppercase, lowercase, number & special character' : '') : '',
     confirmPassword: touched.confirmPassword && form.password !== form.confirmPassword ? 'Passwords do not match' : '',
   };
 
@@ -27,13 +30,14 @@ export default function Register() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setTouched({ firstName: true, email: true, phone: true, password: true, confirmPassword: true });
+    setTouched({ firstName: true, lastName: true, email: true, phone: true, password: true, confirmPassword: true });
     if (Object.values(fieldErrors).some(Boolean)) return;
-    if (!form.firstName.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email) || form.password.length < 10 || form.password !== form.confirmPassword) return;
+    if (!form.firstName.trim() || !form.lastName.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email) || !PW_REGEX.test(form.password) || form.password !== form.confirmPassword) return;
     setError('');
     setLoading(true);
     try {
       const { confirmPassword, ...data } = form;
+      data.phone = data.phone.replace(/\D/g, '').slice(-10);
       await register(data);
       toast.success('Account created!');
       // PublicOnlyRoute redirects to /binges via resolveAuthenticatedLanding
@@ -94,9 +98,10 @@ export default function Register() {
                   <input required value={form.firstName} onChange={update('firstName')} onBlur={handleBlur('firstName')} placeholder="John" autoFocus />
                   {fieldErrors.firstName && <span className="field-error">{fieldErrors.firstName}</span>}
                 </div>
-                <div className="input-group">
+                <div className={`input-group ${fieldErrors.lastName ? 'has-error' : ''}`}>
                   <label>Last Name</label>
-                  <input value={form.lastName} onChange={update('lastName')} placeholder="Doe" />
+                  <input required value={form.lastName} onChange={update('lastName')} onBlur={handleBlur('lastName')} placeholder="Doe" />
+                  {fieldErrors.lastName && <span className="field-error">{fieldErrors.lastName}</span>}
                 </div>
               </div>
               <div className={`input-group ${fieldErrors.email ? 'has-error' : ''}`}>

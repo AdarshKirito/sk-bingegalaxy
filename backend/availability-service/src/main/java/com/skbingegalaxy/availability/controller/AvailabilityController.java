@@ -7,7 +7,9 @@ import com.skbingegalaxy.common.dto.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import jakarta.validation.Valid;
 
@@ -17,6 +19,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/availability")
 @RequiredArgsConstructor
+@Validated
 public class AvailabilityController {
 
     private final AvailabilityBingeScopeService scopeService;
@@ -42,13 +45,17 @@ public class AvailabilityController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate) {
-        return ResponseEntity.ok(ApiResponse.ok(service.getAvailability(from, to, clientDate)));
+        return ResponseEntity.ok()
+            .cacheControl(CacheControl.noStore())
+            .body(ApiResponse.ok(service.getAvailability(from, to, clientDate)));
     }
 
     @GetMapping("/slots")
     public ResponseEntity<ApiResponse<DayAvailabilityDto>> getSlotsForDate(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        return ResponseEntity.ok(ApiResponse.ok(service.getSlotsForDate(date)));
+        return ResponseEntity.ok()
+            .cacheControl(CacheControl.noStore())
+            .body(ApiResponse.ok(service.getSlotsForDate(date)));
     }
 
     // ── Internal endpoint called by booking-service ──────────

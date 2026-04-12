@@ -96,8 +96,8 @@ class RateLimitFilterTest {
 
     @Test
     void authPath_hasTighterLimit() {
-        // Auth paths should have a limit of 10 per minute
-        for (int i = 0; i < 10; i++) {
+        // Auth paths should have a limit of 30 per minute
+        for (int i = 0; i < 30; i++) {
             MockServerWebExchange exchange = MockServerWebExchange.from(
                     MockServerHttpRequest.get("/api/v1/auth/login")
                             .remoteAddress(new InetSocketAddress("10.0.0.50", 12345))
@@ -105,14 +105,14 @@ class RateLimitFilterTest {
             filter.filter(exchange, chain).block();
         }
 
-        // 11th auth request should be rate-limited
-        MockServerWebExchange exchange11 = MockServerWebExchange.from(
+        // 31st auth request should be rate-limited
+        MockServerWebExchange exchange31 = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/api/v1/auth/login")
                         .remoteAddress(new InetSocketAddress("10.0.0.50", 12345))
                         .build());
-        filter.filter(exchange11, chain).block();
+        filter.filter(exchange31, chain).block();
 
-        assertThat(exchange11.getResponse().getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+        assertThat(exchange31.getResponse().getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
     }
 
     @Test

@@ -16,6 +16,8 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 101
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: frontend
           image: skbingegalaxy/frontend:IMAGE_TAG  # Set by CI/CD
@@ -25,9 +27,17 @@ spec:
               name: http
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /var/cache/nginx
+            - name: pid
+              mountPath: /var/run
           resources:
             requests:
               memory: "128Mi"
@@ -48,6 +58,13 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 15
             failureThreshold: 3
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: cache
+          emptyDir: {}
+        - name: pid
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

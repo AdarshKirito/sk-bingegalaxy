@@ -1,5 +1,6 @@
 package com.skbingegalaxy.booking.dto;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import lombok.*;
 
@@ -33,6 +34,7 @@ public class CreateBookingRequest {
     @Builder.Default
     private int numberOfGuests = 1;
 
+    @Valid
     private List<AddOnSelection> addOns;
 
     @Size(max = 1000, message = "Special notes limited to 1000 characters")

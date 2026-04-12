@@ -167,9 +167,13 @@ export default function Login() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    const trimmedEmail = form.email.trim();
+    if (!trimmedEmail) { setError('Email is required'); toast.error('Email is required'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) { setError('Please enter a valid email address'); toast.error('Please enter a valid email address'); return; }
+    if (!form.password) { setError('Password is required'); toast.error('Password is required'); return; }
     setLoading(true);
     try {
-      await login(form);
+      await login({ email: trimmedEmail, password: form.password });
       toast.success('Welcome back!');
       // PublicOnlyRoute redirects once isAuthenticated becomes true
     } catch (err) {

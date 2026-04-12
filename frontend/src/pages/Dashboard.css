@@ -1,6 +1,1236 @@
 .dashboard {
+  display: grid;
+  gap: 1.25rem;
   padding-top: 2rem;
   padding-bottom: 3rem;
+}
+
+.dash-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.dash-overline {
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.dash-header h1 {
+  margin-top: 0.35rem;
+  font-size: clamp(2rem, 4vw, 2.6rem);
+  line-height: 1.05;
+  color: var(--text);
+}
+
+.dash-intro {
+  max-width: 52rem;
+  margin-top: 0.55rem;
+  color: var(--text-secondary);
+}
+
+.dash-header-actions,
+.dash-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.dash-header-actions {
+  justify-content: flex-end;
+}
+
+.dash-main-grid,
+.dash-bottom-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.dash-main-grid {
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.9fr);
+}
+
+.dash-bottom-grid {
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.85fr);
+}
+
+.dash-panel {
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+}
+
+.dash-panel::before {
+  display: none;
+}
+
+.dash-panel:hover {
+  border-color: var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+.dash-panel-head,
+.dash-section-header,
+.dash-booking-top,
+.dash-booking-footer,
+.dash-experience-top,
+.dash-experience-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.dash-panel-head h2,
+.dash-section-header h2 {
+  margin-top: 0.2rem;
+  font-size: 1.35rem;
+  line-height: 1.15;
+  color: var(--text);
+}
+
+.dash-section {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.dash-section-copy {
+  max-width: 48rem;
+}
+
+.dash-section-subtitle {
+  margin-top: 0.4rem;
+  color: var(--text-secondary);
+}
+
+.dash-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.dash-inline-link {
+  font-weight: 600;
+  color: var(--primary);
+  white-space: nowrap;
+}
+
+.dash-muted,
+.dash-experience-body p,
+.dash-support-note p,
+.dash-empty-state span {
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.dash-focus-card,
+.dash-overview-card,
+.dash-support-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.dash-focus-ref {
+  font-size: 0.84rem;
+  color: var(--text-muted);
+}
+
+.dash-focus-meta,
+.dash-booking-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+}
+
+.dash-focus-meta span,
+.dash-booking-meta span,
+.dash-venue-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.dash-focus-tags,
+.dash-booking-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.dash-focus-total {
+  font-size: 1.9rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.dash-venue-chip {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.dash-overview-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.dash-overview-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.dash-overview-row span {
+  color: var(--text-secondary);
+}
+
+.dash-overview-row strong,
+.dash-booking-title strong,
+.dash-experience-footer strong,
+.dash-support-note strong {
+  color: var(--text);
+}
+
+.dash-overview-note,
+.dash-support-note {
+  display: grid;
+  gap: 0.25rem;
+  padding: 1rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+}
+
+.dash-overview-note span,
+.dash-support-note span {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.dash-experience-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dash-experience-nav button {
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-input);
+  color: var(--text);
+}
+
+.dash-experience-nav span {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.dash-experience-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.dash-experience-card {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+  padding: 0;
+  background: var(--bg-card);
+}
+
+.dash-experience-card-featured.dash-experience-card-has-image {
+  grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+}
+
+.dash-experience-image {
+  min-height: 220px;
+  background: var(--bg-input);
+}
+
+.dash-experience-image img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.dash-experience-body {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1.25rem;
+}
+
+.dash-experience-card-featured .dash-experience-body {
+  padding: 1.5rem;
+}
+
+.dash-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  background: var(--primary-bg);
+  color: var(--primary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.dash-experience-icon {
+  width: 2.4rem;
+  height: 2.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--bg-input);
+  color: var(--primary);
+}
+
+.dash-bookings-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.dash-bookings-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.dash-booking-item {
+  display: grid;
+  gap: 0.75rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.dash-booking-item:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.dash-booking-title {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.dash-empty-state {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.dash-support-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.dash-support-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.dash-support-link:hover {
+  border-color: var(--primary);
+  background: var(--bg-card);
+  color: var(--primary);
+}
+
+@media (max-width: 980px) {
+  .dash-header,
+  .dash-main-grid,
+  .dash-bottom-grid,
+  .dash-section-header,
+  .dash-booking-top,
+  .dash-booking-footer,
+  .dash-experience-footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .dash-header-actions {
+    justify-content: flex-start;
+  }
+
+  .dash-main-grid,
+  .dash-bottom-grid,
+  .dash-experience-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dash-experience-card-featured.dash-experience-card-has-image {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .dashboard {
+    padding-top: 1.5rem;
+  }
+
+  .dash-panel-head h2,
+  .dash-section-header h2 {
+    font-size: 1.2rem;
+  }
+
+  .dash-focus-total {
+    font-size: 1.55rem;
+  }
+
+  .dash-booking-badges,
+  .dash-focus-tags {
+    gap: 0.35rem;
+  }
+}.dashboard {
+  display: grid;
+  gap: 1.25rem;
+  padding-top: 2rem;
+  padding-bottom: 3rem;
+}
+
+.dash-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.dash-overline {
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.dash-header h1 {
+  margin-top: 0.35rem;
+  font-size: clamp(2rem, 4vw, 2.6rem);
+  line-height: 1.05;
+  color: var(--text);
+}
+
+.dash-intro {
+  max-width: 52rem;
+  margin-top: 0.55rem;
+  color: var(--text-secondary);
+}
+
+.dash-header-actions,
+.dash-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.dash-header-actions {
+  justify-content: flex-end;
+}
+
+.dash-main-grid,
+.dash-bottom-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.dash-main-grid {
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.9fr);
+}
+
+.dash-bottom-grid {
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.85fr);
+}
+
+.dash-panel {
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+}
+
+.dash-panel::before {
+  display: none;
+}
+
+.dash-panel:hover {
+  border-color: var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+.dash-panel-head,
+.dash-section-header,
+.dash-booking-top,
+.dash-booking-footer,
+.dash-experience-top,
+.dash-experience-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.dash-panel-head h2,
+.dash-section-header h2 {
+  margin-top: 0.2rem;
+  font-size: 1.35rem;
+  line-height: 1.15;
+  color: var(--text);
+}
+
+.dash-section {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.dash-section-copy {
+  max-width: 48rem;
+}
+
+.dash-section-subtitle {
+  margin-top: 0.4rem;
+  color: var(--text-secondary);
+}
+
+.dash-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.dash-inline-link {
+  font-weight: 600;
+  color: var(--primary);
+  white-space: nowrap;
+}
+
+.dash-muted,
+.dash-experience-body p,
+.dash-support-note p,
+.dash-empty-state span {
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.dash-focus-card,
+.dash-overview-card,
+.dash-support-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.dash-focus-ref {
+  font-size: 0.84rem;
+  color: var(--text-muted);
+}
+
+.dash-focus-meta,
+.dash-booking-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+}
+
+.dash-focus-meta span,
+.dash-booking-meta span,
+.dash-venue-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.dash-focus-tags,
+.dash-booking-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.dash-focus-total {
+  font-size: 1.9rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.dash-venue-chip {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.dash-overview-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.dash-overview-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.dash-overview-row span {
+  color: var(--text-secondary);
+}
+
+.dash-overview-row strong,
+.dash-booking-title strong,
+.dash-experience-footer strong,
+.dash-support-note strong {
+  color: var(--text);
+}
+
+.dash-overview-note,
+.dash-support-note {
+  display: grid;
+  gap: 0.25rem;
+  padding: 1rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+}
+
+.dash-overview-note span,
+.dash-support-note span {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.dash-experience-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dash-experience-nav button {
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-input);
+  color: var(--text);
+}
+
+.dash-experience-nav span {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.dash-experience-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.dash-experience-card {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+  padding: 0;
+  background: var(--bg-card);
+}
+
+.dash-experience-card-featured.dash-experience-card-has-image {
+  grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+}
+
+.dash-experience-image {
+  min-height: 220px;
+  background: var(--bg-input);
+}
+
+.dash-experience-image img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.dash-experience-body {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1.25rem;
+}
+
+.dash-experience-card-featured .dash-experience-body {
+  padding: 1.5rem;
+}
+
+.dash-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  background: var(--primary-bg);
+  color: var(--primary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.dash-experience-icon {
+  width: 2.4rem;
+  height: 2.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--bg-input);
+  color: var(--primary);
+}
+
+.dash-bookings-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.dash-bookings-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.dash-booking-item {
+  display: grid;
+  gap: 0.75rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.dash-booking-item:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.dash-booking-title {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.dash-empty-state {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.dash-support-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.dash-support-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.dash-support-link:hover {
+  border-color: var(--primary);
+  background: var(--bg-card);
+  color: var(--primary);
+}
+
+@media (max-width: 980px) {
+  .dash-header,
+  .dash-main-grid,
+  .dash-bottom-grid,
+  .dash-section-header,
+  .dash-booking-top,
+  .dash-booking-footer,
+  .dash-experience-footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .dash-header-actions {
+    justify-content: flex-start;
+  }
+
+  .dash-main-grid,
+  .dash-bottom-grid,
+  .dash-experience-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dash-experience-card-featured.dash-experience-card-has-image {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .dashboard {
+    padding-top: 1.5rem;
+  }
+
+  .dash-panel-head h2,
+  .dash-section-header h2 {
+    font-size: 1.2rem;
+  }
+
+  .dash-focus-total {
+    font-size: 1.55rem;
+  }
+
+  .dash-booking-badges,
+  .dash-focus-tags {
+    gap: 0.35rem;
+  }
+}
+.dashboard {
+  display: grid;
+  gap: 1.25rem;
+  padding-top: 2rem;
+  padding-bottom: 3rem;
+}
+
+.dash-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.dash-overline {
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.dash-header h1 {
+  margin-top: 0.35rem;
+  font-size: clamp(2rem, 4vw, 2.6rem);
+  line-height: 1.05;
+  color: var(--text);
+}
+
+.dash-intro {
+  max-width: 52rem;
+  margin-top: 0.55rem;
+  color: var(--text-secondary);
+}
+
+.dash-header-actions,
+.dash-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.dash-header-actions {
+  justify-content: flex-end;
+}
+
+.dash-main-grid,
+.dash-bottom-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.dash-main-grid {
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.9fr);
+}
+
+.dash-bottom-grid {
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.85fr);
+}
+
+.dash-panel {
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+}
+
+.dash-panel::before {
+  display: none;
+}
+
+.dash-panel:hover {
+  border-color: var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+.dash-panel-head,
+.dash-section-header,
+.dash-booking-top,
+.dash-booking-footer,
+.dash-experience-top,
+.dash-experience-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.dash-panel-head h2,
+.dash-section-header h2 {
+  margin-top: 0.2rem;
+  font-size: 1.35rem;
+  line-height: 1.15;
+  color: var(--text);
+}
+
+.dash-section {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.dash-section-copy {
+  max-width: 48rem;
+}
+
+.dash-section-subtitle {
+  margin-top: 0.4rem;
+  color: var(--text-secondary);
+}
+
+.dash-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.dash-inline-link {
+  font-weight: 600;
+  color: var(--primary);
+  white-space: nowrap;
+}
+
+.dash-muted,
+.dash-experience-body p,
+.dash-support-note p,
+.dash-empty-state span {
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.dash-focus-card,
+.dash-overview-card,
+.dash-support-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.dash-focus-ref {
+  font-size: 0.84rem;
+  color: var(--text-muted);
+}
+
+.dash-focus-meta,
+.dash-booking-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+}
+
+.dash-focus-meta span,
+.dash-booking-meta span,
+.dash-venue-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.dash-focus-tags,
+.dash-booking-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.dash-focus-total {
+  font-size: 1.9rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.dash-venue-chip {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.dash-overview-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.dash-overview-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.dash-overview-row span {
+  color: var(--text-secondary);
+}
+
+.dash-overview-row strong,
+.dash-booking-title strong,
+.dash-experience-footer strong,
+.dash-support-note strong {
+  color: var(--text);
+}
+
+.dash-overview-note,
+.dash-support-note {
+  display: grid;
+  gap: 0.25rem;
+  padding: 1rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+}
+
+.dash-overview-note span,
+.dash-support-note span {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.dash-experience-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dash-experience-nav button {
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-input);
+  color: var(--text);
+}
+
+.dash-experience-nav span {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.dash-experience-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.dash-experience-card {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+  padding: 0;
+  background: var(--bg-card);
+}
+
+.dash-experience-card-featured.dash-experience-card-has-image {
+  grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+}
+
+.dash-experience-image {
+  min-height: 220px;
+  background: var(--bg-input);
+}
+
+.dash-experience-image img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.dash-experience-body {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1.25rem;
+}
+
+.dash-experience-card-featured .dash-experience-body {
+  padding: 1.5rem;
+}
+
+.dash-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  background: var(--primary-bg);
+  color: var(--primary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.dash-experience-icon {
+  width: 2.4rem;
+  height: 2.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--bg-input);
+  color: var(--primary);
+}
+
+.dash-bookings-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.dash-bookings-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.dash-booking-item {
+  display: grid;
+  gap: 0.75rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.dash-booking-item:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.dash-booking-title {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.dash-empty-state {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.dash-support-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.dash-support-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.dash-support-link:hover {
+  border-color: var(--primary);
+  background: var(--bg-card);
+  color: var(--primary);
+}
+
+@media (max-width: 980px) {
+  .dash-header,
+  .dash-main-grid,
+  .dash-bottom-grid,
+  .dash-section-header,
+  .dash-booking-top,
+  .dash-booking-footer,
+  .dash-experience-footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .dash-header-actions {
+    justify-content: flex-start;
+  }
+
+  .dash-main-grid,
+  .dash-bottom-grid,
+  .dash-experience-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dash-experience-card-featured.dash-experience-card-has-image {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .dashboard {
+    padding-top: 1.5rem;
+  }
+
+  .dash-panel-head h2,
+  .dash-section-header h2 {
+    font-size: 1.2rem;
+  }
+
+  .dash-focus-total {
+    font-size: 1.55rem;
+  }
+
+  .dash-booking-badges,
+  .dash-focus-tags {
+    gap: 0.35rem;
+  }
+}.dashboard {
+    display: grid;
+    gap: 1.25rem;
+    padding-top: 2rem;
+    padding-bottom: 3rem;
 }
 
 .dash-hero {
@@ -287,6 +1517,142 @@
   gap: 0.55rem;
 }
 
+.dash-highlight-amount {
+  font-size: 1.9rem;
+}
+
+.dash-highlight-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 1.2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.dash-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.dash-summary-card {
+  display: grid;
+  gap: 0.45rem;
+  padding: 1.15rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+}
+
+.dash-summary-card-accent {
+  background:
+    linear-gradient(180deg, rgba(99, 102, 241, 0.08), transparent 60%),
+    radial-gradient(circle at bottom right, rgba(var(--accent-rgb), 0.03), transparent 35%),
+    var(--bg-card);
+}
+
+.dash-summary-icon,
+.dash-icon,
+.dash-venue-icon,
+.dash-exp-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16px;
+}
+
+.dash-summary-icon,
+.dash-icon,
+.dash-venue-icon {
+  width: 52px;
+  height: 52px;
+  font-size: 1.35rem;
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+
+.dash-summary-value {
+  font-size: 1.45rem;
+}
+
+.dash-actions {
+  margin-bottom: 1.25rem;
+}
+
+.dash-action-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.8rem;
+  padding: 2rem;
+  text-decoration: none;
+  color: var(--text);
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  transition: var(--transition);
+}
+
+.dash-action-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow), 0 0 0 1px rgba(var(--accent-rgb), 0.05);
+  border-color: color-mix(in srgb, var(--primary-light) 88%, var(--accent) 12%);
+}
+
+.dash-icon-success {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.dash-action-card h3 {
+  font-size: 1.25rem;
+  color: var(--text);
+}
+
+.dash-action-card p {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.dash-arrow {
+  position: absolute;
+  top: 1.5rem;
+  right: 1.5rem;
+  color: var(--text-muted);
+}
+
+.dash-payments-card {
+  cursor: default;
+  justify-content: flex-start;
+}
+
+.dash-payments-pending {
+  color: var(--warning);
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.dash-pay-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.dash-payment-status-line {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
 .dash-insights-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
@@ -383,6 +1749,16 @@
   margin-bottom: 1rem;
 }
 
+.dash-section-copy {
+  max-width: 56ch;
+}
+
+.dash-section-subtitle {
+  margin: 0.45rem 0 0;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
 .dash-loyalty-card,
 .dash-help-card {
   display: grid;
@@ -460,8 +1836,139 @@
   white-space: nowrap;
 }
 
+.dash-exp-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
 .dash-experiences {
   margin-bottom: 1.5rem;
+}
+
+.dash-exp-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.28rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.dash-exp-nav button {
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 999px;
+  background: rgba(var(--primary-rgb), 0.08);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.dash-exp-nav button:hover {
+  background: rgba(var(--primary-rgb), 0.14);
+}
+
+.dash-exp-nav span {
+  min-width: 3.25rem;
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.dash-exp-carousel-window {
+  overflow: hidden;
+  border-radius: 26px;
+}
+
+.dash-exp-carousel-track {
+  display: flex;
+  transition: transform 0.35s ease;
+}
+
+.dash-exp-slide {
+  min-width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) 180px;
+  gap: 1rem;
+  padding: 1.45rem;
+  border-radius: 26px;
+  border: 1px solid rgba(var(--primary-rgb), 0.1);
+  background:
+    radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.12), transparent 26%),
+    linear-gradient(145deg, rgba(var(--primary-rgb), 0.08), transparent 58%),
+    var(--bg-card);
+}
+
+.dash-exp-slide-copy {
+  display: grid;
+  align-content: start;
+  gap: 0.8rem;
+}
+
+.dash-exp-slide-art {
+  display: grid;
+  align-content: space-between;
+  justify-items: end;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.dash-exp-slide-icon {
+  width: 92px;
+  height: 92px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 26px;
+  font-size: 2rem;
+  color: #fff;
+  background: linear-gradient(145deg, rgba(var(--primary-rgb), 0.9), rgba(var(--accent-rgb), 0.78));
+  box-shadow: 0 14px 28px rgba(var(--primary-rgb), 0.2);
+}
+
+.dash-exp-slide-price,
+.dash-exp-slide-note {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.dash-exp-slide-note,
+.dash-exp-note {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.dash-exp-dots {
+  display: flex;
+  justify-content: center;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+}
+
+.dash-exp-dot {
+  width: 0.72rem;
+  height: 0.72rem;
+  border: none;
+  border-radius: 999px;
+  background: rgba(var(--primary-rgb), 0.18);
+  cursor: pointer;
+  transition: width 0.2s ease, background 0.2s ease;
+}
+
+.dash-exp-dot.active {
+  width: 2.2rem;
+  background: var(--primary);
 }
 
 .dash-exp-grid {
@@ -474,6 +1981,10 @@
   display: grid;
   gap: 0.8rem;
   padding: 1.2rem;
+  background:
+    radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.08), transparent 24%),
+    linear-gradient(145deg, rgba(var(--primary-rgb), 0.05), transparent 60%),
+    var(--bg-card);
 }
 
 .dash-exp-card:hover {
@@ -524,6 +2035,54 @@
 .dash-exp-price {
   display: block;
   font-size: 1.2rem;
+}
+
+.dash-exp-card[data-theme="celebration"],
+.dash-exp-slide[data-theme="celebration"] {
+  background:
+    radial-gradient(circle at top left, rgba(251, 191, 36, 0.18), transparent 28%),
+    linear-gradient(145deg, rgba(249, 115, 22, 0.08), transparent 60%),
+    var(--bg-card);
+}
+
+.dash-exp-card[data-theme="romance"],
+.dash-exp-slide[data-theme="romance"] {
+  background:
+    radial-gradient(circle at top left, rgba(244, 114, 182, 0.16), transparent 28%),
+    linear-gradient(145deg, rgba(190, 24, 93, 0.08), transparent 60%),
+    var(--bg-card);
+}
+
+.dash-exp-card[data-theme="cinema"],
+.dash-exp-slide[data-theme="cinema"] {
+  background:
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.16), transparent 28%),
+    linear-gradient(145deg, rgba(37, 99, 235, 0.08), transparent 60%),
+    var(--bg-card);
+}
+
+.dash-exp-card[data-theme="team"],
+.dash-exp-slide[data-theme="team"] {
+  background:
+    radial-gradient(circle at top left, rgba(45, 212, 191, 0.16), transparent 28%),
+    linear-gradient(145deg, rgba(13, 148, 136, 0.08), transparent 60%),
+    var(--bg-card);
+}
+
+.dash-exp-card[data-theme="family"],
+.dash-exp-slide[data-theme="family"] {
+  background:
+    radial-gradient(circle at top left, rgba(125, 211, 252, 0.18), transparent 28%),
+    linear-gradient(145deg, rgba(14, 165, 233, 0.08), transparent 60%),
+    var(--bg-card);
+}
+
+.dash-exp-card[data-theme="luxury"],
+.dash-exp-slide[data-theme="luxury"] {
+  background:
+    radial-gradient(circle at top left, rgba(168, 85, 247, 0.16), transparent 28%),
+    linear-gradient(145deg, rgba(99, 102, 241, 0.08), transparent 60%),
+    var(--bg-card);
 }
 
 .dash-upcoming {
@@ -604,12 +2163,21 @@
 
   .dash-venue-head,
   .dash-section-header,
+  .dash-exp-header-actions,
   .dash-exp-footer,
   .dash-highlight-meta,
   .bpc-header,
   .bpc-footer {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .dash-exp-slide {
+    grid-template-columns: 1fr;
+  }
+
+  .dash-exp-slide-art {
+    justify-items: start;
   }
 }
 
@@ -619,6 +2187,7 @@
   .dash-action-card,
   .dash-summary-card,
   .dash-exp-card,
+  .dash-exp-slide,
   .dash-venue-card,
   .dash-member-card {
     padding: 1rem;
@@ -627,6 +2196,11 @@
   .dash-summary-grid,
   .dash-member-metrics {
     grid-template-columns: 1fr;
+  }
+
+  .dash-exp-nav {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .dash-hero-actions,

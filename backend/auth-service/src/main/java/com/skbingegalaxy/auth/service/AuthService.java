@@ -353,6 +353,25 @@ public class AuthService {
         return toDto(user);
     }
 
+    // ── Change password (authenticated) ──────────────────────
+    @Transactional
+    public void changePassword(Long userId, ChangePasswordRequest request) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+
+        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
+            throw new BusinessException("Current password is incorrect", HttpStatus.BAD_REQUEST);
+        }
+
+        if (passwordEncoder.matches(request.getNewPassword(), user.getPassword())) {
+            throw new BusinessException("New password must be different from the current password", HttpStatus.BAD_REQUEST);
+        }
+
+        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        userRepository.save(user);
+        log.info("Password changed for userId: {}", userId);
+    }
+
     public SupportContactDto getSupportContact() {
         String digits = digitsOnly(supportPhone);
         String phoneRaw = toPhoneRaw(digits);
@@ -474,6 +493,37 @@ public class AuthService {
         User user = userRepository.findById(id)
             .orElseThrow(() -> new ResourceNotFoundException("User", "id", id));
         return toDto(user);
+    }
+
+    // ── Super Admin: bulk ban/unban ──────────────────────────
+    @Transactional
+    public int bulkSetActive(java.util.List<Long> userIds, boolean active) {
+        int count = 0;
+        for (Long uid : userIds) {
+            User user = userRepository.findById(uid).orElse(null);
+            if (user == null) continue;
+            if (user.getRole() == UserRole.SUPER_ADMIN) continue;
+            user.setActive(active);
+            userRepository.save(user);
+            count++;
+            log.info("Bulk {} user: {} (ID: {})", active ? "unbanned" : "banned", user.getEmail(), uid);
+        }
+        return count;
+    }
+
+    // ── Super Admin: bulk delete ─────────────────────────────
+    @Transactional
+    public int bulkDeleteUsers(java.util.List<Long> userIds) {
+        int count = 0;
+        for (Long uid : userIds) {
+            User user = userRepository.findById(uid).orElse(null);
+            if (user == null) continue;
+            if (user.getRole() == UserRole.SUPER_ADMIN) continue;
+            userRepository.delete(user);
+            count++;
+            log.info("Bulk deleted user: {} (ID: {}, role: {})", user.getEmail(), uid, user.getRole());
+        }
+        return count;
     }
 
     // ── Admin: update customer ───────────────────────────────

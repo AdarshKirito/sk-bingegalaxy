@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { adminService, bookingService, paymentService } from '../services/endpoints';
+import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
 import DOMPurify from 'dompurify';
 import Pagination from '../components/ui/Pagination';
@@ -18,7 +19,7 @@ const TODAY_SUB_TABS = [
   { key: 'all', label: 'All Today' },
   { key: 'pending', label: 'Pending' },
   { key: 'confirmed', label: 'Confirmed' },
-  { key: 'ready', label: 'Ready to Check-in' },
+  { key: 'ready', label: 'Ready (Pending + Confirmed)' },
   { key: 'checkedIn', label: 'Checked In' },
   { key: 'completed', label: 'Completed' },
   { key: 'cancelled', label: 'Cancelled' },
@@ -33,6 +34,12 @@ const statusBadge = (s) => ({
   PENDING: 'badge-warning', CONFIRMED: 'badge-success', CANCELLED: 'badge-danger',
   COMPLETED: 'badge-info', CHECKED_IN: 'badge-success', NO_SHOW: 'badge-danger',
 }[s] || 'badge-info');
+
+const paymentBadge = (s) => ({
+  SUCCESS: 'badge-success', PENDING: 'badge-warning', INITIATED: 'badge-warning',
+  PARTIALLY_PAID: 'badge-warning', PARTIALLY_REFUNDED: 'badge-info',
+  REFUNDED: 'badge-info', FAILED: 'badge-danger',
+}[s] || 'badge-danger');
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
@@ -114,6 +121,26 @@ export default function AdminBookings() {
     document.addEventListener('visibilitychange', onVisibility);
     return () => { clearInterval(interval); document.removeEventListener('visibilitychange', onVisibility); };
   }, []);
+
+  useEffect(() => {
+    const modalOpen = detailModal.open || notesModal.open;
+    if (!modalOpen) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    const previousPaddingRight = document.body.style.paddingRight;
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+
+    document.body.style.overflow = 'hidden';
+    if (scrollbarWidth > 0) {
+      document.body.style.paddingRight = `${scrollbarWidth}px`;
+    }
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.paddingRight = previousPaddingRight;
+    };
+  }, [detailModal.open, notesModal.open]);
+
   useEffect(() => {
     if (!isSearchActive) fetchBookings();
   }, [fetchBookings, isSearchActive]);
@@ -268,6 +295,8 @@ export default function AdminBookings() {
             { label: 'Pending',            val: stats.todayPending ?? '-',   color: 'var(--warning)' },
             { label: 'Completed',          val: stats.todayCompleted ?? '-', color: '#06b6d4' },
             { label: 'Cancelled',          val: stats.todayCancelled ?? '-', color: 'var(--danger, #e74c3c)' },
+            { label: 'Revenue',            val: `₹${(stats.todayRevenue ?? 0).toLocaleString()}`, color: '#10b981' },
+            { label: 'Est. Revenue',       val: `₹${(stats.todayEstimatedRevenue ?? 0).toLocaleString()}`, color: '#8b5cf6' },
           ].map(c => (
             <div key={c.label} className="ab-stat-card" style={{ borderLeftColor: c.color }}>
               <div className="ab-stat-card-value" style={{ color: c.color }}>{c.val}</div>
@@ -325,7 +354,8 @@ export default function AdminBookings() {
       ) : filteredBookings.length === 0 ? (
         <div className="card ab-empty">
           <p>
-            {activeTab === 'today' ? `No bookings for operational day (${operationalDate})` :
+            {isSearchActive ? `No bookings found for "${search}"` :
+             activeTab === 'today' ? `No bookings for operational day (${operationalDate})` :
              activeTab === 'upcoming' ? "No upcoming bookings" :
              "No bookings found"}
           </p>
@@ -356,7 +386,7 @@ export default function AdminBookings() {
                     <td className="ab-amount">₹{b.totalAmount?.toLocaleString()}</td>
                     <td><span className={`badge ${statusBadge(b.status)}`}>{b.status?.replace('_', ' ')}</span></td>
                     <td>
-                      <span className={`badge ${b.paymentStatus === 'SUCCESS' ? 'badge-success' : b.paymentStatus === 'PENDING' ? 'badge-warning' : 'badge-danger'}`}>
+                      <span className={`badge ${paymentBadge(b.paymentStatus)}`}>
                         {b.paymentStatus?.replace('_', ' ')}
                       </span>
                     </td>
@@ -385,6 +415,7 @@ export default function AdminBookings() {
                 onClick={() => setDetailModal({ open: false, booking: null, bookingCount: 0 })}>×</button>
             </div>
 
+            <div className="ab-modal-body">
             <DetailModalTabs
               booking={detailModal.booking}
               bookingCount={detailModal.bookingCount}
@@ -394,6 +425,7 @@ export default function AdminBookings() {
               onReinstate={handleReinstate}
               onEditReservation={handleEditReservation}
               onClose={() => setDetailModal({ open: false, booking: null, bookingCount: 0 })}/>
+            </div>
           </div>
         </div>
       )}
@@ -427,6 +459,7 @@ export default function AdminBookings() {
 
 function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDate, onAction, onSaved, onReinstate, onEditReservation, onClose }) {
   const navigate = useNavigate();
+  const { isSuperAdmin } = useAuth();
   const [tab, setTab] = useState('customer');
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -442,6 +475,13 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
   // Check-in is only shown for bookings on the current operational date
   const isTodayBooking = b.bookingDate === (operationalDate || new Date().toISOString().slice(0, 10));
 
+  // Event log state
+  const [eventLog, setEventLog] = useState([]);
+  const [eventLogPage, setEventLogPage] = useState(0);
+  const [eventLogTotal, setEventLogTotal] = useState(0);
+  const [eventLogLoading, setEventLogLoading] = useState(false);
+  const [replaying, setReplaying] = useState(false);
+
   // Cancel modal state
   const [cancelModal, setCancelModal] = useState({ open: false });
   const [cancelRefundAmount, setCancelRefundAmount] = useState('');
@@ -456,6 +496,13 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
   const [changeMethodFor, setChangeMethodFor] = useState(null);
   const [changeMethodNewMethod, setChangeMethodNewMethod] = useState('CASH');
   const [changingMethod, setChangingMethod] = useState(false);
+
+  // Price adjustment state
+  const [adjustingPrices, setAdjustingPrices] = useState(false);
+  const [priceForm, setPriceForm] = useState({
+    baseAmount: '', addOnAmount: '', guestAmount: '', reason: ''
+  });
+  const [savingPrices, setSavingPrices] = useState(false);
 
   const [editForm, setEditForm] = useState({
     specialNotes: b.specialNotes || '',
@@ -534,6 +581,32 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
       setB(updated);
       onAction(updated);
     } catch { /* keep current state */ }
+  };
+
+  // Fetch event log when that tab is opened
+  useEffect(() => {
+    if (tab === 'eventLog' && b.bookingRef) {
+      setEventLogLoading(true);
+      adminService.getBookingEvents(b.bookingRef, eventLogPage, 20)
+        .then(res => {
+          const d = res.data.data || res.data;
+          setEventLog(d?.content || (Array.isArray(d) ? d : []));
+          setEventLogTotal(d?.totalPages || 0);
+        })
+        .catch(() => setEventLog([]))
+        .finally(() => setEventLogLoading(false));
+    }
+  }, [tab, b.bookingRef, eventLogPage]);
+
+  const handleReplayBooking = async () => {
+    if (!confirm(`Rebuild CQRS projection for ${b.bookingRef}? This re-derives the booking state from its event log.`)) return;
+    setReplaying(true);
+    try {
+      await adminService.replayBooking(b.bookingRef);
+      toast.success('Projection rebuilt — refreshing booking');
+      await refreshBooking();
+    } catch (err) { toast.error(err.response?.data?.message || 'Replay failed'); }
+    setReplaying(false);
   };
 
   const handleRefund = async () => {
@@ -617,9 +690,9 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
         amount: amt,
         customerId: b.customerId || 0,
         paymentMethod: addPaymentForm.method,
+        bookingTotalAmount: b.totalAmount || 0,
         notes: addPaymentForm.notes || '',
       });
-      toast.success('Payment recorded successfully');
       setShowAddPayment(false);
       setAddPaymentForm({ amount: '', method: 'CASH', notes: '' });
       await refreshPayments();
@@ -643,6 +716,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
   // ── Change payment method (refund old + record new) ────────
   const handleChangeMethod = async (payment) => {
     const remaining = payment.remainingRefundable ?? payment.amount;
+    if (!confirm(`Change payment method from ${payment.paymentMethod} to ${changeMethodNewMethod}?\n\nThis will refund ₹${remaining.toLocaleString()} and re-record with the new method.`)) return;
     setChangingMethod(true);
     try {
       await adminService.initiateRefund({
@@ -650,13 +724,22 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
         amount: remaining,
         reason: `Payment method changed to ${changeMethodNewMethod}`,
       });
-      await adminService.addPayment({
-        bookingRef: b.bookingRef,
-        amount: remaining,
-        customerId: b.customerId || 0,
-        paymentMethod: changeMethodNewMethod,
-        notes: `Method changed from ${payment.paymentMethod} to ${changeMethodNewMethod}`,
-      });
+      try {
+        await adminService.addPayment({
+          bookingRef: b.bookingRef,
+          amount: remaining,
+          customerId: b.customerId || 0,
+          paymentMethod: changeMethodNewMethod,
+          bookingTotalAmount: b.totalAmount || 0,
+          notes: `Method changed from ${payment.paymentMethod} to ${changeMethodNewMethod}`,
+        });
+      } catch (addErr) {
+        toast.error(`Refund succeeded but re-recording failed. Please manually add a ₹${remaining.toLocaleString()} ${changeMethodNewMethod} payment from the Payment tab.`);
+        await refreshPayments();
+        setTimeout(() => refreshBooking(), 2000);
+        setChangingMethod(false);
+        return;
+      }
       toast.success(`Method changed \u2192 ${changeMethodNewMethod}`);
       setChangeMethodFor(null);
       await refreshPayments();
@@ -713,7 +796,10 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
   const handleModalCheckout = async () => {
     // Check for outstanding balance before checkout
     const balance = (b.balanceDue != null) ? b.balanceDue : ((b.totalAmount || 0) - (b.collectedAmount || 0));
-    if (balance > 0.01) {
+    // Warn if payment was fully refunded
+    if (b.paymentStatus === 'REFUNDED') {
+      if (!confirm(`⚠️ Payment was fully REFUNDED (₹0 collected on a ₹${(b.totalAmount || 0).toLocaleString()} booking).\n\nCheckout anyway? The booking will be marked as completed with no revenue recorded.`)) return;
+    } else if (balance > 0.01) {
       if (!confirm(`Outstanding balance of ₹${balance.toLocaleString()} on this booking.\nCheckout anyway? (You can collect the difference from the Payment tab)`)) return;
     } else if (balance < -0.01) {
       if (!confirm(`Customer overpaid by ₹${Math.abs(balance).toLocaleString()}.\nCheckout anyway? (You can issue a refund from the Payment tab)`)) return;
@@ -765,12 +851,16 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
         }
         const maxRefundable = successPayment.remainingRefundable ?? successPayment.amount;
         if (amt > maxRefundable) { toast.error(`Refund amount cannot exceed remaining refundable ₹${maxRefundable.toLocaleString()}`); setActionLoading(false); return; }
-        await adminService.initiateRefund({
-          paymentId: successPayment.id,
-          amount: amt,
-          reason: 'Cancellation refund',
-        });
-        toast.success('Refund of ₹' + amt.toLocaleString() + ' initiated');
+        try {
+          await adminService.initiateRefund({
+            paymentId: successPayment.id,
+            amount: amt,
+            reason: 'Cancellation refund',
+          });
+          toast.success('Refund of ₹' + amt.toLocaleString() + ' initiated');
+        } catch (refundErr) {
+          toast.error('Refund failed: ' + (refundErr.response?.data?.message || 'Unknown error') + '. Booking will still be cancelled — issue refund manually from the Payment tab.');
+        }
       }
       // Then cancel the booking
       await adminService.cancelBooking(b.bookingRef, 'Admin cancellation');
@@ -799,6 +889,53 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
     setSaving(false);
   };
 
+  // ── Price adjustment handler ───────────────────────────────
+  const openPriceAdjustment = () => {
+    setPriceForm({
+      baseAmount: String(b.baseAmount ?? 0),
+      addOnAmount: String(b.addOnAmount ?? 0),
+      guestAmount: String(b.guestAmount ?? 0),
+      reason: ''
+    });
+    setAdjustingPrices(true);
+  };
+
+  const handleSavePriceAdjustment = async () => {
+    const base = parseFloat(priceForm.baseAmount);
+    const addOn = parseFloat(priceForm.addOnAmount);
+    const guest = parseFloat(priceForm.guestAmount);
+    if ([base, addOn, guest].some(v => isNaN(v) || v < 0)) {
+      toast.error('All amounts must be valid non-negative numbers');
+      return;
+    }
+    const newTotal = base + addOn + guest;
+    const oldTotal = (b.baseAmount || 0) + (b.addOnAmount || 0) + (b.guestAmount || 0);
+    if (Math.abs(newTotal - oldTotal) < 0.01) {
+      toast.error('No price changes detected');
+      return;
+    }
+    if (!priceForm.reason.trim()) {
+      toast.error('Please provide a reason for the price adjustment');
+      return;
+    }
+    if (!confirm(`Adjust total from ₹${oldTotal.toLocaleString()} to ₹${newTotal.toLocaleString()}?\n\nReason: ${priceForm.reason}\n\nThis will be recorded in the audit log.`)) return;
+    setSavingPrices(true);
+    try {
+      const res = await adminService.updateBooking(b.bookingRef, {
+        baseAmount: base,
+        addOnAmount: addOn,
+        guestAmount: guest,
+        priceAdjustmentReason: priceForm.reason.trim(),
+      });
+      const updated = res.data.data || res.data;
+      setB(updated);
+      onAction(updated);
+      setAdjustingPrices(false);
+      toast.success(`Price adjusted: ₹${oldTotal.toLocaleString()} → ₹${newTotal.toLocaleString()}`);
+    } catch (err) { toast.error(err.response?.data?.message || 'Failed to adjust prices'); }
+    setSavingPrices(false);
+  };
+
   const tabBtnStyle = (active) => `ab-detail-tab ${active ? 'active' : ''}`;
   const rowStyle = { display: 'flex', justifyContent: 'space-between', padding: '0.45rem 0', borderBottom: '1px solid var(--border)', fontSize: '0.88rem', alignItems: 'center' };
   const labelStyle = { color: 'var(--text-secondary)', fontWeight: 500 };
@@ -810,6 +947,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
         <button className={tabBtnStyle(tab === 'customer')} onClick={() => setTab('customer')}>Customer</button>
         <button className={tabBtnStyle(tab === 'reservation')} onClick={() => setTab('reservation')}>Reservation</button>
         <button className={tabBtnStyle(tab === 'payment')} onClick={() => setTab('payment')}>Payment</button>
+        <button className={tabBtnStyle(tab === 'eventLog')} onClick={() => setTab('eventLog')}>Event Log</button>
       </div>
 
       {tab === 'customer' && (
@@ -874,6 +1012,11 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
             )}
             {b.status === 'CHECKED_IN' && (
               <>
+                {b.paymentStatus === 'REFUNDED' && (
+                  <div className="ab-warning-banner ab-warning-banner--danger" style={{ width: '100%', marginBottom: '0.3rem' }}>
+                    ⚠️ Payment was <strong>fully refunded</strong> — ₹0 collected on a ₹{(b.totalAmount || 0).toLocaleString()} booking. You can still checkout, but no revenue will be recorded.
+                  </div>
+                )}
                 {(() => {
                   const bal = (b.balanceDue != null) ? b.balanceDue : ((b.totalAmount || 0) - (b.collectedAmount || 0));
                   if (bal > 0.01) return (
@@ -984,6 +1127,14 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
             <div style={rowStyle}><span style={labelStyle}>Guest Charge</span><span>₹{b.guestAmount?.toLocaleString()}</span></div>
           )}
           <div style={{ ...rowStyle, fontWeight: 700, fontSize: '1rem' }}><span style={labelStyle}>Total Amount</span><span style={{ color: 'var(--primary)' }}>₹{b.totalAmount?.toLocaleString()}</span></div>
+          {b.pricingSource && b.pricingSource !== 'DEFAULT' && (
+            <div style={{ ...rowStyle, fontSize: '0.78rem' }}>
+              <span style={labelStyle}>Pricing</span>
+              <span className={`badge ${b.pricingSource === 'ADMIN_OVERRIDE' ? 'badge-warning' : 'badge-info'}`} style={{ fontSize: '0.72rem' }}>
+                {b.pricingSource === 'ADMIN_OVERRIDE' ? '⚙️ Admin Override' : b.pricingSource === 'RATE_CODE' ? `📋 ${b.rateCodeName || 'Rate Code'}` : `👤 Customer Pricing`}
+              </span>
+            </div>
+          )}
           {(() => {
             const bal = (b.balanceDue != null) ? b.balanceDue : ((b.totalAmount || 0) - (b.collectedAmount || 0));
             if (b.collectedAmount != null && b.collectedAmount > 0) return (
@@ -1008,7 +1159,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
           </div>
           <div style={rowStyle}>
             <span style={labelStyle}>Payment Status</span>
-            <span className={`badge ${b.paymentStatus === 'SUCCESS' ? 'badge-success' : b.paymentStatus === 'PENDING' ? 'badge-warning' : 'badge-danger'}`}>
+            <span className={`badge ${paymentBadge(b.paymentStatus)}`}>
               {b.paymentStatus?.replace('_', ' ')}
             </span>
           </div>
@@ -1037,7 +1188,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
           {/* Edit Reservation button — navigates to booking wizard for time/addon changes */}
           {(b.status === 'PENDING' || b.status === 'CONFIRMED' || b.status === 'CHECKED_IN') && (
             <div style={{ marginTop: '0.8rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-              {!editing && (
+              {!editing && !adjustingPrices && (
                 <>
                   <button className="btn btn-primary btn-sm" onClick={() => { onEditReservation(b); onClose(); }}>
                     ✏️ Edit Reservation (Change Time / Add-Ons)
@@ -1045,8 +1196,68 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                   <button className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}>
                     Edit Notes
                   </button>
+                  <button className="btn btn-secondary btn-sm" onClick={openPriceAdjustment}>
+                    💰 Adjust Prices
+                  </button>
                 </>
               )}
+            </div>
+          )}
+
+          {/* Price Adjustment Form */}
+          {adjustingPrices && (
+            <div className="ab-cancel-box" style={{ borderColor: 'var(--primary)', marginTop: '1rem' }}>
+              <h4 style={{ marginBottom: '0.5rem', color: 'var(--primary)' }}>Adjust Prices</h4>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+                Override pricing for this reservation. Original total: <strong>₹{b.totalAmount?.toLocaleString()}</strong>
+              </p>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.6rem' }}>
+                <div>
+                  <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.2rem' }}>Base Amount (₹)</label>
+                  <input type="number" value={priceForm.baseAmount} onChange={e => setPriceForm(f => ({ ...f, baseAmount: e.target.value }))}
+                    min="0" step="1"
+                    style={{ padding: '0.35rem 0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--text)', fontSize: '0.85rem', width: '120px' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.2rem' }}>Add-On Amount (₹)</label>
+                  <input type="number" value={priceForm.addOnAmount} onChange={e => setPriceForm(f => ({ ...f, addOnAmount: e.target.value }))}
+                    min="0" step="1"
+                    style={{ padding: '0.35rem 0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--text)', fontSize: '0.85rem', width: '120px' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.2rem' }}>Guest Charge (₹)</label>
+                  <input type="number" value={priceForm.guestAmount} onChange={e => setPriceForm(f => ({ ...f, guestAmount: e.target.value }))}
+                    min="0" step="1"
+                    style={{ padding: '0.35rem 0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--text)', fontSize: '0.85rem', width: '120px' }} />
+                </div>
+              </div>
+              <div style={{ marginBottom: '0.5rem', padding: '0.4rem 0.6rem', background: 'var(--bg)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', fontSize: '0.82rem' }}>
+                New Total: <strong style={{ color: 'var(--primary)' }}>
+                  ₹{((parseFloat(priceForm.baseAmount) || 0) + (parseFloat(priceForm.addOnAmount) || 0) + (parseFloat(priceForm.guestAmount) || 0)).toLocaleString()}
+                </strong>
+                {(() => {
+                  const newT = (parseFloat(priceForm.baseAmount) || 0) + (parseFloat(priceForm.addOnAmount) || 0) + (parseFloat(priceForm.guestAmount) || 0);
+                  const diff = newT - (b.totalAmount || 0);
+                  if (Math.abs(diff) > 0.01) return (
+                    <span style={{ marginLeft: '0.5rem', color: diff > 0 ? 'var(--danger, #e74c3c)' : 'var(--success, #00b894)', fontWeight: 600 }}>
+                      ({diff > 0 ? '+' : ''}₹{diff.toLocaleString()})
+                    </span>
+                  );
+                  return null;
+                })()}
+              </div>
+              <div style={{ marginBottom: '0.6rem' }}>
+                <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.2rem', color: 'var(--danger, #e74c3c)' }}>Reason for adjustment *</label>
+                <input value={priceForm.reason} onChange={e => setPriceForm(f => ({ ...f, reason: e.target.value }))}
+                  placeholder="e.g. Customer bargain, Promotional discount, Correction..."
+                  style={{ padding: '0.35rem 0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--text)', fontSize: '0.85rem', width: '100%', maxWidth: '400px' }} />
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button className="btn btn-primary btn-sm" onClick={handleSavePriceAdjustment} disabled={savingPrices}>
+                  {savingPrices ? 'Saving...' : 'Save Price Adjustment'}
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={() => setAdjustingPrices(false)}>Cancel</button>
+              </div>
             </div>
           )}
         </div>
@@ -1273,6 +1484,65 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                   </div>
                 </div>
               )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'eventLog' && (
+        <div>
+          {eventLogLoading ? (
+            <p className="ab-event-log-empty">Loading event log...</p>
+          ) : eventLog.length === 0 ? (
+            <p className="ab-event-log-empty">No events recorded for this booking</p>
+          ) : (
+            <>
+              {eventLog.map((evt, idx) => (
+                <div key={idx} className="ab-event-log-entry">
+                  <div className="ab-event-log-header">
+                    <span className="ab-event-log-type">{evt.eventType?.replace(/_/g, ' ')}</span>
+                    <span className="ab-event-log-time">
+                      {evt.createdAt ? new Date(evt.createdAt).toLocaleString() : ''}
+                    </span>
+                  </div>
+                  {(evt.previousStatus || evt.newStatus) && (
+                    <div className="ab-event-log-status">
+                      {evt.previousStatus && <span>{evt.previousStatus}</span>}
+                      {evt.previousStatus && evt.newStatus && <span> → </span>}
+                      {evt.newStatus && <strong>{evt.newStatus}</strong>}
+                    </div>
+                  )}
+                  {evt.description && (
+                    <div className="ab-event-log-desc">
+                      {DOMPurify.sanitize(evt.description, { ALLOWED_TAGS: [] })}
+                    </div>
+                  )}
+                  <div className="ab-event-log-meta">
+                    by {evt.triggeredBy || 'system'} ({evt.triggeredByRole || 'SYSTEM'})
+                    {evt.eventVersion ? ` • v${evt.eventVersion}` : ''}
+                  </div>
+                </div>
+              ))}
+              {eventLogTotal > 1 && (
+                <div className="ab-event-log-pagination">
+                  <button className="btn btn-secondary btn-sm" disabled={eventLogPage <= 0} onClick={() => setEventLogPage(p => p - 1)}>← Prev</button>
+                  <span>Page {eventLogPage + 1} of {eventLogTotal}</span>
+                  <button className="btn btn-secondary btn-sm" disabled={eventLogPage >= eventLogTotal - 1} onClick={() => setEventLogPage(p => p + 1)}>Next →</button>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Replay button for super admin */}
+          {isSuperAdmin && (
+            <div className="ab-event-log-replay">
+              <button className="btn btn-secondary btn-sm" onClick={handleReplayBooking} disabled={replaying}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                {replaying ? 'Rebuilding...' : '🔄 Replay Projection'}
+              </button>
+              <span className="replay-hint">
+                Rebuild this booking's state from its event log
+              </span>
             </div>
           )}
         </div>

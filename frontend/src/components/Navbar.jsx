@@ -56,7 +56,7 @@ export default function Navbar() {
 
   const handleChangeBinge = () => {
     clearBinge();
-    navigate(effectiveIsAdmin ? '/admin/binges' : '/binges');
+    navigate(effectiveIsAdmin ? '/admin/platform' : '/platform');
   };
 
   const customerLinks = [
@@ -72,6 +72,7 @@ export default function Navbar() {
     { to: '/admin/book', icon: <FiPlusCircle />, label: 'Create' },
     { to: '/admin/blocked-dates', icon: <FiClock />, label: 'Availability' },
     { to: '/admin/event-types', icon: <FiSettings />, label: 'Catalog' },
+    { to: '/admin/rate-codes', icon: <FiSettings />, label: 'Rate Codes' },
     { to: '/admin/users-config', icon: <FiUsers />, label: 'Users' },
     { to: '/admin/reports', icon: <FiBarChart2 />, label: 'Reports' },
   ];
@@ -88,7 +89,7 @@ export default function Navbar() {
           <span className="brand-icon" aria-hidden="true">🎬</span>
           <span className="brand-copy">
             <strong>SK Binge Galaxy</strong>
-            <span className="brand-meta">{!isAuthenticated ? 'Private Screenings' : isAdmin ? 'Admin Console' : 'Customer Hub'}</span>
+            <span className="brand-meta">{!isAuthenticated ? 'Private Screenings' : isAdmin ? (effectiveSelectedBinge ? 'Admin Console' : 'Admin Platform') : (effectiveSelectedBinge ? 'Customer Hub' : 'Platform')}</span>
           </span>
         </Link>
 
@@ -102,10 +103,15 @@ export default function Navbar() {
             </>
           ) : effectiveIsAdmin ? (
             <>
-              <div className="nav-admin-entry">
-                <NavLink to="/admin/binges" className={navLinkClass}><FiMapPin /> Binges</NavLink>
-                {!effectiveSelectedBinge && effectiveIsSuperAdmin && <NavLink to="/admin/register" className={navLinkClass}><FiShield /> Add Admin</NavLink>}
-              </div>
+              {!effectiveSelectedBinge && (
+                <div className="nav-admin-entry">
+                  <NavLink to="/admin/platform" className={navLinkClass}><FiHome /> Dashboard</NavLink>
+                  <NavLink to="/admin/binges" className={navLinkClass}><FiMapPin /> Binges</NavLink>
+                  <NavLink to="/admin/account" className={navLinkClass}><FiUser /> Account</NavLink>
+                  {effectiveIsSuperAdmin && <NavLink to="/admin/all-users" className={navLinkClass}><FiUsers /> Users</NavLink>}
+                  {effectiveIsSuperAdmin && <NavLink to="/admin/register" className={navLinkClass}><FiShield /> Add Admin</NavLink>}
+                </div>
+              )}
 
               {effectiveSelectedBinge && (
                 <div className="nav-admin-menu">
@@ -154,6 +160,7 @@ export default function Navbar() {
               ) : null}
               {!effectiveSelectedBinge && (
                 <>
+                  <NavLink to="/platform" className={navLinkClass}><FiHome /> Dashboard</NavLink>
                   <NavLink to="/binges" className={navLinkClass}><FiMapPin /> Venues</NavLink>
                   <NavLink to={accountLink.to} className={navLinkClass}><FiUser /> Account</NavLink>
                 </>
