@@ -18,7 +18,7 @@ export default function StepAddOns({
               {ao.imageUrls?.length > 0 && ao.imageUrls[0] && (
                 <div style={{ marginBottom: '0.5rem', borderRadius: 'var(--radius-sm)', overflow: 'hidden', cursor: 'zoom-in' }}
                   onClick={e => { e.stopPropagation(); setImagePopup({ urls: ao.imageUrls, name: ao.name, index: 0 }); }}>
-                  <img src={ao.imageUrls[0]} alt={ao.name} style={{ width: '100%', height: '100px', objectFit: 'cover' }} />
+                  <img src={ao.imageUrls[0]} alt={ao.name} style={{ width: '100%', height: '180px', objectFit: 'cover', borderRadius: 'var(--radius-sm)' }} />
                   {ao.imageUrls.length > 1 && <div style={{ textAlign: 'center', fontSize: '0.65rem', color: 'var(--text-muted)' }}>📸 {ao.imageUrls.length} images</div>}
                 </div>
               )}

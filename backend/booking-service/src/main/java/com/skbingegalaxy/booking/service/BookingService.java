@@ -965,6 +965,7 @@ public class BookingService {
         // Round up used minutes to nearest 30-minute boundary
         int roundedUsed = ((int) Math.ceil(usedMinutes / 30.0)) * 30;
         long remainingMinutes = bookedMinutes - roundedUsed;
+        if (remainingMinutes < 0) remainingMinutes = 0;
 
         // Build a human-readable note
         long usedHours = usedMinutes / 60;

@@ -335,7 +335,22 @@ export default function AdminCustomerPricing() {
                     </table>
                   </div>
 
-                  <div style={{ marginTop: '0.75rem', textAlign: 'right' }}>
+                  <div style={{ marginTop: '0.75rem', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                    <button className="btn btn-secondary" onClick={() => {
+                      setSelectedCustomers(prev => prev.map(c => {
+                        if (c.id !== cust.id) return c;
+                        return {
+                          ...c,
+                          rateCodeId: '',
+                          rateCodeName: '',
+                          eventPricings: eventTypes.map(et => ({ eventTypeId: et.id, eventTypeName: et.name, basePrice: '', hourlyRate: '', pricePerGuest: '' })),
+                          addonPricings: addOns.map(a => ({ addOnId: a.id, addOnName: a.name, price: '' })),
+                          dirty: true,
+                        };
+                      }));
+                    }}>
+                      Clear Overrides
+                    </button>
                     <button className="btn btn-primary" onClick={() => saveCustomerPricing(cust)} disabled={!cust.dirty}>
                       Save Pricing for {cust.firstName}
                     </button>

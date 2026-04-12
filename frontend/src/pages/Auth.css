@@ -11,6 +11,7 @@
     var(--bg);
   position: relative;
   overflow: hidden;
+  overflow-y: auto;
 }
 
 .auth-page::before,
@@ -230,6 +231,7 @@
 
 .auth-card-wrap {
   display: flex;
+  min-height: 100%;
 }
 
 .auth-card {

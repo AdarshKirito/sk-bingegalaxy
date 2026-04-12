@@ -18,7 +18,7 @@ export default function StepEvent({
             {et.imageUrls?.length > 0 && et.imageUrls[0] && (
               <div style={{ marginBottom: '0.75rem', borderRadius: 'var(--radius-sm)', overflow: 'hidden', cursor: 'zoom-in' }}
                 onClick={e => { e.stopPropagation(); setImagePopup({ urls: et.imageUrls, name: et.name, index: 0 }); }}>
-                <LazyImage src={et.imageUrls[0]} alt={et.name} style={{ height: '140px', borderRadius: 'var(--radius-sm)' }} />
+                <LazyImage src={et.imageUrls[0]} alt={et.name} style={{ height: '220px', borderRadius: 'var(--radius-sm)' }} />
                 {et.imageUrls.length > 1 && <div style={{ textAlign: 'center', fontSize: '0.7rem', color: 'var(--text-muted)', padding: '0.15rem' }}>{et.imageUrls.length} images — click to view</div>}
               </div>
             )}

@@ -337,13 +337,17 @@ select optgroup {
 }
 
 .badge {
-  display: inline-block;
-  padding: 0.25rem 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.3rem 0.85rem;
   border-radius: 20px;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  white-space: nowrap;
+  gap: 0.3rem;
 }
 
 .badge-success { background: var(--success-bg); color: var(--success); }
@@ -436,10 +440,23 @@ select optgroup {
   .input-group textarea { padding: 0.65rem 0.75rem; font-size: 0.9rem; }
 }
 
-/* Toast overrides for light theme */
+/* Toast overrides */
+.Toastify__toast-container {
+  z-index: 10001 !important;
+}
 .Toastify__toast {
   border-radius: var(--radius-sm) !important;
   font-family: 'Inter', sans-serif !important;
+}
+
+/* Print styles */
+@media print {
+  nav, .Toastify__toast-container, .navbar, .sidebar, .btn, button,
+  .customer-flow-stagebar, .customer-flow-inline, .ab-modal-overlay > .ab-modal-close,
+  .ab-filter-row, .ab-tabs { display: none !important; }
+  body { background: #fff !important; color: #000 !important; }
+  .ab-modal-overlay { position: static !important; background: none !important; overflow: visible !important; }
+  .ab-modal { box-shadow: none !important; border: none !important; max-height: none !important; overflow: visible !important; }
 }
 
 /* Pagination */

@@ -640,7 +640,8 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
         };
       });
       // Sync with server after Kafka has processed the PAYMENT_REFUNDED event
-      setTimeout(() => refreshBooking(), 2000);
+      setTimeout(() => refreshBooking(), 3000);
+      setTimeout(() => refreshBooking(), 7000);
     } catch (err) { toast.error(err.response?.data?.message || 'Refund failed'); }
     setRefunding(false);
   };
@@ -666,7 +667,8 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
         paymentStatus: 'SUCCESS',
       }));
       // Sync with server after Kafka has had time to process the event
-      setTimeout(() => refreshBooking(), 2000);
+      setTimeout(() => refreshBooking(), 3000);
+      setTimeout(() => refreshBooking(), 7000);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to record cash payment');
     }
@@ -708,7 +710,8 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
         paymentStatus: newBalance < 0.01 ? 'SUCCESS' : 'PARTIALLY_PAID',
       }));
       // Sync with server after Kafka has had time to process the event
-      setTimeout(() => refreshBooking(), 2000);
+      setTimeout(() => refreshBooking(), 3000);
+      setTimeout(() => refreshBooking(), 7000);
     } catch (err) { toast.error(err.response?.data?.message || 'Failed to record payment'); }
     setAddingPayment(false);
   };
@@ -736,7 +739,8 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
       } catch (addErr) {
         toast.error(`Refund succeeded but re-recording failed. Please manually add a ₹${remaining.toLocaleString()} ${changeMethodNewMethod} payment from the Payment tab.`);
         await refreshPayments();
-        setTimeout(() => refreshBooking(), 2000);
+        setTimeout(() => refreshBooking(), 3000);
+        setTimeout(() => refreshBooking(), 7000);
         setChangingMethod(false);
         return;
       }
@@ -746,7 +750,8 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
       // Optimistically update payment method (net collectedAmount unchanged — refund+re-add cancel out)
       setB(prev => ({ ...prev, paymentMethod: changeMethodNewMethod }));
       // Sync with server after Kafka has processed both the refund and re-add events
-      setTimeout(() => refreshBooking(), 2000);
+      setTimeout(() => refreshBooking(), 3000);
+      setTimeout(() => refreshBooking(), 7000);
     } catch (err) { toast.error(err.response?.data?.message || 'Failed to change method'); }
     setChangingMethod(false);
   };
@@ -1265,6 +1270,11 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
 
       {tab === 'payment' && (
         <div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.75rem' }}>
+            <button className="btn btn-secondary btn-sm" onClick={() => window.print()} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+              🖨️ Print Receipt
+            </button>
+          </div>
           {/* Payment pending warning for non-completed bookings */}
           {b.paymentStatus === 'PENDING' && b.status !== 'COMPLETED' && b.status !== 'CANCELLED' && (
             <div style={{ padding: '0.6rem 0.8rem', background: 'rgba(255,165,0,0.1)', border: '1px solid var(--warning, orange)', borderRadius: 'var(--radius-sm)', marginBottom: '1rem', fontSize: '0.85rem', color: 'var(--warning, orange)' }}>

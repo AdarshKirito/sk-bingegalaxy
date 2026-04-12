@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useBinge } from '../context/BingeContext';
@@ -14,10 +14,27 @@ import {
   FiShield,
   FiUsers,
   FiActivity,
-  FiBarChart2,
   FiSettings,
+  FiSearch,
+  FiClock,
 } from 'react-icons/fi';
 import './Entrance.css';
+
+const RECENT_ADMIN_KEY = 'sk-recent-admin-binges';
+const MAX_RECENT = 3;
+
+const saveRecentBinge = (binge) => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(RECENT_ADMIN_KEY) || '[]');
+    const filtered = stored.filter((b) => b.id !== binge.id);
+    filtered.unshift({ id: binge.id, name: binge.name, address: binge.address, ts: Date.now() });
+    localStorage.setItem(RECENT_ADMIN_KEY, JSON.stringify(filtered.slice(0, MAX_RECENT)));
+  } catch { /* ignore */ }
+};
+
+const getRecentBinges = () => {
+  try { return JSON.parse(localStorage.getItem(RECENT_ADMIN_KEY) || '[]'); } catch { return []; }
+};
 
 export default function AdminEntranceDashboard() {
   const { user, isSuperAdmin } = useAuth();
@@ -25,6 +42,7 @@ export default function AdminEntranceDashboard() {
   const navigate = useNavigate();
   const [binges, setBinges] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     clearBinge();
@@ -44,6 +62,7 @@ export default function AdminEntranceDashboard() {
   }, []);
 
   const handleSelect = (binge) => {
+    saveRecentBinge(binge);
     selectBinge({ id: binge.id, name: binge.name, address: binge.address });
     toast.success(`Entered: ${binge.name}`);
     navigate('/admin/dashboard');
@@ -54,6 +73,19 @@ export default function AdminEntranceDashboard() {
   const roleLabel = isSuperAdmin ? 'Super Admin' : 'Admin';
   const activeCount = binges.filter((b) => b.active).length;
   const inactiveCount = binges.length - activeCount;
+  const activeBinges = binges.filter((b) => b.active);
+
+  const recentBinges = useMemo(() => {
+    const recent = getRecentBinges();
+    const activeIds = new Set(activeBinges.map((b) => b.id));
+    return recent.filter((r) => activeIds.has(r.id));
+  }, [activeBinges]);
+
+  const filteredBinges = useMemo(() => {
+    if (!search.trim()) return activeBinges;
+    const q = search.trim().toLowerCase();
+    return activeBinges.filter((b) => (b.name || '').toLowerCase().includes(q) || (b.address || '').toLowerCase().includes(q));
+  }, [activeBinges, search]);
 
   if (loading) {
     return (
@@ -116,16 +148,43 @@ export default function AdminEntranceDashboard() {
           <p>Active Venues</p>
         </div>
         <div className="entrance-stat-card">
-          <span className="entrance-stat-icon"><FiBarChart2 /></span>
-          <strong>—</strong>
-          <p>Select a venue for revenue</p>
-        </div>
-        <div className="entrance-stat-card">
           <span className="entrance-stat-icon"><FiSettings /></span>
           <strong>{inactiveCount}</strong>
           <p>Inactive Venues</p>
         </div>
       </div>
+
+      {/* ── Recent venues ─────────────────────────────────────────── */}
+      {recentBinges.length > 0 && (
+        <section className="entrance-panel">
+          <div className="entrance-panel-head">
+            <div>
+              <span className="entrance-kicker"><FiClock style={{ verticalAlign: '-2px', marginRight: 4 }} /> Recently Managed</span>
+              <h2>Jump back in</h2>
+            </div>
+          </div>
+          <div className="entrance-grid">
+            {recentBinges.map((binge) => (
+              <article
+                key={binge.id}
+                className="entrance-venue-card entrance-venue-card-recent"
+                onClick={() => handleSelect(binge)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSelect(binge)}
+                tabIndex={0}
+                role="button"
+                aria-label={`Enter ${binge.name}`}
+              >
+                <span className="entrance-kicker"><FiClock /> Recent</span>
+                <h3>{binge.name}</h3>
+                {binge.address && <p>{binge.address}</p>}
+                <span className="btn btn-primary btn-sm entrance-venue-enter">
+                  Enter <FiArrowRight />
+                </span>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* ── Venue selection ───────────────────────────────────────── */}
       <section className="entrance-panel">
@@ -137,16 +196,29 @@ export default function AdminEntranceDashboard() {
           <Link to="/admin/binges" className="entrance-inline-link">Manage venues →</Link>
         </div>
 
-        {binges.length === 0 ? (
+        {activeBinges.length > 0 && (
+          <div className="entrance-search">
+            <FiSearch className="entrance-search-icon" />
+            <input
+              type="text"
+              placeholder="Search venues by name or address…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="entrance-search-input"
+            />
+          </div>
+        )}
+
+        {filteredBinges.length === 0 ? (
           <div className="entrance-empty">
             <span className="entrance-empty-icon"><FiMapPin /></span>
-            <h3>No venues yet</h3>
-            <p>Create your first venue from the Binges management page.</p>
-            <Link to="/admin/binges" className="btn btn-primary btn-sm">Create Venue</Link>
+            <h3>{search.trim() ? 'No matching venues' : 'No venues yet'}</h3>
+            <p>{search.trim() ? 'Try a different search term.' : 'Create your first venue from the Binges management page.'}</p>
+            {!search.trim() && <Link to="/admin/binges" className="btn btn-primary btn-sm">Create Venue</Link>}
           </div>
         ) : (
           <div className="entrance-grid">
-            {binges.filter((b) => b.active).map((binge) => (
+            {filteredBinges.map((binge) => (
               <article
                 key={binge.id}
                 className="entrance-venue-card"

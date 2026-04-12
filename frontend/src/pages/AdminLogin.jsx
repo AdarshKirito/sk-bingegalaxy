@@ -24,7 +24,7 @@ export default function AdminLogin() {
     try {
       await adminLogin({ email: trimmedEmail, password: form.password });
       toast.success('Welcome, Admin!');
-      navigate('/admin/binges');
+      navigate('/admin/platform');
     } catch (err) {
       const msg = err.userMessage || err.response?.data?.message || 'Admin login failed. Please check your credentials.';
       setError(msg);

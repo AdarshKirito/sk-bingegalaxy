@@ -522,8 +522,8 @@ export default function AdminUsersConfig() {
               {rateCodes.length === 0 ? (
                 <tr><td colSpan={5} className="ab-empty"><p>No rate codes</p></td></tr>
               ) : rateCodes.map(rc => (
-                <tr key={rc.id}>
-                  <td><strong>{sanitize(rc.name)}</strong></td>
+                <tr key={rc.id} onClick={() => navigate('/admin/rate-codes')} style={{ cursor: 'pointer' }} title="Click to manage rate codes">
+                  <td><strong style={{ color: 'var(--primary)' }}>{sanitize(rc.name)}</strong></td>
                   <td>{sanitize(rc.description || '—')}</td>
                   <td>
                     <span className={rc.active !== false ? 'adm-badge adm-badge-active' : 'adm-badge adm-badge-inactive'}>

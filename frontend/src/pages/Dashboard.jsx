@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { useAuth } from '../context/AuthContext';
@@ -288,6 +288,20 @@ export default function Dashboard() {
     setExperienceIndex(0);
   }, [experienceItems.length, dashboardExperience.layout, dashboardExperience.sectionTitle]);
 
+  // Autoplay carousel every 6 seconds, pause on hover
+  const carouselRef = useRef(null);
+  const autoplayPaused = useRef(false);
+
+  useEffect(() => {
+    if (!useExperienceCarousel || experienceItems.length <= 1) return;
+    const timer = setInterval(() => {
+      if (!autoplayPaused.current) {
+        setExperienceIndex((current) => (current + 1) % experienceItems.length);
+      }
+    }, 6000);
+    return () => clearInterval(timer);
+  }, [useExperienceCarousel, experienceItems.length]);
+
   const handlePreviousExperience = () => {
     if (experienceItems.length <= 1) return;
     setExperienceIndex((current) => (current === 0 ? experienceItems.length - 1 : current - 1));
@@ -309,7 +323,10 @@ export default function Dashboard() {
   const renderExperienceCard = (item, featured = false) => (
     <article
       key={item.key}
-      className={`card dash-experience-card${featured ? ' dash-experience-card-featured' : ''}${item.imageUrl ? ' dash-experience-card-has-image' : ''}`}
+      className={`card dash-experience-card${featured ? ' dash-experience-card-featured' : ''}${item.imageUrl ? ' dash-experience-card-has-image' : ''} dash-theme-${item.theme || 'celebration'}`}
+      ref={featured ? carouselRef : undefined}
+      onMouseEnter={featured ? () => { autoplayPaused.current = true; } : undefined}
+      onMouseLeave={featured ? () => { autoplayPaused.current = false; } : undefined}
     >
       {item.imageUrl && (
         <div className="dash-experience-image">
@@ -453,15 +470,15 @@ export default function Dashboard() {
             </div>
             <div className="dash-overview-row">
               <span>Upcoming bookings</span>
-              <strong>{loading ? '–' : upcomingCount}</strong>
+              <strong>{loading ? 'ï¿½' : upcomingCount}</strong>
             </div>
             <div className="dash-overview-row">
               <span>Past visits</span>
-              <strong>{loading ? '–' : pastCount}</strong>
+              <strong>{loading ? 'ï¿½' : pastCount}</strong>
             </div>
             <div className="dash-overview-row">
               <span>Total spend</span>
-              <strong>{loading ? '–' : formatAmount(totalSpend)}</strong>
+              <strong>{loading ? 'ï¿½' : formatAmount(totalSpend)}</strong>
             </div>
           </div>
 

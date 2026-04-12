@@ -505,6 +505,21 @@
   background:
     linear-gradient(180deg, rgba(var(--primary-rgb), 0.04), transparent 65%),
     var(--bg-card);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.customer-account-support-link > div {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.customer-account-support-link span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .customer-account-support-link svg {
@@ -523,6 +538,12 @@
 .customer-account-policy-list {
   display: grid;
   gap: 0.7rem;
+  overflow: hidden;
+}
+
+.customer-account-policy-list p {
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .customer-account-form-grid {

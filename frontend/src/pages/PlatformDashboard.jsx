@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useBinge } from '../context/BingeContext';
-import { bookingService, paymentService } from '../services/endpoints';
+import { bookingService } from '../services/endpoints';
 import SEO from '../components/SEO';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import { toast } from 'react-toastify';
@@ -12,11 +12,26 @@ import {
   FiUser,
   FiMail,
   FiPhone,
-  FiCreditCard,
-  FiCalendar,
-  FiDollarSign,
+  FiSearch,
+  FiClock,
 } from 'react-icons/fi';
 import './Entrance.css';
+
+const RECENT_BINGES_KEY = 'sk-recent-binges';
+const MAX_RECENT = 3;
+
+const saveRecentBinge = (binge) => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(RECENT_BINGES_KEY) || '[]');
+    const filtered = stored.filter((b) => b.id !== binge.id);
+    filtered.unshift({ id: binge.id, name: binge.name, address: binge.address, ts: Date.now() });
+    localStorage.setItem(RECENT_BINGES_KEY, JSON.stringify(filtered.slice(0, MAX_RECENT)));
+  } catch { /* ignore */ }
+};
+
+const getRecentBinges = () => {
+  try { return JSON.parse(localStorage.getItem(RECENT_BINGES_KEY) || '[]'); } catch { return []; }
+};
 
 export default function PlatformDashboard() {
   const { user } = useAuth();
@@ -24,8 +39,7 @@ export default function PlatformDashboard() {
   const navigate = useNavigate();
   const [binges, setBinges] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [totalSpent, setTotalSpent] = useState(null);
-  const [totalBookings, setTotalBookings] = useState(null);
+  const [search, setSearch] = useState('');
 
   // Clear binge on entrance so navbar shows entrance mode
   useEffect(() => {
@@ -43,20 +57,22 @@ export default function PlatformDashboard() {
         setLoading(false);
       }
     })();
-    // Fetch aggregate spending — this may fail without binge, handle gracefully
-    paymentService.getMyPayments()
-      .then((res) => {
-        const payments = res.data.data || res.data || [];
-        const total = payments
-          .filter((p) => p.status === 'COMPLETED' || p.status === 'SUCCESS')
-          .reduce((sum, p) => sum + (p.amount || 0), 0);
-        setTotalSpent(total);
-        setTotalBookings(payments.length);
-      })
-      .catch(() => { /* no aggregate data available */ });
   }, []);
 
+  const recentBinges = useMemo(() => {
+    const recent = getRecentBinges();
+    const bingeIds = new Set(binges.map((b) => b.id));
+    return recent.filter((r) => bingeIds.has(r.id));
+  }, [binges]);
+
+  const filteredBinges = useMemo(() => {
+    if (!search.trim()) return binges;
+    const q = search.trim().toLowerCase();
+    return binges.filter((b) => (b.name || '').toLowerCase().includes(q) || (b.address || '').toLowerCase().includes(q));
+  }, [binges, search]);
+
   const handleSelect = (binge) => {
+    saveRecentBinge(binge);
     selectBinge({ id: binge.id, name: binge.name, address: binge.address });
     toast.success(`Selected: ${binge.name}`);
     navigate('/dashboard');
@@ -118,22 +134,39 @@ export default function PlatformDashboard() {
           <strong>{binges.length}</strong>
           <p>Available Venues</p>
         </div>
-        <div className="entrance-stat-card">
-          <span className="entrance-stat-icon"><FiDollarSign /></span>
-          <strong>{totalSpent != null ? `₹${totalSpent.toLocaleString()}` : '—'}</strong>
-          <p>Total Spent</p>
-        </div>
-        <div className="entrance-stat-card">
-          <span className="entrance-stat-icon"><FiCreditCard /></span>
-          <strong>{totalBookings != null ? totalBookings : '—'}</strong>
-          <p>Total Payments</p>
-        </div>
-        <div className="entrance-stat-card">
-          <span className="entrance-stat-icon"><FiCalendar /></span>
-          <strong>—</strong>
-          <p>Select a venue for bookings</p>
-        </div>
       </div>
+
+      {/* ── Recent venues ─────────────────────────────────────────── */}
+      {recentBinges.length > 0 && (
+        <section className="entrance-panel">
+          <div className="entrance-panel-head">
+            <div>
+              <span className="entrance-kicker"><FiClock style={{ verticalAlign: '-2px', marginRight: 4 }} /> Recently Visited</span>
+              <h2>Jump back in</h2>
+            </div>
+          </div>
+          <div className="entrance-grid">
+            {recentBinges.map((binge) => (
+              <article
+                key={binge.id}
+                className="entrance-venue-card entrance-venue-card-recent"
+                onClick={() => handleSelect(binge)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSelect(binge)}
+                tabIndex={0}
+                role="button"
+                aria-label={`Select ${binge.name}`}
+              >
+                <span className="entrance-kicker"><FiClock /> Recent</span>
+                <h3>{binge.name}</h3>
+                {binge.address && <p>{binge.address}</p>}
+                <span className="btn btn-primary btn-sm entrance-venue-enter">
+                  Enter <FiArrowRight />
+                </span>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* ── Venue selection ───────────────────────────────────────── */}
       <section className="entrance-panel">
@@ -145,15 +178,28 @@ export default function PlatformDashboard() {
           <span className="entrance-inline-link">{binges.length} venue{binges.length !== 1 ? 's' : ''} available</span>
         </div>
 
-        {binges.length === 0 ? (
+        {binges.length > 0 && (
+          <div className="entrance-search">
+            <FiSearch className="entrance-search-icon" />
+            <input
+              type="text"
+              placeholder="Search venues by name or address…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="entrance-search-input"
+            />
+          </div>
+        )}
+
+        {filteredBinges.length === 0 ? (
           <div className="entrance-empty">
             <span className="entrance-empty-icon"><FiMapPin /></span>
-            <h3>No venues available</h3>
-            <p>No active venues right now. Check back soon.</p>
+            <h3>{search.trim() ? 'No matching venues' : 'No venues available'}</h3>
+            <p>{search.trim() ? 'Try a different search term.' : 'No active venues right now. Check back soon.'}</p>
           </div>
         ) : (
           <div className="entrance-grid">
-            {binges.map((binge) => (
+            {filteredBinges.map((binge) => (
               <article
                 key={binge.id}
                 className="entrance-venue-card"

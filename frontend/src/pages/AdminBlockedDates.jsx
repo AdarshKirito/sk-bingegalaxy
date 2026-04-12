@@ -14,8 +14,8 @@ const fmtMin = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m
  */
 const toMinutes = (v) => (v != null && v < 48) ? v * 60 : (v || 0);
 
-// 30-min intervals: 08:00 (480) to 22:30 (1350)
-const ALL_TIMES = Array.from({ length: 30 }, (_, i) => 480 + i * 30);
+// 30-min intervals: 00:00 (0) to 23:30 (1410) — full 24h
+const ALL_TIMES = Array.from({ length: 48 }, (_, i) => i * 30);
 
 export default function AdminBlockedDates() {
   const [blockedDates, setBlockedDates] = useState([]);

@@ -212,6 +212,11 @@ export default function AdminRateCodes() {
 
           <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem', justifyContent: 'flex-end' }}>
             <button className="btn btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
+            <button className="btn btn-secondary" onClick={() => setForm({
+              name: '', description: '',
+              eventPricings: eventTypes.map(et => ({ eventTypeId: et.id, eventTypeName: et.name, basePrice: '', hourlyRate: '', pricePerGuest: '' })),
+              addonPricings: addOns.map(a => ({ addOnId: a.id, addOnName: a.name, price: '' })),
+            })}>Clear Form</button>
             <button className="btn btn-primary" onClick={handleSave}>{editing ? 'Update' : 'Create'}</button>
           </div>
         </div>

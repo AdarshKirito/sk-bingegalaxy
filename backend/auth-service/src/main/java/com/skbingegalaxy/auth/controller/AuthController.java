@@ -191,7 +191,7 @@ public class AuthController {
                                                                     HttpServletRequest httpRequest,
                                                                     HttpServletResponse response) {
         AuthResponse authResponse = authService.adminRegister(request);
-        setAuthCookies(httpRequest, response, authResponse);
+        // Do NOT call setAuthCookies — that would overwrite the super-admin session with the new admin's tokens
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(ApiResponse.ok("Admin registration successful", authResponse));
     }
