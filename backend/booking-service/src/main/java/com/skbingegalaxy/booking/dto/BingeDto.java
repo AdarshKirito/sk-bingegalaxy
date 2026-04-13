@@ -16,5 +16,10 @@ public class BingeDto {
     private Long adminId;
     private boolean active;
     private LocalDate operationalDate;
+    private String supportEmail;
+    private String supportPhone;
+    private String supportWhatsapp;
+    private boolean customerCancellationEnabled;
+    private int customerCancellationCutoffMinutes;
     private LocalDateTime createdAt;
 }

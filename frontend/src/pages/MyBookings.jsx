@@ -41,6 +41,9 @@ export default function MyBookings() {
   const [tab, setTab] = useState('upcoming');
   const [currentBookings, setCurrentBookings] = useState([]);
   const [pastBookings, setPastBookings] = useState([]);
+  const [pendingReviews, setPendingReviews] = useState([]);
+  const [reviewDrafts, setReviewDrafts] = useState({});
+  const [submittingReviewRef, setSubmittingReviewRef] = useState('');
   const [supportContact, setSupportContact] = useState(CUSTOMER_SUPPORT);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -54,13 +57,29 @@ export default function MyBookings() {
 
   useEffect(() => {
     setLoading(true);
-    Promise.allSettled([authService.getSupportContact(), bookingService.getCurrentBookings(), bookingService.getPastBookings()])
-      .then(([supportRes, currentRes, pastRes]) => {
-        setSupportContact(supportRes.status === 'fulfilled' ? mergeSupportContact(supportRes.value.data.data) : CUSTOMER_SUPPORT);
+    Promise.allSettled([
+      authService.getSupportContact(),
+      bookingService.getCurrentBookings(),
+      bookingService.getPastBookings(),
+      bookingService.getPendingReviews(),
+    ])
+      .then(([supportRes, currentRes, pastRes, pendingReviewRes]) => {
+        const baseSupport = supportRes.status === 'fulfilled' ? mergeSupportContact(supportRes.value.data.data) : CUSTOMER_SUPPORT;
+        setSupportContact(baseSupport);
         setCurrentBookings(currentRes.status === 'fulfilled' ? (currentRes.value.data.data || []) : []);
         setPastBookings(pastRes.status === 'fulfilled' ? (pastRes.value.data.data || []) : []);
+        setPendingReviews(pendingReviewRes.status === 'fulfilled' ? (pendingReviewRes.value.data.data || []) : []);
       })
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      bookingService.getPendingReviews()
+        .then((res) => setPendingReviews(res.data.data || []))
+        .catch(() => null);
+    }, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -101,7 +120,7 @@ export default function MyBookings() {
   const sortedUpcoming = [...currentBookings].sort((left, right) => new Date(`${left.bookingDate}T${left.startTime || '00:00'}`) - new Date(`${right.bookingDate}T${right.startTime || '00:00'}`));
   const sortedPast = [...pastBookings].sort((left, right) => new Date(`${right.bookingDate}T${right.startTime || '00:00'}`) - new Date(`${left.bookingDate}T${left.startTime || '00:00'}`));
   const allBookings = [...sortedUpcoming, ...sortedPast];
-  const support = mergeSupportContact(supportContact);
+  const support = mergeSupportContact(supportContact, selectedBinge);
   const baseBookings = tab === 'upcoming' ? sortedUpcoming : tab === 'past' ? sortedPast : allBookings;
   const filteredBookings = useMemo(() => {
     const today = new Date();
@@ -171,6 +190,40 @@ export default function MyBookings() {
       setCurrentBookings(prev => prev.map(b => b.bookingRef === bookingRef ? { ...b, status: 'CANCELLED' } : b));
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to cancel booking');
+    }
+  };
+
+  const updateReviewDraft = (bookingRef, patch) => {
+    setReviewDrafts((prev) => ({
+      ...prev,
+      [bookingRef]: {
+        rating: prev[bookingRef]?.rating || 0,
+        comment: prev[bookingRef]?.comment || '',
+        ...patch,
+      },
+    }));
+  };
+
+  const submitReview = async (bookingRef, skipped = false) => {
+    const draft = reviewDrafts[bookingRef] || { rating: 0, comment: '' };
+    if (!skipped && (!draft.rating || draft.rating < 1)) {
+      toast.error('Please select a rating out of 5 or choose Skip.');
+      return;
+    }
+
+    setSubmittingReviewRef(bookingRef);
+    try {
+      await bookingService.submitCustomerReview(bookingRef, {
+        rating: skipped ? null : draft.rating,
+        comment: draft.comment,
+        skipped,
+      });
+      setPendingReviews((prev) => prev.filter((b) => b.bookingRef !== bookingRef));
+      toast.success(skipped ? 'Review skipped for now.' : 'Thanks for sharing your review.');
+    } catch (err) {
+      toast.error(err.userMessage || err.response?.data?.message || 'Failed to submit review.');
+    } finally {
+      setSubmittingReviewRef('');
     }
   };
 
@@ -246,6 +299,68 @@ export default function MyBookings() {
         </article>
       </section>
 
+      {pendingReviews.length > 0 && (
+        <section className="customer-hub-panel card">
+          <div className="customer-hub-panel-head">
+            <div>
+              <span className="customer-hub-panel-label">Share your experience</span>
+              <h2>Rate completed binges to improve recommendations and service quality</h2>
+            </div>
+          </div>
+          <div className="customer-mini-grid">
+            {pendingReviews.map((booking) => {
+              const draft = reviewDrafts[booking.bookingRef] || { rating: 0, comment: '' };
+              return (
+                <article key={booking.bookingRef} className="customer-mini-card">
+                  <div>
+                    <span className="customer-booking-ref">{booking.bookingRef}</span>
+                    <h3>{booking.eventType?.name ?? booking.eventType}</h3>
+                    <p>{booking.bookingDate} at {booking.startTime}</p>
+                  </div>
+                  <div className="customer-review-stars" role="group" aria-label="Rate this booking">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={`${booking.bookingRef}-${star}`}
+                        type="button"
+                        className={`customer-review-star ${draft.rating >= star ? 'active' : ''}`}
+                        onClick={() => updateReviewDraft(booking.bookingRef, { rating: star })}
+                      >
+                        ★
+                      </button>
+                    ))}
+                  </div>
+                  <textarea
+                    className="customer-review-input"
+                    placeholder="Tell us what stood out (optional)"
+                    value={draft.comment}
+                    onChange={(event) => updateReviewDraft(booking.bookingRef, { comment: event.target.value })}
+                    rows={3}
+                  />
+                  <div className="customer-mini-card-actions">
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={submittingReviewRef === booking.bookingRef}
+                      onClick={() => submitReview(booking.bookingRef, false)}
+                    >
+                      {submittingReviewRef === booking.bookingRef ? 'Submitting...' : 'Submit Review'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      disabled={submittingReviewRef === booking.bookingRef}
+                      onClick={() => submitReview(booking.bookingRef, true)}
+                    >
+                      Skip
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       <section className="customer-hub-panel card">
         <div className="customer-hub-panel-head">
           <div>
@@ -270,6 +385,9 @@ export default function MyBookings() {
               <span className="customer-booking-ref">Support</span>
               <h3>Help with changes</h3>
               <p>Reach the team with your booking reference already attached.</p>
+              <p>{support.email ? `Email: ${support.email}` : 'Email: not configured for this venue yet.'}</p>
+              <p>{support.phoneDisplay ? `Phone: ${support.phoneDisplay}` : 'Phone: not configured for this venue yet.'}</p>
+              <p>{support.whatsappRaw ? `WhatsApp: ${support.whatsappRaw}` : 'WhatsApp: not configured for this venue yet.'}</p>
             </div>
             <div className="customer-mini-card-actions">
               {support.whatsappRaw ? <a href={buildSupportWhatsAppHref({ supportContact: support, customerName: `${user?.firstName || ''} ${user?.lastName || ''}`.trim(), topic: 'booking support' })} target="_blank" rel="noreferrer" className="btn btn-primary btn-sm">WhatsApp</a> : support.email ? <a href={buildSupportEmailHref({ supportContact: support, customerName: `${user?.firstName || ''} ${user?.lastName || ''}`.trim(), topic: 'booking support' })} className="btn btn-primary btn-sm">Email Support</a> : <span className="customer-account-note">Support contact unavailable</span>}
@@ -410,7 +528,7 @@ export default function MyBookings() {
                 <div className="customer-booking-actions">
                   <Link to={`/booking/${booking.bookingRef}`} className="btn btn-secondary btn-sm">View Details</Link>
                   {booking.status === 'PENDING' && booking.paymentStatus === 'PENDING' && (
-                    <button type="button" className="btn btn-danger btn-sm" onClick={() => handleCancelBooking(booking.bookingRef)}>Cancel Booking</button>
+                    <button type="button" className="btn btn-danger btn-sm" disabled={booking.canCustomerCancel === false} title={booking.customerCancelMessage || ''} onClick={() => handleCancelBooking(booking.bookingRef)}>Cancel Booking</button>
                   )}
                   {booking.paymentStatus !== 'SUCCESS' && booking.status !== 'CANCELLED' && (
                     <Link to={`/payment/${booking.bookingRef}`} className="btn btn-primary btn-sm">Pay Pending Balance</Link>
@@ -440,6 +558,11 @@ export default function MyBookings() {
                 <div className="customer-booking-support-note">
                   <span><FiHeadphones /> Need help with a change, payment, or arrival timing? Use your booking ref for faster support.</span>
                 </div>
+                {booking.canCustomerCancel === false && booking.status === 'PENDING' && booking.paymentStatus === 'PENDING' && (
+                  <div className="customer-booking-support-note">
+                    <span><FiShield /> {booking.customerCancelMessage || 'Cancellation is not allowed for this booking right now.'}</span>
+                  </div>
+                )}
               </article>
               );
             })}

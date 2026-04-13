@@ -8,21 +8,40 @@ import {
   normalizeDashboardExperience,
   sanitizeDashboardExperienceForSave,
 } from '../services/dashboardExperience';
+import {
+  createAboutHighlight,
+  createAboutPolicy,
+  normalizeAboutExperience,
+  sanitizeAboutExperienceForSave,
+} from '../services/aboutExperience';
 import { useBinge } from '../context/BingeContext';
 import { toast } from 'react-toastify';
-import { FiActivity, FiArrowRight, FiCompass, FiEdit2, FiImage, FiMapPin, FiPlus, FiToggleLeft, FiToggleRight, FiTrash2, FiUpload, FiX } from 'react-icons/fi';
+import { FiActivity, FiArrowRight, FiCompass, FiEdit2, FiMapPin, FiPlus, FiToggleLeft, FiToggleRight, FiTrash2, FiUpload, FiX } from 'react-icons/fi';
 import './AdminPages.css';
 
 export default function BingeManagement() {
+  const emptyForm = {
+    name: '',
+    address: '',
+    supportEmail: '',
+    supportPhone: '',
+    supportWhatsapp: '',
+    customerCancellationEnabled: true,
+    customerCancellationCutoffMinutes: 180,
+  };
   const [binges, setBinges] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
-  const [form, setForm] = useState({ name: '', address: '' });
+  const [form, setForm] = useState(emptyForm);
   const [dashboardEditor, setDashboardEditor] = useState({ open: false, binge: null });
   const [dashboardForm, setDashboardForm] = useState(() => normalizeDashboardExperience(null));
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [dashboardSaving, setDashboardSaving] = useState(false);
+  const [aboutEditor, setAboutEditor] = useState({ open: false, binge: null });
+  const [aboutForm, setAboutForm] = useState(() => normalizeAboutExperience(null));
+  const [aboutLoading, setAboutLoading] = useState(false);
+  const [aboutSaving, setAboutSaving] = useState(false);
   const { clearBinge, selectBinge, selectedBinge } = useBinge();
   const navigate = useNavigate();
 
@@ -40,7 +59,7 @@ export default function BingeManagement() {
   useEffect(() => { fetchBinges(); }, []);
 
   const resetForm = () => {
-    setForm({ name: '', address: '' });
+    setForm(emptyForm);
     setShowForm(false);
     setEditId(null);
   };
@@ -52,9 +71,16 @@ export default function BingeManagement() {
     setDashboardSaving(false);
   };
 
+  const resetAboutEditor = () => {
+    setAboutEditor({ open: false, binge: null });
+    setAboutForm(normalizeAboutExperience(null));
+    setAboutLoading(false);
+    setAboutSaving(false);
+  };
+
   const openCreateForm = () => {
     setEditId(null);
-    setForm({ name: '', address: '' });
+    setForm(emptyForm);
     setShowForm(true);
   };
 
@@ -77,7 +103,15 @@ export default function BingeManagement() {
 
   const handleEdit = (b) => {
     setEditId(b.id);
-    setForm({ name: b.name, address: b.address || '' });
+    setForm({
+      name: b.name,
+      address: b.address || '',
+      supportEmail: b.supportEmail || '',
+      supportPhone: b.supportPhone || '',
+      supportWhatsapp: b.supportWhatsapp || '',
+      customerCancellationEnabled: b.customerCancellationEnabled !== false,
+      customerCancellationCutoffMinutes: b.customerCancellationCutoffMinutes ?? 180,
+    });
     setShowForm(true);
   };
 
@@ -92,6 +126,20 @@ export default function BingeManagement() {
       setDashboardEditor({ open: false, binge: null });
     } finally {
       setDashboardLoading(false);
+    }
+  };
+
+  const handleOpenAboutEditor = async (binge) => {
+    setAboutEditor({ open: true, binge });
+    setAboutLoading(true);
+    try {
+      const res = await adminService.getBingeAboutExperience(binge.id);
+      setAboutForm(normalizeAboutExperience(res.data.data || res.data || null));
+    } catch (err) {
+      toast.error(err.userMessage || 'Failed to load customer about page content');
+      setAboutEditor({ open: false, binge: null });
+    } finally {
+      setAboutLoading(false);
     }
   };
 
@@ -158,6 +206,47 @@ export default function BingeManagement() {
     }
   };
 
+  const updateAboutField = (field, value) => {
+    setAboutForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const updateAboutHighlight = (index, field, value) => {
+    setAboutForm((prev) => ({
+      ...prev,
+      highlights: prev.highlights.map((item, itemIndex) => (itemIndex === index ? { ...item, [field]: value } : item)),
+    }));
+  };
+
+  const updateAboutPolicy = (index, field, value) => {
+    setAboutForm((prev) => ({
+      ...prev,
+      policies: prev.policies.map((item, itemIndex) => (itemIndex === index ? { ...item, [field]: value } : item)),
+    }));
+  };
+
+  const updateHouseRule = (index, value) => {
+    setAboutForm((prev) => ({
+      ...prev,
+      houseRules: prev.houseRules.map((item, itemIndex) => (itemIndex === index ? value : item)),
+    }));
+  };
+
+  const handleSaveAboutExperience = async (event) => {
+    event.preventDefault();
+    if (!aboutEditor.binge) return;
+
+    setAboutSaving(true);
+    try {
+      await adminService.updateBingeAboutExperience(aboutEditor.binge.id, sanitizeAboutExperienceForSave(aboutForm));
+      toast.success('Customer about page updated');
+      resetAboutEditor();
+    } catch (err) {
+      toast.error(err.userMessage || 'Failed to save customer about page');
+    } finally {
+      setAboutSaving(false);
+    }
+  };
+
   const handleToggle = async (id) => {
     try {
       await adminService.toggleBinge(id);
@@ -187,7 +276,16 @@ export default function BingeManagement() {
   };
 
   const handleSelect = (binge) => {
-    selectBinge({ id: binge.id, name: binge.name, address: binge.address });
+    selectBinge({
+      id: binge.id,
+      name: binge.name,
+      address: binge.address,
+      supportEmail: binge.supportEmail,
+      supportPhone: binge.supportPhone,
+      supportWhatsapp: binge.supportWhatsapp,
+      customerCancellationEnabled: binge.customerCancellationEnabled,
+      customerCancellationCutoffMinutes: binge.customerCancellationCutoffMinutes,
+    });
     toast.success(`Entered: ${binge.name}`);
     navigate('/admin/dashboard');
   };
@@ -264,6 +362,29 @@ export default function BingeManagement() {
               <div className="input-group">
                 <label>Address</label>
                 <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="123 Main St, City" />
+              </div>
+              <div className="input-group">
+                <label>Support Email</label>
+                <input value={form.supportEmail} onChange={(e) => setForm({ ...form, supportEmail: e.target.value })} placeholder="support@venue.com" />
+              </div>
+              <div className="input-group">
+                <label>Support Phone</label>
+                <input value={form.supportPhone} onChange={(e) => setForm({ ...form, supportPhone: e.target.value })} placeholder="+91 9876543210" />
+              </div>
+              <div className="input-group">
+                <label>Support WhatsApp (digits only)</label>
+                <input value={form.supportWhatsapp} onChange={(e) => setForm({ ...form, supportWhatsapp: e.target.value })} placeholder="919876543210" />
+              </div>
+              <div className="input-group">
+                <label>Customer Cancellation</label>
+                <select value={form.customerCancellationEnabled ? 'enabled' : 'disabled'} onChange={(e) => setForm({ ...form, customerCancellationEnabled: e.target.value === 'enabled' })}>
+                  <option value="enabled">Enabled</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </div>
+              <div className="input-group">
+                <label>Cancellation Cutoff (minutes before start)</label>
+                <input type="number" min="0" value={form.customerCancellationCutoffMinutes} onChange={(e) => setForm({ ...form, customerCancellationCutoffMinutes: Number(e.target.value || 0) })} placeholder="180" />
               </div>
             </div>
             <div className="adm-form-actions">
@@ -482,6 +603,170 @@ export default function BingeManagement() {
         </section>
       )}
 
+      {aboutEditor.open && (
+        <section className="adm-form adm-dashboard-editor">
+          <div className="adm-dashboard-editor-top">
+            <div>
+              <h3>Customer about page</h3>
+              <p className="adm-form-intro">
+                Configure the content customers see in the About page for <strong>{aboutEditor.binge?.name}</strong>.
+                Add highlights, rules, and policies to set clear expectations before checkout.
+              </p>
+            </div>
+            <div className="adm-flow-actions">
+              <button type="button" className="btn btn-secondary" onClick={resetAboutEditor}>Close</button>
+            </div>
+          </div>
+
+          {aboutLoading ? (
+            <div className="adm-dashboard-empty">
+              <h3>Loading current content...</h3>
+              <p>Fetching the latest About page setup for this venue.</p>
+            </div>
+          ) : (
+            <form onSubmit={handleSaveAboutExperience}>
+              <div className="adm-grid-2">
+                <div className="input-group">
+                  <label>Section eyebrow</label>
+                  <input value={aboutForm.sectionEyebrow} onChange={(e) => updateAboutField('sectionEyebrow', e.target.value)} />
+                </div>
+                <div className="input-group">
+                  <label>Section title</label>
+                  <input value={aboutForm.sectionTitle} onChange={(e) => updateAboutField('sectionTitle', e.target.value)} />
+                </div>
+              </div>
+
+              <div className="input-group">
+                <label>Section subtitle</label>
+                <textarea className="adm-textarea" rows={2} value={aboutForm.sectionSubtitle} onChange={(e) => updateAboutField('sectionSubtitle', e.target.value)} />
+              </div>
+
+              <div className="adm-grid-2">
+                <div className="input-group">
+                  <label>Hero title</label>
+                  <input value={aboutForm.heroTitle} onChange={(e) => updateAboutField('heroTitle', e.target.value)} />
+                </div>
+                <div className="input-group">
+                  <label>Contact heading</label>
+                  <input value={aboutForm.contactHeading} onChange={(e) => updateAboutField('contactHeading', e.target.value)} />
+                </div>
+              </div>
+
+              <div className="input-group">
+                <label>Hero description</label>
+                <textarea className="adm-textarea" rows={4} value={aboutForm.heroDescription} onChange={(e) => updateAboutField('heroDescription', e.target.value)} />
+              </div>
+
+              <div className="input-group">
+                <label>Contact description</label>
+                <textarea className="adm-textarea" rows={3} value={aboutForm.contactDescription} onChange={(e) => updateAboutField('contactDescription', e.target.value)} />
+              </div>
+
+              <div className="adm-dashboard-editor-actions">
+                <div>
+                  <h4>Highlights</h4>
+                  <p className="adm-hint">Show what makes this binge stand out for customers.</p>
+                </div>
+                <div className="adm-flow-actions">
+                  <button type="button" className="btn btn-primary btn-sm" onClick={() => setAboutForm((prev) => ({ ...prev, highlights: [...prev.highlights, createAboutHighlight()].slice(0, 8) }))}>
+                    Add Highlight
+                  </button>
+                </div>
+              </div>
+              <div className="adm-dashboard-slides">
+                {aboutForm.highlights.map((item, index) => (
+                  <article key={`about-highlight-${index}`} className="adm-dashboard-slide">
+                    <div className="adm-dashboard-slide-head">
+                      <strong>Highlight {index + 1}</strong>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => setAboutForm((prev) => ({ ...prev, highlights: prev.highlights.filter((_, i) => i !== index) }))}>Remove</button>
+                    </div>
+                    <div className="input-group">
+                      <label>Title</label>
+                      <input value={item.title} onChange={(e) => updateAboutHighlight(index, 'title', e.target.value)} />
+                    </div>
+                    <div className="input-group">
+                      <label>Description</label>
+                      <textarea className="adm-textarea" rows={3} value={item.description} onChange={(e) => updateAboutHighlight(index, 'description', e.target.value)} />
+                    </div>
+                  </article>
+                ))}
+              </div>
+
+              <div className="adm-dashboard-editor-actions">
+                <div>
+                  <h4>House rules</h4>
+                  <p className="adm-hint">Customers see these as numbered rules before booking.</p>
+                </div>
+                <div className="adm-flow-actions">
+                  <button type="button" className="btn btn-primary btn-sm" onClick={() => setAboutForm((prev) => ({ ...prev, houseRules: [...prev.houseRules, ''].slice(0, 12) }))}>
+                    Add Rule
+                  </button>
+                </div>
+              </div>
+              <div className="input-group">
+                <label>Rules section title</label>
+                <input value={aboutForm.houseRulesTitle} onChange={(e) => updateAboutField('houseRulesTitle', e.target.value)} />
+              </div>
+              <div className="adm-dashboard-slides">
+                {aboutForm.houseRules.map((rule, index) => (
+                  <article key={`about-rule-${index}`} className="adm-dashboard-slide">
+                    <div className="adm-dashboard-slide-head">
+                      <strong>Rule {index + 1}</strong>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => setAboutForm((prev) => ({ ...prev, houseRules: prev.houseRules.filter((_, i) => i !== index) }))}>Remove</button>
+                    </div>
+                    <div className="input-group">
+                      <label>Rule text</label>
+                      <textarea className="adm-textarea" rows={2} value={rule} onChange={(e) => updateHouseRule(index, e.target.value)} />
+                    </div>
+                  </article>
+                ))}
+              </div>
+
+              <div className="adm-dashboard-editor-actions">
+                <div>
+                  <h4>Policies</h4>
+                  <p className="adm-hint">Capture booking, cancellation, and compliance information clearly.</p>
+                </div>
+                <div className="adm-flow-actions">
+                  <button type="button" className="btn btn-primary btn-sm" onClick={() => setAboutForm((prev) => ({ ...prev, policies: [...prev.policies, createAboutPolicy()].slice(0, 8) }))}>
+                    Add Policy
+                  </button>
+                </div>
+              </div>
+              <div className="input-group">
+                <label>Policies section title</label>
+                <input value={aboutForm.policyTitle} onChange={(e) => updateAboutField('policyTitle', e.target.value)} />
+              </div>
+              <div className="adm-dashboard-slides">
+                {aboutForm.policies.map((item, index) => (
+                  <article key={`about-policy-${index}`} className="adm-dashboard-slide">
+                    <div className="adm-dashboard-slide-head">
+                      <strong>Policy {index + 1}</strong>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => setAboutForm((prev) => ({ ...prev, policies: prev.policies.filter((_, i) => i !== index) }))}>Remove</button>
+                    </div>
+                    <div className="input-group">
+                      <label>Policy title</label>
+                      <input value={item.title} onChange={(e) => updateAboutPolicy(index, 'title', e.target.value)} />
+                    </div>
+                    <div className="input-group">
+                      <label>Policy description</label>
+                      <textarea className="adm-textarea" rows={3} value={item.description} onChange={(e) => updateAboutPolicy(index, 'description', e.target.value)} />
+                    </div>
+                  </article>
+                ))}
+              </div>
+
+              <div className="adm-form-actions">
+                <button type="button" className="btn btn-secondary" onClick={resetAboutEditor}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={aboutSaving}>
+                  {aboutSaving ? 'Saving...' : 'Save About Page'}
+                </button>
+              </div>
+            </form>
+          )}
+        </section>
+      )}
+
       {binges.length === 0 ? (
         <div className="adm-empty adm-flow-card adm-flow-empty">
           <span className="adm-empty-icon"><FiMapPin /></span>
@@ -523,6 +808,9 @@ export default function BingeManagement() {
                 )}
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleOpenDashboardEditor(b)}>
                   Dashboard design
+                </button>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleOpenAboutEditor(b)}>
+                  About page
                 </button>
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleEdit(b)}>
                   <FiEdit2 style={{ marginRight: 3 }} /> Edit

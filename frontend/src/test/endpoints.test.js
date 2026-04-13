@@ -135,6 +135,12 @@ describe('bookingService', () => {
     await bookingService.getBingeDashboardExperience(3);
     expect(api.get).toHaveBeenCalledWith('/bookings/binges/3/customer-dashboard');
   });
+
+  it('getBingeAboutExperience calls GET /bookings/binges/:id/customer-about', async () => {
+    api.get.mockResolvedValue({ data: { data: {} } });
+    await bookingService.getBingeAboutExperience(3);
+    expect(api.get).toHaveBeenCalledWith('/bookings/binges/3/customer-about');
+  });
 });
 
 describe('availabilityService', () => {
@@ -244,6 +250,18 @@ describe('adminService', () => {
     api.put.mockResolvedValue({ data: {} });
     await adminService.updateBingeDashboardExperience(8, { layout: 'CAROUSEL', slides: [] });
     expect(api.put).toHaveBeenCalledWith('/bookings/admin/binges/8/customer-dashboard', { layout: 'CAROUSEL', slides: [] });
+  });
+
+  it('getBingeAboutExperience calls GET with binge id', async () => {
+    api.get.mockResolvedValue({ data: { data: {} } });
+    await adminService.getBingeAboutExperience(8);
+    expect(api.get).toHaveBeenCalledWith('/bookings/admin/binges/8/customer-about');
+  });
+
+  it('updateBingeAboutExperience calls PUT with binge id and payload', async () => {
+    api.put.mockResolvedValue({ data: {} });
+    await adminService.updateBingeAboutExperience(8, { sectionTitle: 'Venue info' });
+    expect(api.put).toHaveBeenCalledWith('/bookings/admin/binges/8/customer-about', { sectionTitle: 'Venue info' });
   });
 });
 

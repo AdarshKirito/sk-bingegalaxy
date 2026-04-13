@@ -65,7 +65,7 @@ export default function AccountCenter() {
   }, [selectedBinge]);
 
   const customer = profile || user || {};
-  const support = mergeSupportContact(supportContact);
+  const support = mergeSupportContact(supportContact, selectedBinge);
   const hasVenueSelected = Boolean(selectedBinge);
   const primaryLink = hasVenueSelected ? '/my-bookings' : '/platform';
   const primaryLabel = hasVenueSelected ? 'Open Booking Control Center' : 'Go to Dashboard';
@@ -145,11 +145,15 @@ export default function AccountCenter() {
               : myPricing?.pricingSource === 'RATE_CODE'
                 ? `${myPricing.memberLabel || myPricing.rateCodeName || 'Rate code'} pricing is active on your account.`
                 : `Your pricing matches your ${memberTier.toLowerCase()} member tier.`}</p>
-          <div className="customer-hub-highlight-meta">
-            <span className="badge badge-success">{completedCount} completed visits</span>
-            <span className="badge badge-info">{pendingPayments.length} active booking items</span>
-          </div>
-          <strong>Rs {Number(totalSpend || 0).toLocaleString()}</strong>
+          {hasVenueSelected && (
+            <>
+              <div className="customer-hub-highlight-meta">
+                <span className="badge badge-success">{completedCount} completed visits</span>
+                <span className="badge badge-info">{pendingPayments.length} active booking items</span>
+              </div>
+              <strong>Rs {Number(totalSpend || 0).toLocaleString()}</strong>
+            </>
+          )}
           <div className="customer-hub-inline-actions">
             {support.whatsappRaw && <a href={buildSupportWhatsAppHref({ supportContact: support, customerName: `${customer?.firstName || ''} ${customer?.lastName || ''}`.trim(), topic: 'account help' })} target="_blank" rel="noreferrer" className="btn btn-primary btn-sm">WhatsApp Support</a>}
             {support.email && <a href={buildSupportEmailHref({ supportContact: support, customerName: `${customer?.firstName || ''} ${customer?.lastName || ''}`.trim(), topic: 'Account support' })} className="btn btn-secondary btn-sm">Email Support</a>}

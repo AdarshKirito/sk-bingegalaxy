@@ -3,6 +3,9 @@ package com.skbingegalaxy.booking.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.skbingegalaxy.booking.dto.CustomerDashboardExperienceDto;
 import com.skbingegalaxy.booking.dto.CustomerDashboardSlideDto;
+import com.skbingegalaxy.booking.dto.CustomerAboutExperienceDto;
+import com.skbingegalaxy.booking.dto.CustomerAboutHighlightDto;
+import com.skbingegalaxy.booking.dto.CustomerAboutPolicyDto;
 import com.skbingegalaxy.booking.entity.Binge;
 import com.skbingegalaxy.booking.repository.AddOnRepository;
 import com.skbingegalaxy.booking.repository.BingeRepository;
@@ -103,5 +106,35 @@ class BingeServiceTest {
         assertThat(result.getSlides()).hasSize(1);
         assertThat(result.getSlides().get(0).getHeadline()).isEqualTo("Date-night takeover");
         assertThat(binge.getCustomerDashboardConfigJson()).contains("Date-night takeover");
+    }
+
+    @Test
+    void updateCustomerAboutExperience_normalizesAndPersistsContent() {
+        Binge binge = Binge.builder().id(7L).adminId(11L).name("Downtown").active(true).build();
+        when(bingeRepository.findById(7L)).thenReturn(Optional.of(binge));
+        when(bingeRepository.save(any(Binge.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        CustomerAboutExperienceDto request = CustomerAboutExperienceDto.builder()
+            .sectionTitle("Know this venue")
+            .heroTitle("Plan smoother events")
+            .heroDescription("These policies and rules keep your event timeline stress-free.")
+            .highlights(List.of(CustomerAboutHighlightDto.builder()
+                .title("Private atmosphere")
+                .description("Curated setups for birthdays, anniversaries, and screenings.")
+                .build()))
+            .houseRules(List.of("Arrive 15 minutes early"))
+            .policies(List.of(CustomerAboutPolicyDto.builder()
+                .title("Cancellation policy")
+                .description("Cancellation availability depends on configured venue cutoff.")
+                .build()))
+            .build();
+
+        CustomerAboutExperienceDto result = bingeService.updateCustomerAboutExperience(7L, request, 11L, "ADMIN");
+
+        assertThat(result.getSectionTitle()).isEqualTo("Know this venue");
+        assertThat(result.getHighlights()).hasSize(1);
+        assertThat(result.getHouseRules()).contains("Arrive 15 minutes early");
+        assertThat(result.getPolicies()).hasSize(1);
+        assertThat(binge.getCustomerAboutConfigJson()).contains("Plan smoother events");
     }
 }

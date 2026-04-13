@@ -284,6 +284,7 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
         payload.adminNotes = form.adminNotes;
         const alreadyPaid = editBookingData?.paymentStatus === 'SUCCESS' || editBookingData?.paymentStatus === 'PARTIALLY_REFUNDED';
         if (!alreadyPaid) payload.paymentMethod = form.paymentMethod;
+        if (selectedRateCodeId) payload.rateCodeId = Number(selectedRateCodeId);
       }
       await onSubmit(payload);
     } catch (err) {

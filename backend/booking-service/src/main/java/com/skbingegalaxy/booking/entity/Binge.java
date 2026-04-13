@@ -39,6 +39,26 @@ public class Binge {
     @Column(columnDefinition = "TEXT")
     private String customerDashboardConfigJson;
 
+    @Column(columnDefinition = "TEXT")
+    private String customerAboutConfigJson;
+
+    @Column(length = 150)
+    private String supportEmail;
+
+    @Column(length = 20)
+    private String supportPhone;
+
+    @Column(length = 20)
+    private String supportWhatsapp;
+
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean customerCancellationEnabled = true;
+
+    @Column(nullable = false)
+    @Builder.Default
+    private int customerCancellationCutoffMinutes = 180;
+
     @CreationTimestamp
     @Column(updatable = false)
     private LocalDateTime createdAt;

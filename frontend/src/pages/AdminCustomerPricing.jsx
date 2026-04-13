@@ -1,8 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { adminService, authService } from '../services/endpoints';
 import { toast } from 'react-toastify';
 
 export default function AdminCustomerPricing() {
+  const [searchParams] = useSearchParams();
+  const deepLinkHandled = useRef(false);
   const [eventTypes, setEventTypes] = useState([]);
   const [addOns, setAddOns] = useState([]);
   const [rateCodes, setRateCodes] = useState([]);
@@ -32,6 +35,21 @@ export default function AdminCustomerPricing() {
       .catch(() => toast.error('Failed to load data'))
       .finally(() => setLoading(false));
   }, []);
+
+  // Deep-link: auto-load customer from ?customerId= query param
+  useEffect(() => {
+    if (loading || deepLinkHandled.current) return;
+    const customerId = searchParams.get('customerId');
+    if (!customerId) return;
+    deepLinkHandled.current = true;
+    (async () => {
+      try {
+        const res = await authService.getCustomerById(customerId);
+        const cust = res.data.data || res.data;
+        if (cust && cust.id) await addCustomer(cust);
+      } catch { toast.error('Could not load customer from link'); }
+    })();
+  }, [loading]);
 
   const searchCustomers = async () => {
     if (!query.trim()) return;

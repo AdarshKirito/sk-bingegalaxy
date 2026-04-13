@@ -10,6 +10,14 @@ function getInitialTheme() {
 export default function ThemeToggle() {
   const [theme, setTheme] = useState(getInitialTheme);
 
+  const toggleTheme = () => {
+    document.documentElement.classList.add('theme-switching');
+    setTheme(t => t === 'dark' ? 'light' : 'dark');
+    window.setTimeout(() => {
+      document.documentElement.classList.remove('theme-switching');
+    }, 260);
+  };
+
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('theme', theme);
@@ -18,7 +26,7 @@ export default function ThemeToggle() {
   return (
     <button
       className="theme-toggle"
-      onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
+      onClick={toggleTheme}
       aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
       title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
     >

@@ -28,7 +28,16 @@ export default function BingeSelector() {
   }, []);
 
   const handleSelect = (binge) => {
-    selectBinge({ id: binge.id, name: binge.name, address: binge.address });
+    selectBinge({
+      id: binge.id,
+      name: binge.name,
+      address: binge.address,
+      supportEmail: binge.supportEmail,
+      supportPhone: binge.supportPhone,
+      supportWhatsapp: binge.supportWhatsapp,
+      customerCancellationEnabled: binge.customerCancellationEnabled,
+      customerCancellationCutoffMinutes: binge.customerCancellationCutoffMinutes,
+    });
     toast.success(`Selected: ${binge.name}`);
     navigate('/dashboard');
   };

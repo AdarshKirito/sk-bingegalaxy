@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { authService, adminService } from '../../services/endpoints';
+import { useAuth } from '../../context/AuthContext';
 import { toast } from 'react-toastify';
 
 export default function StepCustomer({
@@ -10,11 +11,12 @@ export default function StepCustomer({
   onNext, onCancel,
 }) {
   const navigate = useNavigate();
+  const { isSuperAdmin } = useAuth();
   const [custQuery, setCustQuery] = useState('');
   const [custResults, setCustResults] = useState([]);
   const [custSearching, setCustSearching] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [newCust, setNewCust] = useState({ firstName: '', lastName: '', email: '', phone: '' });
+  const [newCust, setNewCust] = useState({ firstName: '', lastName: '', email: '', phone: '', password: '' });
 
   const inputStyle = {
     padding: '0.55rem 0.8rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
@@ -52,17 +54,20 @@ export default function StepCustomer({
     if (!newCust.firstName.trim()) { toast.error('First name is required to create a customer'); return; }
     if (!newCust.email.trim()) { toast.error('Email is required to create a customer'); return; }
     if (newCust.email.trim() && !/\S+@\S+\.\S+/.test(newCust.email)) { toast.error('Please enter a valid email address'); return; }
+    if (!newCust.password.trim()) { toast.error('Password is required so customer can sign in'); return; }
+    if (newCust.password.length < 10) { toast.error('Password must be at least 10 characters'); return; }
     try {
       const res = await authService.adminCreateCustomer({
         firstName: newCust.firstName,
         lastName: newCust.lastName,
         email: newCust.email,
         phone: newCust.phone,
+        password: newCust.password,
       });
       const created = res.data.data || res.data;
       setSelectedCustomer(created);
       setShowCreateForm(false);
-      setNewCust({ firstName: '', lastName: '', email: '', phone: '' });
+      setNewCust({ firstName: '', lastName: '', email: '', phone: '', password: '' });
       toast.success('Customer created successfully');
     } catch (err) {
       toast.error(err.userMessage || err.response?.data?.message || 'Failed to create customer. Please try again.');
@@ -80,7 +85,7 @@ export default function StepCustomer({
             {selectedCustomer.phone && <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}> | {selectedCustomer.phone}</span>}
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/admin/users-config/${selectedCustomer.id}`)} title="Edit customer details" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>✏️</button>
+            {isSuperAdmin && <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/admin/users-config/${selectedCustomer.id}`)} title="Edit customer details" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>✏️</button>}
             <button className="btn btn-secondary btn-sm" onClick={() => { setSelectedCustomer(null); setSelectedRateCodeId(''); setResolvedPricing(null); }}>Change</button>
           </div>
         </div>
@@ -115,6 +120,7 @@ export default function StepCustomer({
                 <div><label style={labelStyle}>Last Name</label><input style={inputStyle} value={newCust.lastName} onChange={e => setNewCust({ ...newCust, lastName: e.target.value })} aria-label="Last name" /></div>
                 <div><label style={labelStyle}>Email *</label><input type="email" style={inputStyle} value={newCust.email} onChange={e => setNewCust({ ...newCust, email: e.target.value })} aria-label="Email" /></div>
                 <div><label style={labelStyle}>Phone</label><input style={inputStyle} value={newCust.phone} onChange={e => setNewCust({ ...newCust, phone: e.target.value })} aria-label="Phone" /></div>
+                <div style={{ gridColumn: '1 / -1' }}><label style={labelStyle}>Password *</label><input type="password" style={inputStyle} value={newCust.password} onChange={e => setNewCust({ ...newCust, password: e.target.value })} aria-label="Password" placeholder="Minimum 10 characters" /></div>
               </div>
               <button className="btn btn-primary btn-sm" style={{ marginTop: '0.75rem' }} onClick={handleCreateCustomer}>Create Customer</button>
             </div>

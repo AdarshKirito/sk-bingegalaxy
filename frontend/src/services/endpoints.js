@@ -45,13 +45,19 @@ export const bookingService = {
   getMyBookings: () => api.get('/bookings/my'),
   getCurrentBookings: () => api.get('/bookings/my/current', { params: { clientDate: clientDate() } }),
   getPastBookings: () => api.get('/bookings/my/past', { params: { clientDate: clientDate() } }),
+  getPendingReviews: () => api.get('/bookings/my/reviews/pending', { params: { clientDate: clientDate() } }),
   getBookedSlots: (date) => api.get('/bookings/booked-slots', { params: { date } }),
   cancelBooking: (ref) => api.post(`/bookings/${ref}/cancel`),
+  getCustomerReview: (ref) => api.get(`/bookings/${ref}/reviews/customer`),
+  submitCustomerReview: (ref, data) => api.post(`/bookings/${ref}/reviews/customer`, data),
   getMyPricing: () => api.get('/bookings/my-pricing'),
   // Binge (public)
   getAllActiveBinges: () => api.get('/bookings/binges'),
   getBingeById: (id) => api.get(`/bookings/binges/${id}`),
   getBingeDashboardExperience: (id) => api.get(`/bookings/binges/${id}/customer-dashboard`),
+  getBingeAboutExperience: (id) => api.get(`/bookings/binges/${id}/customer-about`),
+  getBingeReviewSummary: (id) => api.get(`/bookings/binges/${id}/reviews/summary`),
+  getBingeReviews: (id, page = 0, size = 10) => api.get(`/bookings/binges/${id}/reviews`, { params: { page, size } }),
 };
 
 export const availabilityService = {
@@ -121,6 +127,8 @@ export const adminService = {
   getBookedSlots: (date) => api.get('/bookings/admin/booked-slots', { params: { date } }),
   // Booking event log (audit trail)
   getBookingEvents: (ref, page, size) => api.get(`/bookings/admin/${ref}/events`, { params: { page, size } }),
+  getBookingReviews: (ref) => api.get(`/bookings/admin/${ref}/reviews`),
+  submitBookingReview: (ref, data) => api.post(`/bookings/admin/${ref}/reviews`, data),
   // CQRS projection replay
   replayBooking: (ref) => api.post(`/bookings/admin/${ref}/replay`),
   replayAll: () => api.post('/bookings/admin/replay-all'),
@@ -153,6 +161,8 @@ export const adminService = {
   updateBinge: (id, data) => api.put(`/bookings/admin/binges/${id}`, data),
   getBingeDashboardExperience: (id) => api.get(`/bookings/admin/binges/${id}/customer-dashboard`),
   updateBingeDashboardExperience: (id, data) => api.put(`/bookings/admin/binges/${id}/customer-dashboard`, data),
+  getBingeAboutExperience: (id) => api.get(`/bookings/admin/binges/${id}/customer-about`),
+  updateBingeAboutExperience: (id, data) => api.put(`/bookings/admin/binges/${id}/customer-about`, data),
   toggleBinge: (id) => api.patch(`/bookings/admin/binges/${id}/toggle-active`),
   deleteBinge: (id) => api.delete(`/bookings/admin/binges/${id}`),
   // Media upload

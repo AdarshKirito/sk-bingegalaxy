@@ -4,6 +4,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.skbingegalaxy.booking.dto.BingeDto;
 import com.skbingegalaxy.booking.dto.BingeSaveRequest;
+import com.skbingegalaxy.booking.dto.CustomerAboutExperienceDto;
+import com.skbingegalaxy.booking.dto.CustomerAboutHighlightDto;
+import com.skbingegalaxy.booking.dto.CustomerAboutPolicyDto;
 import com.skbingegalaxy.booking.dto.CustomerDashboardExperienceDto;
 import com.skbingegalaxy.booking.dto.CustomerDashboardSlideDto;
 import com.skbingegalaxy.booking.entity.Binge;
@@ -40,6 +43,15 @@ public class BingeService {
     private static final String DEFAULT_SLIDE_DESCRIPTION = "Guide customers toward the atmosphere, offers, or experiences you want this venue to highlight first.";
     private static final String DEFAULT_SLIDE_CTA = "Open Booking";
     private static final String DEFAULT_SLIDE_THEME = "celebration";
+    private static final String DEFAULT_ABOUT_EYEBROW = "Before You Book";
+    private static final String DEFAULT_ABOUT_TITLE = "Know your binge before event day";
+    private static final String DEFAULT_ABOUT_HERO_TITLE = "Everything customers should know, in one place";
+    private static final String DEFAULT_ABOUT_HERO_DESCRIPTION = "Set expectations clearly with venue highlights, house rules, and policies so guests walk in prepared and confident.";
+    private static final String DEFAULT_ABOUT_HIGHLIGHTS_TITLE = "Why guests choose this binge";
+    private static final String DEFAULT_ABOUT_HOUSE_RULES_TITLE = "House rules";
+    private static final String DEFAULT_ABOUT_POLICY_TITLE = "Policies and regulations";
+    private static final String DEFAULT_ABOUT_CONTACT_HEADING = "Need help before your slot?";
+    private static final String DEFAULT_ABOUT_CONTACT_DESCRIPTION = "Use the support contacts listed for this binge and include your booking reference for quicker help.";
 
     private final BingeRepository bingeRepository;
     private final BookingRepository bookingRepository;
@@ -83,6 +95,16 @@ public class BingeService {
         return readDashboardExperience(getManagedBinge(id, adminId, role).getCustomerDashboardConfigJson());
     }
 
+    public CustomerAboutExperienceDto getCustomerAboutExperience(Long id) {
+        Binge binge = bingeRepository.findById(id)
+            .orElseThrow(() -> new ResourceNotFoundException("Binge", "id", id));
+        return readAboutExperience(binge.getCustomerAboutConfigJson());
+    }
+
+    public CustomerAboutExperienceDto getAdminCustomerAboutExperience(Long id, Long adminId, String role) {
+        return readAboutExperience(getManagedBinge(id, adminId, role).getCustomerAboutConfigJson());
+    }
+
     @Transactional
     public BingeDto createBinge(BingeSaveRequest request, Long adminId, LocalDate clientDate) {
         if (bingeRepository.existsByNameAndAdminId(request.getName(), adminId)) {
@@ -96,6 +118,11 @@ public class BingeService {
             .adminId(adminId)
             .active(true)
             .operationalDate(opDate)
+            .supportEmail(trimToNull(request.getSupportEmail()))
+            .supportPhone(trimToNull(request.getSupportPhone()))
+            .supportWhatsapp(trimToNull(request.getSupportWhatsapp()))
+            .customerCancellationEnabled(request.getCustomerCancellationEnabled() == null || request.getCustomerCancellationEnabled())
+            .customerCancellationCutoffMinutes(request.getCustomerCancellationCutoffMinutes() == null ? 180 : request.getCustomerCancellationCutoffMinutes())
             .build();
 
         binge = bingeRepository.save(binge);
@@ -109,6 +136,11 @@ public class BingeService {
 
         binge.setName(request.getName());
         binge.setAddress(request.getAddress());
+        binge.setSupportEmail(trimToNull(request.getSupportEmail()));
+        binge.setSupportPhone(trimToNull(request.getSupportPhone()));
+        binge.setSupportWhatsapp(trimToNull(request.getSupportWhatsapp()));
+        binge.setCustomerCancellationEnabled(request.getCustomerCancellationEnabled() == null || request.getCustomerCancellationEnabled());
+        binge.setCustomerCancellationCutoffMinutes(request.getCustomerCancellationCutoffMinutes() == null ? binge.getCustomerCancellationCutoffMinutes() : request.getCustomerCancellationCutoffMinutes());
         binge = bingeRepository.save(binge);
         log.info("Binge updated: '{}' (ID: {})", binge.getName(), id);
         return toDto(binge);
@@ -124,6 +156,19 @@ public class BingeService {
         binge.setCustomerDashboardConfigJson(writeDashboardExperience(normalized));
         bingeRepository.save(binge);
         log.info("Customer dashboard experience updated for binge {}", id);
+        return normalized;
+    }
+
+    @Transactional
+    public CustomerAboutExperienceDto updateCustomerAboutExperience(Long id,
+                                                                    CustomerAboutExperienceDto request,
+                                                                    Long adminId,
+                                                                    String role) {
+        Binge binge = getManagedBinge(id, adminId, role);
+        CustomerAboutExperienceDto normalized = normalizeAboutExperience(request);
+        binge.setCustomerAboutConfigJson(writeAboutExperience(normalized));
+        bingeRepository.save(binge);
+        log.info("Customer about experience updated for binge {}", id);
         return normalized;
     }
 
@@ -193,6 +238,27 @@ public class BingeService {
         }
     }
 
+    private CustomerAboutExperienceDto readAboutExperience(String rawConfigJson) {
+        if (rawConfigJson == null || rawConfigJson.isBlank()) {
+            return normalizeAboutExperience(null);
+        }
+        try {
+            CustomerAboutExperienceDto parsed = objectMapper.readValue(rawConfigJson, CustomerAboutExperienceDto.class);
+            return normalizeAboutExperience(parsed);
+        } catch (JsonProcessingException ex) {
+            log.warn("Failed to parse customer about config JSON. Falling back to defaults.", ex);
+            return normalizeAboutExperience(null);
+        }
+    }
+
+    private String writeAboutExperience(CustomerAboutExperienceDto config) {
+        try {
+            return objectMapper.writeValueAsString(normalizeAboutExperience(config));
+        } catch (JsonProcessingException ex) {
+            throw new BusinessException("Failed to store customer about experience", HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
     private CustomerDashboardExperienceDto normalizeDashboardExperience(CustomerDashboardExperienceDto raw) {
         List<CustomerDashboardSlideDto> normalizedSlides = new ArrayList<>();
         if (raw != null && raw.getSlides() != null) {
@@ -241,6 +307,127 @@ public class BingeService {
             .build();
     }
 
+    private CustomerAboutExperienceDto normalizeAboutExperience(CustomerAboutExperienceDto raw) {
+        List<CustomerAboutHighlightDto> normalizedHighlights = normalizeHighlights(raw != null ? raw.getHighlights() : null);
+        List<String> normalizedHouseRules = normalizeHouseRules(raw != null ? raw.getHouseRules() : null);
+        List<CustomerAboutPolicyDto> normalizedPolicies = normalizePolicies(raw != null ? raw.getPolicies() : null);
+
+        return CustomerAboutExperienceDto.builder()
+            .sectionEyebrow(defaultIfBlank(raw != null ? raw.getSectionEyebrow() : null, DEFAULT_ABOUT_EYEBROW))
+            .sectionTitle(defaultIfBlank(raw != null ? raw.getSectionTitle() : null, DEFAULT_ABOUT_TITLE))
+            .sectionSubtitle(trimToNull(raw != null ? raw.getSectionSubtitle() : null))
+            .heroTitle(defaultIfBlank(raw != null ? raw.getHeroTitle() : null, DEFAULT_ABOUT_HERO_TITLE))
+            .heroDescription(defaultIfBlank(raw != null ? raw.getHeroDescription() : null, DEFAULT_ABOUT_HERO_DESCRIPTION))
+            .highlightsTitle(defaultIfBlank(raw != null ? raw.getHighlightsTitle() : null, DEFAULT_ABOUT_HIGHLIGHTS_TITLE))
+            .highlights(normalizedHighlights)
+            .houseRulesTitle(defaultIfBlank(raw != null ? raw.getHouseRulesTitle() : null, DEFAULT_ABOUT_HOUSE_RULES_TITLE))
+            .houseRules(normalizedHouseRules)
+            .policyTitle(defaultIfBlank(raw != null ? raw.getPolicyTitle() : null, DEFAULT_ABOUT_POLICY_TITLE))
+            .policies(normalizedPolicies)
+            .contactHeading(defaultIfBlank(raw != null ? raw.getContactHeading() : null, DEFAULT_ABOUT_CONTACT_HEADING))
+            .contactDescription(defaultIfBlank(raw != null ? raw.getContactDescription() : null, DEFAULT_ABOUT_CONTACT_DESCRIPTION))
+            .build();
+    }
+
+    private List<CustomerAboutHighlightDto> normalizeHighlights(List<CustomerAboutHighlightDto> rawHighlights) {
+        List<CustomerAboutHighlightDto> normalized = new ArrayList<>();
+        if (rawHighlights != null) {
+            for (CustomerAboutHighlightDto highlight : rawHighlights) {
+                if (highlight == null) {
+                    continue;
+                }
+                String title = trimToNull(highlight.getTitle());
+                String description = trimToNull(highlight.getDescription());
+                if (title == null && description == null) {
+                    continue;
+                }
+                normalized.add(CustomerAboutHighlightDto.builder()
+                    .title(defaultIfBlank(title, "Guest-first service"))
+                    .description(defaultIfBlank(description, "Use this section to highlight what makes your binge special."))
+                    .build());
+                if (normalized.size() == 8) {
+                    break;
+                }
+            }
+        }
+
+        if (normalized.isEmpty()) {
+            normalized.add(CustomerAboutHighlightDto.builder()
+                .title("Private cinematic setup")
+                .description("Your booking includes a private room flow designed for your event's mood and timing.")
+                .build());
+            normalized.add(CustomerAboutHighlightDto.builder()
+                .title("Flexible celebration planning")
+                .description("Add-ons, guest counts, and event details can be tuned around your exact occasion.")
+                .build());
+            normalized.add(CustomerAboutHighlightDto.builder()
+                .title("Clear support channel")
+                .description("Reach the venue team quickly with your booking reference before and on event day.")
+                .build());
+        }
+        return normalized;
+    }
+
+    private List<String> normalizeHouseRules(List<String> rawHouseRules) {
+        List<String> normalized = new ArrayList<>();
+        if (rawHouseRules != null) {
+            for (String rule : rawHouseRules) {
+                String item = trimToNull(rule);
+                if (item == null) {
+                    continue;
+                }
+                normalized.add(item);
+                if (normalized.size() == 12) {
+                    break;
+                }
+            }
+        }
+
+        if (normalized.isEmpty()) {
+            normalized.add("Arrive at least 15 minutes before your slot to complete check-in smoothly.");
+            normalized.add("Carry your booking reference for support and on-site verification.");
+            normalized.add("Outside food, decor, or equipment must follow the venue's prior approval policy.");
+        }
+
+        return normalized;
+    }
+
+    private List<CustomerAboutPolicyDto> normalizePolicies(List<CustomerAboutPolicyDto> rawPolicies) {
+        List<CustomerAboutPolicyDto> normalized = new ArrayList<>();
+        if (rawPolicies != null) {
+            for (CustomerAboutPolicyDto policy : rawPolicies) {
+                if (policy == null) {
+                    continue;
+                }
+                String title = trimToNull(policy.getTitle());
+                String description = trimToNull(policy.getDescription());
+                if (title == null && description == null) {
+                    continue;
+                }
+                normalized.add(CustomerAboutPolicyDto.builder()
+                    .title(defaultIfBlank(title, "Policy"))
+                    .description(defaultIfBlank(description, "Describe this policy clearly so customers know what to expect."))
+                    .build());
+                if (normalized.size() == 8) {
+                    break;
+                }
+            }
+        }
+
+        if (normalized.isEmpty()) {
+            normalized.add(CustomerAboutPolicyDto.builder()
+                .title("Payment policy")
+                .description("Bookings stay reserved based on the payment status shown in your booking and payments portal.")
+                .build());
+            normalized.add(CustomerAboutPolicyDto.builder()
+                .title("Rescheduling and cancellation")
+                .description("Cancellation and rescheduling options depend on your binge's configured timing rules.")
+                .build());
+        }
+
+        return normalized;
+    }
+
     private String normalizeLayout(String layout) {
         return "CAROUSEL".equalsIgnoreCase(trimToNull(layout)) ? "CAROUSEL" : DEFAULT_DASHBOARD_LAYOUT;
     }
@@ -277,6 +464,11 @@ public class BingeService {
             .adminId(b.getAdminId())
             .active(b.isActive())
             .operationalDate(b.getOperationalDate())
+            .supportEmail(b.getSupportEmail())
+            .supportPhone(b.getSupportPhone())
+            .supportWhatsapp(b.getSupportWhatsapp())
+            .customerCancellationEnabled(b.isCustomerCancellationEnabled())
+            .customerCancellationCutoffMinutes(b.getCustomerCancellationCutoffMinutes())
             .createdAt(b.getCreatedAt())
             .build();
     }

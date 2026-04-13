@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useBinge } from '../context/BingeContext';
-import { bookingService } from '../services/endpoints';
+import { authService, bookingService } from '../services/endpoints';
+import { CUSTOMER_SUPPORT, mergeSupportContact } from '../services/customerExperience';
 import SEO from '../components/SEO';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import { toast } from 'react-toastify';
@@ -14,6 +15,8 @@ import {
   FiPhone,
   FiSearch,
   FiClock,
+  FiMessageCircle,
+  FiInfo,
 } from 'react-icons/fi';
 import './Entrance.css';
 
@@ -40,6 +43,7 @@ export default function PlatformDashboard() {
   const [binges, setBinges] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [supportContact, setSupportContact] = useState(CUSTOMER_SUPPORT);
 
   // Clear binge on entrance so navbar shows entrance mode
   useEffect(() => {
@@ -49,8 +53,12 @@ export default function PlatformDashboard() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await bookingService.getAllActiveBinges();
-        setBinges(res.data.data || res.data || []);
+        const [bingeRes, supportRes] = await Promise.allSettled([
+          bookingService.getAllActiveBinges(),
+          authService.getSupportContact(),
+        ]);
+        if (bingeRes.status === 'fulfilled') setBinges(bingeRes.value.data.data || bingeRes.value.data || []);
+        if (supportRes.status === 'fulfilled') setSupportContact(mergeSupportContact(supportRes.value.data.data));
       } catch {
         toast.error('Failed to load venues');
       } finally {
@@ -239,6 +247,47 @@ export default function PlatformDashboard() {
             <p>Update your profile, password, and preferences</p>
           </Link>
         </div>
+      </section>
+
+      {/* ── About & Support ───────────────────────────────────────── */}
+      <section className="entrance-panel entrance-about-section">
+        <div className="entrance-panel-head">
+          <div>
+            <span className="entrance-kicker"><FiInfo style={{ verticalAlign: '-2px', marginRight: 4 }} /> About</span>
+            <h2>SK Binge Galaxy</h2>
+          </div>
+        </div>
+        <p className="entrance-about-description">
+          SK Binge Galaxy is your premium private screening and celebration booking platform. Pick a venue, choose your event
+          type, customize your experience, and book in minutes. Our team ensures every celebration is seamless, from
+          reservation to wrap-up.
+        </p>
+
+        {(supportContact.email || supportContact.phoneRaw || supportContact.whatsappRaw) && (
+          <div className="entrance-about-contact">
+            <h3><FiMessageCircle style={{ verticalAlign: '-2px', marginRight: 6 }} /> Get in Touch</h3>
+            <div className="entrance-about-contact-items">
+              {supportContact.email && (
+                <a href={`mailto:${supportContact.email}`} className="entrance-about-contact-item">
+                  <FiMail /> {supportContact.email}
+                </a>
+              )}
+              {supportContact.phoneRaw && (
+                <a href={`tel:${supportContact.phoneRaw}`} className="entrance-about-contact-item">
+                  <FiPhone /> {supportContact.phoneDisplay || supportContact.phoneRaw}
+                </a>
+              )}
+              {supportContact.whatsappRaw && (
+                <a href={`https://wa.me/${supportContact.whatsappRaw}`} target="_blank" rel="noreferrer" className="entrance-about-contact-item">
+                  <FiMessageCircle /> WhatsApp
+                </a>
+              )}
+            </div>
+            {supportContact.hours && (
+              <p className="entrance-about-hours"><FiClock style={{ verticalAlign: '-2px', marginRight: 4 }} /> Support Hours: {supportContact.hours}</p>
+            )}
+          </div>
+        )}
       </section>
     </div>
   );

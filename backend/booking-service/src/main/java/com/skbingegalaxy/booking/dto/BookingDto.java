@@ -44,6 +44,8 @@ public class BookingDto {
     private LocalDateTime actualCheckoutTime;
     private Integer actualUsedMinutes;
     private String earlyCheckoutNote;
+    private Boolean canCustomerCancel;
+    private String customerCancelMessage;
     private String pricingSource;
     private String rateCodeName;
     private LocalDateTime createdAt;

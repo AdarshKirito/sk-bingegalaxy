@@ -107,11 +107,27 @@ export function buildAccountPreferencesPayload(preferences) {
   };
 }
 
-export function mergeSupportContact(supportContact) {
-  return {
+export function mergeSupportContact(supportContact, binge) {
+  const base = {
     ...CUSTOMER_SUPPORT,
     ...(supportContact || {}),
   };
+  if (binge) {
+    if (binge.supportEmail) base.email = binge.supportEmail;
+    if (binge.supportPhone) {
+      const digits = binge.supportPhone.replace(/\D/g, '');
+      const raw = digits.length === 10 ? `+91${digits}` : `+${digits}`;
+      base.phoneRaw = raw;
+      base.phoneDisplay = digits.length === 10
+        ? `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`
+        : binge.supportPhone;
+    }
+    if (binge.supportWhatsapp) {
+      const digits = binge.supportWhatsapp.replace(/\D/g, '');
+      base.whatsappRaw = digits.length === 10 ? `91${digits}` : digits;
+    }
+  }
+  return base;
 }
 
 export function buildSupportEmailHref({ supportContact, bookingRef, customerName, topic = 'Booking support' } = {}) {

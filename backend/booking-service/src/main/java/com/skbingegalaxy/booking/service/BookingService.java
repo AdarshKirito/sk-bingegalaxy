@@ -28,6 +28,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.Year;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
@@ -38,6 +39,8 @@ import java.util.stream.Collectors;
 public class BookingService {
 
     private final BookingRepository bookingRepository;
+    private final BingeRepository bingeRepository;
+    private final BookingReviewRepository bookingReviewRepository;
     private final BookingAddOnRepository bookingAddOnRepository;
     private final EventTypeRepository eventTypeRepository;
     private final AddOnRepository addOnRepository;
@@ -580,7 +583,163 @@ public class BookingService {
             throw new BusinessException(
                 "Only PENDING bookings can be cancelled by the customer. Current status: " + booking.getStatus());
         }
+        CancellationPolicyDecision decision = evaluateCustomerCancellation(booking);
+        if (!decision.allowed()) {
+            throw new BusinessException(decision.message());
+        }
         return cancelBooking(booking, "CUSTOMER", "Booking cancelled by customer");
+    }
+
+    @Transactional(readOnly = true)
+    public List<BookingDto> getPendingCustomerReviews(Long customerId, LocalDate clientToday) {
+        LocalDate today = clientToday != null ? clientToday : LocalDate.now();
+        Long bid = BingeContext.getBingeId();
+
+        List<Booking> completed = (bid != null
+            ? bookingRepository.findCustomerPastBookingsByBinge(bid, customerId, today)
+            : bookingRepository.findCustomerPastBookings(customerId, today)).stream()
+            .filter(b -> b.getStatus() == BookingStatus.COMPLETED)
+            .toList();
+
+        return completed.stream()
+            .filter(b -> bookingReviewRepository
+                .findByBookingRefAndCustomerIdAndReviewerRole(b.getBookingRef(), customerId, "CUSTOMER")
+                .isEmpty())
+            .map(this::toDto)
+            .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public BookingReviewDto getCustomerReview(String bookingRef, Long customerId) {
+        Booking booking = findScopedBookingByRef(bookingRef);
+        if (!booking.getCustomerId().equals(customerId)) {
+            throw new BusinessException("Not authorised to access this review");
+        }
+
+        BookingReview review = bookingReviewRepository
+            .findByBookingRefAndCustomerIdAndReviewerRole(bookingRef, customerId, "CUSTOMER")
+            .orElseThrow(() -> new ResourceNotFoundException("BookingReview", "bookingRef", bookingRef));
+        return toReviewDto(review);
+    }
+
+    @Transactional
+    public BookingReviewDto submitCustomerReview(String bookingRef, Long customerId, CustomerReviewRequest request) {
+        Booking booking = findScopedBookingByRef(bookingRef);
+        if (!booking.getCustomerId().equals(customerId)) {
+            throw new BusinessException("Not authorised to review this booking");
+        }
+        if (booking.getStatus() != BookingStatus.COMPLETED) {
+            throw new BusinessException("Reviews can be submitted only after booking completion");
+        }
+
+        boolean skipped = request.getSkipped() != null && request.getSkipped();
+        if (!skipped && request.getRating() == null) {
+            throw new BusinessException("Please provide a rating or choose skip");
+        }
+
+        BookingReview review = bookingReviewRepository
+            .findByBookingRefAndCustomerIdAndReviewerRole(bookingRef, customerId, "CUSTOMER")
+            .orElseGet(() -> BookingReview.builder()
+                .booking(booking)
+                .bingeId(booking.getBingeId())
+                .bookingRef(bookingRef)
+                .customerId(customerId)
+                .reviewerRole("CUSTOMER")
+                .visibleToCustomer(true)
+                .build());
+
+        review.setSkipped(skipped);
+        review.setRating(skipped ? null : request.getRating());
+        review.setComment(trimToNull(request.getComment()));
+
+        BookingReview saved = bookingReviewRepository.save(review);
+        return toReviewDto(saved);
+    }
+
+    @Transactional
+    public BookingReviewDto submitAdminReview(String bookingRef, Long adminId, String role, AdminReviewRequest request) {
+        if (!"ADMIN".equalsIgnoreCase(role) && !"SUPER_ADMIN".equalsIgnoreCase(role)) {
+            throw new BusinessException("Only admins can submit admin reviews", org.springframework.http.HttpStatus.FORBIDDEN);
+        }
+
+        Booking booking = findScopedBookingByRef(bookingRef);
+        if (booking.getStatus() != BookingStatus.COMPLETED) {
+            throw new BusinessException("Admin reviews can be submitted only after booking completion");
+        }
+
+        BookingReview review = bookingReviewRepository
+            .findByBookingRefAndAdminIdAndReviewerRole(bookingRef, adminId, "ADMIN")
+            .orElseGet(() -> BookingReview.builder()
+                .booking(booking)
+                .bingeId(booking.getBingeId())
+                .bookingRef(bookingRef)
+                .customerId(booking.getCustomerId())
+                .adminId(adminId)
+                .reviewerRole("ADMIN")
+                .visibleToCustomer(false)
+                .build());
+
+        review.setSkipped(false);
+        review.setRating(request.getRating());
+        review.setComment(trimToNull(request.getComment()));
+
+        BookingReview saved = bookingReviewRepository.save(review);
+        return toReviewDto(saved);
+    }
+
+    @Transactional(readOnly = true)
+    public List<BookingReviewDto> getAdminReviewsForBooking(String bookingRef, String role) {
+        if (!"ADMIN".equalsIgnoreCase(role) && !"SUPER_ADMIN".equalsIgnoreCase(role)) {
+            throw new BusinessException("Only admins can view booking reviews", org.springframework.http.HttpStatus.FORBIDDEN);
+        }
+
+        findScopedBookingByRef(bookingRef);
+
+        return bookingReviewRepository.findByBookingRefOrderByCreatedAtDesc(bookingRef)
+            .stream()
+            .map(this::toReviewDto)
+            .toList();
+    }
+
+    // ── Public: binge review summary (overall rating + distribution) ──
+    @Transactional(readOnly = true)
+    public BingeReviewSummaryDto getBingeReviewSummary(Long bingeId) {
+        long count = bookingReviewRepository.countBingeCustomerReviews(bingeId);
+        double avg = count > 0 ? bookingReviewRepository.averageBingeRating(bingeId) : 0;
+        List<Object[]> dist = bookingReviewRepository.ratingDistribution(bingeId);
+        java.util.Map<Integer, Long> distribution = new java.util.LinkedHashMap<>();
+        for (int star = 5; star >= 1; star--) distribution.put(star, 0L);
+        for (Object[] row : dist) {
+            distribution.put((Integer) row[0], (Long) row[1]);
+        }
+        return BingeReviewSummaryDto.builder()
+            .bingeId(bingeId)
+            .averageRating(Math.round(avg * 10.0) / 10.0)
+            .totalReviews(count)
+            .ratingDistribution(distribution)
+            .build();
+    }
+
+    // ── Public: paginated customer reviews for a binge ──
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<BookingReviewDto> getBingePublicReviews(Long bingeId, org.springframework.data.domain.Pageable pageable) {
+        return bookingReviewRepository
+            .findByBingeIdAndReviewerRoleAndSkippedFalseAndVisibleToCustomerTrueAndRatingIsNotNull(bingeId, "CUSTOMER", pageable)
+            .map(this::toReviewDto);
+    }
+
+    // ── Admin: customer review summary (avg admin rating + count) ──
+    @Transactional(readOnly = true)
+    public java.util.Map<String, Object> getCustomerReviewSummary(Long customerId) {
+        double avgAdmin = bookingReviewRepository.averageAdminRatingForCustomer(customerId);
+        long countAdmin = bookingReviewRepository.countAdminReviewsForCustomer(customerId);
+        long countCustomer = bookingReviewRepository.findByCustomerIdAndReviewerRoleAndSkippedFalseAndRatingIsNotNull(
+            customerId, "CUSTOMER", org.springframework.data.domain.Pageable.unpaged()).getTotalElements();
+        return java.util.Map.of(
+            "avgAdminRating", Math.round(avgAdmin * 10.0) / 10.0,
+            "adminReviewCount", countAdmin,
+            "customerReviewCount", countCustomer
+        );
     }
 
     // ── System: cancel booking without request-scoped binge context ──
@@ -1040,8 +1199,25 @@ public class BookingService {
         String pricingSource = "DEFAULT";
         String rateCodeName = null;
 
+        // If admin specified a rate code override, resolve all pricing from that rate code
+        ResolvedPricingDto rateCodePricingOverride = null;
+        if (request.getRateCodeId() != null) {
+            rateCodePricingOverride = pricingService.resolveRateCodePricing(request.getRateCodeId());
+            pricingSource = "RATE_CODE";
+            rateCodeName = rateCodePricingOverride.getRateCodeName();
+        }
+
         PricingService.ResolvedEventPrice eventPrice;
-        if (custId > 0) {
+        if (rateCodePricingOverride != null) {
+            final String rcName = rateCodeName;
+            eventPrice = rateCodePricingOverride.getEventPricings().stream()
+                .filter(ep -> ep.getEventTypeId().equals(request.getEventTypeId()))
+                .findFirst()
+                .map(ep -> new PricingService.ResolvedEventPrice(
+                    ep.getBasePrice(), ep.getHourlyRate(), ep.getPricePerGuest(), "RATE_CODE", rcName))
+                .orElse(new PricingService.ResolvedEventPrice(
+                    eventType.getBasePrice(), eventType.getHourlyRate(), eventType.getPricePerGuest(), "RATE_CODE", rcName));
+        } else if (custId > 0) {
             eventPrice = pricingService.resolveEventPrice(custId, request.getEventTypeId());
             pricingSource = eventPrice.source();
             rateCodeName = eventPrice.rateCodeName();
@@ -1063,7 +1239,13 @@ public class BookingService {
                 AddOn addOn = findBookableAddOn(sel.getAddOnId());
                 int qty = Math.max(sel.getQuantity(), 1);
                 BigDecimal resolvedPrice;
-                if (custId > 0) {
+                if (rateCodePricingOverride != null) {
+                    resolvedPrice = rateCodePricingOverride.getAddonPricings().stream()
+                        .filter(ap -> ap.getAddOnId().equals(sel.getAddOnId()))
+                        .findFirst()
+                        .map(ResolvedPricingDto.AddonPricing::getPrice)
+                        .orElse(addOn.getPrice());
+                } else if (custId > 0) {
                     PricingService.ResolvedAddonPrice ap = pricingService.resolveAddonPrice(custId, sel.getAddOnId());
                     resolvedPrice = ap.price();
                 } else {
@@ -1457,6 +1639,7 @@ public class BookingService {
     }
 
     private BookingDto toDto(Booking b) {
+        CancellationPolicyDecision cancelDecision = evaluateCustomerCancellation(b);
         return BookingDto.builder()
             .id(b.getId())
             .bookingRef(b.getBookingRef())
@@ -1494,12 +1677,70 @@ public class BookingService {
             .actualCheckoutTime(b.getActualCheckoutTime())
             .actualUsedMinutes(b.getActualUsedMinutes())
             .earlyCheckoutNote(b.getEarlyCheckoutNote())
+            .canCustomerCancel(cancelDecision.allowed())
+            .customerCancelMessage(cancelDecision.message())
             .pricingSource(b.getPricingSource())
             .rateCodeName(b.getRateCodeName())
             .createdAt(b.getCreatedAt())
             .updatedAt(b.getUpdatedAt())
             .build();
     }
+
+    private CancellationPolicyDecision evaluateCustomerCancellation(Booking booking) {
+        Binge binge = null;
+        if (booking.getBingeId() != null) {
+            binge = bingeRepository.findById(booking.getBingeId()).orElse(null);
+        }
+
+        boolean enabled = binge == null || binge.isCustomerCancellationEnabled();
+        if (!enabled) {
+            return new CancellationPolicyDecision(false, "This venue currently does not allow customer self-cancellation.");
+        }
+
+        int cutoffMinutes = (binge != null && binge.getCustomerCancellationCutoffMinutes() >= 0)
+            ? binge.getCustomerCancellationCutoffMinutes()
+            : 180;
+
+        LocalDateTime eventStart = LocalDateTime.of(booking.getBookingDate(), booking.getStartTime());
+        LocalDateTime lockAt = eventStart.minusMinutes(cutoffMinutes);
+        LocalDateTime now = LocalDateTime.now();
+
+        if (now.isAfter(lockAt) || now.isEqual(lockAt)) {
+            return new CancellationPolicyDecision(false,
+                "Cancellation is locked for this booking. This venue allows cancellation only until "
+                    + cutoffMinutes + " minutes before start time.");
+        }
+
+        long minutesLeft = Math.max(0, ChronoUnit.MINUTES.between(now, lockAt));
+        return new CancellationPolicyDecision(true,
+            "Cancellation is open. It will lock " + minutesLeft + " minutes from now.");
+    }
+
+    private BookingReviewDto toReviewDto(BookingReview review) {
+        Booking booking = review.getBooking();
+        return BookingReviewDto.builder()
+            .id(review.getId())
+            .bookingRef(review.getBookingRef())
+            .customerId(review.getCustomerId())
+            .customerName(booking != null ? booking.getCustomerName() : null)
+            .adminId(review.getAdminId())
+            .reviewerRole(review.getReviewerRole())
+            .rating(review.getRating())
+            .comment(review.getComment())
+            .skipped(review.isSkipped())
+            .visibleToCustomer(review.isVisibleToCustomer())
+            .eventTypeName(booking != null && booking.getEventType() != null ? booking.getEventType().getName() : null)
+            .createdAt(review.getCreatedAt())
+            .build();
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) return null;
+        String normalized = value.trim();
+        return normalized.isEmpty() ? null : normalized;
+    }
+
+    private record CancellationPolicyDecision(boolean allowed, String message) {}
 
     private EventTypeDto toEventTypeDto(EventType et) {
         return EventTypeDto.builder()

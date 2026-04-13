@@ -1,6 +1,8 @@
 package com.skbingegalaxy.booking.dto;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import lombok.*;
 
@@ -15,4 +17,20 @@ public class BingeSaveRequest {
 
     @Size(max = 500)
     private String address;
+
+    @Size(max = 150)
+    private String supportEmail;
+
+    @Size(max = 20)
+    @Pattern(regexp = "^$|^[+0-9][0-9\\s-]{6,19}$", message = "Support phone must be a valid phone number")
+    private String supportPhone;
+
+    @Size(max = 20)
+    @Pattern(regexp = "^$|^[0-9]{7,20}$", message = "WhatsApp number must contain digits only")
+    private String supportWhatsapp;
+
+    private Boolean customerCancellationEnabled;
+
+    @PositiveOrZero(message = "Cancellation cutoff must be zero or more minutes")
+    private Integer customerCancellationCutoffMinutes;
 }

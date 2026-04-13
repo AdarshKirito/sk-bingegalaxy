@@ -380,15 +380,15 @@
 }
 
 .ab-warning-banner--orange {
-  background: rgba(255, 100, 0, 0.1);
-  border: 1px solid orange;
-  color: orange;
+  background: var(--warning-bg);
+  border: 1px solid var(--warning);
+  color: var(--warning);
 }
 
 .ab-warning-banner--info {
-  background: rgba(0, 206, 201, 0.1);
-  border: 1px solid #00cec9;
-  color: #00cec9;
+  background: rgba(var(--primary-rgb), 0.08);
+  border: 1px solid var(--primary-light);
+  color: var(--primary-light);
 }
 
 .ab-warning-banner--danger {

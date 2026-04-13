@@ -78,6 +78,13 @@ public class BookingController {
         return ResponseEntity.ok(ApiResponse.ok(bookingService.getCustomerPastBookings(userId, clientDate)));
     }
 
+    @GetMapping("/my/reviews/pending")
+    public ResponseEntity<ApiResponse<List<BookingDto>>> getMyPendingReviews(
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate) {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.getPendingCustomerReviews(userId, clientDate)));
+    }
+
     @GetMapping("/event-types")
     public ResponseEntity<ApiResponse<List<EventTypeDto>>> getEventTypes() {
         return ResponseEntity.ok(ApiResponse.ok(bookingService.getActiveEventTypes()));
@@ -100,6 +107,37 @@ public class BookingController {
             @RequestHeader("X-User-Id") Long userId) {
         BookingDto cancelled = bookingService.cancelBookingByCustomer(bookingRef, userId);
         return ResponseEntity.ok(ApiResponse.ok("Booking cancelled", cancelled));
+    }
+
+    @GetMapping("/{bookingRef}/reviews/customer")
+    public ResponseEntity<ApiResponse<BookingReviewDto>> getMyReview(
+            @PathVariable String bookingRef,
+            @RequestHeader("X-User-Id") Long userId) {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.getCustomerReview(bookingRef, userId)));
+    }
+
+    @PostMapping("/{bookingRef}/reviews/customer")
+    public ResponseEntity<ApiResponse<BookingReviewDto>> submitMyReview(
+            @PathVariable String bookingRef,
+            @RequestHeader("X-User-Id") Long userId,
+            @Valid @RequestBody CustomerReviewRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok("Review submitted", bookingService.submitCustomerReview(bookingRef, userId, request)));
+    }
+
+    @PostMapping("/admin/{bookingRef}/reviews")
+    public ResponseEntity<ApiResponse<BookingReviewDto>> submitAdminReview(
+            @PathVariable String bookingRef,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String role,
+            @Valid @RequestBody AdminReviewRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok("Admin review submitted", bookingService.submitAdminReview(bookingRef, userId, role, request)));
+    }
+
+    @GetMapping("/admin/{bookingRef}/reviews")
+    public ResponseEntity<ApiResponse<List<BookingReviewDto>>> getAdminReviews(
+            @PathVariable String bookingRef,
+            @RequestHeader("X-User-Role") String role) {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.getAdminReviewsForBooking(bookingRef, role)));
     }
 
     @GetMapping("/my-pricing")

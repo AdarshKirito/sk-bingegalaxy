@@ -12,11 +12,11 @@
 
 .navbar-home {
   background:
-    radial-gradient(circle at top left, rgba(99, 102, 241, 0.06), transparent 26%),
-    radial-gradient(circle at top right, rgba(var(--accent-rgb), 0.03), transparent 20%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.88));
-  border-bottom-color: rgba(99, 102, 241, 0.12);
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06), 0 1px 0 rgba(var(--accent-rgb), 0.06);
+    radial-gradient(circle at top left, rgba(194, 158, 70, 0.05), transparent 26%),
+    radial-gradient(circle at top right, rgba(99, 102, 241, 0.04), transparent 20%),
+    linear-gradient(180deg, rgba(250, 249, 247, 0.98), rgba(245, 243, 240, 0.96));
+  border-bottom-color: rgba(194, 158, 70, 0.12);
+  box-shadow: 0 2px 8px rgba(26, 26, 46, 0.03), 0 1px 0 rgba(194, 158, 70, 0.08);
 }
 
 .navbar-home .navbar-brand {
@@ -59,15 +59,16 @@
 }
 
 .navbar-home .btn.btn-primary:hover {
-  background: linear-gradient(135deg, var(--primary-dark), #4338ca);
+  background: linear-gradient(135deg, var(--primary-dark), color-mix(in srgb, var(--primary-light) 78%, var(--accent) 22%));
 }
 
 .navbar-customer {
   background:
-    radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.03), transparent 22%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 252, 0.94));
-  border-bottom-color: rgba(var(--primary-rgb), 0.1);
-  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
+    radial-gradient(circle at top left, rgba(194, 158, 70, 0.04), transparent 22%),
+    radial-gradient(circle at top right, rgba(99, 102, 241, 0.05), transparent 24%),
+    linear-gradient(180deg, rgba(250, 249, 247, 0.98), rgba(245, 243, 240, 0.96));
+  border-bottom-color: rgba(194, 158, 70, 0.1);
+  box-shadow: 0 2px 8px rgba(26, 26, 46, 0.03);
 }
 
 .navbar-customer .navbar-brand {
@@ -103,6 +104,7 @@
   background:
     linear-gradient(135deg, rgba(var(--primary-rgb), 0.08), rgba(var(--accent-rgb), 0.03) 65%, rgba(255, 255, 255, 0.9));
   box-shadow: 0 8px 20px rgba(var(--primary-rgb), 0.05);
+  color: var(--text);
 }
 
 .navbar-customer .venue-pill-label,
@@ -123,33 +125,34 @@
 
 [data-theme="dark"] .navbar-home {
   background:
-    radial-gradient(circle at top left, rgba(99, 102, 241, 0.06), transparent 24%),
-    linear-gradient(180deg, rgba(30, 41, 59, 0.96), rgba(15, 23, 42, 0.94));
-  border-bottom-color: rgba(129, 140, 248, 0.18);
+    radial-gradient(circle at top left, rgba(194, 158, 70, 0.06), transparent 24%),
+    linear-gradient(180deg, rgba(17, 17, 19, 0.98), rgba(17, 17, 19, 0.96));
+  border-bottom-color: rgba(194, 158, 70, 0.12);
 }
 
 [data-theme="dark"] .navbar-customer {
   background:
-    radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.03), transparent 22%),
-    linear-gradient(180deg, rgba(30, 41, 59, 0.96), rgba(15, 23, 42, 0.94));
-  border-bottom-color: rgba(var(--primary-rgb), 0.14);
+    radial-gradient(circle at top left, rgba(194, 158, 70, 0.04), transparent 22%),
+    radial-gradient(circle at top right, rgba(99, 102, 241, 0.06), transparent 24%),
+    linear-gradient(180deg, rgba(17, 17, 19, 0.98), rgba(17, 17, 19, 0.96));
+  border-bottom-color: rgba(99, 102, 241, 0.1);
 }
 
 [data-theme="dark"] .navbar-customer .nav-customer-links,
 [data-theme="dark"] .navbar-customer .venue-btn,
 [data-theme="dark"] .navbar-customer .nav-user {
   background:
-    linear-gradient(180deg, rgba(var(--primary-rgb), 0.08), rgba(var(--accent-rgb), 0.03) 60%, rgba(15, 23, 42, 0.8));
+    linear-gradient(180deg, rgba(var(--primary-rgb), 0.1), rgba(var(--accent-rgb), 0.04) 60%, rgba(17, 17, 19, 0.8));
 }
 
 /* ── Admin Navbar ─────────────────────────────────────────── */
 .navbar-admin {
   background:
-    radial-gradient(circle at top left, rgba(var(--primary-rgb), 0.06), transparent 26%),
-    radial-gradient(circle at top right, rgba(var(--accent-rgb), 0.03), transparent 20%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 252, 0.90));
-  border-bottom-color: rgba(var(--primary-rgb), 0.14);
-  box-shadow: 0 1px 4px rgba(var(--primary-rgb), 0.08), 0 1px 0 rgba(var(--accent-rgb), 0.05);
+    radial-gradient(circle at top left, rgba(194, 158, 70, 0.04), transparent 26%),
+    radial-gradient(circle at top right, rgba(99, 102, 241, 0.03), transparent 20%),
+    linear-gradient(180deg, rgba(250, 249, 247, 0.98), rgba(245, 243, 240, 0.95));
+  border-bottom-color: rgba(194, 158, 70, 0.1);
+  box-shadow: 0 1px 3px rgba(26, 26, 46, 0.04), 0 1px 0 rgba(194, 158, 70, 0.06);
 }
 
 .navbar-admin .brand-meta {
@@ -175,13 +178,11 @@
   align-items: center;
   gap: 0.22rem;
   min-width: 0;
+  width: fit-content;
   padding: 0.24rem;
   border: 1px solid rgba(var(--primary-rgb), 0.12);
   border-radius: 999px;
-  background:
-    linear-gradient(180deg, rgba(var(--primary-rgb), 0.05), rgba(var(--accent-rgb), 0.025) 80%),
-    var(--bg-input);
-  box-shadow: 0 10px 24px rgba(var(--primary-rgb), 0.05);
+  background: var(--bg-input);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -202,7 +203,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding-bottom: 0.8rem;
+  padding: 0 0.25rem 0.8rem;
 }
 
 .nav-admin-meta {
@@ -214,11 +215,13 @@
   background:
     linear-gradient(135deg, rgba(var(--primary-rgb), 0.11), rgba(var(--accent-rgb), 0.06) 68%, rgba(255, 255, 255, 0.9));
   box-shadow: 0 8px 20px rgba(var(--primary-rgb), 0.05);
+  color: var(--text);
 }
 
 .navbar-admin .nav-admin-links .nav-link {
-  padding: 0.5rem 0.72rem;
-  font-size: 0.83rem;
+  padding: 0.5rem 0.68rem;
+  font-size: 0.82rem;
+  white-space: nowrap;
 }
 
 .navbar-admin .nav-link:hover,
@@ -237,23 +240,19 @@
 }
 
 .navbar-admin .venue-btn {
-  background:
-    linear-gradient(135deg, rgba(var(--primary-rgb), 0.08), rgba(var(--accent-rgb), 0.045) 65%, rgba(255, 255, 255, 0.9));
+  background: rgba(var(--primary-rgb), 0.06);
 }
 
 [data-theme="dark"] .navbar-admin {
   background:
-    radial-gradient(circle at top left, rgba(var(--primary-rgb), 0.06), transparent 26%),
-    radial-gradient(circle at top right, rgba(var(--accent-rgb), 0.02), transparent 20%),
-    linear-gradient(180deg, rgba(30, 41, 59, 0.96), rgba(15, 23, 42, 0.94));
-  border-bottom-color: rgba(var(--primary-rgb), 0.18);
+    linear-gradient(180deg, rgba(17, 17, 19, 0.98), rgba(17, 17, 19, 0.96));
+  border-bottom-color: var(--border);
 }
 
 [data-theme="dark"] .navbar-admin .nav-admin-links,
 [data-theme="dark"] .navbar-admin .venue-btn,
 [data-theme="dark"] .navbar-admin .nav-admin-user {
-  background:
-    linear-gradient(180deg, rgba(var(--primary-rgb), 0.08), rgba(var(--accent-rgb), 0.04) 62%, rgba(15, 23, 42, 0.82));
+  background: rgba(var(--primary-rgb), 0.08);
 }
 
 .navbar .container {
@@ -306,8 +305,8 @@
   font-size: 0.85rem;
   color: var(--primary);
   font-weight: 600;
-  border: 1px solid rgba(37, 99, 235, 0.14);
-  background: linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(14, 165, 233, 0.12));
+  border: 1px solid rgba(var(--primary-rgb), 0.14);
+  background: rgba(var(--primary-rgb), 0.06);
   padding: 0.5rem 0.8rem;
   min-width: 0;
   max-width: 172px;
@@ -365,32 +364,30 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, rgba(251, 191, 36, 0.12), rgba(245, 158, 11, 0.08));
-  border: 1px solid rgba(251, 191, 36, 0.25);
+  background: rgba(var(--primary-rgb), 0.08);
+  border: 1px solid rgba(var(--primary-rgb), 0.14);
   cursor: pointer;
   font-size: 1.15rem;
-  color: #f59e0b;
+  color: var(--primary);
   width: 38px;
   height: 38px;
   border-radius: var(--radius-sm);
   transition: var(--transition);
 }
 .theme-toggle:hover {
-  background: linear-gradient(135deg, rgba(251, 191, 36, 0.22), rgba(245, 158, 11, 0.16));
-  color: #d97706;
-  border-color: rgba(245, 158, 11, 0.4);
-  box-shadow: 0 0 12px rgba(245, 158, 11, 0.15);
+  background: rgba(var(--primary-rgb), 0.14);
+  color: var(--primary-dark);
+  border-color: rgba(var(--primary-rgb), 0.25);
 }
 [data-theme="dark"] .theme-toggle {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(139, 92, 246, 0.08));
-  border-color: rgba(139, 92, 246, 0.25);
-  color: #a78bfa;
+  background: rgba(var(--primary-rgb), 0.1);
+  border-color: rgba(var(--primary-rgb), 0.18);
+  color: var(--primary-light);
 }
 [data-theme="dark"] .theme-toggle:hover {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.22), rgba(139, 92, 246, 0.16));
-  color: #c4b5fd;
-  border-color: rgba(139, 92, 246, 0.4);
-  box-shadow: 0 0 12px rgba(139, 92, 246, 0.15);
+  background: rgba(var(--primary-rgb), 0.18);
+  color: var(--primary-light);
+  border-color: rgba(var(--primary-rgb), 0.3);
 }
 
 .menu-overlay {
@@ -453,8 +450,8 @@
 
 .nav-link-active {
   color: var(--primary);
-  background: linear-gradient(135deg, rgba(37, 99, 235, 0.12), rgba(14, 165, 233, 0.1));
-  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.16);
+  background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.12), rgba(var(--accent-rgb), 0.08));
+  box-shadow: inset 0 0 0 1px rgba(var(--primary-rgb), 0.16);
 }
 
 .nav-auth-link {
@@ -489,7 +486,7 @@
 
 .nav-auth-link-active:hover {
   color: #fff;
-  background: linear-gradient(135deg, var(--primary-dark), #4338ca);
+  background: linear-gradient(135deg, var(--primary-dark), var(--primary-light));
 }
 
 .nav-btn {
@@ -506,14 +503,14 @@
   font-size: 0.9rem;
   font-weight: 600;
   padding: 0.45rem 0.85rem;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  background: linear-gradient(135deg, #4f46e5, #818cf8);
   border-radius: 999px;
   white-space: nowrap;
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25);
+  box-shadow: 0 2px 10px rgba(99, 102, 241, 0.25);
   transition: var(--transition);
 }
 .nav-user:hover {
-  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35);
   transform: translateY(-1px);
 }
 
@@ -521,19 +518,19 @@
   font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--text-muted);
 }
 
 .nav-logout-btn {
   padding-inline: 0.65rem;
-  color: #ef4444;
+  color: var(--danger);
   font-size: 1.1rem;
   border-radius: var(--radius-sm);
   transition: var(--transition);
 }
 .nav-logout-btn:hover {
-  background: rgba(239, 68, 68, 0.1);
-  color: #dc2626;
+  background: var(--danger-bg);
+  color: var(--danger);
 }
 
 .nav-action-label {
@@ -592,17 +589,21 @@
     right: -280px;
     width: 280px;
     height: 100vh;
-    background: var(--bg-card);
+    background:
+      linear-gradient(180deg, rgba(var(--primary-rgb), 0.04), transparent 30%),
+      var(--bg-card);
     flex-direction: column;
     align-items: stretch;
     gap: 0.25rem;
     padding: 5rem 1.25rem 2rem;
     box-shadow: -4px 0 20px rgba(0, 0, 0, 0.15);
+    border-left: 1px solid var(--border);
     z-index: 105;
     transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     overflow-y: auto;
     margin-left: 0;
     justify-content: flex-start;
+    color: var(--text);
   }
 
   .navbar-links.open {

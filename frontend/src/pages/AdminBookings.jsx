@@ -51,6 +51,7 @@ export default function AdminBookings() {
   const initTab = searchParams.get('tab') || 'today';
   const initStatus = searchParams.get('status') || 'PENDING';
   const initSub = searchParams.get('sub') || 'ready';
+  const initSearch = searchParams.get('search') || '';
 
   const [activeTab, setActiveTab] = useState(initTab);
   const [todaySubTab, setTodaySubTab] = useState(initSub);
@@ -144,6 +145,28 @@ export default function AdminBookings() {
   useEffect(() => {
     if (!isSearchActive) fetchBookings();
   }, [fetchBookings, isSearchActive]);
+
+  // Auto-search + auto-open when navigated with ?search=BKREF (e.g. from user modal reservations tab)
+  useEffect(() => {
+    if (!initSearch) return;
+    setSearch(initSearch);
+    setIsSearchActive(true);
+    setLoading(true);
+    adminService.searchBookings(initSearch)
+      .then(res => {
+        const d = res.data.data;
+        const results = d?.content || (Array.isArray(d) ? d : []);
+        setBookings(results);
+        setTotalPages(0);
+        // Auto-open the first matching booking
+        if (results.length > 0) {
+          const match = results.find(b => b.bookingRef === initSearch) || results[0];
+          openDetailModal(match);
+        }
+      })
+      .catch(() => { setBookings([]); setTotalPages(0); })
+      .finally(() => setLoading(false));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const switchTab = (key) => {
     setActiveTab(key);
@@ -470,6 +493,10 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
   const [refundReason, setRefundReason] = useState('');
   const [refunding, setRefunding] = useState(false);
   const [refundsByPayment, setRefundsByPayment] = useState({});
+  const [bookingReviews, setBookingReviews] = useState([]);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [savingAdminReview, setSavingAdminReview] = useState(false);
+  const [adminReviewForm, setAdminReviewForm] = useState({ rating: 5, comment: '' });
   const [actionLoading, setActionLoading] = useState(false);
   const [b, setB] = useState(initialBooking);
   // Check-in is only shown for bookings on the current operational date
@@ -597,6 +624,37 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
         .finally(() => setEventLogLoading(false));
     }
   }, [tab, b.bookingRef, eventLogPage]);
+
+  useEffect(() => {
+    if (tab !== 'reviews' || !b.bookingRef) return;
+    setReviewsLoading(true);
+    adminService.getBookingReviews(b.bookingRef)
+      .then((res) => setBookingReviews(res.data.data || []))
+      .catch(() => setBookingReviews([]))
+      .finally(() => setReviewsLoading(false));
+  }, [tab, b.bookingRef]);
+
+  const handleSaveAdminReview = async () => {
+    if (b.status !== 'COMPLETED') {
+      toast.error('Admin reviews are available only for completed bookings.');
+      return;
+    }
+    setSavingAdminReview(true);
+    try {
+      await adminService.submitBookingReview(b.bookingRef, {
+        rating: Number(adminReviewForm.rating || 5),
+        comment: adminReviewForm.comment,
+      });
+      const refreshed = await adminService.getBookingReviews(b.bookingRef);
+      setBookingReviews(refreshed.data.data || []);
+      setAdminReviewForm({ rating: 5, comment: '' });
+      toast.success('Admin review saved.');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to save admin review.');
+    } finally {
+      setSavingAdminReview(false);
+    }
+  };
 
   const handleReplayBooking = async () => {
     if (!confirm(`Rebuild CQRS projection for ${b.bookingRef}? This re-derives the booking state from its event log.`)) return;
@@ -952,6 +1010,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
         <button className={tabBtnStyle(tab === 'customer')} onClick={() => setTab('customer')}>Customer</button>
         <button className={tabBtnStyle(tab === 'reservation')} onClick={() => setTab('reservation')}>Reservation</button>
         <button className={tabBtnStyle(tab === 'payment')} onClick={() => setTab('payment')}>Payment</button>
+        <button className={tabBtnStyle(tab === 'reviews')} onClick={() => setTab('reviews')}>Reviews</button>
         <button className={tabBtnStyle(tab === 'eventLog')} onClick={() => setTab('eventLog')}>Event Log</button>
       </div>
 
@@ -972,7 +1031,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
           <div style={rowStyle}><span style={labelStyle}>Customer ID</span><span>{b.customerId || 'N/A'}</span></div>
           <div style={rowStyle}><span style={labelStyle}>Total Bookings</span><span>{bookingCount}</span></div>
 
-          {b.customerId && (
+          {b.customerId && isSuperAdmin && (
             <div style={{ marginTop: '0.8rem' }}>
               <button className="btn btn-secondary btn-sm" onClick={() => { onClose(); navigate(`/admin/users-config/${b.customerId}`); }}>
                 ✏️ Edit Customer Details
@@ -1271,7 +1330,43 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
       {tab === 'payment' && (
         <div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.75rem' }}>
-            <button className="btn btn-secondary btn-sm" onClick={() => window.print()} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+            <button className="btn btn-secondary btn-sm" onClick={() => {
+              const addOnsHtml = (b.addOns && b.addOns.length > 0) ? b.addOns.map(a =>
+                `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee">${DOMPurify.sanitize(a.name || a.addOnName || 'Add-on', { ALLOWED_TAGS: [] })}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right">x${a.quantity || 1}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right">₹${(a.price || 0).toLocaleString()}</td></tr>`
+              ).join('') : '';
+              const paymentsHtml = payments.length > 0 ? payments.map(p =>
+                `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee">${DOMPurify.sanitize(p.transactionId || '—', { ALLOWED_TAGS: [] })}</td><td style="padding:4px 8px;border-bottom:1px solid #eee">${(p.paymentMethod || '').replace('_',' ')}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right">₹${(p.amount || 0).toLocaleString()}</td><td style="padding:4px 8px;border-bottom:1px solid #eee"><span style="color:${p.status==='SUCCESS'?'green':'#e74c3c'}">${p.status}</span></td></tr>`
+              ).join('') : '<tr><td colspan="4" style="padding:8px;text-align:center;color:#888">No digital payment records</td></tr>';
+              const w = window.open('', '_blank', 'width=420,height=650');
+              if (!w) return;
+              w.document.write(`<!DOCTYPE html><html><head><title>Receipt - ${DOMPurify.sanitize(b.bookingRef, { ALLOWED_TAGS: [] })}</title><style>body{font-family:Arial,sans-serif;margin:0;padding:20px;color:#222;max-width:400px;margin:0 auto}h2{text-align:center;margin:0 0 4px}p.sub{text-align:center;color:#666;font-size:12px;margin:0 0 16px}hr{border:none;border-top:1px dashed #ccc;margin:12px 0}table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;padding:4px 8px;border-bottom:2px solid #333;font-size:12px}td{padding:4px 8px}tr.total td{border-top:2px solid #333;font-weight:700;font-size:14px}.footer{text-align:center;font-size:11px;color:#999;margin-top:20px}@media print{body{padding:10px}}</style></head><body>`
+              + `<h2>SK Binge Galaxy</h2><p class="sub">Booking Receipt</p><hr>`
+              + `<table><tr><td><strong>Ref:</strong></td><td>${DOMPurify.sanitize(b.bookingRef, { ALLOWED_TAGS: [] })}</td></tr>`
+              + `<tr><td><strong>Customer:</strong></td><td>${DOMPurify.sanitize(b.customerName || '—', { ALLOWED_TAGS: [] })}</td></tr>`
+              + `<tr><td><strong>Email:</strong></td><td>${DOMPurify.sanitize(b.customerEmail || '—', { ALLOWED_TAGS: [] })}</td></tr>`
+              + `<tr><td><strong>Event:</strong></td><td>${DOMPurify.sanitize(b.eventType?.name || b.eventTypeName || '—', { ALLOWED_TAGS: [] })}</td></tr>`
+              + `<tr><td><strong>Date:</strong></td><td>${b.bookingDate || '—'}</td></tr>`
+              + `<tr><td><strong>Time:</strong></td><td>${b.startTime || '—'} (${b.durationMinutes || b.durationHours * 60 || 0} min)</td></tr>`
+              + `<tr><td><strong>Guests:</strong></td><td>${b.numberOfGuests || 1}</td></tr>`
+              + `<tr><td><strong>Status:</strong></td><td>${b.status || '—'}</td></tr>`
+              + `</table><hr>`
+              + `<table><tr><th>Item</th><th style="text-align:right">Qty</th><th style="text-align:right">Amount</th></tr>`
+              + `<tr><td style="padding:4px 8px">Base Amount</td><td style="padding:4px 8px;text-align:right">—</td><td style="padding:4px 8px;text-align:right">₹${(b.baseAmount || 0).toLocaleString()}</td></tr>`
+              + (b.guestAmount > 0 ? `<tr><td style="padding:4px 8px">Guest Charges</td><td style="padding:4px 8px;text-align:right">—</td><td style="padding:4px 8px;text-align:right">₹${(b.guestAmount || 0).toLocaleString()}</td></tr>` : '')
+              + addOnsHtml
+              + `<tr class="total"><td colspan="2" style="padding:6px 8px">TOTAL</td><td style="padding:6px 8px;text-align:right">₹${(b.totalAmount || 0).toLocaleString()}</td></tr>`
+              + `</table><hr>`
+              + `<p style="font-size:12px;font-weight:600;margin-bottom:4px">Payment Details</p>`
+              + `<table><tr><th>Transaction</th><th>Method</th><th style="text-align:right">Amount</th><th>Status</th></tr>`
+              + paymentsHtml
+              + `</table>`
+              + (b.paymentMethod ? `<p style="font-size:12px;color:#666;margin-top:6px">Payment Method: ${DOMPurify.sanitize(b.paymentMethod.replace('_', ' '), { ALLOWED_TAGS: [] })}</p>` : '')
+              + (b.rateCodeName ? `<p style="font-size:12px;color:#666">Rate Code: ${DOMPurify.sanitize(b.rateCodeName, { ALLOWED_TAGS: [] })}</p>` : '')
+              + `<hr><p class="footer">Thank you for choosing SK Binge Galaxy!<br/>Generated: ${new Date().toLocaleString()}</p>`
+              + `</body></html>`);
+              w.document.close();
+              setTimeout(() => w.print(), 300);
+            }} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
               🖨️ Print Receipt
             </button>
           </div>
@@ -1495,6 +1590,58 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                 </div>
               )}
             </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'reviews' && (
+        <div>
+          {b.status !== 'COMPLETED' && (
+            <div className="ab-warning-banner" style={{ marginBottom: '0.75rem' }}>
+              Reviews become available after checkout is completed.
+            </div>
+          )}
+          <div style={{ marginBottom: '0.75rem', padding: '0.8rem', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-input)' }}>
+            <h4 style={{ marginBottom: '0.5rem' }}>Admin private review</h4>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+              <label style={labelStyle}>Rating</label>
+              <select value={adminReviewForm.rating} onChange={(e) => setAdminReviewForm((prev) => ({ ...prev, rating: Number(e.target.value) }))}>
+                <option value={5}>5</option>
+                <option value={4}>4</option>
+                <option value={3}>3</option>
+                <option value={2}>2</option>
+                <option value={1}>1</option>
+              </select>
+            </div>
+            <textarea
+              rows={3}
+              placeholder="Add private notes about this customer's completed event"
+              value={adminReviewForm.comment}
+              onChange={(e) => setAdminReviewForm((prev) => ({ ...prev, comment: e.target.value }))}
+            />
+            <div style={{ marginTop: '0.5rem' }}>
+              <button className="btn btn-primary btn-sm" disabled={savingAdminReview || b.status !== 'COMPLETED'} onClick={handleSaveAdminReview}>
+                {savingAdminReview ? 'Saving...' : 'Save Admin Review'}
+              </button>
+            </div>
+          </div>
+
+          {reviewsLoading ? (
+            <p style={{ color: 'var(--text-muted)' }}>Loading reviews...</p>
+          ) : bookingReviews.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)' }}>No reviews recorded yet for this booking.</p>
+          ) : (
+            bookingReviews.map((review) => (
+              <div key={review.id} style={{ marginBottom: '0.75rem', padding: '0.75rem', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }}>
+                <div style={{ ...rowStyle, borderBottom: 'none', padding: 0 }}>
+                  <span style={labelStyle}>{review.reviewerRole === 'CUSTOMER' ? 'Customer review' : 'Admin review'}</span>
+                  <span>{review.skipped ? 'Skipped' : `${review.rating || '-'} / 5`}</span>
+                </div>
+                <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
+                  {review.comment || 'No comment provided.'}
+                </div>
+              </div>
+            ))
           )}
         </div>
       )}

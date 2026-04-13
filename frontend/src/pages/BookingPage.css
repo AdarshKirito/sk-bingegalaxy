@@ -18,13 +18,13 @@
   padding: 1.6rem;
   background:
     radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.05), transparent 24%),
-    linear-gradient(145deg, rgba(var(--primary-rgb), 0.1), rgba(14, 165, 233, 0.04) 55%, var(--bg-card));
+    linear-gradient(145deg, rgba(var(--primary-rgb), 0.1), rgba(var(--accent-rgb), 0.04) 55%, var(--bg-card));
   box-shadow: 0 14px 30px rgba(var(--primary-rgb), 0.06), var(--shadow-sm);
 }
 
 [data-theme="dark"] .booking-shell-copy,
 [data-theme="dark"] .booking-shell-panel {
-  background: linear-gradient(145deg, rgba(37, 99, 235, 0.14), rgba(14, 165, 233, 0.08) 55%, var(--bg-card));
+  background: linear-gradient(145deg, rgba(var(--primary-rgb), 0.14), rgba(var(--accent-rgb), 0.08) 55%, var(--bg-card));
 }
 
 .booking-shell-copy::after,
@@ -34,7 +34,7 @@
   inset: auto -40px -60px auto;
   width: 180px;
   height: 180px;
-  background: radial-gradient(circle, rgba(56, 189, 248, 0.18), transparent 68%);
+  background: radial-gradient(circle, rgba(194, 158, 70, 0.12), transparent 68%);
   pointer-events: none;
 }
 
@@ -44,7 +44,7 @@
   position: absolute;
   inset: 0 0 auto;
   height: 1px;
-  background: linear-gradient(90deg, rgba(var(--primary-rgb), 0), rgba(var(--primary-rgb), 0.35), rgba(var(--accent-rgb), 0.18), rgba(var(--primary-rgb), 0));
+  background: linear-gradient(90deg, rgba(var(--primary-rgb), 0), rgba(var(--gold-rgb), 0.35), rgba(var(--accent-rgb), 0.18), rgba(var(--primary-rgb), 0));
 }
 
 .booking-shell-kicker,
@@ -58,8 +58,8 @@
   color: var(--primary);
   padding: 0.42rem 0.78rem;
   border-radius: 999px;
-  border: 1px solid rgba(var(--primary-rgb), 0.14);
-  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.08), rgba(var(--accent-rgb), 0.03));
+  border: 1px solid rgba(var(--gold-rgb), 0.18);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.08), rgba(var(--gold-rgb), 0.05));
 }
 
 .booking-shell-copy h1,

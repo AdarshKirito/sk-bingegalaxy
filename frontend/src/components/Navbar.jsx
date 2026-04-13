@@ -8,6 +8,7 @@ import {
   FiClock,
   FiCompass,
   FiCreditCard,
+  FiInfo,
   FiHome,
   FiLogOut,
   FiMapPin,
@@ -56,7 +57,7 @@ export default function Navbar() {
 
   const handleChangeBinge = () => {
     clearBinge();
-    navigate(effectiveIsAdmin ? '/admin/platform' : '/platform');
+    navigate(effectiveIsAdmin ? '/admin/platform' : '/binges');
   };
 
   const customerLinks = [
@@ -64,6 +65,7 @@ export default function Navbar() {
     { to: '/book', icon: <FiCalendar />, label: 'Book' },
     { to: '/my-bookings', icon: <FiCompass />, label: 'Bookings' },
     { to: '/payments', icon: <FiCreditCard />, label: 'Payments' },
+    { to: '/about', icon: <FiInfo />, label: 'About' },
   ];
 
   const adminConsoleLinks = [

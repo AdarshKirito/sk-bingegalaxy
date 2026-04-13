@@ -1,13 +1,15 @@
 package com.skbingegalaxy.booking.controller;
 
-import com.skbingegalaxy.booking.dto.BingeDto;
-import com.skbingegalaxy.booking.dto.BingeSaveRequest;
-import com.skbingegalaxy.booking.dto.CustomerDashboardExperienceDto;
+import com.skbingegalaxy.booking.dto.*;
 import com.skbingegalaxy.booking.service.BingeService;
+import com.skbingegalaxy.booking.service.BookingService;
 import com.skbingegalaxy.common.dto.ApiResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -25,6 +27,7 @@ import java.util.List;
 public class BingeController {
 
     private final BingeService bingeService;
+    private final BookingService bookingService;
 
     // ── Public: list all active binges (for user selection) ──
     @GetMapping("/binges")
@@ -41,6 +44,27 @@ public class BingeController {
     @GetMapping("/binges/{id}/customer-dashboard")
     public ResponseEntity<ApiResponse<CustomerDashboardExperienceDto>> getCustomerDashboardExperience(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.ok(bingeService.getCustomerDashboardExperience(id)));
+    }
+
+    @GetMapping("/binges/{id}/customer-about")
+    public ResponseEntity<ApiResponse<CustomerAboutExperienceDto>> getCustomerAboutExperience(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.ok(bingeService.getCustomerAboutExperience(id)));
+    }
+
+    // ── Public: binge review summary (avg rating, count, distribution) ──
+    @GetMapping("/binges/{id}/reviews/summary")
+    public ResponseEntity<ApiResponse<BingeReviewSummaryDto>> getBingeReviewSummary(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.getBingeReviewSummary(id)));
+    }
+
+    // ── Public: paginated customer reviews for a binge ──
+    @GetMapping("/binges/{id}/reviews")
+    public ResponseEntity<ApiResponse<Page<BookingReviewDto>>> getBingePublicReviews(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        return ResponseEntity.ok(ApiResponse.ok(
+            bookingService.getBingePublicReviews(id, PageRequest.of(page, Math.min(size, 50), Sort.by(Sort.Direction.DESC, "createdAt")))));
     }
 
     // ── Admin: list admin's binges ───────────────────────────
@@ -85,6 +109,14 @@ public class BingeController {
         return ResponseEntity.ok(ApiResponse.ok(bingeService.getAdminCustomerDashboardExperience(id, adminId, role)));
     }
 
+    @GetMapping("/admin/binges/{id}/customer-about")
+    public ResponseEntity<ApiResponse<CustomerAboutExperienceDto>> getAdminCustomerAboutExperience(
+            @PathVariable Long id,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        return ResponseEntity.ok(ApiResponse.ok(bingeService.getAdminCustomerAboutExperience(id, adminId, role)));
+    }
+
     @PutMapping("/admin/binges/{id}/customer-dashboard")
     public ResponseEntity<ApiResponse<CustomerDashboardExperienceDto>> updateCustomerDashboardExperience(
             @PathVariable Long id,
@@ -95,6 +127,17 @@ public class BingeController {
             "Customer dashboard experience updated",
             bingeService.updateCustomerDashboardExperience(id, request, adminId, role)));
     }
+
+            @PutMapping("/admin/binges/{id}/customer-about")
+            public ResponseEntity<ApiResponse<CustomerAboutExperienceDto>> updateCustomerAboutExperience(
+                @PathVariable Long id,
+                @Valid @RequestBody CustomerAboutExperienceDto request,
+                @RequestHeader("X-User-Id") Long adminId,
+                @RequestHeader("X-User-Role") String role) {
+            return ResponseEntity.ok(ApiResponse.ok(
+                "Customer about experience updated",
+                bingeService.updateCustomerAboutExperience(id, request, adminId, role)));
+            }
 
     // ── Admin: toggle active ─────────────────────────────────
     @PatchMapping("/admin/binges/{id}/toggle-active")

@@ -21,7 +21,7 @@
   border: 1px solid var(--border);
   background:
     radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.05), transparent 26%),
-    linear-gradient(150deg, rgba(var(--primary-rgb), 0.1), rgba(14, 165, 233, 0.04) 52%, var(--bg-card));
+    linear-gradient(150deg, rgba(var(--primary-rgb), 0.1), rgba(var(--accent-rgb), 0.04) 52%, var(--bg-card));
   box-shadow: 0 14px 32px rgba(var(--primary-rgb), 0.06), var(--shadow-sm);
 }
 
@@ -29,7 +29,7 @@
 [data-theme="dark"] .entrance-profile {
   background:
     radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.04), transparent 24%),
-    linear-gradient(150deg, rgba(var(--primary-rgb), 0.14), rgba(14, 165, 233, 0.08) 55%, var(--bg-card));
+    linear-gradient(150deg, rgba(var(--primary-rgb), 0.14), rgba(var(--accent-rgb), 0.08) 55%, var(--bg-card));
 }
 
 .entrance-welcome::before,
@@ -391,6 +391,61 @@
   border-color: var(--border);
   background: rgba(var(--primary-rgb), 0.03);
   color: var(--text-secondary);
+}
+
+/* ── About & Support (entrance) ────────────────────────────────────────── */
+.entrance-about-description {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  max-width: 72ch;
+}
+
+.entrance-about-contact {
+  margin-top: 0.75rem;
+  padding: 1rem;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  display: grid;
+  gap: 0.65rem;
+}
+
+.entrance-about-contact h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.entrance-about-contact-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.entrance-about-contact-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.88rem;
+  font-weight: 500;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.entrance-about-contact-item:hover {
+  border-color: var(--primary);
+  background: rgba(var(--primary-rgb), 0.06);
+}
+
+.entrance-about-hours {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--text-muted);
 }
 
 /* ── Responsive ────────────────────────────────────────────────────────── */

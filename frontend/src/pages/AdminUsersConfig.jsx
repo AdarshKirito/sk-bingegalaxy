@@ -522,7 +522,7 @@ export default function AdminUsersConfig() {
               {rateCodes.length === 0 ? (
                 <tr><td colSpan={5} className="ab-empty"><p>No rate codes</p></td></tr>
               ) : rateCodes.map(rc => (
-                <tr key={rc.id} onClick={() => navigate('/admin/rate-codes')} style={{ cursor: 'pointer' }} title="Click to manage rate codes">
+                <tr key={rc.id} onClick={() => navigate(`/admin/rate-codes?expand=${rc.id}`)} style={{ cursor: 'pointer' }} title="Click to view this rate code">
                   <td><strong style={{ color: 'var(--primary)' }}>{sanitize(rc.name)}</strong></td>
                   <td>{sanitize(rc.description || '—')}</td>
                   <td>
@@ -631,9 +631,14 @@ export default function AdminUsersConfig() {
                   <>
                     <div className="ab-detail-row">
                       <span className="ab-detail-label">Current Rate Code</span>
-                      <span className={cd.currentRateCodeName ? 'adm-badge adm-badge-info' : ''}>
-                        {cd.currentRateCodeName || 'None (base pricing)'}
-                      </span>
+                      {cd.currentRateCodeName ? (
+                        <span className="adm-badge adm-badge-info" style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                          onClick={() => navigate(`/admin/customer-pricing?customerId=${u.id}`)}>
+                          {cd.currentRateCodeName}
+                        </span>
+                      ) : (
+                        <span>None (base pricing)</span>
+                      )}
                     </div>
                     <div className="ab-detail-row">
                       <span className="ab-detail-label">Rate Code ID</span>

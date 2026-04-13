@@ -40,6 +40,12 @@ export interface Binge {
   name: string;
   location?: string;
   description?: string;
+  address?: string;
+  supportEmail?: string;
+  supportPhone?: string;
+  supportWhatsapp?: string;
+  customerCancellationEnabled?: boolean;
+  customerCancellationCutoffMinutes?: number;
   active?: boolean;
 }
 

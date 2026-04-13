@@ -232,7 +232,7 @@ export default function BookingConfirmation() {
             )}
             <Link to="/my-bookings" className="btn btn-secondary btn-sm">My Bookings</Link>
             <Link to="/payments" className="btn btn-secondary btn-sm">Payments</Link>
-            <button className="btn btn-secondary btn-sm" onClick={() => window.print()} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+            <button className="btn btn-secondary btn-sm" onClick={() => window.print()} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
               <FiPrinter /> Print Receipt
             </button>
           </div>

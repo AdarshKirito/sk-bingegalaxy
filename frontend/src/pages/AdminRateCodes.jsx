@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { adminService } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import { FiTrash2 } from 'react-icons/fi';
 
 export default function AdminRateCodes() {
+  const [searchParams] = useSearchParams();
   const [rateCodes, setRateCodes] = useState([]);
   const [eventTypes, setEventTypes] = useState([]);
   const [addOns, setAddOns] = useState([]);
@@ -26,6 +28,20 @@ export default function AdminRateCodes() {
   };
 
   useEffect(() => { load(); }, []);
+
+  /* Auto-expand rate code from URL param (e.g. ?expand=5) */
+  useEffect(() => {
+    const expandParam = searchParams.get('expand');
+    if (expandParam && rateCodes.length > 0) {
+      const id = Number(expandParam);
+      if (rateCodes.some(rc => rc.id === id)) {
+        setExpandedId(id);
+        setTimeout(() => {
+          document.getElementById(`rc-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 100);
+      }
+    }
+  }, [searchParams, rateCodes]);
 
   const openCreate = () => {
     setEditing(null);
@@ -241,7 +257,7 @@ export default function AdminRateCodes() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
           {rateCodes.map(rc => (
-            <div key={rc.id} className="card" style={{ padding: '1rem' }}>
+            <div key={rc.id} id={`rc-${rc.id}`} className="card" style={{ padding: '1rem', border: expandedId === rc.id ? '1px solid var(--primary)' : undefined }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
