@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { adminService, bookingService, paymentService } from '../services/endpoints';
 import { useAuth } from '../context/AuthContext';
@@ -79,6 +79,23 @@ export default function AdminBookings() {
 
   // Booking detail modal
   const [detailModal, setDetailModal] = useState({ open: false, booking: null, bookingCount: 0 });
+
+  // Double-tap guard for backdrop dismissal
+  const overlayTapCount = useRef(0);
+  const overlayTapTimer = useRef(null);
+  const handleOverlayDoubleTap = (e, closeFn) => {
+    // Only count clicks directly on the overlay, not child elements
+    if (e.target !== e.currentTarget) return;
+    overlayTapCount.current += 1;
+    if (overlayTapCount.current >= 2) {
+      overlayTapCount.current = 0;
+      clearTimeout(overlayTapTimer.current);
+      closeFn();
+    } else {
+      clearTimeout(overlayTapTimer.current);
+      overlayTapTimer.current = setTimeout(() => { overlayTapCount.current = 0; }, 600);
+    }
+  };
 
   const fetchStats = useCallback(() => {
     adminService.getDashboardStats()
@@ -429,7 +446,7 @@ export default function AdminBookings() {
 
       {/* Booking Detail Modal (Editable) */}
       {detailModal.open && detailModal.booking && (
-        <div className="ab-modal-overlay" onClick={() => setDetailModal({ open: false, booking: null, bookingCount: 0 })}>
+        <div className="ab-modal-overlay" onClick={(e) => handleOverlayDoubleTap(e, () => setDetailModal({ open: false, booking: null, bookingCount: 0 }))}>
           <div className="card ab-modal-card"
                onClick={e => e.stopPropagation()}>
             <div className="ab-modal-header">
@@ -777,7 +794,12 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
   // ── Change payment method (refund old + record new) ────────
   const handleChangeMethod = async (payment) => {
     const remaining = payment.remainingRefundable ?? payment.amount;
-    if (!confirm(`Change payment method from ${payment.paymentMethod} to ${changeMethodNewMethod}?\n\nThis will refund ₹${remaining.toLocaleString()} and re-record with the new method.`)) return;
+    const confirmMsg = `Change payment method from ${payment.paymentMethod} to ${changeMethodNewMethod}?\n\n` +
+      `⚠️ This will:\n` +
+      `  1. Refund ₹${remaining.toLocaleString()} from the original ${payment.paymentMethod.replace('_', ' ')} payment\n` +
+      `  2. Record a new ₹${remaining.toLocaleString()} ${changeMethodNewMethod} payment\n\n` +
+      `Net effect: ₹0 change to balance (method swap only).\nContinue?`;
+    if (!confirm(confirmMsg)) return;
     setChangingMethod(true);
     try {
       await adminService.initiateRefund({
@@ -1437,11 +1459,16 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                         }}>
                         💳 {(p.remainingRefundable ?? p.amount) <= 0 ? 'Fully Refunded' : 'Refund Payment'}
                       </button>
-                      {(p.remainingRefundable ?? p.amount) > 0 && (
+                      {(p.remainingRefundable ?? p.amount) > 0 && b.status !== 'COMPLETED' && b.status !== 'CANCELLED' && b.status !== 'NO_SHOW' && (
                         <button className="btn btn-sm btn-secondary"
                           onClick={() => { setChangeMethodFor(changeMethodFor === p.id ? null : p.id); setChangeMethodNewMethod('CASH'); }}>
                           ⇄ Change Method
                         </button>
+                      )}
+                      {(p.remainingRefundable ?? p.amount) > 0 && (b.status === 'COMPLETED' || b.status === 'CANCELLED' || b.status === 'NO_SHOW') && (
+                        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                          Method change unavailable — booking is {b.status.replace('_', ' ').toLowerCase()}
+                        </span>
                       )}
                       {p.totalRefunded > 0 && (
                         <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
@@ -1654,32 +1681,84 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
             <p className="ab-event-log-empty">No events recorded for this booking</p>
           ) : (
             <>
-              {eventLog.map((evt, idx) => (
-                <div key={idx} className="ab-event-log-entry">
-                  <div className="ab-event-log-header">
-                    <span className="ab-event-log-type">{evt.eventType?.replace(/_/g, ' ')}</span>
-                    <span className="ab-event-log-time">
-                      {evt.createdAt ? new Date(evt.createdAt).toLocaleString() : ''}
-                    </span>
-                  </div>
-                  {(evt.previousStatus || evt.newStatus) && (
-                    <div className="ab-event-log-status">
-                      {evt.previousStatus && <span>{evt.previousStatus}</span>}
-                      {evt.previousStatus && evt.newStatus && <span> → </span>}
-                      {evt.newStatus && <strong>{evt.newStatus}</strong>}
+              {eventLog.map((evt, idx) => {
+                // Format event type into human-readable action
+                const eventAction = (() => {
+                  const type = evt.eventType || '';
+                  const map = {
+                    BOOKING_CREATED: 'Booking Created',
+                    BOOKING_CONFIRMED: 'Booking Confirmed',
+                    BOOKING_CANCELLED: 'Booking Cancelled',
+                    BOOKING_CHECKED_IN: 'Customer Checked In',
+                    BOOKING_CHECKED_OUT: 'Customer Checked Out',
+                    BOOKING_COMPLETED: 'Booking Completed',
+                    BOOKING_UPDATED: 'Booking Updated',
+                    BOOKING_REINSTATED: 'Booking Reinstated',
+                    PAYMENT_INITIATED: 'Payment Initiated',
+                    PAYMENT_SUCCESS: 'Payment Successful',
+                    PAYMENT_FAILED: 'Payment Failed',
+                    PAYMENT_REFUNDED: 'Payment Refunded',
+                    PAYMENT_PARTIALLY_REFUNDED: 'Partial Refund Issued',
+                    PAYMENT_METHOD_CHANGED: 'Payment Method Changed',
+                    CASH_PAYMENT_RECORDED: 'Cash Payment Recorded',
+                    NO_SHOW: 'Marked as No-Show',
+                    PRICE_ADJUSTED: 'Price Adjusted',
+                    UNDO_CHECK_IN: 'Check-In Undone',
+                    NOTIFICATION_SENT: 'Notification Sent',
+                    NOTIFICATION_FAILED: 'Notification Failed',
+                  };
+                  return map[type] || type.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+                })();
+
+                // Build clear "who did what" message
+                const actor = evt.triggeredBy || 'System';
+                const role = evt.triggeredByRole ? `(${evt.triggeredByRole.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase())})` : '';
+                const whoLine = `${actor} ${role}`.trim();
+
+                // Format timestamp in browser local time
+                const localTime = evt.createdAt
+                  ? new Date(evt.createdAt).toLocaleString(undefined, {
+                      year: 'numeric', month: 'short', day: 'numeric',
+                      hour: '2-digit', minute: '2-digit', second: '2-digit',
+                    })
+                  : '';
+
+                // Build change summary
+                const changeSummary = (() => {
+                  const parts = [];
+                  if (evt.previousStatus && evt.newStatus) {
+                    parts.push(`Status: ${evt.previousStatus.replace(/_/g, ' ')} → ${evt.newStatus.replace(/_/g, ' ')}`);
+                  } else if (evt.newStatus) {
+                    parts.push(`Status set to: ${evt.newStatus.replace(/_/g, ' ')}`);
+                  }
+                  if (evt.description) {
+                    parts.push(DOMPurify.sanitize(evt.description, { ALLOWED_TAGS: [] }));
+                  }
+                  return parts;
+                })();
+
+                return (
+                  <div key={idx} className="ab-event-log-entry">
+                    <div className="ab-event-log-header">
+                      <span className="ab-event-log-type">{eventAction}</span>
+                      <span className="ab-event-log-time" title={evt.createdAt || ''}>
+                        {localTime}
+                      </span>
                     </div>
-                  )}
-                  {evt.description && (
-                    <div className="ab-event-log-desc">
-                      {DOMPurify.sanitize(evt.description, { ALLOWED_TAGS: [] })}
+                    {changeSummary.length > 0 && (
+                      <div className="ab-event-log-desc">
+                        {changeSummary.map((line, i) => (
+                          <div key={i}>{line}</div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="ab-event-log-meta">
+                      Modified by: <strong>{whoLine}</strong>
+                      {evt.eventVersion ? ` · revision v${evt.eventVersion}` : ''}
                     </div>
-                  )}
-                  <div className="ab-event-log-meta">
-                    by {evt.triggeredBy || 'system'} ({evt.triggeredByRole || 'SYSTEM'})
-                    {evt.eventVersion ? ` • v${evt.eventVersion}` : ''}
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {eventLogTotal > 1 && (
                 <div className="ab-event-log-pagination">
                   <button className="btn btn-secondary btn-sm" disabled={eventLogPage <= 0} onClick={() => setEventLogPage(p => p - 1)}>← Prev</button>

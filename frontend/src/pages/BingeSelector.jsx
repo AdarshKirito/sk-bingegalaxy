@@ -4,11 +4,34 @@ import { bookingService } from '../services/endpoints';
 import { useBinge } from '../context/BingeContext';
 import { toast } from 'react-toastify';
 import SEO from '../components/SEO';
-import { FiArrowRight, FiCompass, FiMapPin, FiSearch } from 'react-icons/fi';
+import { FiArrowRight, FiCompass, FiMapPin, FiSearch, FiStar } from 'react-icons/fi';
 import './CustomerHub.css';
+
+// Render star icons based on average rating
+function StarRating({ avg, count }) {
+  const rounded = Math.round((avg || 0) * 2) / 2; // round to 0.5
+  const stars = [];
+  for (let i = 1; i <= 5; i++) {
+    if (i <= rounded) {
+      stars.push(<FiStar key={i} style={{ fill: 'var(--gold, #c29e46)', color: 'var(--gold, #c29e46)', width: 14, height: 14 }} />);
+    } else if (i - 0.5 === rounded) {
+      stars.push(<FiStar key={i} style={{ color: 'var(--gold, #c29e46)', width: 14, height: 14 }} />);
+    } else {
+      stars.push(<FiStar key={i} style={{ color: 'var(--border-hover, #ccc)', width: 14, height: 14 }} />);
+    }
+  }
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+      {stars}
+      <strong style={{ fontSize: '0.82rem', color: 'var(--text)' }}>{avg ? avg.toFixed(1) : '—'}</strong>
+      <span>({count || 0} review{count === 1 ? '' : 's'})</span>
+    </span>
+  );
+}
 
 export default function BingeSelector() {
   const [binges, setBinges] = useState([]);
+  const [reviewSummaries, setReviewSummaries] = useState({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const { selectBinge } = useBinge();
@@ -18,7 +41,19 @@ export default function BingeSelector() {
     (async () => {
       try {
         const res = await bookingService.getAllActiveBinges();
-        setBinges(res.data.data || res.data || []);
+        const bingeList = res.data.data || res.data || [];
+        setBinges(bingeList);
+        // Fetch review summaries for all binges in parallel
+        const summaries = {};
+        await Promise.allSettled(
+          bingeList.map(async (b) => {
+            try {
+              const r = await bookingService.getBingeReviewSummary(b.id);
+              summaries[b.id] = r.data.data || r.data || {};
+            } catch { summaries[b.id] = {}; }
+          })
+        );
+        setReviewSummaries(summaries);
       } catch (err) {
         toast.error('Failed to load venues');
       } finally {
@@ -105,6 +140,10 @@ export default function BingeSelector() {
                 <span className="customer-flow-kicker">Venue option</span>
                 <h3>{binge.name}</h3>
                 <p>{binge.address || 'Private-screening location ready for bookings.'}</p>
+                <StarRating
+                  avg={reviewSummaries[binge.id]?.averageRating}
+                  count={reviewSummaries[binge.id]?.totalReviews}
+                />
               </div>
               <button type="button" className="btn btn-primary btn-sm">
                 Select <FiArrowRight />

@@ -201,9 +201,9 @@
 .nav-admin-console {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0 0.25rem 0.8rem;
+  justify-content: center;
+  gap: 1rem;
+  padding: 0 1rem 0.8rem;
 }
 
 .nav-admin-meta {

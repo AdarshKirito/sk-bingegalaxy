@@ -66,6 +66,15 @@
   margin-bottom: 0.65rem;
 }
 
+.customer-hub-highlight h2 {
+  font-size: 1.1rem;
+  line-height: 1.35;
+}
+
+.customer-hub-highlight p {
+  font-size: 0.85rem;
+}
+
 .customer-hub-copy p,
 .customer-hub-highlight p,
 .customer-hub-stat p,

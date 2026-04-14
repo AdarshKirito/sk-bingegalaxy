@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { adminService } from '../services/endpoints';
+import { adminService, bookingService } from '../services/endpoints';
 import {
   createDashboardSlide,
   DASHBOARD_LAYOUT_OPTIONS,
@@ -16,8 +16,24 @@ import {
 } from '../services/aboutExperience';
 import { useBinge } from '../context/BingeContext';
 import { toast } from 'react-toastify';
-import { FiActivity, FiArrowRight, FiCompass, FiEdit2, FiMapPin, FiPlus, FiToggleLeft, FiToggleRight, FiTrash2, FiUpload, FiX } from 'react-icons/fi';
+import { FiActivity, FiArrowRight, FiCompass, FiEdit2, FiMapPin, FiPlus, FiStar, FiToggleLeft, FiToggleRight, FiTrash2, FiUpload, FiX } from 'react-icons/fi';
 import './AdminPages.css';
+
+function StarRating({ avg, count }) {
+  const rounded = Math.round((avg || 0) * 2) / 2;
+  const stars = [];
+  for (let i = 1; i <= 5; i++) {
+    if (i <= rounded) stars.push(<FiStar key={i} style={{ fill: '#f59e0b', color: '#f59e0b', verticalAlign: '-2px' }} />);
+    else if (i - 0.5 === rounded) stars.push(<FiStar key={i} style={{ fill: '#f59e0b', color: '#f59e0b', opacity: 0.5, verticalAlign: '-2px' }} />);
+    else stars.push(<FiStar key={i} style={{ color: '#d1d5db', verticalAlign: '-2px' }} />);
+  }
+  return (
+    <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.85rem', margin: '4px 0' }}>
+      {stars} <strong style={{ marginLeft: 2 }}>{(avg || 0).toFixed(1)}</strong>
+      <span style={{ color: '#888' }}>({count || 0})</span>
+    </span>
+  );
+}
 
 export default function BingeManagement() {
   const emptyForm = {
@@ -30,6 +46,7 @@ export default function BingeManagement() {
     customerCancellationCutoffMinutes: 180,
   };
   const [binges, setBinges] = useState([]);
+  const [reviewSummaries, setReviewSummaries] = useState({});
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
@@ -48,7 +65,19 @@ export default function BingeManagement() {
   const fetchBinges = async () => {
     try {
       const res = await adminService.getAdminBinges();
-      setBinges(res.data.data || res.data || []);
+      const list = res.data.data || res.data || [];
+      setBinges(list);
+      // Fetch review summaries
+      const summaries = {};
+      await Promise.allSettled(
+        list.map(async (b) => {
+          try {
+            const r = await bookingService.getBingeReviewSummary(b.id);
+            summaries[b.id] = r.data.data || r.data || {};
+          } catch { summaries[b.id] = {}; }
+        })
+      );
+      setReviewSummaries(summaries);
     } catch (err) {
       toast.error('Failed to load binges');
     } finally {
@@ -792,6 +821,9 @@ export default function BingeManagement() {
               <div className="adm-venue-card-copy">
                 <h3>{b.name}</h3>
                 <p>{b.address || 'Add an address so the venue reads clearly across staff and customer workflows.'}</p>
+                {reviewSummaries[b.id]?.averageRating > 0 && (
+                  <StarRating avg={reviewSummaries[b.id].averageRating} count={reviewSummaries[b.id].totalReviews} />
+                )}
               </div>
 
               <p className="adm-venue-card-note">

@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react';
 
 export default function Modal({ open, onClose, title, children, style }) {
   const dialogRef = useRef(null);
+  const backdropClickCount = useRef(0);
+  const backdropTimer = useRef(null);
 
   useEffect(() => {
     if (!dialogRef.current) return;
@@ -17,14 +19,36 @@ export default function Modal({ open, onClose, title, children, style }) {
     if (!dialog) return;
     const handleCancel = (e) => {
       e.preventDefault();
-      onClose?.();
+      // Require double-press of Escape to close
+      backdropClickCount.current += 1;
+      if (backdropClickCount.current >= 2) {
+        backdropClickCount.current = 0;
+        clearTimeout(backdropTimer.current);
+        onClose?.();
+      } else {
+        clearTimeout(backdropTimer.current);
+        backdropTimer.current = setTimeout(() => { backdropClickCount.current = 0; }, 600);
+      }
     };
     dialog.addEventListener('cancel', handleCancel);
-    return () => dialog.removeEventListener('cancel', handleCancel);
+    return () => {
+      dialog.removeEventListener('cancel', handleCancel);
+      clearTimeout(backdropTimer.current);
+    };
   }, [onClose]);
 
   const handleBackdropClick = (e) => {
-    if (e.target === dialogRef.current) onClose?.();
+    if (e.target !== dialogRef.current) return;
+    // Require double-tap on backdrop to close
+    backdropClickCount.current += 1;
+    if (backdropClickCount.current >= 2) {
+      backdropClickCount.current = 0;
+      clearTimeout(backdropTimer.current);
+      onClose?.();
+    } else {
+      clearTimeout(backdropTimer.current);
+      backdropTimer.current = setTimeout(() => { backdropClickCount.current = 0; }, 600);
+    }
   };
 
   if (!open) return null;

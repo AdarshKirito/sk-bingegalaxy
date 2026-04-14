@@ -17,8 +17,31 @@ import {
   FiClock,
   FiMessageCircle,
   FiInfo,
+  FiStar,
 } from 'react-icons/fi';
 import './Entrance.css';
+
+// Render star icons based on average rating
+function StarRating({ avg, count }) {
+  const rounded = Math.round((avg || 0) * 2) / 2;
+  const stars = [];
+  for (let i = 1; i <= 5; i++) {
+    if (i <= rounded) {
+      stars.push(<FiStar key={i} style={{ fill: 'var(--gold, #c29e46)', color: 'var(--gold, #c29e46)', width: 14, height: 14 }} />);
+    } else if (i - 0.5 === rounded) {
+      stars.push(<FiStar key={i} style={{ color: 'var(--gold, #c29e46)', width: 14, height: 14 }} />);
+    } else {
+      stars.push(<FiStar key={i} style={{ color: 'var(--border-hover, #ccc)', width: 14, height: 14 }} />);
+    }
+  }
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
+      {stars}
+      <strong style={{ fontSize: '0.82rem', color: 'var(--text)' }}>{avg ? avg.toFixed(1) : '—'}</strong>
+      <span>({count || 0} review{count === 1 ? '' : 's'})</span>
+    </span>
+  );
+}
 
 const RECENT_BINGES_KEY = 'sk-recent-binges';
 const MAX_RECENT = 3;
@@ -41,6 +64,7 @@ export default function PlatformDashboard() {
   const { selectBinge, clearBinge } = useBinge();
   const navigate = useNavigate();
   const [binges, setBinges] = useState([]);
+  const [reviewSummaries, setReviewSummaries] = useState({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [supportContact, setSupportContact] = useState(CUSTOMER_SUPPORT);
@@ -57,8 +81,20 @@ export default function PlatformDashboard() {
           bookingService.getAllActiveBinges(),
           authService.getSupportContact(),
         ]);
-        if (bingeRes.status === 'fulfilled') setBinges(bingeRes.value.data.data || bingeRes.value.data || []);
+        const bingeList = bingeRes.status === 'fulfilled' ? (bingeRes.value.data.data || bingeRes.value.data || []) : [];
+        setBinges(bingeList);
         if (supportRes.status === 'fulfilled') setSupportContact(mergeSupportContact(supportRes.value.data.data));
+        // Fetch review summaries for all binges
+        const summaries = {};
+        await Promise.allSettled(
+          bingeList.map(async (b) => {
+            try {
+              const r = await bookingService.getBingeReviewSummary(b.id);
+              summaries[b.id] = r.data.data || r.data || {};
+            } catch { summaries[b.id] = {}; }
+          })
+        );
+        setReviewSummaries(summaries);
       } catch {
         toast.error('Failed to load venues');
       } finally {
@@ -167,6 +203,9 @@ export default function PlatformDashboard() {
                 <span className="entrance-kicker"><FiClock /> Recent</span>
                 <h3>{binge.name}</h3>
                 {binge.address && <p>{binge.address}</p>}
+                {reviewSummaries[binge.id]?.averageRating > 0 && (
+                  <StarRating avg={reviewSummaries[binge.id].averageRating} count={reviewSummaries[binge.id].totalReviews} />
+                )}
                 <span className="btn btn-primary btn-sm entrance-venue-enter">
                   Enter <FiArrowRight />
                 </span>
@@ -220,6 +259,9 @@ export default function PlatformDashboard() {
                 <span className="entrance-kicker"><FiMapPin /> Venue</span>
                 <h3>{binge.name}</h3>
                 {binge.address && <p>{binge.address}</p>}
+                {reviewSummaries[binge.id]?.averageRating > 0 && (
+                  <StarRating avg={reviewSummaries[binge.id].averageRating} count={reviewSummaries[binge.id].totalReviews} />
+                )}
                 <span className="btn btn-primary btn-sm entrance-venue-enter">
                   Enter <FiArrowRight />
                 </span>

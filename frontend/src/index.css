@@ -528,12 +528,177 @@ td,
 
 /* Print styles */
 @media print {
-  nav, .Toastify__toast-container, .navbar, .sidebar, .btn, button,
-  .customer-flow-stagebar, .customer-flow-inline, .ab-modal-overlay > .ab-modal-close,
-  .ab-filter-row, .ab-tabs { display: none !important; }
-  body { background: #fff !important; color: #000 !important; }
+  /* Hide non-printable UI chrome */
+  nav, .Toastify__toast-container, .navbar, .sidebar,
+  .customer-flow-stagebar, .customer-flow-inline,
+  .customer-flow-actions, .customer-flow-actions-left,
+  .customer-flow-step-list, .customer-flow-card-span,
+  .ab-modal-overlay > .ab-modal-close,
+  .ab-filter-row, .ab-tabs,
+  .menu-overlay, .hamburger-btn { display: none !important; }
+
+  /* Only hide buttons that are NOT .print-keep */
+  .btn:not(.print-keep), button:not(.print-keep) { display: none !important; }
+
+  body {
+    background: #fff !important;
+    color: #000 !important;
+    font-size: 12pt !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .container { max-width: 100% !important; padding: 0 !important; }
+
+  /* ── Receipt-specific layout ─────────────────────────── */
+  .customer-flow-shell {
+    padding: 0 !important;
+    gap: 0 !important;
+  }
+
+  .customer-flow-hero {
+    display: block !important;
+    page-break-inside: avoid;
+  }
+
+  .customer-flow-hero .customer-flow-copy {
+    background: none !important;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+  }
+
+  .customer-flow-hero .customer-flow-copy::before { display: none !important; }
+
+  .customer-flow-copy .customer-flow-kicker { display: none !important; }
+
+  .customer-flow-copy h1 {
+    font-size: 14pt !important;
+    margin-bottom: 0.3rem !important;
+  }
+
+  .customer-flow-copy p { font-size: 10pt !important; color: #444 !important; }
+
+  .customer-flow-summary {
+    background: none !important;
+    box-shadow: none !important;
+    border: 1px solid #ccc !important;
+    border-radius: 6px !important;
+    padding: 0.75rem !important;
+    margin-top: 0.5rem !important;
+    page-break-inside: avoid;
+  }
+
+  .customer-flow-summary::before { display: none !important; }
+
+  .customer-flow-summary .customer-flow-kicker {
+    border: none !important;
+    background: none !important;
+    padding: 0 !important;
+    font-size: 9pt !important;
+    color: #666 !important;
+  }
+
+  .customer-flow-summary h2 { font-size: 13pt !important; }
+  .customer-flow-summary strong { font-size: 14pt !important; color: #000 !important; }
+
+  .customer-flow-badges .badge {
+    border: 1px solid #999 !important;
+    background: #f5f5f5 !important;
+    color: #000 !important;
+    font-size: 9pt !important;
+  }
+
+  .customer-flow-fact-grid {
+    gap: 0.3rem !important;
+  }
+
+  .customer-flow-grid {
+    display: block !important;
+  }
+
+  .customer-flow-card {
+    background: none !important;
+    box-shadow: none !important;
+    border: 1px solid #ddd !important;
+    border-radius: 6px !important;
+    padding: 0.75rem !important;
+    margin-bottom: 0.5rem !important;
+    page-break-inside: avoid;
+  }
+
+  .customer-flow-card::before { display: none !important; }
+
+  .customer-flow-card-head {
+    margin-bottom: 0.5rem !important;
+  }
+
+  .customer-flow-card-head h2 { font-size: 11pt !important; }
+  .customer-flow-card-head p { font-size: 9pt !important; }
+  .customer-flow-section-label { font-size: 8pt !important; }
+
+  .customer-flow-detail-grid {
+    gap: 0.2rem !important;
+  }
+
+  .customer-flow-detail-item {
+    background: none !important;
+    border: none !important;
+    padding: 0.2rem 0 !important;
+    font-size: 10pt !important;
+  }
+
+  .customer-flow-list {
+    gap: 0 !important;
+  }
+
+  .customer-flow-row {
+    padding: 0.15rem 0 !important;
+    font-size: 10pt !important;
+  }
+
+  .customer-flow-total {
+    border-top: 2px solid #000 !important;
+    font-size: 12pt !important;
+    padding-top: 0.3rem !important;
+  }
+
+  .customer-flow-note {
+    font-size: 9pt !important;
+    border: 1px solid #ccc !important;
+    background: #fafafa !important;
+    padding: 0.4rem !important;
+  }
+
+  .customer-booking-ref { font-size: 9pt !important; }
+
+  /* Admin modal receipt */
   .ab-modal-overlay { position: static !important; background: none !important; overflow: visible !important; }
   .ab-modal { box-shadow: none !important; border: none !important; max-height: none !important; overflow: visible !important; }
+
+  /* Header branding for receipt */
+  .customer-flow-shell::before {
+    content: 'SK Binge Galaxy — Booking Receipt';
+    display: block !important;
+    text-align: center;
+    font-size: 16pt;
+    font-weight: 700;
+    padding-bottom: 0.5rem;
+    margin-bottom: 0.5rem;
+    border-bottom: 2px solid #000;
+  }
+
+  /* Footer */
+  .customer-flow-shell::after {
+    content: 'Thank you for choosing SK Binge Galaxy! • Printed: ' attr(data-print-date);
+    display: block !important;
+    text-align: center;
+    font-size: 8pt;
+    color: #888;
+    margin-top: 1rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid #ccc;
+  }
 }
 
 /* Pagination */
