@@ -127,6 +127,59 @@ public class Booking {
     @Column(length = 100)
     private String rateCodeName;      // snapshot of rate code name at booking time
 
+    // ── Reschedule tracking ──────────────────────────────────
+    @Column(nullable = false)
+    @Builder.Default
+    private int rescheduleCount = 0;
+
+    /** Reference to the original booking if this is a rescheduled slot. */
+    @Column(length = 20)
+    private String originalBookingRef;
+
+    // ── Transfer tracking ────────────────────────────────────
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean transferred = false;
+
+    /** Customer ID of the original booker before transfer. */
+    private Long originalCustomerId;
+
+    /** Name of the original booker before transfer. */
+    @Column(length = 150)
+    private String originalCustomerName;
+
+    // ── Recurring booking group ──────────────────────────────
+    /** Shared group identifier linking all bookings in one recurring series. */
+    @Column(length = 40)
+    private String recurringGroupId;
+
+    // ── Venue room assignment ────────────────────────────────
+    /** Selected venue room ID (null = no room preference). */
+    private Long venueRoomId;
+
+    /** Snapshot of the room name at booking time. */
+    @Column(length = 100)
+    private String venueRoomName;
+
+    // ── Loyalty points ───────────────────────────────────────
+    @Column(nullable = false)
+    @Builder.Default
+    private long loyaltyPointsEarned = 0;
+
+    @Column(nullable = false)
+    @Builder.Default
+    private long loyaltyPointsRedeemed = 0;
+
+    @Column(precision = 10, scale = 2)
+    private java.math.BigDecimal loyaltyDiscountAmount;
+
+    // ── Surge pricing snapshot ───────────────────────────────
+    @Column(precision = 5, scale = 2)
+    private java.math.BigDecimal surgeMultiplier;
+
+    @Column(length = 100)
+    private String surgeLabel;
+
     @CreationTimestamp
     @Column(updatable = false)
     private LocalDateTime createdAt;

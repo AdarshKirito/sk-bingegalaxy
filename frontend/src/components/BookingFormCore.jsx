@@ -62,8 +62,8 @@ export default function BookingFormCore({ form, setForm, isAdmin = false }) {
     const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
     const bookedHalfHours = new Set();
     bookedSlots.forEach(bs => {
-      const start = bs.startMinute != null ? bs.startMinute : bs.startHour * 60;
-      const dur = bs.durationMinutes != null ? bs.durationMinutes : bs.durationHours * 60;
+      const start = bs.startMinute != null ? bs.startMinute : 0;
+      const dur = bs.durationMinutes != null ? bs.durationMinutes : (bs.durationHours || 0) * 60;
       for (let m = start; m < start + dur; m += 30) bookedHalfHours.add(Math.floor(m / 30));
     });
     const slots = [];
@@ -72,7 +72,7 @@ export default function BookingFormCore({ form, setForm, isAdmin = false }) {
       let allAvailable = true;
       for (let m = startMin; m < startMin + durMin; m += 30) {
         const slot = rawSlots.find(s => {
-          const sm = s.startMinute != null ? s.startMinute : s.startHour * 60;
+          const sm = s.startMinute != null ? s.startMinute : 0;
           return sm === m;
         });
         if (!slot || !slot.available || bookedHalfHours.has(Math.floor(m / 30))) { allAvailable = false; break; }

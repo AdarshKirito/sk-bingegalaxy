@@ -1279,3 +1279,50 @@
     align-self: flex-start;
   }
 }
+
+/* ── Modal overlay (customer-facing reschedule/transfer) ── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  animation: modal-fade-in 0.2s ease;
+}
+.modal-overlay .modal-content {
+  position: relative;
+  max-height: 90vh;
+  overflow-y: auto;
+  border-radius: 20px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.25);
+  animation: modal-slide-up 0.25s ease;
+}
+.modal-overlay .modal-content h2 { margin: 0; }
+.modal-overlay .modal-content label span {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+.modal-overlay .modal-content .form-control {
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.95rem;
+  background: var(--bg);
+  color: var(--text);
+}
+.modal-overlay .modal-content .form-control:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+@keyframes modal-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modal-slide-up {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@media (max-width: 600px) {
+  .modal-overlay .modal-content { margin: 1rem; max-width: 100% !important; }
+}

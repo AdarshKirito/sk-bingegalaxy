@@ -19,6 +19,11 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      observation-enabled: true
+    listener:
+      observation-enabled: true
+    template:
+      observation-enabled: true
   mail:
     host: ${EMAIL_HOST:smtp.gmail.com}
     port: ${EMAIL_PORT:587}
@@ -53,6 +58,26 @@ logging:
   level:
     com.skbingegalaxy.notification: WARN
 
+# ── Resilience4j Circuit Breaker ─────────────────────────
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 60s
+        permitted-number-of-calls-in-half-open-state: 3
+        slow-call-duration-threshold: 10s
+        slow-call-rate-threshold: 80
+        register-health-indicator: true
+    instances:
+      smtp:
+        base-config: default
+      sms:
+        base-config: default
+      push:
+        base-config: default
+
 eureka:
   instance:
     prefer-ip-address: true
@@ -61,13 +86,15 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,prometheus,metrics
+        include: health,info,prometheus,metrics,circuitbreakers
   endpoint:
     health:
       show-details: when-authorized
       probes:
         enabled: true
   health:
+    circuitbreakers:
+      enabled: true
     livenessstate:
       enabled: true
     readinessstate:

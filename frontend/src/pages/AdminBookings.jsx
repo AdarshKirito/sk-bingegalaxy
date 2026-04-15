@@ -5,6 +5,8 @@ import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
 import DOMPurify from 'dompurify';
 import Pagination from '../components/ui/Pagination';
+import { exportBookingsCSV, exportBookingsPDF } from '../services/exportUtils';
+import { FiDownload } from 'react-icons/fi';
 import './AdminBookings.css';
 
 const TABS = [
@@ -317,6 +319,14 @@ export default function AdminBookings() {
       <div className="page-header" style={{ marginBottom: '0.5rem' }}>
         <h1>Manage Bookings</h1>
         <p>Manage all reservations, check-ins, and payments</p>
+        <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => bookings.length ? exportBookingsCSV(bookings) : toast.warn('No bookings to export')} title="Export CSV">
+            <FiDownload size={14} /> CSV
+          </button>
+          <button className="btn btn-secondary btn-sm" onClick={() => bookings.length ? exportBookingsPDF(bookings, `${activeTab} bookings`) : toast.warn('No bookings to export')} title="Export PDF">
+            <FiDownload size={14} /> PDF
+          </button>
+        </div>
       </div>
 
       {/* Operational Date Banner + Today Stats Cards */}

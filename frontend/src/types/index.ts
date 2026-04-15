@@ -118,14 +118,12 @@ export interface AvailableDate {
 
 export interface TimeSlot {
   startMinute?: number;
-  startHour?: number;
   available: boolean;
 }
 
 export interface BookedSlot {
   bookingRef?: string;
   startMinute?: number;
-  startHour?: number;
   durationMinutes?: number;
   durationHours?: number;
 }

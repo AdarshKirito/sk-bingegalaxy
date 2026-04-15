@@ -37,6 +37,7 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      observation-enabled: true
     consumer:
       group-id: booking-group
       auto-offset-reset: earliest
@@ -44,6 +45,10 @@ spring:
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       properties:
         spring.json.trusted.packages: com.skbingegalaxy.*
+    listener:
+      observation-enabled: true
+    template:
+      observation-enabled: true
 
 app:
   booking:

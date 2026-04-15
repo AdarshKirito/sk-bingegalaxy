@@ -1,6 +1,5 @@
 package com.skbingegalaxy.booking.client;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Primary;
@@ -13,15 +12,20 @@ import java.net.URI;
 import java.time.LocalDate;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 @Primary
 public class HttpAvailabilityClient implements AvailabilityClient {
 
     private final AvailabilityClientFallback fallback;
+    private final RestClient restClient;
 
     @Value("${availability.service.url:${AVAILABILITY_SERVICE_URL:http://availability-service:8082}}")
     private String availabilityServiceUrl;
+
+    public HttpAvailabilityClient(AvailabilityClientFallback fallback, RestClient.Builder restClientBuilder) {
+        this.fallback = fallback;
+        this.restClient = restClientBuilder.build();
+    }
 
     @Override
     public Boolean checkSlotAvailable(String internalApiSecret,
@@ -39,7 +43,7 @@ public class HttpAvailabilityClient implements AvailabilityClient {
             .toUri();
 
         try {
-            return RestClient.create()
+            return restClient
                 .get()
                 .uri(uri)
                 .header("X-Internal-Secret", internalApiSecret)

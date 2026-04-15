@@ -1,6 +1,7 @@
 package com.skbingegalaxy.notification.dto;
 
 import com.skbingegalaxy.common.enums.NotificationChannel;
+import com.skbingegalaxy.notification.model.DeliveryStatus;
 import lombok.*;
 
 import java.time.LocalDateTime;
@@ -26,4 +27,13 @@ public class NotificationDto {
     private int retryCount;
     private LocalDateTime sentAt;
     private LocalDateTime createdAt;
+
+    // Delivery tracking
+    private DeliveryStatus deliveryStatus;
+    private LocalDateTime deliveredAt;
+    private LocalDateTime openedAt;
+    private LocalDateTime clickedAt;
+    private LocalDateTime bouncedAt;
+
+    private LocalDateTime nextRetryAt;
 }

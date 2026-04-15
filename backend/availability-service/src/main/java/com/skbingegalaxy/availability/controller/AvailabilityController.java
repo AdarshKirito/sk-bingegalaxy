@@ -104,8 +104,8 @@ public class AvailabilityController {
     @DeleteMapping("/admin/unblock-slot")
     public ResponseEntity<ApiResponse<Void>> unblockSlot(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
-            @RequestParam int startHour) {
-        service.unblockSlot(date, startHour);
+            @RequestParam int startMinute) {
+        service.unblockSlot(date, startMinute);
         return ResponseEntity.ok(ApiResponse.ok("Slot unblocked", null));
     }
 }

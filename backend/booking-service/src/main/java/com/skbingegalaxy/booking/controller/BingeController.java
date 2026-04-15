@@ -3,6 +3,7 @@ package com.skbingegalaxy.booking.controller;
 import com.skbingegalaxy.booking.dto.*;
 import com.skbingegalaxy.booking.service.BingeService;
 import com.skbingegalaxy.booking.service.BookingService;
+import com.skbingegalaxy.booking.service.CancellationTierService;
 import com.skbingegalaxy.common.dto.ApiResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
@@ -28,6 +29,7 @@ public class BingeController {
 
     private final BingeService bingeService;
     private final BookingService bookingService;
+    private final CancellationTierService cancellationTierService;
 
     // ── Public: list all active binges (for user selection) ──
     @GetMapping("/binges")
@@ -157,5 +159,27 @@ public class BingeController {
             @RequestHeader("X-User-Role") String role) {
         bingeService.deleteBinge(id, adminId, role);
         return ResponseEntity.ok(ApiResponse.ok("Binge deleted", null));
+    }
+
+    // ── Admin: cancellation tiers ────────────────────────────
+    @GetMapping("/admin/binges/{id}/cancellation-tiers")
+    public ResponseEntity<ApiResponse<List<CancellationTierDto>>> getCancellationTiers(
+            @PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.ok(cancellationTierService.getTiers(id)));
+    }
+
+    @PutMapping("/admin/binges/{id}/cancellation-tiers")
+    public ResponseEntity<ApiResponse<List<CancellationTierDto>>> saveCancellationTiers(
+            @PathVariable Long id,
+            @Valid @RequestBody CancellationTierSaveRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok("Cancellation tiers saved",
+            cancellationTierService.saveTiers(id, request)));
+    }
+
+    // ── Public: cancellation tiers for a binge (for customer display) ──
+    @GetMapping("/binges/{id}/cancellation-tiers")
+    public ResponseEntity<ApiResponse<List<CancellationTierDto>>> getPublicCancellationTiers(
+            @PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.ok(cancellationTierService.getTiers(id)));
     }
 }

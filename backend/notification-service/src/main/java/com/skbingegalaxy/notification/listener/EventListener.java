@@ -5,13 +5,18 @@ import com.skbingegalaxy.common.enums.NotificationChannel;
 import com.skbingegalaxy.common.event.BookingEvent;
 import com.skbingegalaxy.common.event.NotificationEvent;
 import com.skbingegalaxy.common.event.PaymentEvent;
+import com.skbingegalaxy.notification.model.BookingReminder;
+import com.skbingegalaxy.notification.repository.BookingReminderRepository;
 import com.skbingegalaxy.notification.repository.NotificationRepository;
+import com.skbingegalaxy.notification.service.ChannelRouter;
 import com.skbingegalaxy.notification.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -20,8 +25,23 @@ import java.util.Map;
 @Slf4j
 public class EventListener {
 
+    /** Only suppress duplicates if a successfully-sent notification exists within this window. */
+    private static final long DEDUP_TTL_HOURS = 1;
+
     private final NotificationService notificationService;
     private final NotificationRepository notificationRepository;
+    private final BookingReminderRepository bookingReminderRepository;
+    private final ChannelRouter channelRouter;
+
+    private boolean recentlySentForBooking(String bookingRef, String type) {
+        return notificationRepository.existsByBookingRefAndTypeAndSentTrueAndCreatedAtAfter(
+            bookingRef, type, LocalDateTime.now().minusHours(DEDUP_TTL_HOURS));
+    }
+
+    private boolean recentlySentForEmail(String email, String type) {
+        return notificationRepository.existsByRecipientEmailAndTypeAndSentTrueAndCreatedAtAfter(
+            email, type, LocalDateTime.now().minusHours(DEDUP_TTL_HOURS));
+    }
 
     @KafkaListener(topics = KafkaTopics.BOOKING_CREATED, groupId = "notification-service")
     public void handleBookingCreated(BookingEvent event) {
@@ -31,8 +51,8 @@ public class EventListener {
                 log.warn("Skipping BOOKING_CREATED — missing required fields");
                 return;
             }
-            if (notificationRepository.existsByBookingRefAndType(event.getBookingRef(), "BOOKING_CREATED")) {
-                log.info("Duplicate BOOKING_CREATED for {} — skipping", event.getBookingRef());
+            if (recentlySentForBooking(event.getBookingRef(), "BOOKING_CREATED")) {
+                log.info("Duplicate BOOKING_CREATED for {} — skipping (sent within TTL)", event.getBookingRef());
                 return;
             }
             Map<String, Object> meta = new HashMap<>();
@@ -41,9 +61,11 @@ public class EventListener {
             meta.put("startTime", event.getStartTime() != null ? event.getStartTime().toString() : "");
             meta.put("durationHours", event.getDurationHours());
             meta.put("totalAmount", event.getTotalAmount() != null ? event.getTotalAmount().toPlainString() : "0");
+            NotificationChannel channel = channelRouter.resolveChannel(
+                    event.getCustomerEmail(), event.getCustomerPhone(), "BOOKING_CREATED", meta);
             notificationService.sendNotification(
                 "BOOKING_CREATED",
-                NotificationChannel.EMAIL,
+                channel,
                 event.getCustomerEmail(),
                 event.getCustomerPhone(),
                 event.getCustomerName(),
@@ -52,6 +74,9 @@ public class EventListener {
                 event.getBookingRef(),
                 meta
             );
+
+            // ── Schedule reminders ("day before" + "1 hour before") ──
+            scheduleReminders(event);
         } catch (Exception e) {
             log.error("Failed to process BOOKING_CREATED event for {}: {}", event.getBookingRef(), e.getMessage(), e);
         }
@@ -65,21 +90,27 @@ public class EventListener {
                 log.warn("Skipping BOOKING_CANCELLED — missing required fields");
                 return;
             }
-            if (notificationRepository.existsByBookingRefAndType(event.getBookingRef(), "BOOKING_CANCELLED")) {
-                log.info("Duplicate BOOKING_CANCELLED for {} — skipping", event.getBookingRef());
+            if (recentlySentForBooking(event.getBookingRef(), "BOOKING_CANCELLED")) {
+                log.info("Duplicate BOOKING_CANCELLED for {} — skipping (sent within TTL)", event.getBookingRef());
                 return;
             }
+            Map<String, Object> cancelMeta = Map.of("eventType", event.getEventTypeName() != null ? event.getEventTypeName() : "");
+            NotificationChannel channel = channelRouter.resolveChannel(
+                    event.getCustomerEmail(), event.getCustomerPhone(), "BOOKING_CANCELLED", cancelMeta);
             notificationService.sendNotification(
                 "BOOKING_CANCELLED",
-                NotificationChannel.EMAIL,
+                channel,
                 event.getCustomerEmail(),
                 event.getCustomerPhone(),
                 event.getCustomerName(),
                 "Booking Cancelled - " + event.getBookingRef(),
                 buildBookingCancelledBody(event),
                 event.getBookingRef(),
-                Map.of("eventType", event.getEventTypeName() != null ? event.getEventTypeName() : "")
+                cancelMeta
             );
+
+            // ── Cancel pending reminders for this booking ──
+            cancelReminders(event.getBookingRef());
         } catch (Exception e) {
             log.error("Failed to process BOOKING_CANCELLED event for {}: {}", event.getBookingRef(), e.getMessage(), e);
         }
@@ -93,17 +124,19 @@ public class EventListener {
                 log.warn("Skipping PAYMENT_SUCCESS — missing recipient email");
                 return;
             }
-            if (notificationRepository.existsByBookingRefAndType(event.getBookingRef(), "PAYMENT_SUCCESS")) {
-                log.info("Duplicate PAYMENT_SUCCESS for {} — skipping", event.getBookingRef());
+            if (recentlySentForBooking(event.getBookingRef(), "PAYMENT_SUCCESS")) {
+                log.info("Duplicate PAYMENT_SUCCESS for {} — skipping (sent within TTL)", event.getBookingRef());
                 return;
             }
             Map<String, Object> meta = new HashMap<>();
             meta.put("transactionId", event.getTransactionId() != null ? event.getTransactionId() : "");
             meta.put("amount", event.getAmount() != null ? event.getAmount().toPlainString() : "0");
             meta.put("paymentMethod", event.getPaymentMethod() != null ? event.getPaymentMethod() : "");
+            NotificationChannel channel = channelRouter.resolveChannel(
+                    event.getCustomerEmail(), event.getCustomerPhone(), "PAYMENT_SUCCESS", meta);
             notificationService.sendNotification(
                 "PAYMENT_SUCCESS",
-                NotificationChannel.EMAIL,
+                channel,
                 event.getCustomerEmail(), event.getCustomerPhone(), event.getCustomerName(),
                 "Payment Successful - " + event.getBookingRef(),
                 buildPaymentSuccessBody(event),
@@ -123,15 +156,17 @@ public class EventListener {
                 log.warn("Skipping PAYMENT_FAILED — missing recipient email");
                 return;
             }
-            if (notificationRepository.existsByBookingRefAndType(event.getBookingRef(), "PAYMENT_FAILED")) {
-                log.info("Duplicate PAYMENT_FAILED for {} — skipping", event.getBookingRef());
+            if (recentlySentForBooking(event.getBookingRef(), "PAYMENT_FAILED")) {
+                log.info("Duplicate PAYMENT_FAILED for {} — skipping (sent within TTL)", event.getBookingRef());
                 return;
             }
             Map<String, Object> meta = new HashMap<>();
             meta.put("transactionId", event.getTransactionId() != null ? event.getTransactionId() : "");
+            NotificationChannel channel = channelRouter.resolveChannel(
+                    event.getCustomerEmail(), event.getCustomerPhone(), "PAYMENT_FAILED", meta);
             notificationService.sendNotification(
                 "PAYMENT_FAILED",
-                NotificationChannel.EMAIL,
+                channel,
                 event.getCustomerEmail(), event.getCustomerPhone(), event.getCustomerName(),
                 "Payment Failed - " + event.getBookingRef(),
                 buildPaymentFailedBody(event),
@@ -173,13 +208,15 @@ public class EventListener {
                 log.warn("Skipping USER_REGISTERED — missing recipient email");
                 return;
             }
-            if (notificationRepository.existsByRecipientEmailAndType(event.getRecipientEmail(), "USER_REGISTERED")) {
-                log.info("Duplicate USER_REGISTERED for {} — skipping", event.getRecipientEmail());
+            if (recentlySentForEmail(event.getRecipientEmail(), "USER_REGISTERED")) {
+                log.info("Duplicate USER_REGISTERED for {} — skipping (sent within TTL)", event.getRecipientEmail());
                 return;
             }
+            NotificationChannel channel = channelRouter.resolveChannel(
+                    event.getRecipientEmail(), event.getRecipientPhone(), "USER_REGISTERED", null);
             notificationService.sendNotification(
                 "USER_REGISTERED",
-                NotificationChannel.EMAIL,
+                channel,
                 event.getRecipientEmail(),
                 event.getRecipientPhone(),
                 event.getRecipientName(),
@@ -203,9 +240,11 @@ public class EventListener {
             }
             Map<String, Object> meta = event.getMetadata() != null ? new HashMap<>(event.getMetadata()) : new HashMap<>();
             meta.put("name", event.getRecipientName());
+            NotificationChannel channel = channelRouter.resolveChannel(
+                    event.getRecipientEmail(), null, "PASSWORD_RESET", meta);
             notificationService.sendNotification(
                 "PASSWORD_RESET",
-                NotificationChannel.EMAIL,
+                channel,
                 event.getRecipientEmail(),
                 null,
                 event.getRecipientName(),
@@ -320,5 +359,73 @@ public class EventListener {
             SK Binge Galaxy Team""",
             event.getRecipientName()
         );
+    }
+
+    // ── Scheduled-reminder helpers ──────────────────────────────
+
+    private void scheduleReminders(BookingEvent event) {
+        if (event.getBookingDate() == null || event.getStartTime() == null) {
+            log.warn("Cannot schedule reminders for {} — missing date/time", event.getBookingRef());
+            return;
+        }
+        try {
+            LocalDateTime bookingStart = LocalDateTime.of(event.getBookingDate(), event.getStartTime());
+
+            // "Day before" reminder — fires at 10:00 the day before the booking
+            LocalDateTime dayBefore = LocalDateTime.of(
+                    event.getBookingDate().minusDays(1), LocalTime.of(10, 0));
+            if (dayBefore.isAfter(LocalDateTime.now())) {
+                bookingReminderRepository.save(BookingReminder.builder()
+                        .bookingRef(event.getBookingRef())
+                        .recipientEmail(event.getCustomerEmail())
+                        .recipientPhone(event.getCustomerPhone())
+                        .recipientName(event.getCustomerName())
+                        .eventTypeName(event.getEventTypeName())
+                        .bookingDate(event.getBookingDate())
+                        .startTime(event.getStartTime())
+                        .durationHours(event.getDurationHours())
+                        .reminderType("DAY_BEFORE")
+                        .fireAt(dayBefore)
+                        .build());
+            }
+
+            // "1 hour before" reminder
+            LocalDateTime oneHourBefore = bookingStart.minusHours(1);
+            if (oneHourBefore.isAfter(LocalDateTime.now())) {
+                bookingReminderRepository.save(BookingReminder.builder()
+                        .bookingRef(event.getBookingRef())
+                        .recipientEmail(event.getCustomerEmail())
+                        .recipientPhone(event.getCustomerPhone())
+                        .recipientName(event.getCustomerName())
+                        .eventTypeName(event.getEventTypeName())
+                        .bookingDate(event.getBookingDate())
+                        .startTime(event.getStartTime())
+                        .durationHours(event.getDurationHours())
+                        .reminderType("ONE_HOUR_BEFORE")
+                        .fireAt(oneHourBefore)
+                        .build());
+            }
+
+            log.info("Scheduled reminders for booking {}", event.getBookingRef());
+        } catch (Exception e) {
+            log.error("Failed to schedule reminders for {}: {}", event.getBookingRef(), e.getMessage());
+        }
+    }
+
+    private void cancelReminders(String bookingRef) {
+        try {
+            var reminders = bookingReminderRepository.findByBookingRef(bookingRef);
+            for (var r : reminders) {
+                if (!r.isFired()) {
+                    r.setCancelled(true);
+                    bookingReminderRepository.save(r);
+                }
+            }
+            if (!reminders.isEmpty()) {
+                log.info("Cancelled {} pending reminders for booking {}", reminders.size(), bookingRef);
+            }
+        } catch (Exception e) {
+            log.error("Failed to cancel reminders for {}: {}", bookingRef, e.getMessage());
+        }
     }
 }

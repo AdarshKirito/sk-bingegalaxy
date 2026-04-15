@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { bookingService } from '../services/endpoints';
 import SEO from '../components/SEO';
+import { toast } from 'react-toastify';
 import {
   FiAlertCircle,
   FiArrowRight,
@@ -14,6 +15,9 @@ import {
   FiMail,
   FiMapPin,
   FiPrinter,
+  FiRefreshCw,
+  FiRepeat,
+  FiSend,
   FiShield,
   FiUsers,
 } from 'react-icons/fi';
@@ -49,6 +53,11 @@ export default function BookingConfirmation() {
   const [booking, setBooking] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [rescheduleOpen, setRescheduleOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [rescheduleForm, setRescheduleForm] = useState({ newBookingDate: '', newStartTime: '', newDurationMinutes: '' });
+  const [transferForm, setTransferForm] = useState({ recipientName: '', recipientEmail: '', recipientPhone: '' });
+  const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => {
     bookingService.getByRef(ref)
@@ -59,6 +68,47 @@ export default function BookingConfirmation() {
       })
       .finally(() => setLoading(false));
   }, [ref]);
+
+  const handleReschedule = async () => {
+    if (!rescheduleForm.newBookingDate || !rescheduleForm.newStartTime) {
+      toast.error('Please select a new date and time.');
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const payload = {
+        newBookingDate: rescheduleForm.newBookingDate,
+        newStartTime: rescheduleForm.newStartTime + ':00',
+        newDurationMinutes: rescheduleForm.newDurationMinutes ? Number(rescheduleForm.newDurationMinutes) : null,
+      };
+      const res = await bookingService.rescheduleBooking(ref, payload);
+      setBooking(res.data.data);
+      toast.success('Booking rescheduled successfully');
+      setRescheduleOpen(false);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to reschedule');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleTransfer = async () => {
+    if (!transferForm.recipientName.trim() || !transferForm.recipientEmail.trim()) {
+      toast.error('Recipient name and email are required.');
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const res = await bookingService.transferBooking(ref, transferForm);
+      setBooking(res.data.data);
+      toast.success('Booking transferred successfully');
+      setTransferOpen(false);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to transfer');
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   if (loading) return <div className="loading"><div className="spinner"></div></div>;
   if (error) return <div className="container customer-flow-shell customer-flow-shell-narrow"><div className="customer-flow-card customer-flow-empty"><h2>{error}</h2></div></div>;
@@ -97,6 +147,7 @@ export default function BookingConfirmation() {
     { icon: <FiHash />, label: 'Duration', value: durationLabel },
     { icon: <FiUsers />, label: 'Guests', value: `${booking.numberOfGuests || 1} guest${Number(booking.numberOfGuests || 1) === 1 ? '' : 's'}` },
     { icon: <FiMapPin />, label: 'Venue', value: venueLabel },
+    ...(booking.venueRoomName ? [{ icon: <FiMapPin />, label: 'Room', value: booking.venueRoomName }] : []),
   ];
   const summaryFacts = [
     { label: 'Total', value: formatAmount(booking.totalAmount) },
@@ -230,6 +281,16 @@ export default function BookingConfirmation() {
             {needsPayment && (
               <Link to={`/payment/${booking.bookingRef}`} className="btn btn-primary btn-sm">Proceed to Payment</Link>
             )}
+            {booking.canCustomerReschedule && (
+              <button className="btn btn-secondary btn-sm" onClick={() => { setRescheduleForm({ newBookingDate: booking.bookingDate || '', newStartTime: booking.startTime ? booking.startTime.substring(0, 5) : '', newDurationMinutes: '' }); setRescheduleOpen(true); }}>
+                <FiRepeat /> Reschedule
+              </button>
+            )}
+            {booking.canCustomerTransfer && (
+              <button className="btn btn-secondary btn-sm" onClick={() => { setTransferForm({ recipientName: '', recipientEmail: '', recipientPhone: '' }); setTransferOpen(true); }}>
+                <FiSend /> Transfer
+              </button>
+            )}
             <Link to="/my-bookings" className="btn btn-secondary btn-sm">My Bookings</Link>
             <Link to="/payments" className="btn btn-secondary btn-sm">Payments</Link>
             <button className="btn btn-secondary btn-sm" onClick={() => window.print()} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -316,6 +377,24 @@ export default function BookingConfirmation() {
                 <strong>{formatAmount(booking.guestAmount)}</strong>
               </div>
             )}
+            {booking.surgeMultiplier && Number(booking.surgeMultiplier) > 1 && (
+              <div className="customer-flow-row" style={{ color: '#92400e' }}>
+                <span>⚡ {booking.surgeLabel || 'Peak pricing'}</span>
+                <strong>{booking.surgeMultiplier}× multiplier</strong>
+              </div>
+            )}
+            {(booking.loyaltyPointsRedeemed || 0) > 0 && (
+              <div className="customer-flow-row" style={{ color: '#5b21b6' }}>
+                <span>🎁 Loyalty discount ({booking.loyaltyPointsRedeemed} pts)</span>
+                <strong>−{formatAmount(booking.loyaltyDiscountAmount)}</strong>
+              </div>
+            )}
+            {(booking.loyaltyPointsEarned || 0) > 0 && (
+              <div className="customer-flow-row" style={{ color: '#059669' }}>
+                <span>⭐ Points earned</span>
+                <strong>+{booking.loyaltyPointsEarned} pts</strong>
+              </div>
+            )}
             <div className="customer-flow-row">
               <span>Payment state</span>
               <strong>{paymentStatusLabel}</strong>
@@ -371,7 +450,109 @@ export default function BookingConfirmation() {
             <Link to="/book" className="btn btn-secondary">Book Another</Link>
           </div>
         </article>
+
+        {(booking.transferred || booking.recurringGroupId || booking.rescheduleCount > 0) && (
+          <article className="customer-flow-card customer-flow-card-span customer-flow-stack">
+            <div className="customer-flow-card-head">
+              <div>
+                <span className="customer-flow-section-label">Booking history</span>
+                <h2>Changes and lineage</h2>
+              </div>
+            </div>
+            <div className="customer-flow-list">
+              {booking.transferred && (
+                <div className="customer-flow-row">
+                  <span><FiSend /> Transferred from</span>
+                  <strong>{booking.originalCustomerName || 'Another customer'}</strong>
+                </div>
+              )}
+              {booking.rescheduleCount > 0 && (
+                <div className="customer-flow-row">
+                  <span><FiRefreshCw /> Rescheduled</span>
+                  <strong>{booking.rescheduleCount} time{booking.rescheduleCount > 1 ? 's' : ''}{booking.originalBookingRef ? ` (originally ${booking.originalBookingRef})` : ''}</strong>
+                </div>
+              )}
+              {booking.recurringGroupId && (
+                <div className="customer-flow-row">
+                  <span><FiRepeat /> Recurring series</span>
+                  <strong>{booking.recurringGroupId}</strong>
+                </div>
+              )}
+            </div>
+          </article>
+        )}
       </section>
+
+      {/* Reschedule Modal */}
+      {rescheduleOpen && (
+        <div className="modal-overlay" onClick={() => !actionLoading && setRescheduleOpen(false)}>
+          <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px', padding: '2rem' }}>
+            <h2 style={{ marginBottom: '0.5rem' }}>Reschedule Booking</h2>
+            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
+              {booking.bookingRef} — {eventLabel}
+            </p>
+            <label style={{ display: 'block', marginBottom: '1rem' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>New Date</span>
+              <input type="date" className="form-control" value={rescheduleForm.newBookingDate}
+                onChange={(e) => setRescheduleForm(prev => ({ ...prev, newBookingDate: e.target.value }))}
+                min={new Date().toLocaleDateString('en-CA')} />
+            </label>
+            <label style={{ display: 'block', marginBottom: '1rem' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>New Start Time</span>
+              <input type="time" className="form-control" value={rescheduleForm.newStartTime}
+                onChange={(e) => setRescheduleForm(prev => ({ ...prev, newStartTime: e.target.value }))} />
+            </label>
+            <label style={{ display: 'block', marginBottom: '1.5rem' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>New Duration (minutes, leave empty to keep current)</span>
+              <input type="number" className="form-control" min="30" step="30" placeholder="Same as original"
+                value={rescheduleForm.newDurationMinutes}
+                onChange={(e) => setRescheduleForm(prev => ({ ...prev, newDurationMinutes: e.target.value }))} />
+            </label>
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+              <button className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => setRescheduleOpen(false)}>Cancel</button>
+              <button className="btn btn-primary btn-sm" disabled={actionLoading} onClick={handleReschedule}>
+                {actionLoading ? 'Rescheduling...' : 'Confirm Reschedule'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transfer Modal */}
+      {transferOpen && (
+        <div className="modal-overlay" onClick={() => !actionLoading && setTransferOpen(false)}>
+          <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px', padding: '2rem' }}>
+            <h2 style={{ marginBottom: '0.5rem' }}>Transfer Booking</h2>
+            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
+              {booking.bookingRef} — {eventLabel}
+            </p>
+            <label style={{ display: 'block', marginBottom: '1rem' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Name</span>
+              <input type="text" className="form-control" placeholder="Full name of the new guest"
+                value={transferForm.recipientName}
+                onChange={(e) => setTransferForm(prev => ({ ...prev, recipientName: e.target.value }))} />
+            </label>
+            <label style={{ display: 'block', marginBottom: '1rem' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Email</span>
+              <input type="email" className="form-control" placeholder="name@example.com"
+                value={transferForm.recipientEmail}
+                onChange={(e) => setTransferForm(prev => ({ ...prev, recipientEmail: e.target.value }))} />
+            </label>
+            <label style={{ display: 'block', marginBottom: '1.5rem' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Phone (optional)</span>
+              <input type="tel" className="form-control" placeholder="+91XXXXXXXXXX"
+                value={transferForm.recipientPhone}
+                onChange={(e) => setTransferForm(prev => ({ ...prev, recipientPhone: e.target.value }))} />
+            </label>
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+              <button className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => setTransferOpen(false)}>Cancel</button>
+              <button className="btn btn-primary btn-sm" disabled={actionLoading} onClick={handleTransfer}>
+                {actionLoading ? 'Transferring...' : 'Confirm Transfer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -10,22 +10,20 @@ import com.skbingegalaxy.common.exception.ResourceNotFoundException;
 import com.skbingegalaxy.payment.dto.*;
 import com.skbingegalaxy.payment.entity.Payment;
 import com.skbingegalaxy.payment.entity.Refund;
+import com.skbingegalaxy.payment.client.RazorpayGatewayClient;
 import com.skbingegalaxy.payment.repository.PaymentRepository;
 import com.skbingegalaxy.payment.repository.RefundRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
-import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -46,6 +44,7 @@ public class PaymentService {
     private final PaymentRepository paymentRepository;
     private final RefundRepository refundRepository;
     private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final RazorpayGatewayClient razorpayGatewayClient;
 
     @Value("${app.razorpay.key-secret}")
     private String razorpayKeySecret;
@@ -91,7 +90,7 @@ public class PaymentService {
         String transactionId = "TXN-" + UUID.randomUUID().toString().substring(0, 12).toUpperCase();
         String gatewayOrderId;
         if (!paymentSimulationEnabled && razorpayKeyId != null && !razorpayKeyId.isBlank()) {
-            gatewayOrderId = createRazorpayOrder(
+            gatewayOrderId = razorpayGatewayClient.createOrder(
                 request.getAmount(),
                 request.getCurrency() != null ? request.getCurrency() : "INR",
                 request.getBookingRef());
@@ -686,43 +685,6 @@ public class PaymentService {
 
     private boolean isAdminRole(String requesterRole) {
         return "ADMIN".equalsIgnoreCase(requesterRole) || "SUPER_ADMIN".equalsIgnoreCase(requesterRole);
-    }
-
-    /**
-     * Creates a Razorpay order via the Razorpay Orders API and returns the order ID (e.g. "order_xxx").
-     * Only called when simulation is disabled and a valid key-id is configured.
-     */
-    @SuppressWarnings("unchecked")
-    private String createRazorpayOrder(BigDecimal amount, String currency, String receipt) {
-        try {
-            String credentials = Base64.getEncoder()
-                .encodeToString((razorpayKeyId + ":" + razorpayKeySecret).getBytes(StandardCharsets.UTF_8));
-
-            Map<String, Object> body = Map.of(
-                "amount", amount.multiply(BigDecimal.valueOf(100)).longValue(), // rupees → paise
-                "currency", currency != null ? currency : "INR",
-                "receipt", receipt
-            );
-
-            Map<String, Object> response = RestClient.create()
-                .post()
-                .uri("https://api.razorpay.com/v1/orders")
-                .header("Authorization", "Basic " + credentials)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(body)
-                .retrieve()
-                .body(Map.class);
-
-            if (response != null && response.containsKey("id")) {
-                return (String) response.get("id");
-            }
-            throw new BusinessException("Razorpay order creation failed — no id returned", HttpStatus.BAD_GATEWAY);
-        } catch (BusinessException e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("Failed to create Razorpay order for receipt={}: {}", receipt, e.getMessage());
-            throw new BusinessException("Payment gateway error. Please try again.", HttpStatus.BAD_GATEWAY);
-        }
     }
 
     /**

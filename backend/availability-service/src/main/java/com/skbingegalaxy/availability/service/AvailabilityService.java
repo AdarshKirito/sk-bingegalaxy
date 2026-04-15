@@ -130,39 +130,39 @@ public class AvailabilityService {
     // ── Admin: block slot ────────────────────────────────────
     @Transactional
     public BlockedSlotDto blockSlot(BlockSlotRequest request, Long adminId) {
-        if (request.getEndHour() <= request.getStartHour()) {
+        if (request.getEndMinute() <= request.getStartMinute()) {
             throw new BusinessException("End time must be after start time");
         }
         Long bid = BingeContext.getBingeId();
         boolean exists = bid != null
-            ? blockedSlotRepository.existsByBingeIdAndSlotDateAndStartHour(bid, request.getDate(), request.getStartHour())
-            : blockedSlotRepository.existsBySlotDateAndStartHour(request.getDate(), request.getStartHour());
+            ? blockedSlotRepository.existsByBingeIdAndSlotDateAndStartHour(bid, request.getDate(), request.getStartMinute())
+            : blockedSlotRepository.existsBySlotDateAndStartHour(request.getDate(), request.getStartMinute());
         if (exists) {
-            throw new DuplicateResourceException("BlockedSlot", "slot", request.getDate() + " " + request.getStartHour());
+            throw new DuplicateResourceException("BlockedSlot", "slot", request.getDate() + " " + request.getStartMinute());
         }
         BlockedSlot entity = BlockedSlot.builder()
             .slotDate(request.getDate())
-            .startHour(request.getStartHour())
-            .endHour(request.getEndHour())
+            .startHour(request.getStartMinute())
+            .endHour(request.getEndMinute())
             .reason(request.getReason())
             .blockedBy(adminId)
             .bingeId(bid)
             .build();
         entity = blockedSlotRepository.save(entity);
-        log.info("Admin {} blocked slot {} on {}", adminId, request.getStartHour(), request.getDate());
+        log.info("Admin {} blocked slot {} on {}", adminId, request.getStartMinute(), request.getDate());
         return toBlockedSlotDto(entity);
     }
 
     // ── Admin: unblock slot ──────────────────────────────────
     @Transactional
-    public void unblockSlot(LocalDate date, int startHour) {
+    public void unblockSlot(LocalDate date, int startMinute) {
         Long bid = BingeContext.getBingeId();
         if (bid != null) {
-            blockedSlotRepository.deleteByBingeIdAndSlotDateAndStartHour(bid, date, startHour);
+            blockedSlotRepository.deleteByBingeIdAndSlotDateAndStartHour(bid, date, startMinute);
         } else {
-            blockedSlotRepository.deleteBySlotDateAndStartHour(date, startHour);
+            blockedSlotRepository.deleteBySlotDateAndStartHour(date, startMinute);
         }
-        log.info("Unblocked slot {} on {}", startHour, date);
+        log.info("Unblocked slot {} on {}", startMinute, date);
     }
 
     // ── Admin: list all blocked dates ────────────────────────
@@ -255,8 +255,8 @@ public class AvailabilityService {
         return BlockedSlotDto.builder()
             .id(entity.getId())
             .date(entity.getSlotDate())
-            .startHour(entity.getStartHour())
-            .endHour(entity.getEndHour())
+            .startMinute(entity.getStartHour())
+            .endMinute(entity.getEndHour())
             .reason(entity.getReason())
             .blockedBy(entity.getBlockedBy())
             .build();

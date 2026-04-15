@@ -19,7 +19,9 @@ import java.util.Map;
 
 /**
  * Records immutable event logs for every booking state change.
- * This provides an audit trail / event sourcing foundation.
+ * This provides an append-only audit trail used by the CQRS read-model
+ * projection ({@link BookingProjectionService}) — NOT true Event Sourcing,
+ * since the {@code Booking} entity table remains the source of truth.
  */
 @Service
 @RequiredArgsConstructor

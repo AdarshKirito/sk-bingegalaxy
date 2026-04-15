@@ -10,8 +10,8 @@ import java.time.LocalDate;
 public class BlockedSlotDto {
     private Long id;
     private LocalDate date;
-    private int startHour;
-    private int endHour;
+    private int startMinute;
+    private int endMinute;
     private String reason;
     private Long blockedBy;
 }

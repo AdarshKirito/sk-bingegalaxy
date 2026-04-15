@@ -56,6 +56,21 @@ public class MediaController {
                 .body(ApiResponse.error("File size exceeds 5 MB limit"));
         }
         String contentType = file.getContentType();
+        // Infer content type from extension if the client did not send one
+        // (some clients omit MIME type for uppercase extensions like .JPG)
+        if (contentType == null || contentType.isBlank()) {
+            String fname = file.getOriginalFilename();
+            if (fname != null && fname.contains(".")) {
+                String ext = fname.substring(fname.lastIndexOf('.') + 1).toLowerCase();
+                contentType = switch (ext) {
+                    case "jpg", "jpeg" -> "image/jpeg";
+                    case "png" -> "image/png";
+                    case "webp" -> "image/webp";
+                    case "gif" -> "image/gif";
+                    default -> null;
+                };
+            }
+        }
         if (contentType == null || !ALLOWED_TYPES.contains(contentType.toLowerCase())) {
             return ResponseEntity.badRequest()
                 .body(ApiResponse.error("Only JPEG, PNG, WebP, and GIF images are allowed"));

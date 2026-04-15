@@ -109,8 +109,8 @@ export default function AdminBlockedDates() {
     try {
       await adminService.blockSlot({
         date: slotForm.date,
-        startHour: start,
-        endHour: end,
+        startMinute: start,
+        endMinute: end,
         reason: slotForm.reason,
       });
       toast.success(`Blocked ${fmtMin(start)} – ${fmtMin(end)} on ${slotForm.date}`);
@@ -121,10 +121,10 @@ export default function AdminBlockedDates() {
     }
   };
 
-  const handleUnblockSlot = async (date, startHour) => {
-    if (!window.confirm(`Unblock the ${startHour}:00 slot on ${date}?`)) return;
+  const handleUnblockSlot = async (date, startMinute) => {
+    if (!window.confirm(`Unblock the ${fmtMin(startMinute)} slot on ${date}?`)) return;
     try {
-      await adminService.unblockSlot(date, startHour);
+      await adminService.unblockSlot(date, startMinute);
       toast.success('Slot unblocked');
       fetchData();
     } catch (err) {
@@ -249,8 +249,8 @@ export default function AdminBlockedDates() {
             ) : (
               <div className="adm-grid-3">
                 {blockedSlots.map(s => {
-                  const startM = toMinutes(s.startHour);
-                  const endM = toMinutes(s.endHour);
+                  const startM = s.startMinute != null ? s.startMinute : 0;
+                  const endM = s.endMinute != null ? s.endMinute : 0;
                   const durMin = endM - startM;
                   return (
                     <div key={s.id} className="adm-item">
@@ -267,7 +267,7 @@ export default function AdminBlockedDates() {
                         </span>
                       </div>
                       <div className="adm-item-footer">
-                        <button className="btn btn-danger btn-sm" onClick={() => handleUnblockSlot(s.date, s.startHour)}>
+                        <button className="btn btn-danger btn-sm" onClick={() => handleUnblockSlot(s.date, s.startMinute)}>
                           <FiTrash2 style={{ marginRight: 3 }} /> Remove
                         </button>
                       </div>

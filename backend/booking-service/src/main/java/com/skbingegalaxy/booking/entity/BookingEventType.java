@@ -10,5 +10,7 @@ public enum BookingEventType {
     PAYMENT_UPDATED,
     MODIFIED,
     REINSTATED,
-    COMPLETED
+    COMPLETED,
+    RESCHEDULED,
+    TRANSFERRED
 }

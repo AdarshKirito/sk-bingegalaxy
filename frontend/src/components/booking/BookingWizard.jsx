@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { bookingService, availabilityService, adminService } from '../../services/endpoints';
 import { toast } from 'react-toastify';
 import { format, addDays } from 'date-fns';
@@ -22,12 +22,12 @@ export { default as StepReview } from './StepReview';
  * Shared booking wizard used by both Customer and Admin.
  *
  * Props:
- *  - isAdmin        : boolean — shows customer search (step 0), CASH payment, admin notes
- *  - reinstateData   : object | null — pre-fill data for reinstate flow
- *  - editBookingData : object | null — pre-fill data for edit-reservation flow
- *  - prefillData      : object | null — pre-fill data for repeat booking flow
- *  - onSubmit        : async (payload) => void — called with the final booking payload
- *  - onCancel        : () => void — called when user clicks Cancel
+ *  - isAdmin        : boolean â€” shows customer search (step 0), CASH payment, admin notes
+ *  - reinstateData   : object | null â€” pre-fill data for reinstate flow
+ *  - editBookingData : object | null â€” pre-fill data for edit-reservation flow
+ *  - prefillData      : object | null â€” pre-fill data for repeat booking flow
+ *  - onSubmit        : async (payload) => void â€” called with the final booking payload
+ *  - onCancel        : () => void â€” called when user clicks Cancel
  */
 export default function BookingWizard({ isAdmin = false, reinstateData = null, editBookingData = null, prefillData = null, initialEventTypeId = null, onSubmit, onCancel }) {
   const firstStep = isAdmin ? 0 : 1;
@@ -48,6 +48,11 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
   const [resolvedPricing, setResolvedPricing] = useState(null);
   const [activeRateCodes, setActiveRateCodes] = useState([]);
   const [selectedRateCodeId, setSelectedRateCodeId] = useState('');
+  const [capacityFull, setCapacityFull] = useState(false);
+  const [venueRooms, setVenueRooms] = useState([]);
+  const [surgeRules, setSurgeRules] = useState([]);
+  const [loyalty, setLoyalty] = useState(null);
+  const [activeSurge, setActiveSurge] = useState(null);
 
   const [form, setForm] = useState({
     eventTypeId: initialEventTypeId || '',
@@ -59,6 +64,8 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
     specialNotes: '',
     adminNotes: '',
     paymentMethod: isAdmin ? 'CASH' : 'UPI',
+    venueRoomId: '',
+    redeemLoyaltyPoints: 0,
   });
 
   // Pre-fill from reinstate/edit data
@@ -155,6 +162,48 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
       .catch(() => setResolvedPricing(null));
   }, [isAdmin, selectedRateCodeId]);
 
+  // Load venue rooms
+  useEffect(() => {
+    bookingService.getVenueRooms()
+      .then(res => setVenueRooms(res.data.data || []))
+      .catch(() => setVenueRooms([]));
+  }, []);
+
+  // Load surge rules
+  useEffect(() => {
+    bookingService.getActiveSurgeRules()
+      .then(res => setSurgeRules(res.data.data || []))
+      .catch(() => setSurgeRules([]));
+  }, []);
+
+  // Load loyalty (customer only)
+  useEffect(() => {
+    if (!isAdmin) {
+      bookingService.getMyLoyalty()
+        .then(res => setLoyalty(res.data.data || null))
+        .catch(() => setLoyalty(null));
+    }
+  }, [isAdmin]);
+
+  // Resolve which surge rule applies for the selected date+time
+  useEffect(() => {
+    if (!form.bookingDate || form.startTime === '' || !surgeRules.length) {
+      setActiveSurge(null);
+      return;
+    }
+    const bookingDate = new Date(form.bookingDate + 'T00:00:00');
+    const isoDow = bookingDate.getDay() === 0 ? 7 : bookingDate.getDay(); // ISO Monday=1, Sunday=7
+    const startMin = Number(form.startTime);
+    let best = null;
+    for (const rule of surgeRules) {
+      if (rule.dayOfWeek && rule.dayOfWeek !== isoDow) continue;
+      if (startMin >= rule.startMinute && startMin < rule.endMinute) {
+        if (!best || rule.multiplier > best.multiplier) best = rule;
+      }
+    }
+    setActiveSurge(best);
+  }, [form.bookingDate, form.startTime, surgeRules]);
+
   // Load availability (once, before step 2 is reached or when on step 2)
   useEffect(() => {
     if (availability.length > 0) return;
@@ -192,17 +241,15 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
     return opts;
   })();
 
-  // Duration-based time slot generation
+  const durMin = Number(form.durationMinutes);
+  const isToday = form.bookingDate === format(new Date(), 'yyyy-MM-dd');
+  const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
   const durationSlots = (() => {
-    if (!rawSlots.length || !form.durationMinutes) return [];
-    const durMin = Number(form.durationMinutes);
-    const isToday = form.bookingDate === format(new Date(), 'yyyy-MM-dd');
-    const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
     const bookedHalfHours = new Set();
     const editRef = editBookingData?.bookingRef;
     bookedSlots.forEach(bs => {
       if (editRef && bs.bookingRef === editRef) return;
-      const start = bs.startMinute != null ? bs.startMinute : ((bs.startHour || 0) * 60);
+      const start = bs.startMinute != null ? bs.startMinute : 0;
       const dur = bs.durationMinutes != null ? bs.durationMinutes : ((bs.durationHours || 0) * 60);
       if (!dur) return;
       for (let m = start; m < start + dur; m += 30) bookedHalfHours.add(Math.floor(m / 30));
@@ -216,7 +263,7 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
       let allAvailable = true;
       for (let m = startMin; m < startMin + durMin; m += 30) {
         const slot = rawSlots.find(s => {
-          const sm = s.startMinute != null ? s.startMinute : s.startHour * 60;
+          const sm = s.startMinute != null ? s.startMinute : 0;
           return sm === m;
         });
         if (!slot || !slot.available || bookedHalfHours.has(Math.floor(m / 30))) { allAvailable = false; break; }
@@ -239,7 +286,15 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
       return sum + (unitPrice * a.quantity);
     }, 0);
     const guestCharge = pricePerGuest * Math.max(form.numberOfGuests - 1, 0);
-    return base + addOnTotal + guestCharge;
+    let subtotal = base + addOnTotal + guestCharge;
+    if (activeSurge) subtotal = subtotal * activeSurge.multiplier;
+    return subtotal;
+  };
+
+  const calculateLoyaltyDiscount = () => {
+    if (!loyalty || !form.redeemLoyaltyPoints || form.redeemLoyaltyPoints <= 0) return 0;
+    const redemptionRate = loyalty.redemptionRate || 100;
+    return Math.min(form.redeemLoyaltyPoints / redemptionRate, calculateTotal());
   };
 
   const toggleAddOn = (addon) => {
@@ -250,6 +305,34 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
       const rap = resolvedPricing?.addonPricings?.find(ap => ap.addOnId === addon.id);
       const price = rap ? rap.price : addon.price;
       setForm(f => ({ ...f, addOns: [...f.addOns, { addOnId: addon.id, quantity: 1, price, name: addon.name }] }));
+    }
+  };
+
+  const handleJoinWaitlist = async () => {
+    if (!form.eventTypeId || !form.bookingDate || form.startTime === '') {
+      toast.error('Please complete event, date, and time selection first');
+      return;
+    }
+    setLoading(true);
+    try {
+      const startMin = Number(form.startTime);
+      const startH = Math.floor(startMin / 60);
+      const startM = startMin % 60;
+      await bookingService.joinWaitlist({
+        eventTypeId: Number(form.eventTypeId),
+        preferredDate: form.bookingDate,
+        preferredStartTime: String(startH).padStart(2, '0') + ':' + String(startM).padStart(2, '0'),
+        durationMinutes: Number(form.durationMinutes),
+        numberOfGuests: Number(form.numberOfGuests),
+      });
+      toast.success('You\'ve been added to the waitlist! We\'ll notify you when a spot opens.');
+      setCapacityFull(false);
+      setError('');
+    } catch (err) {
+      const msg = err.userMessage || err.response?.data?.message || 'Failed to join waitlist';
+      toast.error(msg);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -275,6 +358,8 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
         numberOfGuests: Number(form.numberOfGuests),
         addOns: form.addOns.map(a => ({ addOnId: a.addOnId, quantity: a.quantity })),
         specialNotes: form.specialNotes,
+        venueRoomId: form.venueRoomId ? Number(form.venueRoomId) : null,
+        redeemLoyaltyPoints: form.redeemLoyaltyPoints ? Number(form.redeemLoyaltyPoints) : null,
       };
       if (isAdmin) {
         payload.customerId = selectedCustomer.id;
@@ -289,8 +374,14 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
       await onSubmit(payload);
     } catch (err) {
       const msg = err.userMessage || err.response?.data?.message || 'Booking failed. Please try again.';
-      setError(msg);
-      toast.error(msg);
+      if (msg.startsWith('CAPACITY_FULL:')) {
+        setCapacityFull(true);
+        setError(msg.replace('CAPACITY_FULL:', ''));
+      } else {
+        setCapacityFull(false);
+        setError(msg);
+      }
+      toast.error(msg.replace('CAPACITY_FULL:', ''));
     } finally {
       setLoading(false);
     }
@@ -377,6 +468,7 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
           form={form} setForm={setForm} isAdmin={isAdmin} selectedEvent={selectedEvent}
           durationOptions={durationOptions} durationSlots={durationSlots}
           availability={availability} resolvedPricing={resolvedPricing}
+          venueRooms={venueRooms} activeSurge={activeSurge}
           fmtTime={fmtTime} fmtDuration={fmtDuration}
           onNext={() => {
             if (!form.bookingDate) { toast.error('Please select a date before proceeding'); return; }
@@ -401,8 +493,11 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
           form={form} setForm={setForm} isAdmin={isAdmin}
           selectedEvent={selectedEvent} selectedCustomer={selectedCustomer}
           resolvedPricing={resolvedPricing} editBookingData={editBookingData}
-          calculateTotal={calculateTotal} fmtTime={fmtTime} fmtDuration={fmtDuration}
+          calculateTotal={calculateTotal} calculateLoyaltyDiscount={calculateLoyaltyDiscount}
+          fmtTime={fmtTime} fmtDuration={fmtDuration}
           loading={loading} onSubmit={handleSubmit} onBack={() => setStep(3)}
+          capacityFull={capacityFull} onJoinWaitlist={handleJoinWaitlist}
+          venueRooms={venueRooms} activeSurge={activeSurge} loyalty={loyalty}
         />
       )}
     </div>

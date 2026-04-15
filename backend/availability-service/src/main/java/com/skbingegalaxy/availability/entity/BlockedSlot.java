@@ -26,14 +26,17 @@ public class BlockedSlot {
     private LocalDate slotDate;
 
     /**
-     * Start of blocked period. For admin-created blocked slots this is typically
-     * an hour (0-23); for booking-created blocks it may represent minutes since
-     * midnight. Named 'startHour' for DB-column compatibility.
+     * Start of blocked period in <b>minutes since midnight</b> (0–1439).
+     * DB column kept as {@code startHour} for backward compatibility; the
+     * public API (DTOs) uses {@code startMinute} to avoid ambiguity.
      */
     @Column(nullable = false)
     private int startHour;
 
-    /** End of blocked period — same unit as startHour. */
+    /**
+     * End of blocked period in <b>minutes since midnight</b> (1–1440).
+     * DB column kept as {@code endHour} for backward compatibility.
+     */
     @Column(nullable = false)
     private int endHour;
 

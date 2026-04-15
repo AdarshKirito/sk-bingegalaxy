@@ -10,22 +10,30 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
+    "e2e:install": "playwright install --with-deps chromium"
   },
   "dependencies": {
+    "@sentry/react": "^9.15.0",
+    "@testing-library/dom": "^10.4.1",
     "axios": "^1.8.4",
     "date-fns": "^3.6.0",
     "dompurify": "^3.3.3",
+    "i18next": "^25.1.2",
     "react": "^18.3.1",
     "react-datepicker": "^6.9.0",
     "react-dom": "^18.3.1",
     "react-helmet-async": "^3.0.0",
+    "react-i18next": "^15.5.1",
     "react-icons": "^5.2.1",
     "react-router-dom": "^6.23.1",
     "react-toastify": "^10.0.5",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@playwright/test": "^1.52.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",

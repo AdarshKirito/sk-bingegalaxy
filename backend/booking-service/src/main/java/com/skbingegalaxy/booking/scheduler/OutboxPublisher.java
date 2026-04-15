@@ -1,5 +1,6 @@
 package com.skbingegalaxy.booking.scheduler;
 
+import com.skbingegalaxy.booking.config.AdminEventBus;
 import com.skbingegalaxy.booking.entity.OutboxEvent;
 import com.skbingegalaxy.booking.repository.OutboxEventRepository;
 import com.skbingegalaxy.common.constants.KafkaTopics;
@@ -32,6 +33,7 @@ public class OutboxPublisher {
     private final OutboxEventRepository outboxRepo;
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final ObjectMapper objectMapper;
+    private final AdminEventBus adminEventBus;
 
     @Scheduled(fixedDelay = 2000)
     @SchedulerLock(name = "outboxPublisher", lockAtLeastFor = "1s", lockAtMostFor = "30s")
@@ -47,6 +49,12 @@ public class OutboxPublisher {
                     .get(KAFKA_SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 event.setSent(true);
                 event.setSentAt(LocalDateTime.now());
+                // Push to admin SSE stream for real-time dashboard updates
+                adminEventBus.publish("booking", java.util.Map.of(
+                    "type", event.getTopic(),
+                    "ref", event.getAggregateKey(),
+                    "ts", System.currentTimeMillis()
+                ));
             } catch (Exception e) {
                 log.error("Outbox: failed to publish event {} to {}: {}",
                     event.getId(), event.getTopic(), e.getMessage());

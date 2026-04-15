@@ -33,4 +33,7 @@ public class BingeSaveRequest {
 
     @PositiveOrZero(message = "Cancellation cutoff must be zero or more minutes")
     private Integer customerCancellationCutoffMinutes;
+
+    @jakarta.validation.constraints.Min(value = 1, message = "Max concurrent bookings must be at least 1")
+    private Integer maxConcurrentBookings;
 }

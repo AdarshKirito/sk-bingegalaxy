@@ -48,6 +48,7 @@ public class BookingService {
     private final RateCodeAddonPricingRepository rateCodeAddonPricingRepository;
     private final CustomerEventPricingRepository customerEventPricingRepository;
     private final CustomerAddonPricingRepository customerAddonPricingRepository;
+    private final CancellationTierRepository cancellationTierRepository;
     private final AvailabilityClient availabilityClient;
     private final AvailabilityClientFallback availabilityFallback;
     private final KafkaTemplate<String, Object> kafkaTemplate;
@@ -57,6 +58,8 @@ public class BookingService {
     private final PricingService pricingService;
     private final BookingEventLogService eventLogService;
     private final SagaOrchestrator sagaOrchestrator;
+    private final VenueRoomRepository venueRoomRepository;
+    private final LoyaltyService loyaltyService;
 
     @Value("${internal.api.secret}")
     private String internalApiSecret;
@@ -69,6 +72,15 @@ public class BookingService {
 
     @Value("${app.booking.cooldown-minutes-after-timeout:10}")
     private int cooldownMinutesAfterTimeout;
+
+    @Value("${app.booking.max-reschedules-per-booking:3}")
+    private int maxReschedulesPerBooking;
+
+    @Value("${app.booking.reschedule-cutoff-hours:2}")
+    private int rescheduleCutoffHours;
+
+    @Value("${app.booking.transfer-cutoff-hours:2}")
+    private int transferCutoffHours;
 
     // ── Create booking ───────────────────────────────────────
     @Transactional
@@ -127,6 +139,16 @@ public class BookingService {
             throw new BusinessException("Selected time slot conflicts with an existing booking");
         }
 
+        // Capacity management: enforce max concurrent bookings per time slot
+        Binge binge = bingeRepository.findById(bingeId).orElse(null);
+        if (binge != null && binge.getMaxConcurrentBookings() != null) {
+            int overlapping = countOverlappingBookings(request.getBookingDate(), startMinute, durMin);
+            if (overlapping >= binge.getMaxConcurrentBookings()) {
+                throw new BusinessException("CAPACITY_FULL:This time slot has reached maximum capacity ("
+                    + binge.getMaxConcurrentBookings() + " bookings). You can join the waitlist to be notified when a spot opens up.");
+            }
+        }
+
         // Calculate pricing using resolved customer pricing
         PricingService.ResolvedEventPrice eventPrice = pricingService.resolveEventPrice(customerId, request.getEventTypeId());
         BigDecimal durationDecimalHours = BigDecimal.valueOf(durMin)
@@ -164,7 +186,47 @@ public class BookingService {
         String rateCodeName = eventPrice.rateCodeName();
 
         BigDecimal totalAmount = baseAmount.add(addOnTotal).add(guestAmount);
+
+        // ── Surge pricing ────────────────────────────────────
+        BigDecimal surgeMultiplier = null;
+        String surgeLabel = null;
+        PricingService.SurgeResult surge = pricingService.resolveSurge(request.getBookingDate(), request.getStartTime());
+        if (surge != null) {
+            surgeMultiplier = surge.multiplier();
+            surgeLabel = surge.label();
+            totalAmount = totalAmount.multiply(surgeMultiplier).setScale(2, RoundingMode.HALF_UP);
+            baseAmount = baseAmount.multiply(surgeMultiplier).setScale(2, RoundingMode.HALF_UP);
+        }
+
+        // ── Venue room assignment ────────────────────────────
+        Long venueRoomId = null;
+        String venueRoomName = null;
+        if (request.getVenueRoomId() != null) {
+            VenueRoom room = venueRoomRepository.findByIdAndBingeId(request.getVenueRoomId(), bingeId)
+                .orElseThrow(() -> new BusinessException("Selected room not found"));
+            if (!room.isActive()) throw new BusinessException("Selected room is currently unavailable");
+            // Check room capacity for the requested time slot
+            int roomOccupancy = countRoomBookings(room.getId(), request.getBookingDate(), startMinute, durMin);
+            if (roomOccupancy >= room.getCapacity()) {
+                throw new BusinessException("Selected room '" + room.getName() + "' is fully booked for this time slot");
+            }
+            venueRoomId = room.getId();
+            venueRoomName = room.getName();
+        }
+
+        // ── Loyalty redemption ───────────────────────────────
         String bookingRef = generateBookingRef();
+        long loyaltyPointsRedeemed = 0;
+        BigDecimal loyaltyDiscountAmount = BigDecimal.ZERO;
+        if (request.getRedeemLoyaltyPoints() != null && request.getRedeemLoyaltyPoints() > 0) {
+            LoyaltyService.RedemptionResult redemption = loyaltyService.redeemPoints(
+                customerId, bingeId, bookingRef,
+                request.getRedeemLoyaltyPoints(), totalAmount);
+            loyaltyPointsRedeemed = redemption.pointsRedeemed();
+            loyaltyDiscountAmount = redemption.discountAmount();
+            totalAmount = totalAmount.subtract(loyaltyDiscountAmount);
+            if (totalAmount.compareTo(BigDecimal.ZERO) < 0) totalAmount = BigDecimal.ZERO;
+        }
 
         Booking booking = Booking.builder()
             .bookingRef(bookingRef)
@@ -186,6 +248,12 @@ public class BookingService {
             .totalAmount(totalAmount)
             .pricingSource(pricingSource)
             .rateCodeName(rateCodeName)
+            .venueRoomId(venueRoomId)
+            .venueRoomName(venueRoomName)
+            .surgeMultiplier(surgeMultiplier)
+            .surgeLabel(surgeLabel)
+            .loyaltyPointsRedeemed(loyaltyPointsRedeemed)
+            .loyaltyDiscountAmount(loyaltyDiscountAmount)
             .status(BookingStatus.PENDING)
             .paymentStatus(PaymentStatus.PENDING)
             .build();
@@ -590,6 +658,379 @@ public class BookingService {
         return cancelBooking(booking, "CUSTOMER", "Booking cancelled by customer");
     }
 
+    // ── Customer: reschedule own booking ─────────────────────
+    @Transactional
+    public BookingDto rescheduleBooking(String bookingRef, Long customerId, RescheduleBookingRequest request) {
+        Booking booking = findScopedBookingByRef(bookingRef);
+
+        // Ownership check
+        if (!booking.getCustomerId().equals(customerId)) {
+            throw new BusinessException("Not authorised to reschedule this booking");
+        }
+
+        // Status check: only PENDING or CONFIRMED can be rescheduled
+        if (booking.getStatus() != BookingStatus.PENDING && booking.getStatus() != BookingStatus.CONFIRMED) {
+            throw new BusinessException(
+                "Only PENDING or CONFIRMED bookings can be rescheduled. Current status: " + booking.getStatus());
+        }
+
+        // Anti-abuse: max reschedule limit
+        if (booking.getRescheduleCount() >= maxReschedulesPerBooking) {
+            throw new BusinessException(
+                "This booking has already been rescheduled " + maxReschedulesPerBooking
+                    + " times. Please cancel and create a new booking instead.");
+        }
+
+        // Cutoff check: must be at least N hours before existing booking start
+        LocalDateTime eventStart = LocalDateTime.of(booking.getBookingDate(), booking.getStartTime());
+        long hoursUntilStart = java.time.temporal.ChronoUnit.HOURS.between(LocalDateTime.now(), eventStart);
+        if (hoursUntilStart < rescheduleCutoffHours) {
+            throw new BusinessException(
+                "Rescheduling requires at least " + rescheduleCutoffHours
+                    + " hours notice before the booking start time.");
+        }
+
+        // New date must be in the future
+        if (request.getNewBookingDate().isBefore(LocalDate.now())) {
+            throw new BusinessException("New booking date must be today or later");
+        }
+
+        // Resolve new duration
+        int existingDuration = resolveDurationMinutes(booking.getDurationMinutes(), booking.getDurationHours());
+        int newDurMin = request.getNewDurationMinutes() != null ? request.getNewDurationMinutes() : existingDuration;
+        if (newDurMin < 30 || newDurMin > 720) {
+            throw new BusinessException("Duration must be between 30 minutes and 12 hours");
+        }
+        if (newDurMin % 30 != 0) {
+            throw new BusinessException("Duration must be in 30-minute increments");
+        }
+
+        Long bingeId = booking.getBingeId();
+
+        // Check availability via internal HTTP call
+        int startMinute = request.getNewStartTime().getHour() * 60 + request.getNewStartTime().getMinute();
+        Boolean available = availabilityClient.checkSlotAvailable(
+            internalApiSecret, request.getNewBookingDate(), bingeId, startMinute, newDurMin);
+        if (available != null) {
+            availabilityFallback.cacheResult(request.getNewBookingDate(), startMinute, newDurMin, available);
+        }
+        if (available == null) {
+            throw new BusinessException("Availability service is temporarily unavailable. Please try again.");
+        }
+        if (Boolean.FALSE.equals(available)) {
+            throw new BusinessException("The new date/time slot is not available");
+        }
+
+        // Acquire advisory lock for the new slot
+        bookingRepository.acquireSlotLock(slotLockKey(bingeId, request.getNewBookingDate()));
+
+        // Check for conflicts (exclude this booking from overlap check)
+        if (hasTimeConflict(request.getNewBookingDate(), startMinute, newDurMin, booking.getId())) {
+            throw new BusinessException("The new time slot conflicts with an existing booking");
+        }
+
+        // Capacity check for new slot
+        Binge binge = bingeRepository.findById(bingeId).orElse(null);
+        if (binge != null && binge.getMaxConcurrentBookings() != null) {
+            // Exclude current booking from count if same date
+            List<Booking> activeBookings = bookingRepository.findActiveBookingsByBingeAndDate(bingeId, request.getNewBookingDate());
+            int newEnd = startMinute + newDurMin;
+            int overlapping = 0;
+            for (Booking b : activeBookings) {
+                if (b.getId().equals(booking.getId())) continue;
+                int effDur = getEffectiveDurationMinutes(b);
+                if (effDur == 0) continue;
+                int existingStart = b.getStartTime().getHour() * 60 + b.getStartTime().getMinute();
+                int existingEnd = existingStart + effDur;
+                if (startMinute < existingEnd && newEnd > existingStart) overlapping++;
+            }
+            if (overlapping >= binge.getMaxConcurrentBookings()) {
+                throw new BusinessException("CAPACITY_FULL:The new time slot has reached maximum capacity.");
+            }
+        }
+
+        // Recalculate pricing if duration changed
+        if (newDurMin != existingDuration) {
+            PricingService.ResolvedEventPrice eventPrice = pricingService.resolveEventPrice(
+                booking.getCustomerId(), booking.getEventType().getId());
+            BigDecimal durationDecimalHours = BigDecimal.valueOf(newDurMin)
+                .divide(BigDecimal.valueOf(60), 4, RoundingMode.HALF_UP);
+            BigDecimal newBaseAmount = eventPrice.basePrice()
+                .add(eventPrice.hourlyRate().multiply(durationDecimalHours).setScale(2, RoundingMode.HALF_UP));
+            BigDecimal totalAmount = newBaseAmount.add(booking.getAddOnAmount()).add(booking.getGuestAmount());
+            booking.setBaseAmount(newBaseAmount);
+            booking.setTotalAmount(totalAmount);
+        }
+
+        // Record old values for audit
+        String oldDetails = String.format("Date: %s, Time: %s, Duration: %d min",
+            booking.getBookingDate(), booking.getStartTime(), existingDuration);
+
+        // Apply changes
+        booking.setBookingDate(request.getNewBookingDate());
+        booking.setStartTime(request.getNewStartTime());
+        booking.setDurationMinutes(newDurMin);
+        booking.setDurationHours(newDurMin / 60);
+        booking.setRescheduleCount(booking.getRescheduleCount() + 1);
+        if (booking.getOriginalBookingRef() == null) {
+            booking.setOriginalBookingRef(booking.getBookingRef());
+        }
+
+        Booking saved = bookingRepository.save(booking);
+
+        String newDetails = String.format("Date: %s, Time: %s, Duration: %d min",
+            saved.getBookingDate(), saved.getStartTime(), newDurMin);
+        eventLogService.logEvent(saved, BookingEventType.RESCHEDULED, oldDetails, customerId,
+            "CUSTOMER", "Rescheduled (attempt #" + saved.getRescheduleCount() + "): " + oldDetails + " → " + newDetails);
+        publishBookingEvent(saved, KafkaTopics.BOOKING_RESCHEDULED);
+        log.info("Booking rescheduled: {} (attempt #{})", bookingRef, saved.getRescheduleCount());
+
+        return toDto(saved);
+    }
+
+    // ── Customer: transfer booking to another person ─────────
+    @Transactional
+    public BookingDto transferBooking(String bookingRef, Long customerId, TransferBookingRequest request) {
+        Booking booking = findScopedBookingByRef(bookingRef);
+
+        // Ownership check
+        if (!booking.getCustomerId().equals(customerId)) {
+            throw new BusinessException("Not authorised to transfer this booking");
+        }
+
+        // Status check
+        if (booking.getStatus() != BookingStatus.PENDING && booking.getStatus() != BookingStatus.CONFIRMED) {
+            throw new BusinessException(
+                "Only PENDING or CONFIRMED bookings can be transferred. Current status: " + booking.getStatus());
+        }
+
+        // Already transferred check
+        if (booking.isTransferred()) {
+            throw new BusinessException("This booking has already been transferred once. Further transfers are not allowed.");
+        }
+
+        // Cannot transfer to yourself
+        if (booking.getCustomerEmail().equalsIgnoreCase(request.getRecipientEmail())) {
+            throw new BusinessException("Cannot transfer a booking to yourself");
+        }
+
+        // Cutoff check: must be at least N hours before start
+        LocalDateTime eventStart = LocalDateTime.of(booking.getBookingDate(), booking.getStartTime());
+        long hoursUntilStart = java.time.temporal.ChronoUnit.HOURS.between(LocalDateTime.now(), eventStart);
+        if (hoursUntilStart < transferCutoffHours) {
+            throw new BusinessException(
+                "Transfers require at least " + transferCutoffHours + " hours notice before the booking start time.");
+        }
+
+        // Record original customer details
+        String oldCustomerDetails = String.format("Customer: %s (%s)",
+            booking.getCustomerName(), booking.getCustomerEmail());
+        booking.setOriginalCustomerId(booking.getCustomerId());
+        booking.setOriginalCustomerName(booking.getCustomerName());
+
+        // Update to recipient details
+        // Note: we keep the same customerId for the original booker since the recipient
+        // may not have an account. The transfer is tracked via the original* fields.
+        // For a real-world system, you might look up the recipient by email.
+        booking.setCustomerName(request.getRecipientName());
+        booking.setCustomerEmail(request.getRecipientEmail());
+        if (request.getRecipientPhone() != null && !request.getRecipientPhone().isBlank()) {
+            booking.setCustomerPhone(request.getRecipientPhone());
+        }
+        booking.setTransferred(true);
+
+        Booking saved = bookingRepository.save(booking);
+
+        String newCustomerDetails = String.format("Customer: %s (%s)",
+            saved.getCustomerName(), saved.getCustomerEmail());
+        eventLogService.logEvent(saved, BookingEventType.TRANSFERRED, oldCustomerDetails, customerId,
+            "CUSTOMER", "Transferred: " + oldCustomerDetails + " → " + newCustomerDetails);
+        publishBookingEvent(saved, KafkaTopics.BOOKING_TRANSFERRED);
+        log.info("Booking transferred: {} from {} to {}", bookingRef,
+            booking.getOriginalCustomerName(), request.getRecipientName());
+
+        return toDto(saved);
+    }
+
+    // ── Customer: create recurring bookings ──────────────────
+    @Transactional
+    public RecurringBookingResult createRecurringBookings(RecurringBookingRequest request,
+                                                          Long customerId, String customerName,
+                                                          String customerEmail, String customerPhone) {
+        Long bingeId = BingeContext.requireBingeId();
+        String groupId = "RG-" + Year.now().getValue() + "-"
+            + String.format("%08X", ThreadLocalRandom.current().nextInt());
+
+        int durMin = request.getDurationMinutes();
+        if (durMin < 30 || durMin > 720 || durMin % 30 != 0) {
+            throw new BusinessException("Duration must be between 30 minutes and 12 hours in 30-minute increments");
+        }
+
+        EventType eventType = findBookableEventType(request.getEventTypeId());
+        List<BookingDto> createdBookings = new ArrayList<>();
+        List<RecurringBookingResult.SkippedOccurrence> skipped = new ArrayList<>();
+
+        for (int i = 0; i < request.getOccurrences(); i++) {
+            LocalDate date = calculateRecurrenceDate(request.getStartDate(), request.getPattern(), i);
+
+            // Skip dates in the past
+            if (date.isBefore(LocalDate.now())) {
+                skipped.add(RecurringBookingResult.SkippedOccurrence.builder()
+                    .date(date).reason("Date is in the past").build());
+                continue;
+            }
+
+            try {
+                // Check availability
+                int startMinute = request.getStartTime().getHour() * 60 + request.getStartTime().getMinute();
+                Boolean available = availabilityClient.checkSlotAvailable(
+                    internalApiSecret, date, bingeId, startMinute, durMin);
+                if (available != null) {
+                    availabilityFallback.cacheResult(date, startMinute, durMin, available);
+                }
+                if (Boolean.FALSE.equals(available) || available == null) {
+                    skipped.add(RecurringBookingResult.SkippedOccurrence.builder()
+                        .date(date).reason("Slot not available").build());
+                    continue;
+                }
+
+                // Acquire slot lock + conflict check
+                bookingRepository.acquireSlotLock(slotLockKey(bingeId, date));
+                if (hasTimeConflict(date, startMinute, durMin)) {
+                    skipped.add(RecurringBookingResult.SkippedOccurrence.builder()
+                        .date(date).reason("Time slot conflicts with existing booking").build());
+                    continue;
+                }
+
+                // Capacity check
+                Binge binge = bingeRepository.findById(bingeId).orElse(null);
+                if (binge != null && binge.getMaxConcurrentBookings() != null) {
+                    int overlapping = countOverlappingBookings(date, startMinute, durMin);
+                    if (overlapping >= binge.getMaxConcurrentBookings()) {
+                        skipped.add(RecurringBookingResult.SkippedOccurrence.builder()
+                            .date(date).reason("Slot at capacity").build());
+                        continue;
+                    }
+                }
+
+                // Calculate pricing
+                PricingService.ResolvedEventPrice eventPrice = pricingService.resolveEventPrice(customerId, request.getEventTypeId());
+                BigDecimal durationDecimalHours = BigDecimal.valueOf(durMin)
+                    .divide(BigDecimal.valueOf(60), 4, RoundingMode.HALF_UP);
+                BigDecimal baseAmount = eventPrice.basePrice()
+                    .add(eventPrice.hourlyRate().multiply(durationDecimalHours).setScale(2, RoundingMode.HALF_UP));
+
+                // Process add-ons
+                List<BookingAddOn> bookingAddOns = new ArrayList<>();
+                BigDecimal addOnTotal = BigDecimal.ZERO;
+                if (request.getAddOns() != null) {
+                    for (AddOnSelection sel : request.getAddOns()) {
+                        AddOn addOn = findBookableAddOn(sel.getAddOnId());
+                        int qty = Math.max(sel.getQuantity(), 1);
+                        PricingService.ResolvedAddonPrice addonPrice = pricingService.resolveAddonPrice(customerId, sel.getAddOnId());
+                        BigDecimal linePrice = addonPrice.price().multiply(BigDecimal.valueOf(qty));
+                        addOnTotal = addOnTotal.add(linePrice);
+                        bookingAddOns.add(BookingAddOn.builder()
+                            .addOn(addOn).quantity(qty).price(linePrice).build());
+                    }
+                }
+
+                int guests = Math.max(request.getNumberOfGuests(), 1);
+                BigDecimal guestAmount = eventPrice.pricePerGuest()
+                    .multiply(BigDecimal.valueOf(Math.max(guests - 1, 0)));
+                BigDecimal totalAmount = baseAmount.add(addOnTotal).add(guestAmount);
+
+                Booking booking = Booking.builder()
+                    .bookingRef(generateBookingRef())
+                    .bingeId(bingeId)
+                    .customerId(customerId)
+                    .customerName(customerName)
+                    .customerEmail(customerEmail)
+                    .customerPhone(customerPhone)
+                    .eventType(eventType)
+                    .bookingDate(date)
+                    .startTime(request.getStartTime())
+                    .durationHours(durMin / 60)
+                    .durationMinutes(durMin)
+                    .numberOfGuests(guests)
+                    .specialNotes(request.getSpecialNotes())
+                    .baseAmount(baseAmount)
+                    .addOnAmount(addOnTotal)
+                    .guestAmount(guestAmount)
+                    .totalAmount(totalAmount)
+                    .pricingSource(eventPrice.source())
+                    .rateCodeName(eventPrice.rateCodeName())
+                    .status(BookingStatus.PENDING)
+                    .paymentStatus(PaymentStatus.PENDING)
+                    .recurringGroupId(groupId)
+                    .build();
+
+                for (BookingAddOn ba : bookingAddOns) {
+                    ba.setBooking(booking);
+                }
+                booking.setAddOns(bookingAddOns);
+
+                Booking saved = bookingRepository.save(booking);
+                eventLogService.logEvent(saved, BookingEventType.CREATED, null, customerId,
+                    "CUSTOMER", "Recurring booking created (group: " + groupId + ")");
+                sagaOrchestrator.startSaga(saved.getBookingRef());
+                publishBookingEvent(saved, KafkaTopics.BOOKING_CREATED);
+                createdBookings.add(toDto(saved));
+
+            } catch (BusinessException e) {
+                skipped.add(RecurringBookingResult.SkippedOccurrence.builder()
+                    .date(date).reason(e.getMessage()).build());
+            } catch (Exception e) {
+                log.warn("Unexpected error creating recurring booking for date {}: {}", date, e.getMessage());
+                skipped.add(RecurringBookingResult.SkippedOccurrence.builder()
+                    .date(date).reason("Unexpected error — please retry this date individually").build());
+            }
+        }
+
+        if (createdBookings.isEmpty()) {
+            throw new BusinessException("No bookings could be created. All dates were unavailable or conflicting.");
+        }
+
+        log.info("Recurring group {} created: {} bookings, {} skipped", groupId,
+            createdBookings.size(), skipped.size());
+
+        return RecurringBookingResult.builder()
+            .recurringGroupId(groupId)
+            .requestedOccurrences(request.getOccurrences())
+            .successfulOccurrences(createdBookings.size())
+            .skippedOccurrences(skipped.size())
+            .createdBookings(createdBookings)
+            .skipped(skipped)
+            .build();
+    }
+
+    private LocalDate calculateRecurrenceDate(LocalDate startDate,
+                                               RecurringBookingRequest.RecurrencePattern pattern, int index) {
+        return switch (pattern) {
+            case WEEKLY -> startDate.plusWeeks(index);
+            case BIWEEKLY -> startDate.plusWeeks(index * 2L);
+            case MONTHLY -> startDate.plusMonths(index);
+        };
+    }
+
+    // ── Customer: get all bookings in a recurring group ──────
+    @Transactional(readOnly = true)
+    public List<BookingDto> getRecurringGroupBookings(String groupId, Long customerId) {
+        Long bid = BingeContext.getBingeId();
+        List<Booking> bookings;
+        if (bid != null) {
+            bookings = bookingRepository.findByRecurringGroupIdAndBingeId(groupId, bid);
+        } else {
+            bookings = bookingRepository.findByRecurringGroupId(groupId);
+        }
+        // Verify ownership: at least one booking in the group belongs to the customer
+        boolean owns = bookings.stream().anyMatch(b -> b.getCustomerId().equals(customerId));
+        if (!owns) {
+            throw new BusinessException("Not authorised to view this recurring group");
+        }
+        return bookings.stream().map(this::toDto).toList();
+    }
+
     @Transactional(readOnly = true)
     public List<BookingDto> getPendingCustomerReviews(Long customerId, LocalDate clientToday) {
         LocalDate today = clientToday != null ? clientToday : LocalDate.now();
@@ -915,6 +1356,7 @@ public class BookingService {
                 bookingRepository.save(b);
                 eventLogService.logEvent(b, BookingEventType.COMPLETED, "CHECKED_IN", null, "SYSTEM",
                     "Auto-completed by end-of-day audit");
+                awardLoyaltyPoints(b);
                 markedCompleted++;
                 affectedRefs.add(b.getBookingRef());
             }
@@ -1055,6 +1497,96 @@ public class BookingService {
         return false;
     }
 
+    /** Count active bookings that overlap with a given time range (for capacity enforcement). */
+    @Transactional(readOnly = true)
+    public int countOverlappingBookings(LocalDate date, int startMinute, int durationMinutes) {
+        Long bid = BingeContext.getBingeId();
+        List<Booking> activeBookings = bid != null
+            ? bookingRepository.findActiveBookingsByBingeAndDate(bid, date)
+            : bookingRepository.findActiveBookingsByDate(date);
+        int newEnd = startMinute + durationMinutes;
+        int count = 0;
+        for (Booking b : activeBookings) {
+            int effectiveDuration = getEffectiveDurationMinutes(b);
+            if (effectiveDuration == 0) continue;
+            int existingStart = b.getStartTime().getHour() * 60 + b.getStartTime().getMinute();
+            int existingEnd = existingStart + effectiveDuration;
+            if (startMinute < existingEnd && newEnd > existingStart) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /** Count active bookings assigned to a specific venue room for a given time slot. */
+    private int countRoomBookings(Long roomId, LocalDate date, int startMinute, int durationMinutes) {
+        Long bid = BingeContext.getBingeId();
+        List<Booking> activeBookings = bid != null
+            ? bookingRepository.findActiveBookingsForReadByBingeAndDate(bid, date)
+            : bookingRepository.findActiveBookingsForReadByDate(date);
+        int newEnd = startMinute + durationMinutes;
+        int count = 0;
+        for (Booking b : activeBookings) {
+            if (!roomId.equals(b.getVenueRoomId())) continue;
+            int effectiveDuration = getEffectiveDurationMinutes(b);
+            if (effectiveDuration == 0) continue;
+            int existingStart = b.getStartTime().getHour() * 60 + b.getStartTime().getMinute();
+            int existingEnd = existingStart + effectiveDuration;
+            if (startMinute < existingEnd && newEnd > existingStart) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /** Award loyalty points when a booking is completed. */
+    private void awardLoyaltyPoints(Booking booking) {
+        try {
+            BigDecimal payableAmount = booking.getCollectedAmount() != null
+                ? booking.getCollectedAmount() : booking.getTotalAmount();
+            long earned = loyaltyService.earnPoints(
+                booking.getCustomerId(), booking.getBingeId(),
+                booking.getBookingRef(), payableAmount);
+            if (earned > 0) {
+                booking.setLoyaltyPointsEarned(earned);
+                bookingRepository.save(booking);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to award loyalty points for booking {}: {}", booking.getBookingRef(), e.getMessage());
+        }
+    }
+
+    /** Get capacity info: current occupancy vs max for a given slot. */
+    @Transactional(readOnly = true)
+    public java.util.Map<String, Object> getSlotCapacity(LocalDate date, int startMinute, int durationMinutes) {
+        Long bid = BingeContext.requireBingeId();
+        return getSlotCapacityForBinge(bid, date, startMinute, durationMinutes);
+    }
+
+    /** Get capacity info for a specific binge (no BingeContext required). */
+    @Transactional(readOnly = true)
+    public java.util.Map<String, Object> getSlotCapacityForBinge(Long bingeId, LocalDate date, int startMinute, int durationMinutes) {
+        Binge binge = bingeRepository.findById(bingeId).orElse(null);
+        List<Booking> activeBookings = bookingRepository.findActiveBookingsByBingeAndDate(bingeId, date);
+        int newEnd = startMinute + durationMinutes;
+        int overlapping = 0;
+        for (Booking b : activeBookings) {
+            int effectiveDuration = getEffectiveDurationMinutes(b);
+            if (effectiveDuration == 0) continue;
+            int existingStart = b.getStartTime().getHour() * 60 + b.getStartTime().getMinute();
+            int existingEnd = existingStart + effectiveDuration;
+            if (startMinute < existingEnd && newEnd > existingStart) {
+                overlapping++;
+            }
+        }
+        Integer max = binge != null ? binge.getMaxConcurrentBookings() : null;
+        return java.util.Map.of(
+            "currentBookings", overlapping,
+            "maxConcurrentBookings", max != null ? max : -1,
+            "isFull", max != null && overlapping >= max
+        );
+    }
+
     /**
      * For COMPLETED bookings with an early checkout, return the actual used minutes
      * rounded UP to the nearest 30-minute boundary so remaining time becomes available.
@@ -1115,7 +1647,9 @@ public class BookingService {
             booking.setStatus(BookingStatus.COMPLETED);
             booking.setCheckedIn(false);
             booking.setActualCheckoutTime(now);
-            return toDto(bookingRepository.save(booking));
+            Booking completed = bookingRepository.save(booking);
+            awardLoyaltyPoints(completed);
+            return toDto(completed);
         }
 
         long usedMinutes = java.time.Duration.between(scheduledStart, now).toMinutes();
@@ -1165,6 +1699,8 @@ public class BookingService {
         eventLogService.logEvent(saved, BookingEventType.CHECKED_OUT, "CHECKED_IN", null, "ADMIN",
             note);
         log.info("Early checkout for {}: {}", bookingRef, note);
+
+        awardLoyaltyPoints(saved);
 
         return toDto(saved);
     }
@@ -1560,6 +2096,94 @@ public class BookingService {
             .orElseThrow(() -> new ResourceNotFoundException("EventType", "id", id));
     }
 
+    // ═══════════════════════════════════════════════════════════
+    //  VENUE ROOM MANAGEMENT
+    // ═══════════════════════════════════════════════════════════
+
+    @Transactional(readOnly = true)
+    public List<VenueRoomDto> getActiveVenueRooms() {
+        Long bid = BingeContext.requireBingeId();
+        return venueRoomRepository.findByBingeIdAndActiveTrueOrderBySortOrderAsc(bid)
+            .stream().map(this::toRoomDto).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<VenueRoomDto> getAvailableRooms(LocalDate date, int startMinute, int durationMinutes) {
+        Long bid = BingeContext.requireBingeId();
+        List<VenueRoom> rooms = venueRoomRepository.findByBingeIdAndActiveTrueOrderBySortOrderAsc(bid);
+        return rooms.stream().map(room -> {
+            int occ = countRoomBookings(room.getId(), date, startMinute, durationMinutes);
+            VenueRoomDto dto = toRoomDto(room);
+            dto.setCurrentOccupancy(occ);
+            dto.setAvailable(occ < room.getCapacity());
+            return dto;
+        }).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<VenueRoomDto> getAllVenueRooms() {
+        Long bid = requireSelectedBinge("managing venue rooms");
+        return venueRoomRepository.findByBingeIdOrderBySortOrderAsc(bid)
+            .stream().map(this::toRoomDto).toList();
+    }
+
+    @Transactional
+    public VenueRoomDto createVenueRoom(VenueRoomSaveRequest request) {
+        Long bid = requireSelectedBinge("creating venue room");
+        VenueRoom room = VenueRoom.builder()
+            .bingeId(bid).name(request.getName()).roomType(request.getRoomType())
+            .capacity(request.getCapacity()).description(request.getDescription())
+            .sortOrder(request.getSortOrder()).active(request.isActive())
+            .build();
+        room = venueRoomRepository.save(room);
+        log.info("Venue room created: {}", room.getName());
+        return toRoomDto(room);
+    }
+
+    @Transactional
+    public VenueRoomDto updateVenueRoom(Long id, VenueRoomSaveRequest request) {
+        Long bid = requireSelectedBinge("updating venue room");
+        VenueRoom room = venueRoomRepository.findByIdAndBingeId(id, bid)
+            .orElseThrow(() -> new ResourceNotFoundException("VenueRoom", "id", id));
+        room.setName(request.getName());
+        room.setRoomType(request.getRoomType());
+        room.setCapacity(request.getCapacity());
+        room.setDescription(request.getDescription());
+        room.setSortOrder(request.getSortOrder());
+        room.setActive(request.isActive());
+        room = venueRoomRepository.save(room);
+        log.info("Venue room updated: {}", room.getName());
+        return toRoomDto(room);
+    }
+
+    @Transactional
+    public void toggleVenueRoom(Long id) {
+        Long bid = requireSelectedBinge("toggling venue room");
+        VenueRoom room = venueRoomRepository.findByIdAndBingeId(id, bid)
+            .orElseThrow(() -> new ResourceNotFoundException("VenueRoom", "id", id));
+        room.setActive(!room.isActive());
+        venueRoomRepository.save(room);
+        log.info("Venue room {} toggled to active={}", room.getName(), room.isActive());
+    }
+
+    @Transactional
+    public void deleteVenueRoom(Long id) {
+        Long bid = requireSelectedBinge("deleting venue room");
+        VenueRoom room = venueRoomRepository.findByIdAndBingeId(id, bid)
+            .orElseThrow(() -> new ResourceNotFoundException("VenueRoom", "id", id));
+        venueRoomRepository.delete(room);
+        log.info("Venue room deleted: {}", room.getName());
+    }
+
+    private VenueRoomDto toRoomDto(VenueRoom r) {
+        return VenueRoomDto.builder()
+            .id(r.getId()).bingeId(r.getBingeId()).name(r.getName())
+            .roomType(r.getRoomType()).capacity(r.getCapacity())
+            .description(r.getDescription()).sortOrder(r.getSortOrder())
+            .active(r.isActive()).createdAt(r.getCreatedAt()).updatedAt(r.getUpdatedAt())
+            .build();
+    }
+
     private AddOn findManagedAddOn(Long id) {
         Long bid = requireSelectedBinge("managing add-ons");
         return addOnRepository.findByIdAndBingeId(id, bid)
@@ -1609,6 +2233,7 @@ public class BookingService {
         try {
             BookingEvent event = BookingEvent.builder()
                 .bookingRef(b.getBookingRef())
+                .bingeId(b.getBingeId())
                 .customerId(b.getCustomerId())
                 .customerName(b.getCustomerName())
                 .customerEmail(b.getCustomerEmail())
@@ -1679,11 +2304,42 @@ public class BookingService {
             .earlyCheckoutNote(b.getEarlyCheckoutNote())
             .canCustomerCancel(cancelDecision.allowed())
             .customerCancelMessage(cancelDecision.message())
+            .cancellationRefundPercentage(cancelDecision.refundPercentage())
             .pricingSource(b.getPricingSource())
             .rateCodeName(b.getRateCodeName())
+            .rescheduleCount(b.getRescheduleCount())
+            .originalBookingRef(b.getOriginalBookingRef())
+            .transferred(b.isTransferred())
+            .originalCustomerName(b.getOriginalCustomerName())
+            .recurringGroupId(b.getRecurringGroupId())
+            .canCustomerReschedule(canCustomerReschedule(b))
+            .canCustomerTransfer(canCustomerTransfer(b))
+            .venueRoomId(b.getVenueRoomId())
+            .venueRoomName(b.getVenueRoomName())
+            .loyaltyPointsEarned(b.getLoyaltyPointsEarned())
+            .loyaltyPointsRedeemed(b.getLoyaltyPointsRedeemed())
+            .loyaltyDiscountAmount(b.getLoyaltyDiscountAmount())
+            .surgeMultiplier(b.getSurgeMultiplier())
+            .surgeLabel(b.getSurgeLabel())
             .createdAt(b.getCreatedAt())
             .updatedAt(b.getUpdatedAt())
             .build();
+    }
+
+    private boolean canCustomerReschedule(Booking b) {
+        if (b.getStatus() != BookingStatus.PENDING && b.getStatus() != BookingStatus.CONFIRMED) return false;
+        if (b.getRescheduleCount() >= maxReschedulesPerBooking) return false;
+        LocalDateTime eventStart = LocalDateTime.of(b.getBookingDate(), b.getStartTime());
+        long hoursUntilStart = java.time.temporal.ChronoUnit.HOURS.between(LocalDateTime.now(), eventStart);
+        return hoursUntilStart >= rescheduleCutoffHours;
+    }
+
+    private boolean canCustomerTransfer(Booking b) {
+        if (b.getStatus() != BookingStatus.PENDING && b.getStatus() != BookingStatus.CONFIRMED) return false;
+        if (b.isTransferred()) return false;
+        LocalDateTime eventStart = LocalDateTime.of(b.getBookingDate(), b.getStartTime());
+        long hoursUntilStart = java.time.temporal.ChronoUnit.HOURS.between(LocalDateTime.now(), eventStart);
+        return hoursUntilStart >= transferCutoffHours;
     }
 
     private CancellationPolicyDecision evaluateCustomerCancellation(Booking booking) {
@@ -1694,26 +2350,60 @@ public class BookingService {
 
         boolean enabled = binge == null || binge.isCustomerCancellationEnabled();
         if (!enabled) {
-            return new CancellationPolicyDecision(false, "This venue currently does not allow customer self-cancellation.");
+            return new CancellationPolicyDecision(false, "This venue currently does not allow customer self-cancellation.", 0);
         }
 
+        LocalDateTime eventStart = LocalDateTime.of(booking.getBookingDate(), booking.getStartTime());
+        LocalDateTime now = LocalDateTime.now();
+        long hoursUntilStart = ChronoUnit.HOURS.between(now, eventStart);
+
+        // Check for tiered cancellation policy
+        List<com.skbingegalaxy.booking.entity.CancellationTier> tiers = booking.getBingeId() != null
+            ? cancellationTierRepository.findByBingeIdOrderByHoursBeforeStartDesc(booking.getBingeId())
+            : List.of();
+
+        if (!tiers.isEmpty()) {
+            // Tiered policy: find matching tier (first where hoursUntilStart >= tier.hoursBeforeStart)
+            for (var tier : tiers) {
+                if (hoursUntilStart >= tier.getHoursBeforeStart()) {
+                    String label = tier.getLabel() != null ? tier.getLabel() : (tier.getRefundPercentage() + "% refund");
+                    return new CancellationPolicyDecision(true,
+                        "Cancellation available with " + tier.getRefundPercentage() + "% refund (" + label + "). "
+                            + hoursUntilStart + " hours until start.",
+                        tier.getRefundPercentage());
+                }
+            }
+            // No tier matched (too close to start) — check if there's a 0h tier
+            var lastTier = tiers.get(tiers.size() - 1);
+            if (lastTier.getHoursBeforeStart() == 0) {
+                String label = lastTier.getLabel() != null ? lastTier.getLabel() : (lastTier.getRefundPercentage() + "% refund");
+                return new CancellationPolicyDecision(true,
+                    "Late cancellation: " + lastTier.getRefundPercentage() + "% refund (" + label + ").",
+                    lastTier.getRefundPercentage());
+            }
+            // Beyond all tiers — deny cancellation
+            return new CancellationPolicyDecision(false,
+                "Cancellation is no longer available. The closest policy tier requires at least "
+                    + lastTier.getHoursBeforeStart() + " hours notice.", 0);
+        }
+
+        // Legacy binary policy (no tiers configured)
         int cutoffMinutes = (binge != null && binge.getCustomerCancellationCutoffMinutes() >= 0)
             ? binge.getCustomerCancellationCutoffMinutes()
             : 180;
 
-        LocalDateTime eventStart = LocalDateTime.of(booking.getBookingDate(), booking.getStartTime());
         LocalDateTime lockAt = eventStart.minusMinutes(cutoffMinutes);
-        LocalDateTime now = LocalDateTime.now();
 
         if (now.isAfter(lockAt) || now.isEqual(lockAt)) {
             return new CancellationPolicyDecision(false,
                 "Cancellation is locked for this booking. This venue allows cancellation only until "
-                    + cutoffMinutes + " minutes before start time.");
+                    + cutoffMinutes + " minutes before start time.", 0);
         }
 
         long minutesLeft = Math.max(0, ChronoUnit.MINUTES.between(now, lockAt));
         return new CancellationPolicyDecision(true,
-            "Cancellation is open. It will lock " + minutesLeft + " minutes from now.");
+            "Cancellation is open. It will lock " + minutesLeft + " minutes from now.",
+            100); // Legacy policy = full refund if within window
     }
 
     private BookingReviewDto toReviewDto(BookingReview review) {
@@ -1740,7 +2430,7 @@ public class BookingService {
         return normalized.isEmpty() ? null : normalized;
     }
 
-    private record CancellationPolicyDecision(boolean allowed, String message) {}
+    private record CancellationPolicyDecision(boolean allowed, String message, int refundPercentage) {}
 
     private EventTypeDto toEventTypeDto(EventType et) {
         return EventTypeDto.builder()

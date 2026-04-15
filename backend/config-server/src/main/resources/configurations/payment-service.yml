@@ -33,6 +33,7 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      observation-enabled: true
     consumer:
       group-id: payment-group
       auto-offset-reset: earliest
@@ -40,6 +41,10 @@ spring:
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       properties:
         spring.json.trusted.packages: com.skbingegalaxy.*
+    listener:
+      observation-enabled: true
+    template:
+      observation-enabled: true
 
 app:
   payment:
@@ -54,6 +59,44 @@ logging:
   level:
     com.skbingegalaxy.payment: WARN
 
+# ── Resilience4j Circuit Breaker ─────────────────────────
+spring.cloud.openfeign.circuitbreaker.enabled: true
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        slow-call-duration-threshold: 5s
+        slow-call-rate-threshold: 80
+        register-health-indicator: true
+    instances:
+      booking-service:
+        base-config: default
+      razorpay:
+        base-config: default
+        wait-duration-in-open-state: 60s
+        slow-call-duration-threshold: 10s
+  retry:
+    configs:
+      default:
+        max-attempts: 3
+        wait-duration: 500ms
+        retry-exceptions:
+          - java.io.IOException
+          - java.net.SocketTimeoutException
+          - feign.RetryableException
+    instances:
+      booking-service:
+        base-config: default
+  timelimiter:
+    configs:
+      default:
+        timeout-duration: 5s
+
 eureka:
   instance:
     prefer-ip-address: true
@@ -62,13 +105,15 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,prometheus,metrics
+        include: health,info,prometheus,metrics,circuitbreakers
   endpoint:
     health:
       show-details: when-authorized
       probes:
         enabled: true
   health:
+    circuitbreakers:
+      enabled: true
     livenessstate:
       enabled: true
     readinessstate:

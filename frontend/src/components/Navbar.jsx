@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useBinge } from '../context/BingeContext';
+import { useTranslation } from 'react-i18next';
 import {
   FiBarChart2,
   FiCalendar,
@@ -19,6 +20,8 @@ import {
   FiUser,
   FiUsers,
   FiX,
+  FiGrid,
+  FiZap,
 } from 'react-icons/fi';
 import ThemeToggle from './ThemeToggle';
 import './Navbar.css';
@@ -26,6 +29,7 @@ import './Navbar.css';
 export default function Navbar() {
   const { user, isAuthenticated, isAdmin, isSuperAdmin, loading, logout } = useAuth();
   const { selectedBinge, clearBinge } = useBinge();
+  const { i18n } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -75,6 +79,8 @@ export default function Navbar() {
     { to: '/admin/blocked-dates', icon: <FiClock />, label: 'Availability' },
     { to: '/admin/event-types', icon: <FiSettings />, label: 'Catalog' },
     { to: '/admin/rate-codes', icon: <FiSettings />, label: 'Rate Codes' },
+    { to: '/admin/venue-rooms', icon: <FiGrid />, label: 'Rooms' },
+    { to: '/admin/surge-rules', icon: <FiZap />, label: 'Surge Rules' },
     { to: '/admin/users-config', icon: <FiUsers />, label: 'Users' },
     { to: '/admin/reports', icon: <FiBarChart2 />, label: 'Reports' },
   ];
@@ -216,6 +222,14 @@ export default function Navbar() {
           )}
 
           <ThemeToggle />
+          <button
+            className="lang-toggle-btn"
+            onClick={() => { const next = i18n.language === 'en' ? 'hi' : 'en'; i18n.changeLanguage(next); localStorage.setItem('lang', next); }}
+            aria-label="Switch language"
+            title={i18n.language === 'en' ? 'हिन्दी' : 'English'}
+          >
+            {i18n.language === 'en' ? 'हि' : 'EN'}
+          </button>
           <button
             className="hamburger-btn"
             onClick={() => setMenuOpen(o => !o)}

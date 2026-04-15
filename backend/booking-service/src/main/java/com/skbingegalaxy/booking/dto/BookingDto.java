@@ -46,8 +46,28 @@ public class BookingDto {
     private String earlyCheckoutNote;
     private Boolean canCustomerCancel;
     private String customerCancelMessage;
+    private Integer cancellationRefundPercentage;
     private String pricingSource;
     private String rateCodeName;
+    private int rescheduleCount;
+    private String originalBookingRef;
+    private boolean transferred;
+    private String originalCustomerName;
+    private String recurringGroupId;
+    /** Whether the customer is allowed to reschedule this booking. */
+    private Boolean canCustomerReschedule;
+    /** Whether the customer is allowed to transfer this booking. */
+    private Boolean canCustomerTransfer;
+    // ── Venue Room ───
+    private Long venueRoomId;
+    private String venueRoomName;
+    // ── Loyalty Points ───
+    private long loyaltyPointsEarned;
+    private long loyaltyPointsRedeemed;
+    private BigDecimal loyaltyDiscountAmount;
+    // ── Surge Pricing ───
+    private BigDecimal surgeMultiplier;
+    private String surgeLabel;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

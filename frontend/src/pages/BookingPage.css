@@ -374,3 +374,252 @@
     width: 28px;
   }
 }
+
+/* ====================================================================
+   Room / Space Selection
+   ==================================================================== */
+.room-section {
+  margin-top: 1.5rem;
+}
+
+.room-section h3 {
+  margin-bottom: 0.75rem;
+  font-size: 1rem;
+  color: var(--text);
+}
+
+.room-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.room-card {
+  cursor: pointer;
+  padding: 0.65rem 1.1rem;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 0.85rem;
+  transition: var(--transition);
+  text-align: left;
+  min-width: 140px;
+}
+
+.room-card:hover {
+  border-color: rgba(var(--primary-rgb), 0.35);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.06), var(--primary-bg));
+}
+
+.room-card.selected {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+  box-shadow: var(--shadow-primary), 0 10px 20px rgba(var(--primary-rgb), 0.1);
+}
+
+.room-card-name {
+  display: block;
+  font-weight: 600;
+}
+
+.room-card-detail {
+  display: block;
+  font-size: 0.75rem;
+  opacity: 0.8;
+  margin-top: 0.15rem;
+}
+
+/* ====================================================================
+   Surge Pricing Banner
+   ==================================================================== */
+.surge-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  margin-top: 1rem;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(135deg, #fef3c7, #fde68a);
+  border: 1px solid #f59e0b;
+}
+
+[data-theme="dark"] .surge-banner {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(253, 230, 138, 0.08));
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.surge-banner-icon {
+  font-size: 1.3rem;
+  flex-shrink: 0;
+}
+
+.surge-banner-title {
+  font-weight: 600;
+  color: #92400e;
+}
+
+[data-theme="dark"] .surge-banner-title {
+  color: #fbbf24;
+}
+
+.surge-banner-sub {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #78350f;
+}
+
+[data-theme="dark"] .surge-banner-sub {
+  color: #fcd34d;
+}
+
+/* Surge row in review */
+.review-surge-row {
+  font-size: 0.85rem;
+  background: #fef3c7;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius-sm);
+  margin: 0.25rem 0;
+}
+
+[data-theme="dark"] .review-surge-row {
+  background: rgba(245, 158, 11, 0.1);
+  color: #fbbf24;
+}
+
+/* ====================================================================
+   Loyalty Redemption Card (Review Step)
+   ==================================================================== */
+.loyalty-redeem-card {
+  background: linear-gradient(135deg, #ede9fe, #ddd6fe);
+  border: 1px solid #8b5cf6;
+  border-radius: var(--radius-sm);
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+[data-theme="dark"] .loyalty-redeem-card {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(124, 58, 237, 0.06));
+  border-color: rgba(139, 92, 246, 0.35);
+}
+
+.loyalty-redeem-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.loyalty-redeem-title {
+  font-weight: 600;
+  color: #5b21b6;
+  font-size: 0.95rem;
+}
+
+[data-theme="dark"] .loyalty-redeem-title {
+  color: #a78bfa;
+}
+
+.loyalty-redeem-balance {
+  font-size: 0.85rem;
+  color: #6d28d9;
+}
+
+[data-theme="dark"] .loyalty-redeem-balance {
+  color: #c4b5fd;
+}
+
+.loyalty-redeem-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.loyalty-redeem-controls label {
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.loyalty-redeem-input {
+  width: 120px;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.loyalty-redeem-discount {
+  font-size: 0.8rem;
+  color: #5b21b6;
+  margin: 0.5rem 0 0;
+}
+
+[data-theme="dark"] .loyalty-redeem-discount {
+  color: #c4b5fd;
+}
+
+/* Strikethrough original price */
+.price-original {
+  text-decoration: line-through;
+  color: var(--text-muted);
+  margin-right: 0.5rem;
+  font-size: 0.9em;
+}
+
+/* ====================================================================
+   Waitlist Card
+   ==================================================================== */
+.waitlist-card {
+  background: var(--bg-warning, #fffbe6);
+  border: 1px solid var(--warning, #f59e0b);
+  padding: 1rem;
+  margin-top: 1rem;
+  border-radius: var(--radius-sm);
+}
+
+[data-theme="dark"] .waitlist-card {
+  background: rgba(245, 158, 11, 0.06);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.waitlist-card-title {
+  margin: 0 0 0.5rem;
+  font-weight: 600;
+}
+
+.waitlist-card-sub {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* ====================================================================
+   Mobile adjustments for new features
+   ==================================================================== */
+@media (max-width: 480px) {
+  .surge-banner {
+    flex-direction: column;
+    text-align: center;
+    gap: 0.4rem;
+  }
+  .room-card {
+    min-width: 100%;
+  }
+  .loyalty-redeem-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .loyalty-redeem-input {
+    width: 100%;
+  }
+  .loyalty-redeem-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

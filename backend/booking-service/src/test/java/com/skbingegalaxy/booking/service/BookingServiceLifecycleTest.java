@@ -37,6 +37,7 @@ import static org.mockito.Mockito.*;
 class BookingServiceLifecycleTest {
 
     @Mock private BookingRepository bookingRepository;
+        @Mock private BingeRepository bingeRepository;
     @Mock private BookingAddOnRepository bookingAddOnRepository;
     @Mock private EventTypeRepository eventTypeRepository;
     @Mock private AddOnRepository addOnRepository;
@@ -44,6 +45,7 @@ class BookingServiceLifecycleTest {
     @Mock private RateCodeAddonPricingRepository rateCodeAddonPricingRepository;
     @Mock private CustomerEventPricingRepository customerEventPricingRepository;
     @Mock private CustomerAddonPricingRepository customerAddonPricingRepository;
+        @Mock private CancellationTierRepository cancellationTierRepository;
     @Mock private AvailabilityClient availabilityClient;
     @Spy  private AvailabilityClientFallback availabilityFallback;
     @Mock private KafkaTemplate<String, Object> kafkaTemplate;
@@ -67,6 +69,8 @@ class BookingServiceLifecycleTest {
         ReflectionTestUtils.setField(bookingService, "refPrefix", "SKBG");
         ReflectionTestUtils.setField(bookingService, "maxPendingPerCustomer", 2);
         ReflectionTestUtils.setField(bookingService, "cooldownMinutesAfterTimeout", 10);
+        lenient().when(bingeRepository.findById(anyLong())).thenReturn(Optional.empty());
+        lenient().when(cancellationTierRepository.findByBingeIdOrderByHoursBeforeStartDesc(anyLong())).thenReturn(List.of());
 
         eventType = EventType.builder()
                 .id(1L).bingeId(11L).name("Birthday Party")

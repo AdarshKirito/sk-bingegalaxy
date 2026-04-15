@@ -1,7 +1,15 @@
+# ── Build ────────────────────────────────────────────────────────────────────
+FROM maven:3.9-eclipse-temurin-17-alpine AS build
+WORKDIR /build
+COPY . .
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -B package -pl booking-service -am -DskipTests
+
+# ── Runtime ──────────────────────────────────────────────────────────────────
 FROM eclipse-temurin:17-jre-alpine
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 WORKDIR /app
-COPY target/*.jar app.jar
+COPY --from=build /build/booking-service/target/*.jar app.jar
 RUN mkdir -p /app/uploads && chown -R appuser:appgroup /app
 USER appuser
 EXPOSE 8083

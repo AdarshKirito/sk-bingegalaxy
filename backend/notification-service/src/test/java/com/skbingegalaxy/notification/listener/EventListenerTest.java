@@ -5,8 +5,11 @@ import com.skbingegalaxy.common.event.BookingEvent;
 import com.skbingegalaxy.common.event.NotificationEvent;
 import com.skbingegalaxy.common.event.PaymentEvent;
 import com.skbingegalaxy.notification.dto.NotificationDto;
+import com.skbingegalaxy.notification.repository.BookingReminderRepository;
 import com.skbingegalaxy.notification.repository.NotificationRepository;
+import com.skbingegalaxy.notification.service.ChannelRouter;
 import com.skbingegalaxy.notification.service.NotificationService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -27,7 +30,16 @@ class EventListenerTest {
 
     @Mock private NotificationService notificationService;
     @Mock private NotificationRepository notificationRepository;
+    @Mock private BookingReminderRepository bookingReminderRepository;
+    @Mock private ChannelRouter channelRouter;
     @InjectMocks private EventListener eventListener;
+
+    @BeforeEach
+    void setUp() {
+        // Default: channel router always returns EMAIL (matches existing test expectations)
+        lenient().when(channelRouter.resolveChannel(any(), any(), any(), any()))
+                .thenReturn(NotificationChannel.EMAIL);
+    }
 
     @Test
     @DisplayName("Booking created event triggers email notification")
@@ -61,6 +73,24 @@ class EventListenerTest {
                 contains("Birthday Party"),
                 eq("SKBG001"),
                 any());
+    }
+
+    @Test
+    @DisplayName("Booking created event skips duplicate notifications only when a recent sent notification exists")
+    void handleBookingCreated_recentSuccessfulDuplicate_skipsNotification() {
+        BookingEvent event = BookingEvent.builder()
+                .bookingRef("SKBG001")
+                .customerName("John Doe")
+                .customerEmail("john@example.com")
+                .build();
+
+        when(notificationRepository.existsByBookingRefAndTypeAndSentTrueAndCreatedAtAfter(
+                eq("SKBG001"), eq("BOOKING_CREATED"), any(java.time.LocalDateTime.class)))
+                .thenReturn(true);
+
+        eventListener.handleBookingCreated(event);
+
+        verify(notificationService, never()).sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test

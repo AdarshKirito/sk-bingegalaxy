@@ -12,6 +12,7 @@ spring:
   data:
     mongodb:
       uri: ${SPRING_DATA_MONGODB_URI:mongodb://localhost:27017/notification_db}
+      database: ${SPRING_DATA_MONGODB_DATABASE:notification_db}
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
 
@@ -21,3 +22,26 @@ eureka:
       defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE}
   instance:
     prefer-ip-address: true
+
+# ── Notification provider configuration ──
+app:
+  notification:
+    from-email: ${EMAIL_FROM:noreply@skbingegalaxy.com}
+    max-retries: 3
+    retry-interval-ms: 300000
+    unsubscribe-url: ${NOTIFICATION_UNSUBSCRIBE_URL:https://skbingegalaxy.com/account/notifications}
+  sms:
+    provider: ${SMS_PROVIDER:disabled}          # disabled | mock | twilio
+  whatsapp:
+    provider: ${WHATSAPP_PROVIDER:disabled}     # disabled | mock | twilio
+  push:
+    provider: ${PUSH_PROVIDER:disabled}         # disabled | mock | fcm
+  twilio:
+    account-sid: ${TWILIO_ACCOUNT_SID:}
+    auth-token: ${TWILIO_AUTH_TOKEN:}
+    sms-from: ${TWILIO_SMS_FROM:}
+    whatsapp-from: ${TWILIO_WHATSAPP_FROM:}
+  fcm:
+    credentials-path: ${FCM_CREDENTIALS_PATH:}
+  reminder:
+    check-interval-ms: ${REMINDER_CHECK_INTERVAL_MS:60000}

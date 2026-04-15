@@ -41,6 +41,8 @@ public class AdminBookingController {
     private final BookingEventLogService eventLogService;
     private final com.skbingegalaxy.booking.service.BookingProjectionService projectionService;
     private final com.skbingegalaxy.booking.service.SagaOrchestrator sagaOrchestrator;
+    private final com.skbingegalaxy.booking.service.PricingService pricingService;
+    private final com.skbingegalaxy.booking.service.LoyaltyService loyaltyService;
 
     private static final int MAX_PAGE_SIZE = 100;
 
@@ -460,5 +462,91 @@ public class AdminBookingController {
             .totalPages(page.getTotalPages())
             .last(page.isLast())
             .build();
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  VENUE ROOM MANAGEMENT
+    // ═══════════════════════════════════════════════════════════
+
+    @GetMapping("/venue-rooms")
+    public ResponseEntity<ApiResponse<java.util.List<VenueRoomDto>>> getAllVenueRooms() {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.getAllVenueRooms()));
+    }
+
+    @PostMapping("/venue-rooms")
+    public ResponseEntity<ApiResponse<VenueRoomDto>> createVenueRoom(
+            @Valid @RequestBody VenueRoomSaveRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+            .body(ApiResponse.ok("Room created", bookingService.createVenueRoom(request)));
+    }
+
+    @PutMapping("/venue-rooms/{id}")
+    public ResponseEntity<ApiResponse<VenueRoomDto>> updateVenueRoom(
+            @PathVariable Long id, @Valid @RequestBody VenueRoomSaveRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok("Room updated", bookingService.updateVenueRoom(id, request)));
+    }
+
+    @PatchMapping("/venue-rooms/{id}/toggle-active")
+    public ResponseEntity<ApiResponse<Void>> toggleVenueRoom(@PathVariable Long id) {
+        bookingService.toggleVenueRoom(id);
+        return ResponseEntity.ok(ApiResponse.ok("Room toggled", null));
+    }
+
+    @DeleteMapping("/venue-rooms/{id}")
+    public ResponseEntity<ApiResponse<Void>> deleteVenueRoom(@PathVariable Long id) {
+        bookingService.deleteVenueRoom(id);
+        return ResponseEntity.ok(ApiResponse.ok("Room deleted", null));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  SURGE PRICING RULE MANAGEMENT
+    // ═══════════════════════════════════════════════════════════
+
+    @GetMapping("/pricing/surge-rules")
+    public ResponseEntity<ApiResponse<java.util.List<SurgePricingRuleDto>>> getSurgeRules() {
+        return ResponseEntity.ok(ApiResponse.ok(pricingService.getSurgeRules()));
+    }
+
+    @PostMapping("/pricing/surge-rules")
+    public ResponseEntity<ApiResponse<SurgePricingRuleDto>> createSurgeRule(
+            @Valid @RequestBody SurgePricingRuleSaveRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+            .body(ApiResponse.ok("Surge rule created", pricingService.createSurgeRule(request)));
+    }
+
+    @PutMapping("/pricing/surge-rules/{id}")
+    public ResponseEntity<ApiResponse<SurgePricingRuleDto>> updateSurgeRule(
+            @PathVariable Long id, @Valid @RequestBody SurgePricingRuleSaveRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok("Surge rule updated", pricingService.updateSurgeRule(id, request)));
+    }
+
+    @PatchMapping("/pricing/surge-rules/{id}/toggle-active")
+    public ResponseEntity<ApiResponse<Void>> toggleSurgeRule(@PathVariable Long id) {
+        pricingService.toggleSurgeRule(id);
+        return ResponseEntity.ok(ApiResponse.ok("Surge rule toggled", null));
+    }
+
+    @DeleteMapping("/pricing/surge-rules/{id}")
+    public ResponseEntity<ApiResponse<Void>> deleteSurgeRule(@PathVariable Long id) {
+        pricingService.deleteSurgeRule(id);
+        return ResponseEntity.ok(ApiResponse.ok("Surge rule deleted", null));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  LOYALTY MANAGEMENT
+    // ═══════════════════════════════════════════════════════════
+
+    @GetMapping("/loyalty/{customerId}")
+    public ResponseEntity<ApiResponse<LoyaltyAccountDto>> getCustomerLoyalty(
+            @PathVariable Long customerId) {
+        return ResponseEntity.ok(ApiResponse.ok(loyaltyService.getAccount(customerId)));
+    }
+
+    @PostMapping("/loyalty/{customerId}/adjust")
+    public ResponseEntity<ApiResponse<LoyaltyAccountDto>> adjustLoyaltyPoints(
+            @PathVariable Long customerId,
+            @RequestParam long points,
+            @RequestParam(required = false) String description) {
+        return ResponseEntity.ok(ApiResponse.ok("Points adjusted", loyaltyService.adjustPoints(customerId, points, description)));
     }
 }

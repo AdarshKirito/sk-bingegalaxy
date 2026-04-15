@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #1a1a2e; color: #e0e0e0; margin: 0; padding: 0; }
+        .container { max-width: 600px; margin: 0 auto; background: #16213e; border-radius: 8px; overflow: hidden; }
+        .header { background: linear-gradient(135deg, #e94560, #533483); padding: 24px; text-align: center; }
+        .header h1 { color: #fff; margin: 0; font-size: 24px; }
+        .body { padding: 32px 24px; }
+        .body h2 { color: #e94560; }
+        .details { background: #0f3460; border-radius: 6px; padding: 16px; margin: 16px 0; }
+        .details p { margin: 6px 0; }
+        .label { color: #a0a0a0; }
+        .value { color: #fff; font-weight: 600; }
+        .footer { background: #0f3460; padding: 16px 24px; text-align: center; font-size: 12px; color: #a0a0a0; }
+        .unsubscribe { margin-top: 8px; }
+        .unsubscribe a { color: #a0a0a0; text-decoration: underline; font-size: 11px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header"><h1>SK Binge Galaxy</h1></div>
+    <div class="body">
+        <h2 th:if="${reminderType == 'DAY_BEFORE'}">Your Booking is Tomorrow!</h2>
+        <h2 th:if="${reminderType == 'ONE_HOUR_BEFORE'}">Your Booking Starts in 1 Hour!</h2>
+        <p>Dear <span th:text="${recipientName}">Customer</span>,</p>
+        <p th:if="${reminderType == 'DAY_BEFORE'}">This is a friendly reminder that your booking is tomorrow. Here are your details:</p>
+        <p th:if="${reminderType == 'ONE_HOUR_BEFORE'}">Just a quick heads-up — your booking starts very soon!</p>
+        <div class="details">
+            <p><span class="label">Booking Ref:</span> <span class="value" th:text="${bookingRef}">SKBG25XXXXXX</span></p>
+            <p><span class="label">Event:</span> <span class="value" th:text="${eventType}">Birthday Party</span></p>
+            <p><span class="label">Date:</span> <span class="value" th:text="${bookingDate}">2025-01-15</span></p>
+            <p><span class="label">Time:</span> <span class="value" th:text="${startTime}">14:00</span></p>
+        </div>
+        <p>We look forward to hosting you!</p>
+    </div>
+    <div class="footer">
+        &copy; 2025 SK Binge Galaxy. All rights reserved.
+        <div class="unsubscribe">
+            <a th:href="${unsubscribeUrl}">Manage notification preferences</a>
+        </div>
+    </div>
+</div>
+</body>
+</html>

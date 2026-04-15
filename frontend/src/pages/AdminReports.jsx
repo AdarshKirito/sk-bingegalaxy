@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { adminService } from '../services/endpoints';
 import { toast } from 'react-toastify';
-import { FiBarChart2, FiCalendar, FiCheckCircle, FiClock, FiAlertTriangle } from 'react-icons/fi';
+import { FiBarChart2, FiCalendar, FiCheckCircle, FiClock, FiAlertTriangle, FiDownload } from 'react-icons/fi';
+import { exportReportCSV, exportReportPDF } from '../services/exportUtils';
 import './AdminPages.css';
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -128,8 +129,14 @@ export default function AdminReports() {
       ) : report ? (
         <>
           {/* Period badge */}
-          <div className="adm-card" style={{ padding: '0.75rem 1.15rem', fontSize: '0.85rem' }}>
-            <strong>Period:</strong> {report.fromDate} — {report.toDate}
+          <div className="adm-card" style={{ padding: '0.75rem 1.15rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+            <span><strong>Period:</strong> {report.fromDate} — {report.toDate}</span>
+            <button className="btn btn-secondary btn-sm" onClick={() => exportReportCSV(report, `${report.fromDate} to ${report.toDate}`)} title="Export CSV">
+              <FiDownload size={14} /> CSV
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => exportReportPDF(report, `${report.fromDate} to ${report.toDate}`)} title="Export PDF">
+              <FiDownload size={14} /> PDF
+            </button>
           </div>
 
           {/* Stats cards */}

@@ -44,6 +44,35 @@ class BingeContextTest {
     }
 
     @Test
+    void execute_setsContextForAction_andClearsAfterwards() {
+        BingeContext.execute(55L, () -> assertThat(BingeContext.getBingeId()).isEqualTo(55L));
+
+        assertThat(BingeContext.getBingeId()).isNull();
+    }
+
+    @Test
+    void execute_clearsContextWhenActionThrows() {
+        assertThatThrownBy(() -> BingeContext.execute(66L, () -> {
+            assertThat(BingeContext.getBingeId()).isEqualTo(66L);
+            throw new IllegalStateException("boom");
+        })).isInstanceOf(IllegalStateException.class)
+            .hasMessage("boom");
+
+        assertThat(BingeContext.getBingeId()).isNull();
+    }
+
+    @Test
+    void supply_returnsValue_andClearsAfterwards() {
+        String result = BingeContext.supply(77L, () -> {
+            assertThat(BingeContext.getBingeId()).isEqualTo(77L);
+            return "ok";
+        });
+
+        assertThat(result).isEqualTo("ok");
+        assertThat(BingeContext.getBingeId()).isNull();
+    }
+
+    @Test
     void threadLocal_isIsolatedPerThread() throws InterruptedException {
         BingeContext.setBingeId(1L);
 

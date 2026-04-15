@@ -9,6 +9,8 @@ public final class KafkaTopics {
     public static final String BOOKING_CREATED  = "booking.created";
     public static final String BOOKING_CONFIRMED = "booking.confirmed";
     public static final String BOOKING_CANCELLED = "booking.cancelled";
+    public static final String BOOKING_RESCHEDULED = "booking.rescheduled";
+    public static final String BOOKING_TRANSFERRED = "booking.transferred";
     public static final String BOOKING_CASH_PAYMENT = "booking.cash-payment";
     public static final String PAYMENT_SUCCESS   = "payment.success";
     public static final String PAYMENT_FAILED    = "payment.failed";

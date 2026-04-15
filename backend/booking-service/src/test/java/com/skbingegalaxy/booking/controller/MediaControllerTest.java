@@ -150,6 +150,19 @@ class MediaControllerTest {
         }
 
         @Test
+        @DisplayName("infers JPEG content type from uppercase .JPG extension when client omits MIME type")
+        void upload_uppercaseJpgWithoutContentType_succeeds() {
+            MockMultipartFile file = new MockMultipartFile(
+                "file", "PHOTO.JPG", null, new byte[]{1, 2, 3});
+
+            ResponseEntity<ApiResponse<Map<String, String>>> resp = controller.uploadImage(file);
+
+            assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+            assertThat(resp.getBody()).isNotNull();
+            assertThat(resp.getBody().getData().get("url")).endsWith(".jpg");
+        }
+
+        @Test
         @DisplayName("sanitizes unknown extension to .jpg")
         void upload_unknownExtension_fallsBackToJpg() {
             MockMultipartFile file = new MockMultipartFile(

@@ -39,4 +39,11 @@ public class CreateBookingRequest {
 
     @Size(max = 1000, message = "Special notes limited to 1000 characters")
     private String specialNotes;
+
+    /** Optional venue room ID for seat/room selection. */
+    private Long venueRoomId;
+
+    /** Number of loyalty points the customer wants to redeem as discount. */
+    @Min(value = 0, message = "Loyalty points to redeem cannot be negative")
+    private Long redeemLoyaltyPoints;
 }

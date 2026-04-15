@@ -3,6 +3,7 @@ package com.skbingegalaxy.booking.controller;
 import com.skbingegalaxy.booking.dto.*;
 import com.skbingegalaxy.booking.service.AdminBingeScopeService;
 import com.skbingegalaxy.booking.service.BookingService;
+import com.skbingegalaxy.booking.service.LoyaltyService;
 import com.skbingegalaxy.booking.service.PricingService;
 import com.skbingegalaxy.common.dto.ApiResponse;
 import jakarta.validation.Valid;
@@ -25,6 +26,7 @@ public class BookingController {
     private final AdminBingeScopeService adminBingeScopeService;
     private final BookingService bookingService;
     private final PricingService pricingService;
+    private final LoyaltyService loyaltyService;
 
     @ModelAttribute
     void validateSelectedBinge() {
@@ -101,12 +103,57 @@ public class BookingController {
         return ResponseEntity.ok(ApiResponse.ok(bookingService.getBookedSlotsForDate(date)));
     }
 
+    @GetMapping("/slot-capacity")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> getSlotCapacity(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) java.time.LocalDate date,
+            @RequestParam int startMinute,
+            @RequestParam int durationMinutes) {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.getSlotCapacity(date, startMinute, durationMinutes)));
+    }
+
     @PostMapping("/{bookingRef}/cancel")
     public ResponseEntity<ApiResponse<BookingDto>> cancelMyBooking(
             @PathVariable String bookingRef,
             @RequestHeader("X-User-Id") Long userId) {
         BookingDto cancelled = bookingService.cancelBookingByCustomer(bookingRef, userId);
         return ResponseEntity.ok(ApiResponse.ok("Booking cancelled", cancelled));
+    }
+
+    @PostMapping("/{bookingRef}/reschedule")
+    public ResponseEntity<ApiResponse<BookingDto>> rescheduleMyBooking(
+            @PathVariable String bookingRef,
+            @RequestHeader("X-User-Id") Long userId,
+            @Valid @RequestBody RescheduleBookingRequest request) {
+        BookingDto rescheduled = bookingService.rescheduleBooking(bookingRef, userId, request);
+        return ResponseEntity.ok(ApiResponse.ok("Booking rescheduled successfully", rescheduled));
+    }
+
+    @PostMapping("/{bookingRef}/transfer")
+    public ResponseEntity<ApiResponse<BookingDto>> transferMyBooking(
+            @PathVariable String bookingRef,
+            @RequestHeader("X-User-Id") Long userId,
+            @Valid @RequestBody TransferBookingRequest request) {
+        BookingDto transferred = bookingService.transferBooking(bookingRef, userId, request);
+        return ResponseEntity.ok(ApiResponse.ok("Booking transferred successfully", transferred));
+    }
+
+    @PostMapping("/recurring")
+    public ResponseEntity<ApiResponse<RecurringBookingResult>> createRecurringBookings(
+            @Valid @RequestBody RecurringBookingRequest request,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Email") String email,
+            @RequestHeader(value = "X-User-Name", defaultValue = "Customer") String name,
+            @RequestHeader(value = "X-User-Phone", defaultValue = "") String phone) {
+        RecurringBookingResult result = bookingService.createRecurringBookings(request, userId, name, email, phone);
+        return ResponseEntity.status(HttpStatus.CREATED)
+            .body(ApiResponse.ok("Recurring bookings created", result));
+    }
+
+    @GetMapping("/recurring/{groupId}")
+    public ResponseEntity<ApiResponse<List<BookingDto>>> getRecurringGroup(
+            @PathVariable String groupId,
+            @RequestHeader("X-User-Id") Long userId) {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.getRecurringGroupBookings(groupId, userId)));
     }
 
     @GetMapping("/{bookingRef}/reviews/customer")
@@ -144,5 +191,35 @@ public class BookingController {
     public ResponseEntity<ApiResponse<ResolvedPricingDto>> getMyPricing(
             @RequestHeader("X-User-Id") Long userId) {
         return ResponseEntity.ok(ApiResponse.ok(pricingService.resolveCustomerPricing(userId)));
+    }
+
+    // ── Venue Rooms ──────────────────────────────────────────
+
+    @GetMapping("/venue-rooms")
+    public ResponseEntity<ApiResponse<java.util.List<VenueRoomDto>>> getActiveRooms() {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.getActiveVenueRooms()));
+    }
+
+    @GetMapping("/venue-rooms/available")
+    public ResponseEntity<ApiResponse<java.util.List<VenueRoomDto>>> getAvailableRooms(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) java.time.LocalDate date,
+            @RequestParam int startMinute,
+            @RequestParam int durationMinutes) {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.getAvailableRooms(date, startMinute, durationMinutes)));
+    }
+
+    // ── Loyalty ──────────────────────────────────────────────
+
+    @GetMapping("/loyalty")
+    public ResponseEntity<ApiResponse<LoyaltyAccountDto>> getMyLoyalty(
+            @RequestHeader("X-User-Id") Long userId) {
+        return ResponseEntity.ok(ApiResponse.ok(loyaltyService.getAccount(userId)));
+    }
+
+    // ── Surge Pricing (public read) ──────────────────────────
+
+    @GetMapping("/surge-rules")
+    public ResponseEntity<ApiResponse<java.util.List<SurgePricingRuleDto>>> getActiveSurgeRules() {
+        return ResponseEntity.ok(ApiResponse.ok(pricingService.getActiveSurgeRules()));
     }
 }

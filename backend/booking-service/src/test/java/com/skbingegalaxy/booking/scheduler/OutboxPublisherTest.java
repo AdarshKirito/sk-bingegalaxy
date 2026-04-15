@@ -1,6 +1,7 @@
 package com.skbingegalaxy.booking.scheduler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.skbingegalaxy.booking.config.AdminEventBus;
 import com.skbingegalaxy.booking.entity.OutboxEvent;
 import com.skbingegalaxy.booking.repository.OutboxEventRepository;
 import com.skbingegalaxy.common.constants.KafkaTopics;
@@ -29,6 +30,7 @@ class OutboxPublisherTest {
     @Mock private OutboxEventRepository outboxEventRepository;
     @Mock private KafkaTemplate<String, Object> kafkaTemplate;
     @Mock private ObjectMapper objectMapper;
+    @Mock private AdminEventBus adminEventBus;
 
     @InjectMocks private OutboxPublisher outboxPublisher;
 

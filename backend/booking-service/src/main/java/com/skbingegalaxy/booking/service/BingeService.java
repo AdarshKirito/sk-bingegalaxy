@@ -123,6 +123,7 @@ public class BingeService {
             .supportWhatsapp(trimToNull(request.getSupportWhatsapp()))
             .customerCancellationEnabled(request.getCustomerCancellationEnabled() == null || request.getCustomerCancellationEnabled())
             .customerCancellationCutoffMinutes(request.getCustomerCancellationCutoffMinutes() == null ? 180 : request.getCustomerCancellationCutoffMinutes())
+            .maxConcurrentBookings(request.getMaxConcurrentBookings())
             .build();
 
         binge = bingeRepository.save(binge);
@@ -141,6 +142,7 @@ public class BingeService {
         binge.setSupportWhatsapp(trimToNull(request.getSupportWhatsapp()));
         binge.setCustomerCancellationEnabled(request.getCustomerCancellationEnabled() == null || request.getCustomerCancellationEnabled());
         binge.setCustomerCancellationCutoffMinutes(request.getCustomerCancellationCutoffMinutes() == null ? binge.getCustomerCancellationCutoffMinutes() : request.getCustomerCancellationCutoffMinutes());
+        binge.setMaxConcurrentBookings(request.getMaxConcurrentBookings());
         binge = bingeRepository.save(binge);
         log.info("Binge updated: '{}' (ID: {})", binge.getName(), id);
         return toDto(binge);
@@ -469,6 +471,7 @@ public class BingeService {
             .supportWhatsapp(b.getSupportWhatsapp())
             .customerCancellationEnabled(b.isCustomerCancellationEnabled())
             .customerCancellationCutoffMinutes(b.getCustomerCancellationCutoffMinutes())
+            .maxConcurrentBookings(b.getMaxConcurrentBookings())
             .createdAt(b.getCreatedAt())
             .build();
     }

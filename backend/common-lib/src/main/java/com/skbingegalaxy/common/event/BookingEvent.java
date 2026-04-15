@@ -12,6 +12,7 @@ import java.time.LocalTime;
 @Builder
 public class BookingEvent implements Serializable {
     private String bookingRef;
+    private Long bingeId;
     private Long customerId;
     private String customerName;
     private String customerEmail;

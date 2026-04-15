@@ -21,5 +21,6 @@ public class BingeDto {
     private String supportWhatsapp;
     private boolean customerCancellationEnabled;
     private int customerCancellationCutoffMinutes;
+    private Integer maxConcurrentBookings;
     private LocalDateTime createdAt;
 }

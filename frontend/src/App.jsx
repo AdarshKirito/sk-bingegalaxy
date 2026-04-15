@@ -5,6 +5,7 @@ import 'react-toastify/dist/ReactToastify.css';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { BingeProvider, useBinge } from './context/BingeContext';
 import ErrorBoundary from './components/ErrorBoundary';
+import usePageTracking from './hooks/usePageTracking';
 
 import Navbar from './components/Navbar';
 import './pages/AdminExperience.css';
@@ -34,6 +35,8 @@ const AdminBookingCreate = lazy(() => import('./pages/AdminBookingCreate'));
 const AdminUsersConfig = lazy(() => import('./pages/AdminUsersConfig'));
 const AdminRateCodes = lazy(() => import('./pages/AdminRateCodes'));
 const AdminCustomerPricing = lazy(() => import('./pages/AdminCustomerPricing'));
+const AdminVenueRooms = lazy(() => import('./pages/AdminVenueRooms'));
+const AdminSurgeRules = lazy(() => import('./pages/AdminSurgeRules'));
 const BingeManagement = lazy(() => import('./pages/BingeManagement'));
 const BingeSelector = lazy(() => import('./pages/BingeSelector'));
 const PlatformDashboard = lazy(() => import('./pages/PlatformDashboard'));
@@ -126,6 +129,7 @@ function AdminBingeRequired({ children }) {
 function AppFrame() {
   const location = useLocation();
   const isAdminRoute = location.pathname.startsWith('/admin');
+  usePageTracking();
 
   return (
     <>
@@ -170,6 +174,8 @@ function AppFrame() {
           <Route path="/admin/event-types" element={<AdminBingeRequired><AdminEventTypes /></AdminBingeRequired>} />
           <Route path="/admin/rate-codes" element={<AdminBingeRequired><AdminRateCodes /></AdminBingeRequired>} />
           <Route path="/admin/customer-pricing" element={<AdminBingeRequired><AdminCustomerPricing /></AdminBingeRequired>} />
+          <Route path="/admin/venue-rooms" element={<AdminBingeRequired><AdminVenueRooms /></AdminBingeRequired>} />
+          <Route path="/admin/surge-rules" element={<AdminBingeRequired><AdminSurgeRules /></AdminBingeRequired>} />
           <Route path="/admin/reports" element={<AdminBingeRequired><AdminReports /></AdminBingeRequired>} />
           <Route path="/admin/book" element={<AdminBingeRequired><AdminBookingCreate /></AdminBingeRequired>} />
           <Route path="/admin/users-config" element={<AdminBingeRequired><AdminUsersConfig /></AdminBingeRequired>} />

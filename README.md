@@ -2,6 +2,19 @@
 
 A production-grade, cloud-deployable microservices application for booking private theater experiences.
 
+## Engineering Highlights
+
+| Area | Details |
+|------|---------|
+| **Architecture** | 8 Spring Boot microservices + React SPA, CQRS read-model projections, Saga orchestration, Transactional Outbox pattern |
+| **Auth** | BCrypt-12, JWT + httpOnly cookies, account lockout (5 attempts / 15 min), constant-time login (prevents email enumeration), Google OAuth |
+| **API Gateway** | Redis-backed rate limiting (token bucket), JWT validation, path traversal prevention, role-based route guards, CORS config |
+| **Booking** | Event log (immutable audit trail), optimistic locking, idempotent Kafka consumers, dead-letter topics, pending booking timeout |
+| **Payment** | Razorpay integration with HMAC signature verification, over-refund prevention (pessimistic lock), over-collection guard, stale callback rejection |
+| **Frontend** | 32 lazy-loaded routes, Zustand + Context, proactive token refresh, skeleton loaders, dark mode, ARIA/keyboard nav, DOMPurify XSS sanitization |
+| **K8s** | HPA, PDB, network policies (zero-trust deny-all + explicit allow), TLS via cert-manager, least-privilege DB users, daily backup CronJobs |
+| **DevOps** | Multi-stage Docker builds, health checks on all containers, secret generation scripts, K8s manifest rendering |
+
 ## Architecture Overview
 
 ```
@@ -28,7 +41,7 @@ A production-grade, cloud-deployable microservices application for booking priva
 
 | Layer | Technology |
 |-------|-----------|
-| Backend | Java 17, Spring Boot 3.2.5, Spring Cloud 2023.0.1 |
+| Backend | Java 17, Spring Boot 3.4.5, Spring Cloud 2024.0.1 |
 | Frontend | React 18, Vite, React Router 6, Axios |
 | Service Discovery | Spring Cloud Netflix Eureka |
 | Config | Spring Cloud Config Server (native) |
@@ -55,26 +68,13 @@ A production-grade, cloud-deployable microservices application for booking priva
 
 ## Prerequisites
 
-- **Java 17+** and **Maven 3.9+**
-- **Node.js 20+** and **npm**
-- **Docker** and **Docker Compose**
-- **PostgreSQL 16** and **MongoDB 7** (or use Docker Compose)
-- **Apache Kafka** (or use Docker Compose)
+- **Docker** and **Docker Compose** (multi-stage builds handle Maven + Node inside Docker)
+- For local development without Docker: **Java 17+**, **Maven 3.9+**, **Node.js 20+**, **npm**
 
 ## Quick Start with Docker Compose
 
 ```bash
-# 1. Build all backend services
-cd backend
-mvn clean package -DskipTests
-
-# 2. Build frontend
-cd ../frontend
-npm install
-npm run build
-
-# 3. Start everything
-cd ..
+# Multi-stage Docker builds compile everything from source — no local JDK/Maven required.
 docker-compose up --build -d
 ```
 

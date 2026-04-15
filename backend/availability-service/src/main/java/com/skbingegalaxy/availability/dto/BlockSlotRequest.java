@@ -14,12 +14,12 @@ public class BlockSlotRequest {
     private LocalDate date;
 
     @Min(value = 0, message = "Start minute must be >= 0")
-    @Max(value = 1410)
-    private int startHour;
+    @Max(value = 1410, message = "Start minute must be <= 1410 (23:30)")
+    private int startMinute;
 
     @Min(value = 30, message = "End minute must be >= 30")
-    @Max(value = 1440)
-    private int endHour;
+    @Max(value = 1440, message = "End minute must be <= 1440 (24:00)")
+    private int endMinute;
 
     private String reason;
 }

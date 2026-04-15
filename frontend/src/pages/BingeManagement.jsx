@@ -44,6 +44,10 @@ export default function BingeManagement() {
     supportWhatsapp: '',
     customerCancellationEnabled: true,
     customerCancellationCutoffMinutes: 180,
+    maxConcurrentBookings: '',
+    loyaltyEnabled: false,
+    loyaltyPointsPerRupee: 10,
+    loyaltyRedemptionRate: 100,
   };
   const [binges, setBinges] = useState([]);
   const [reviewSummaries, setReviewSummaries] = useState({});
@@ -59,6 +63,10 @@ export default function BingeManagement() {
   const [aboutForm, setAboutForm] = useState(() => normalizeAboutExperience(null));
   const [aboutLoading, setAboutLoading] = useState(false);
   const [aboutSaving, setAboutSaving] = useState(false);
+  const [tierEditor, setTierEditor] = useState({ open: false, binge: null });
+  const [tierRows, setTierRows] = useState([]);
+  const [tierLoading, setTierLoading] = useState(false);
+  const [tierSaving, setTierSaving] = useState(false);
   const { clearBinge, selectBinge, selectedBinge } = useBinge();
   const navigate = useNavigate();
 
@@ -107,6 +115,33 @@ export default function BingeManagement() {
     setAboutSaving(false);
   };
 
+  const handleOpenTierEditor = async (binge) => {
+    setTierEditor({ open: true, binge });
+    setTierLoading(true);
+    try {
+      const res = await adminService.getCancellationTiers(binge.id);
+      const tiers = res.data.data || res.data || [];
+      setTierRows(tiers.length ? tiers.map(t => ({ hoursBeforeStart: t.hoursBeforeStart, refundPercentage: t.refundPercentage, label: t.label || '' })) : [{ hoursBeforeStart: 48, refundPercentage: 100, label: 'Full refund' }, { hoursBeforeStart: 24, refundPercentage: 50, label: 'Half refund' }, { hoursBeforeStart: 0, refundPercentage: 0, label: 'No refund' }]);
+    } catch {
+      setTierRows([{ hoursBeforeStart: 48, refundPercentage: 100, label: 'Full refund' }, { hoursBeforeStart: 24, refundPercentage: 50, label: 'Half refund' }, { hoursBeforeStart: 0, refundPercentage: 0, label: 'No refund' }]);
+    } finally {
+      setTierLoading(false);
+    }
+  };
+
+  const handleSaveTiers = async () => {
+    setTierSaving(true);
+    try {
+      await adminService.saveCancellationTiers(tierEditor.binge.id, { tiers: tierRows });
+      toast.success('Cancellation tiers saved');
+      setTierEditor({ open: false, binge: null });
+    } catch (err) {
+      toast.error(err.userMessage || err.response?.data?.message || 'Failed to save tiers');
+    } finally {
+      setTierSaving(false);
+    }
+  };
+
   const openCreateForm = () => {
     setEditId(null);
     setForm(emptyForm);
@@ -140,6 +175,10 @@ export default function BingeManagement() {
       supportWhatsapp: b.supportWhatsapp || '',
       customerCancellationEnabled: b.customerCancellationEnabled !== false,
       customerCancellationCutoffMinutes: b.customerCancellationCutoffMinutes ?? 180,
+      maxConcurrentBookings: b.maxConcurrentBookings ?? '',
+      loyaltyEnabled: b.loyaltyEnabled || false,
+      loyaltyPointsPerRupee: b.loyaltyPointsPerRupee ?? 10,
+      loyaltyRedemptionRate: b.loyaltyRedemptionRate ?? 100,
     });
     setShowForm(true);
   };
@@ -314,6 +353,7 @@ export default function BingeManagement() {
       supportWhatsapp: binge.supportWhatsapp,
       customerCancellationEnabled: binge.customerCancellationEnabled,
       customerCancellationCutoffMinutes: binge.customerCancellationCutoffMinutes,
+      maxConcurrentBookings: binge.maxConcurrentBookings,
     });
     toast.success(`Entered: ${binge.name}`);
     navigate('/admin/dashboard');
@@ -415,6 +455,33 @@ export default function BingeManagement() {
                 <label>Cancellation Cutoff (minutes before start)</label>
                 <input type="number" min="0" value={form.customerCancellationCutoffMinutes} onChange={(e) => setForm({ ...form, customerCancellationCutoffMinutes: Number(e.target.value || 0) })} placeholder="180" />
               </div>
+              <div className="input-group">
+                <label>Max Concurrent Bookings per Slot</label>
+                <input type="number" min="1" value={form.maxConcurrentBookings} onChange={(e) => setForm({ ...form, maxConcurrentBookings: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Unlimited" />
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Leave empty for unlimited capacity</span>
+              </div>
+              <div className="input-group">
+                <label>Loyalty Program</label>
+                <select value={form.loyaltyEnabled ? 'enabled' : 'disabled'} onChange={(e) => setForm({ ...form, loyaltyEnabled: e.target.value === 'enabled' })}>
+                  <option value="disabled">Disabled</option>
+                  <option value="enabled">Enabled</option>
+                </select>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Customers earn + redeem loyalty points for this venue</span>
+              </div>
+              {form.loyaltyEnabled && (
+                <>
+                  <div className="input-group">
+                    <label>Points per ₹ spent</label>
+                    <input type="number" min="1" max="100" value={form.loyaltyPointsPerRupee} onChange={(e) => setForm({ ...form, loyaltyPointsPerRupee: Number(e.target.value) || 10 })} />
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>e.g., 10 = earn 10 points per ₹1 spent</span>
+                  </div>
+                  <div className="input-group">
+                    <label>Redemption Rate (points per ₹1 discount)</label>
+                    <input type="number" min="1" max="1000" value={form.loyaltyRedemptionRate} onChange={(e) => setForm({ ...form, loyaltyRedemptionRate: Number(e.target.value) || 100 })} />
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>e.g., 100 = 100 points = ₹1 discount</span>
+                  </div>
+                </>
+              )}
             </div>
             <div className="adm-form-actions">
               <button type="button" className="btn btn-secondary" onClick={resetForm}>Cancel</button>
@@ -796,6 +863,62 @@ export default function BingeManagement() {
         </section>
       )}
 
+      {tierEditor.open && (
+        <section className="adm-form adm-flow-card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+            <div>
+              <h3>Cancellation refund tiers</h3>
+              <p className="adm-form-intro">
+                Define tiered refund percentages for <strong>{tierEditor.binge?.name}</strong>. Each row sets the refund a customer gets when cancelling at least N hours before the booking starts. The first matching tier (highest hours threshold) applies.
+              </p>
+            </div>
+            <button type="button" className="btn btn-secondary" onClick={() => setTierEditor({ open: false, binge: null })}>Close</button>
+          </div>
+          {tierLoading ? <p>Loading...</p> : (
+            <>
+              <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '1rem' }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: 'left', padding: '0.4rem 0.6rem', borderBottom: '1px solid var(--border)' }}>Hours before start</th>
+                    <th style={{ textAlign: 'left', padding: '0.4rem 0.6rem', borderBottom: '1px solid var(--border)' }}>Refund %</th>
+                    <th style={{ textAlign: 'left', padding: '0.4rem 0.6rem', borderBottom: '1px solid var(--border)' }}>Label</th>
+                    <th style={{ width: '60px', borderBottom: '1px solid var(--border)' }} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {tierRows.map((row, i) => (
+                    <tr key={i}>
+                      <td style={{ padding: '0.3rem 0.6rem' }}>
+                        <input type="number" min="0" style={{ width: '80px' }} value={row.hoursBeforeStart} onChange={(e) => setTierRows(prev => prev.map((r, j) => j === i ? { ...r, hoursBeforeStart: Number(e.target.value) } : r))} />
+                      </td>
+                      <td style={{ padding: '0.3rem 0.6rem' }}>
+                        <input type="number" min="0" max="100" style={{ width: '80px' }} value={row.refundPercentage} onChange={(e) => setTierRows(prev => prev.map((r, j) => j === i ? { ...r, refundPercentage: Number(e.target.value) } : r))} />
+                      </td>
+                      <td style={{ padding: '0.3rem 0.6rem' }}>
+                        <input value={row.label} onChange={(e) => setTierRows(prev => prev.map((r, j) => j === i ? { ...r, label: e.target.value } : r))} placeholder="e.g. Full refund" />
+                      </td>
+                      <td style={{ padding: '0.3rem 0.6rem' }}>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setTierRows(prev => prev.filter((_, j) => j !== i))}>
+                          <FiTrash2 />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setTierRows(prev => [...prev, { hoursBeforeStart: 0, refundPercentage: 0, label: '' }])}>
+                  <FiPlus /> Add Tier
+                </button>
+                <button type="button" className="btn btn-primary" disabled={tierSaving} onClick={handleSaveTiers}>
+                  {tierSaving ? 'Saving...' : 'Save Tiers'}
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      )}
+
       {binges.length === 0 ? (
         <div className="adm-empty adm-flow-card adm-flow-empty">
           <span className="adm-empty-icon"><FiMapPin /></span>
@@ -843,6 +966,9 @@ export default function BingeManagement() {
                 </button>
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleOpenAboutEditor(b)}>
                   About page
+                </button>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleOpenTierEditor(b)}>
+                  Cancellation tiers
                 </button>
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleEdit(b)}>
                   <FiEdit2 style={{ marginRight: 3 }} /> Edit

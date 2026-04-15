@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { adminService } from '../services/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
-import { FiCalendar, FiDollarSign, FiUsers, FiTrendingUp, FiClock, FiClipboard, FiPlusCircle, FiSlash, FiStar, FiBarChart2, FiAlertTriangle, FiRefreshCw, FiBell, FiActivity } from 'react-icons/fi';
+import { FiCalendar, FiDollarSign, FiUsers, FiTrendingUp, FiClock, FiClipboard, FiPlusCircle, FiSlash, FiStar, FiBarChart2, FiAlertTriangle, FiRefreshCw, FiBell, FiActivity, FiWifi, FiWifiOff } from 'react-icons/fi';
 import { SkeletonStatCard } from '../components/ui/Skeleton';
+import useRealtimeUpdates from '../hooks/useRealtimeUpdates';
 import './AdminDashboard.css';
 
 export default function AdminDashboard() {
@@ -20,6 +21,20 @@ export default function AdminDashboard() {
   const [retryingNotifications, setRetryingNotifications] = useState(false);
   const [failedSagas, setFailedSagas] = useState([]);
   const [compensatingSagas, setCompensatingSagas] = useState([]);
+
+  const refreshStats = useCallback(() => {
+    adminService.getDashboardStats()
+      .then(res => setStats(res.data.data))
+      .catch(() => {});
+  }, []);
+
+  // Real-time updates: auto-refresh stats when a booking/payment event arrives
+  const { connected } = useRealtimeUpdates({
+    onEvent: (event) => {
+      toast.info(`Live: ${event?.type?.replace('.', ' ') || 'update'} — ${event?.ref || ''}`, { autoClose: 4000 });
+      refreshStats();
+    },
+  });
 
   const fetchOpDate = () => {
     setOpDateError(false);
@@ -100,6 +115,10 @@ export default function AdminDashboard() {
       <div className="page-header">
         <h1>Admin Dashboard</h1>
         <p>SK Binge Galaxy management console</p>
+        <span className={`live-badge ${connected ? 'live-badge-on' : 'live-badge-off'}`} title={connected ? 'Live updates active' : 'Live updates disconnected'}>
+          {connected ? <FiWifi size={14} /> : <FiWifiOff size={14} />}
+          {connected ? ' Live' : ' Offline'}
+        </span>
       </div>
 
       {/* Live Date & Time + Operational Date */}

@@ -51,4 +51,30 @@ public class Notification {
 
     @CreatedDate
     private LocalDateTime createdAt;
+
+    // ── Delivery tracking ──
+
+    @Builder.Default
+    private DeliveryStatus deliveryStatus = DeliveryStatus.PENDING;
+
+    private LocalDateTime deliveredAt;
+    private LocalDateTime openedAt;
+    private LocalDateTime clickedAt;
+    private LocalDateTime bouncedAt;
+
+    // ── Exponential backoff ──
+
+    /** When the next retry should be attempted (null = immediate / not scheduled). */
+    @Indexed
+    private LocalDateTime nextRetryAt;
+
+    // ── Batching / Digest ──
+
+    /** Group key for digest aggregation (e.g. "digest:<email>"). Null = non-digest. */
+    @Indexed
+    private String digestGroup;
+
+    /** Whether this notification has been folded into a digest email already. */
+    @Builder.Default
+    private boolean digested = false;
 }

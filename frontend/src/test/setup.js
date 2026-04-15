@@ -1,5 +1,8 @@
 import '@testing-library/jest-dom';
 
+// Initialize i18n so useTranslation works in test env without warnings
+import '../services/i18n';
+
 // Global test helpers
 
 // Mock dialog methods not available in jsdom

@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   build: {
-    sourcemap: false,
+    sourcemap: 'hidden', // Sourcemaps for Sentry but not served publicly
   },
   server: {
     port: 3000,

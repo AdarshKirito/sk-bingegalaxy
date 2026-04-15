@@ -234,6 +234,11 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     void acquireSlotLock(@Param("lockKey") long lockKey);
 
     // Atomic collected-amount updates (avoids read-modify-write race conditions)
+    // Recurring group queries
+    List<Booking> findByRecurringGroupId(String recurringGroupId);
+
+    List<Booking> findByRecurringGroupIdAndBingeId(String recurringGroupId, Long bingeId);
+
     @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
     @Query("UPDATE Booking b SET b.collectedAmount = COALESCE(b.collectedAmount, 0) + :amount WHERE b.bookingRef = :ref")
     int addToCollectedAmount(@Param("ref") String bookingRef, @Param("amount") java.math.BigDecimal amount);

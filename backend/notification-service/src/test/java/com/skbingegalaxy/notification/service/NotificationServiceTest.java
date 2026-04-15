@@ -4,6 +4,7 @@ import com.skbingegalaxy.common.enums.NotificationChannel;
 import com.skbingegalaxy.notification.dto.NotificationDto;
 import com.skbingegalaxy.notification.model.Notification;
 import com.skbingegalaxy.notification.repository.NotificationRepository;
+import com.skbingegalaxy.notification.repository.NotificationPreferenceRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -27,16 +28,23 @@ import static org.mockito.Mockito.*;
 class NotificationServiceTest {
 
     @Mock private NotificationRepository notificationRepository;
+    @Mock private NotificationPreferenceRepository preferenceRepository;
     @Mock private TemplateEngine templateEngine;
 
     private NotificationService notificationService;
+    private NotificationPreferenceService preferenceService;
 
     @BeforeEach
     void setUp() {
+        preferenceService = new NotificationPreferenceService(preferenceRepository);
         // mailSender is null (not configured) — emails are logged only
-        notificationService = new NotificationService(notificationRepository, null, templateEngine);
+        // smsProvider, whatsAppProvider, pushProvider are null (disabled)
+        notificationService = new NotificationService(
+                notificationRepository, null, templateEngine, preferenceService,
+                null, null, null);
         ReflectionTestUtils.setField(notificationService, "fromEmail", "test@skbingegalaxy.com");
         ReflectionTestUtils.setField(notificationService, "maxRetries", 3);
+        ReflectionTestUtils.setField(notificationService, "unsubscribeUrl", "https://example.com/unsub");
     }
 
     // ══════════════════════════════════════════════════════
@@ -223,21 +231,22 @@ class NotificationServiceTest {
                     .type("BOOKING_CREATED").channel(NotificationChannel.EMAIL)
                     .subject("Test").body("Body").sent(false).retryCount(1).build();
 
-            when(notificationRepository.findBySentFalseAndRetryCountLessThan(eq(3), any(org.springframework.data.domain.Pageable.class)))
-                    .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(failed)));
+            when(notificationRepository.findRetryableNotifications(eq(3), any(LocalDateTime.class), any(org.springframework.data.domain.Pageable.class)))
+                    .thenReturn(List.of(failed));
 
             notificationService.retryFailedNotifications();
 
             assertThat(failed.getRetryCount()).isEqualTo(2);
-                assertThat(failed.isSent()).isFalse();
+            assertThat(failed.isSent()).isFalse();
+            assertThat(failed.getNextRetryAt()).isNotNull();
             verify(notificationRepository).save(failed);
         }
 
         @Test
         @DisplayName("No failed notifications does nothing")
         void noFailed_doesNothing() {
-            when(notificationRepository.findBySentFalseAndRetryCountLessThan(eq(3), any(org.springframework.data.domain.Pageable.class)))
-                    .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of()));
+            when(notificationRepository.findRetryableNotifications(eq(3), any(LocalDateTime.class), any(org.springframework.data.domain.Pageable.class)))
+                    .thenReturn(List.of());
 
             notificationService.retryFailedNotifications();
 

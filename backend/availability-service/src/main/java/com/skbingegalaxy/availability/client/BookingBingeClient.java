@@ -6,7 +6,7 @@ import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 
-@FeignClient(name = "booking-service")
+@FeignClient(name = "booking-service", fallback = BookingBingeClientFallback.class)
 public interface BookingBingeClient {
 
     @GetMapping("/api/v1/bookings/binges/{id}")

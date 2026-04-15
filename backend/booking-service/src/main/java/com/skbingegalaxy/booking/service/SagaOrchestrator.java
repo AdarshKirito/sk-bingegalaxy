@@ -69,8 +69,13 @@ public class SagaOrchestrator {
                     java.math.BigDecimal total = booking.getTotalAmount() != null
                         ? booking.getTotalAmount() : java.math.BigDecimal.ZERO;
                     if (collected.compareTo(total) < 0) {
-                        log.warn("Saga {} cannot advance to CONFIRMED — collected ₹{} < total ₹{}",
+                        log.error("Saga {} BLOCKED from CONFIRMED — collected ₹{} < total ₹{}; entering compensation",
                             bookingRef, collected, total);
+                        saga.setSagaStatus(SagaStatus.COMPENSATING);
+                        saga.setFailureReason(String.format(
+                            "Underpayment: collected ₹%s < total ₹%s", collected, total));
+                        saga.setCompensationAttempts(saga.getCompensationAttempts() + 1);
+                        sagaStateRepository.save(saga);
                         return;
                     }
                 }

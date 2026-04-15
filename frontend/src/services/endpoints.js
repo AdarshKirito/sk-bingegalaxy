@@ -48,9 +48,18 @@ export const bookingService = {
   getPendingReviews: () => api.get('/bookings/my/reviews/pending', { params: { clientDate: clientDate() } }),
   getBookedSlots: (date) => api.get('/bookings/booked-slots', { params: { date } }),
   cancelBooking: (ref) => api.post(`/bookings/${ref}/cancel`),
+  rescheduleBooking: (ref, data) => api.post(`/bookings/${ref}/reschedule`, data),
+  transferBooking: (ref, data) => api.post(`/bookings/${ref}/transfer`, data),
+  createRecurringBookings: (data) => api.post('/bookings/recurring', data),
+  getRecurringGroup: (groupId) => api.get(`/bookings/recurring/${groupId}`),
   getCustomerReview: (ref) => api.get(`/bookings/${ref}/reviews/customer`),
   submitCustomerReview: (ref, data) => api.post(`/bookings/${ref}/reviews/customer`, data),
   getMyPricing: () => api.get('/bookings/my-pricing'),
+  getSlotCapacity: (date, startMinute, durationMinutes) => api.get('/bookings/slot-capacity', { params: { date, startMinute, durationMinutes } }),
+  // Waitlist
+  joinWaitlist: (data) => api.post('/bookings/waitlist', data),
+  leaveWaitlist: (entryId) => api.delete(`/bookings/waitlist/${entryId}`),
+  getMyWaitlist: () => api.get('/bookings/waitlist/my'),
   // Binge (public)
   getAllActiveBinges: () => api.get('/bookings/binges'),
   getBingeById: (id) => api.get(`/bookings/binges/${id}`),
@@ -58,6 +67,14 @@ export const bookingService = {
   getBingeAboutExperience: (id) => api.get(`/bookings/binges/${id}/customer-about`),
   getBingeReviewSummary: (id) => api.get(`/bookings/binges/${id}/reviews/summary`),
   getBingeReviews: (id, page = 0, size = 10) => api.get(`/bookings/binges/${id}/reviews`, { params: { page, size } }),
+  getCancellationTiers: (bingeId) => api.get(`/bookings/binges/${bingeId}/cancellation-tiers`),
+  // Venue rooms (public)
+  getVenueRooms: () => api.get('/bookings/venue-rooms'),
+  getAvailableRooms: (date, startMinute, durationMinutes) => api.get('/bookings/venue-rooms/available', { params: { date, startMinute, durationMinutes } }),
+  // Loyalty (customer)
+  getMyLoyalty: () => api.get('/bookings/loyalty'),
+  // Surge rules (public)
+  getActiveSurgeRules: () => api.get('/bookings/surge-rules'),
 };
 
 export const availabilityService = {
@@ -93,7 +110,7 @@ export const adminService = {
   blockDate: (data) => api.post('/availability/admin/block-date', data),
   unblockDate: (date) => api.delete('/availability/admin/unblock-date', { params: { date } }),
   blockSlot: (data) => api.post('/availability/admin/block-slot', data),
-  unblockSlot: (date, startHour) => api.delete('/availability/admin/unblock-slot', { params: { date, startHour } }),
+  unblockSlot: (date, startMinute) => api.delete('/availability/admin/unblock-slot', { params: { date, startMinute } }),
   initiateRefund: (data) => api.post('/payments/admin/refund', data),
   getRefundsForPayment: (paymentId) => api.get(`/payments/admin/refunds/${paymentId}`),
   getPaymentStats: () => api.get('/payments/admin/stats'),
@@ -165,6 +182,27 @@ export const adminService = {
   updateBingeAboutExperience: (id, data) => api.put(`/bookings/admin/binges/${id}/customer-about`, data),
   toggleBinge: (id) => api.patch(`/bookings/admin/binges/${id}/toggle-active`),
   deleteBinge: (id) => api.delete(`/bookings/admin/binges/${id}`),
+  // Cancellation tiers
+  getCancellationTiers: (bingeId) => api.get(`/bookings/admin/binges/${bingeId}/cancellation-tiers`),
+  saveCancellationTiers: (bingeId, data) => api.put(`/bookings/admin/binges/${bingeId}/cancellation-tiers`, data),
+  // Waitlist (admin)
+  getWaitlistForDate: (date) => api.get('/bookings/waitlist/admin', { params: { date } }),
+  getWaitlistCount: (date) => api.get('/bookings/waitlist/admin/count', { params: { date } }),
   // Media upload
   uploadMedia: (formData) => api.post('/bookings/admin/media/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  // Venue rooms (admin)
+  getVenueRooms: () => api.get('/bookings/admin/venue-rooms'),
+  createVenueRoom: (data) => api.post('/bookings/admin/venue-rooms', data),
+  updateVenueRoom: (id, data) => api.put(`/bookings/admin/venue-rooms/${id}`, data),
+  toggleVenueRoom: (id) => api.patch(`/bookings/admin/venue-rooms/${id}/toggle-active`),
+  deleteVenueRoom: (id) => api.delete(`/bookings/admin/venue-rooms/${id}`),
+  // Surge pricing rules (admin)
+  getSurgeRules: () => api.get('/bookings/admin/pricing/surge-rules'),
+  createSurgeRule: (data) => api.post('/bookings/admin/pricing/surge-rules', data),
+  updateSurgeRule: (id, data) => api.put(`/bookings/admin/pricing/surge-rules/${id}`, data),
+  toggleSurgeRule: (id) => api.patch(`/bookings/admin/pricing/surge-rules/${id}/toggle-active`),
+  deleteSurgeRule: (id) => api.delete(`/bookings/admin/pricing/surge-rules/${id}`),
+  // Loyalty (admin)
+  getCustomerLoyalty: (customerId) => api.get(`/bookings/admin/loyalty/${customerId}`),
+  adjustLoyaltyPoints: (customerId, data) => api.post(`/bookings/admin/loyalty/${customerId}/adjust`, data),
 };

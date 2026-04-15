@@ -3,6 +3,7 @@ import { format } from 'date-fns';
 export default function StepDateTime({
   form, setForm, isAdmin, selectedEvent,
   durationOptions, durationSlots, availability, resolvedPricing,
+  venueRooms, activeSurge,
   fmtTime, fmtDuration,
   onNext, onBack,
 }) {
@@ -73,6 +74,42 @@ export default function StepDateTime({
           ) : <p style={{ color: 'var(--text-muted)' }}>Select a date first</p>}
         </div>
       </div>
+
+      {activeSurge && (
+        <div className="surge-banner">
+          <span className="surge-banner-icon">⚡</span>
+          <div>
+            <strong className="surge-banner-title">{activeSurge.label || 'Peak Pricing'}</strong>
+            <p className="surge-banner-sub">{activeSurge.multiplier}× multiplier applies to this time slot</p>
+          </div>
+        </div>
+      )}
+
+      {venueRooms.length > 0 && (
+        <div className="room-section">
+          <h3>Select Room / Space (optional)</h3>
+          <div className="room-grid" role="listbox" aria-label="Available rooms">
+            <button
+              className={`room-card ${!form.venueRoomId ? 'selected' : ''}`}
+              aria-selected={!form.venueRoomId}
+              onClick={() => setForm(f => ({ ...f, venueRoomId: '' }))}>
+              Any available
+            </button>
+            {venueRooms.map(room => (
+              <button key={room.id}
+                className={`room-card ${form.venueRoomId === room.id ? 'selected' : ''}`}
+                aria-selected={form.venueRoomId === room.id}
+                onClick={() => setForm(f => ({ ...f, venueRoomId: room.id }))}>
+                <span className="room-card-name">{room.name}</span>
+                <span className="room-card-detail">
+                  {room.roomType?.replace(/_/g, ' ')} · {room.capacity} guests
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="booking-nav">
         <button className="btn btn-secondary" onClick={onBack}>Back</button>
         <button className="btn btn-primary" onClick={onNext}>

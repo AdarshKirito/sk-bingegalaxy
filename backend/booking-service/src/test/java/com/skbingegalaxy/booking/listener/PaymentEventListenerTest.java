@@ -1,5 +1,6 @@
 package com.skbingegalaxy.booking.listener;
 
+import com.skbingegalaxy.booking.config.AdminEventBus;
 import com.skbingegalaxy.booking.entity.Booking;
 import com.skbingegalaxy.booking.repository.ProcessedEventRepository;
 import com.skbingegalaxy.booking.service.BookingService;
@@ -29,6 +30,7 @@ class PaymentEventListenerTest {
     @Mock private BookingService bookingService;
     @Mock private ProcessedEventRepository processedEventRepository;
     @Mock private SagaOrchestrator sagaOrchestrator;
+    @Mock private AdminEventBus adminEventBus;
 
     @InjectMocks private PaymentEventListener paymentEventListener;
 

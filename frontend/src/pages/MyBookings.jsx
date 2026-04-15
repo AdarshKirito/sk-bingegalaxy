@@ -26,10 +26,13 @@ import {
   FiFilter,
   FiHeadphones,
   FiMail,
+  FiMapPin,
   FiMessageCircle,
   FiPhoneCall,
   FiRefreshCw,
+  FiRepeat,
   FiSearch,
+  FiSend,
   FiShield,
   FiStar,
 } from 'react-icons/fi';
@@ -53,6 +56,12 @@ export default function MyBookings() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [query, setQuery] = useState('');
+  const [waitlistEntries, setWaitlistEntries] = useState([]);
+  const [rescheduleModal, setRescheduleModal] = useState(null);
+  const [transferModal, setTransferModal] = useState(null);
+  const [rescheduleForm, setRescheduleForm] = useState({ newBookingDate: '', newStartTime: '', newDurationMinutes: '' });
+  const [transferForm, setTransferForm] = useState({ recipientName: '', recipientEmail: '', recipientPhone: '' });
+  const [actionLoading, setActionLoading] = useState(false);
   const perPage = 6;
 
   useEffect(() => {
@@ -62,13 +71,15 @@ export default function MyBookings() {
       bookingService.getCurrentBookings(),
       bookingService.getPastBookings(),
       bookingService.getPendingReviews(),
+      bookingService.getMyWaitlist(),
     ])
-      .then(([supportRes, currentRes, pastRes, pendingReviewRes]) => {
+      .then(([supportRes, currentRes, pastRes, pendingReviewRes, waitlistRes]) => {
         const baseSupport = supportRes.status === 'fulfilled' ? mergeSupportContact(supportRes.value.data.data) : CUSTOMER_SUPPORT;
         setSupportContact(baseSupport);
         setCurrentBookings(currentRes.status === 'fulfilled' ? (currentRes.value.data.data || []) : []);
         setPastBookings(pastRes.status === 'fulfilled' ? (pastRes.value.data.data || []) : []);
         setPendingReviews(pendingReviewRes.status === 'fulfilled' ? (pendingReviewRes.value.data.data || []) : []);
+        setWaitlistEntries(waitlistRes.status === 'fulfilled' ? (waitlistRes.value.data.data || []) : []);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -182,14 +193,83 @@ export default function MyBookings() {
     },
   });
 
-  const handleCancelBooking = async (bookingRef) => {
-    if (!window.confirm('Cancel this booking? This cannot be undone.')) return;
+  const handleCancelBooking = async (bookingRef, refundPct) => {
+    const refundNote = refundPct != null ? ` You will receive a ${refundPct}% refund.` : '';
+    if (!window.confirm(`Cancel this booking?${refundNote} This cannot be undone.`)) return;
     try {
       await bookingService.cancelBooking(bookingRef);
       toast.success('Booking cancelled');
       setCurrentBookings(prev => prev.map(b => b.bookingRef === bookingRef ? { ...b, status: 'CANCELLED' } : b));
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to cancel booking');
+    }
+  };
+
+  const handleLeaveWaitlist = async (entryId) => {
+    if (!window.confirm('Leave the waitlist for this slot?')) return;
+    try {
+      await bookingService.leaveWaitlist(entryId);
+      toast.success('Removed from waitlist');
+      setWaitlistEntries(prev => prev.filter(e => e.id !== entryId));
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to leave waitlist');
+    }
+  };
+
+  const openRescheduleModal = (booking) => {
+    setRescheduleForm({
+      newBookingDate: booking.bookingDate || '',
+      newStartTime: booking.startTime ? booking.startTime.substring(0, 5) : '',
+      newDurationMinutes: '',
+    });
+    setRescheduleModal(booking);
+  };
+
+  const handleReschedule = async () => {
+    if (!rescheduleForm.newBookingDate || !rescheduleForm.newStartTime) {
+      toast.error('Please select a new date and time.');
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const payload = {
+        newBookingDate: rescheduleForm.newBookingDate,
+        newStartTime: rescheduleForm.newStartTime + ':00',
+        newDurationMinutes: rescheduleForm.newDurationMinutes ? Number(rescheduleForm.newDurationMinutes) : null,
+      };
+      const res = await bookingService.rescheduleBooking(rescheduleModal.bookingRef, payload);
+      const updated = res.data.data;
+      setCurrentBookings(prev => prev.map(b => b.bookingRef === updated.bookingRef ? updated : b));
+      toast.success('Booking rescheduled successfully');
+      setRescheduleModal(null);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to reschedule booking');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const openTransferModal = (booking) => {
+    setTransferForm({ recipientName: '', recipientEmail: '', recipientPhone: '' });
+    setTransferModal(booking);
+  };
+
+  const handleTransfer = async () => {
+    if (!transferForm.recipientName.trim() || !transferForm.recipientEmail.trim()) {
+      toast.error('Recipient name and email are required.');
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const res = await bookingService.transferBooking(transferModal.bookingRef, transferForm);
+      const updated = res.data.data;
+      setCurrentBookings(prev => prev.map(b => b.bookingRef === updated.bookingRef ? updated : b));
+      toast.success('Booking transferred successfully');
+      setTransferModal(null);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to transfer booking');
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -411,6 +491,9 @@ export default function MyBookings() {
           <button className={`btn btn-sm ${tab === 'upcoming' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('upcoming')}>Upcoming</button>
           <button className={`btn btn-sm ${tab === 'past' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('past')}>Past</button>
           <button className={`btn btn-sm ${tab === 'all' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('all')}>All</button>
+          {waitlistEntries.length > 0 && (
+            <button className={`btn btn-sm ${tab === 'waitlist' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('waitlist')}>Waitlist ({waitlistEntries.length})</button>
+          )}
         </div>
 
         <div className="customer-hub-filters customer-hub-filters-wide">
@@ -482,6 +565,44 @@ export default function MyBookings() {
 
       {loading ? (
         <SkeletonGrid count={6} columns={2} />
+      ) : tab === 'waitlist' ? (
+        <section className="customer-booking-grid">
+          {waitlistEntries.length === 0 ? (
+            <div className="card customer-hub-empty">
+              <h2>No waitlist entries</h2>
+              <p>You'll see your waitlist positions here when a fully-booked slot is joined.</p>
+            </div>
+          ) : waitlistEntries.map((entry) => (
+            <article key={entry.id} className="card customer-booking-card customer-booking-card-rich">
+              <div className="customer-booking-topline">
+                <span className={`badge ${entry.status === 'OFFERED' ? 'badge-success' : entry.status === 'WAITING' ? 'badge-warning' : 'badge-info'}`}>{entry.status}</span>
+              </div>
+              <div className="customer-booking-head">
+                <div>
+                  <span className="customer-booking-ref">Position #{entry.position}</span>
+                  <h3>{entry.eventTypeName || 'Event'}</h3>
+                </div>
+              </div>
+              <div className="customer-booking-meta">
+                <span><FiCalendar /> {entry.preferredDate}</span>
+                <span><FiClock /> {entry.preferredStartTime} for {entry.durationMinutes}m</span>
+              </div>
+              {entry.status === 'OFFERED' && entry.offerExpiresAt && (
+                <p style={{ fontSize: '0.85rem', color: 'var(--success)', fontWeight: 600, margin: '0.5rem 0' }}>
+                  A spot opened up! Offer expires at {new Date(entry.offerExpiresAt).toLocaleTimeString()}
+                </p>
+              )}
+              <div className="customer-booking-actions">
+                {entry.status === 'OFFERED' && (
+                  <Link to="/book" state={{ eventTypeId: entry.eventTypeId, prefillBooking: { eventTypeId: entry.eventTypeId, durationMinutes: entry.durationMinutes, numberOfGuests: entry.numberOfGuests || 1 } }} className="btn btn-primary btn-sm">Book Now</Link>
+                )}
+                {(entry.status === 'WAITING' || entry.status === 'OFFERED') && (
+                  <button type="button" className="btn btn-danger btn-sm" onClick={() => handleLeaveWaitlist(entry.id)}>Leave Waitlist</button>
+                )}
+              </div>
+            </article>
+          ))}
+        </section>
       ) : filteredBookings.length === 0 ? (
         <div className="card customer-hub-empty">
           <h2>No matching bookings</h2>
@@ -513,7 +634,22 @@ export default function MyBookings() {
                   <span><FiCalendar /> {booking.bookingDate}</span>
                   <span><FiClock /> {booking.startTime} and {formatDuration(booking)}</span>
                   <span><FiCreditCard /> {booking.paymentMethod?.replace('_', ' ') || 'Payment method at checkout'}</span>
+                  {booking.venueRoomName && <span><FiMapPin /> {booking.venueRoomName}</span>}
                 </div>
+
+                {(booking.surgeMultiplier > 1 || booking.loyaltyPointsEarned > 0 || booking.loyaltyPointsRedeemed > 0) && (
+                  <div className="customer-booking-tags">
+                    {booking.surgeMultiplier > 1 && (
+                      <span className="customer-booking-tag" style={{ background: '#fef3c7', color: '#92400e' }}>⚡ {booking.surgeLabel || 'Peak'} ({booking.surgeMultiplier}×)</span>
+                    )}
+                    {booking.loyaltyPointsRedeemed > 0 && (
+                      <span className="customer-booking-tag" style={{ background: '#ede9fe', color: '#5b21b6' }}>🎁 −{booking.loyaltyPointsRedeemed} pts</span>
+                    )}
+                    {booking.loyaltyPointsEarned > 0 && (
+                      <span className="customer-booking-tag" style={{ background: '#d1fae5', color: '#059669' }}>⭐ +{booking.loyaltyPointsEarned} pts</span>
+                    )}
+                  </div>
+                )}
 
                 {(booking.addOns || []).length > 0 && (
                   <div className="customer-booking-tags">
@@ -528,7 +664,17 @@ export default function MyBookings() {
                 <div className="customer-booking-actions">
                   <Link to={`/booking/${booking.bookingRef}`} className="btn btn-secondary btn-sm">View Details</Link>
                   {booking.status === 'PENDING' && booking.paymentStatus === 'PENDING' && (
-                    <button type="button" className="btn btn-danger btn-sm" disabled={booking.canCustomerCancel === false} title={booking.customerCancelMessage || ''} onClick={() => handleCancelBooking(booking.bookingRef)}>Cancel Booking</button>
+                    <button type="button" className="btn btn-danger btn-sm" disabled={booking.canCustomerCancel === false} title={booking.customerCancelMessage || ''} onClick={() => handleCancelBooking(booking.bookingRef, booking.cancellationRefundPercentage)}>Cancel Booking</button>
+                  )}
+                  {booking.canCustomerReschedule && (
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => openRescheduleModal(booking)}>
+                      <FiRepeat /> Reschedule
+                    </button>
+                  )}
+                  {booking.canCustomerTransfer && (
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => openTransferModal(booking)}>
+                      <FiSend /> Transfer
+                    </button>
                   )}
                   {booking.paymentStatus !== 'SUCCESS' && booking.status !== 'CANCELLED' && (
                     <Link to={`/payment/${booking.bookingRef}`} className="btn btn-primary btn-sm">Pay Pending Balance</Link>
@@ -539,6 +685,22 @@ export default function MyBookings() {
                     </Link>
                   )}
                 </div>
+
+                {booking.transferred && (
+                  <div className="customer-booking-support-note" style={{ borderLeft: '3px solid var(--info)' }}>
+                    <span><FiSend /> Transferred from {booking.originalCustomerName || 'another customer'}</span>
+                  </div>
+                )}
+                {booking.recurringGroupId && (
+                  <div className="customer-booking-support-note" style={{ borderLeft: '3px solid var(--primary)' }}>
+                    <span><FiRepeat /> Part of recurring series ({booking.recurringGroupId})</span>
+                  </div>
+                )}
+                {booking.rescheduleCount > 0 && (
+                  <div className="customer-booking-support-note" style={{ borderLeft: '3px solid var(--warning)' }}>
+                    <span><FiRefreshCw /> Rescheduled {booking.rescheduleCount} time{booking.rescheduleCount > 1 ? 's' : ''}</span>
+                  </div>
+                )}
 
                 <div className="customer-booking-actions customer-booking-actions-support">
                   <button type="button" className="btn btn-secondary btn-sm" onClick={() => downloadBookingSummary(booking, { customerName, venueName: selectedBinge?.name })}>
@@ -616,6 +778,77 @@ export default function MyBookings() {
           </ol>
         </article>
       </section>
+
+      {/* Reschedule Modal */}
+      {rescheduleModal && (
+        <div className="modal-overlay" onClick={() => !actionLoading && setRescheduleModal(null)}>
+          <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px', padding: '2rem' }}>
+            <h2 style={{ marginBottom: '0.5rem' }}>Reschedule Booking</h2>
+            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
+              {rescheduleModal.bookingRef} — {rescheduleModal.eventType?.name ?? rescheduleModal.eventType}
+            </p>
+            <label style={{ display: 'block', marginBottom: '1rem' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>New Date</span>
+              <input type="date" className="form-control" value={rescheduleForm.newBookingDate}
+                onChange={(e) => setRescheduleForm(prev => ({ ...prev, newBookingDate: e.target.value }))}
+                min={new Date().toLocaleDateString('en-CA')} />
+            </label>
+            <label style={{ display: 'block', marginBottom: '1rem' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>New Start Time</span>
+              <input type="time" className="form-control" value={rescheduleForm.newStartTime}
+                onChange={(e) => setRescheduleForm(prev => ({ ...prev, newStartTime: e.target.value }))} />
+            </label>
+            <label style={{ display: 'block', marginBottom: '1.5rem' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>New Duration (minutes, leave empty to keep current)</span>
+              <input type="number" className="form-control" min="30" step="30" placeholder="Same as original"
+                value={rescheduleForm.newDurationMinutes}
+                onChange={(e) => setRescheduleForm(prev => ({ ...prev, newDurationMinutes: e.target.value }))} />
+            </label>
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+              <button className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => setRescheduleModal(null)}>Cancel</button>
+              <button className="btn btn-primary btn-sm" disabled={actionLoading} onClick={handleReschedule}>
+                {actionLoading ? 'Rescheduling...' : 'Confirm Reschedule'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transfer Modal */}
+      {transferModal && (
+        <div className="modal-overlay" onClick={() => !actionLoading && setTransferModal(null)}>
+          <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px', padding: '2rem' }}>
+            <h2 style={{ marginBottom: '0.5rem' }}>Transfer Booking</h2>
+            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
+              {transferModal.bookingRef} — {transferModal.eventType?.name ?? transferModal.eventType}
+            </p>
+            <label style={{ display: 'block', marginBottom: '1rem' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Name</span>
+              <input type="text" className="form-control" placeholder="Full name of the new guest"
+                value={transferForm.recipientName}
+                onChange={(e) => setTransferForm(prev => ({ ...prev, recipientName: e.target.value }))} />
+            </label>
+            <label style={{ display: 'block', marginBottom: '1rem' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Email</span>
+              <input type="email" className="form-control" placeholder="name@example.com"
+                value={transferForm.recipientEmail}
+                onChange={(e) => setTransferForm(prev => ({ ...prev, recipientEmail: e.target.value }))} />
+            </label>
+            <label style={{ display: 'block', marginBottom: '1.5rem' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Phone (optional)</span>
+              <input type="tel" className="form-control" placeholder="+91XXXXXXXXXX"
+                value={transferForm.recipientPhone}
+                onChange={(e) => setTransferForm(prev => ({ ...prev, recipientPhone: e.target.value }))} />
+            </label>
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+              <button className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => setTransferModal(null)}>Cancel</button>
+              <button className="btn btn-primary btn-sm" disabled={actionLoading} onClick={handleTransfer}>
+                {actionLoading ? 'Transferring...' : 'Confirm Transfer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

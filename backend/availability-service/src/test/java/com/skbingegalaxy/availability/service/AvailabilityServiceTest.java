@@ -290,9 +290,9 @@ class AvailabilityServiceTest {
         void blockSlot_success() {
             LocalDate date = LocalDate.now().plusDays(5);
             BlockSlotRequest request = BlockSlotRequest.builder()
-                    .date(date).startHour(10).endHour(12).reason("Reserved").build();
+                .date(date).startMinute(600).endMinute(720).reason("Reserved").build();
 
-            when(blockedSlotRepository.existsBySlotDateAndStartHour(date, 10)).thenReturn(false);
+            when(blockedSlotRepository.existsBySlotDateAndStartHour(date, 600)).thenReturn(false);
             when(blockedSlotRepository.save(any(BlockedSlot.class)))
                     .thenAnswer(i -> {
                         BlockedSlot bs = i.getArgument(0);
@@ -302,8 +302,8 @@ class AvailabilityServiceTest {
 
             BlockedSlotDto result = availabilityService.blockSlot(request, 1L);
 
-            assertThat(result.getStartHour()).isEqualTo(10);
-            assertThat(result.getEndHour()).isEqualTo(12);
+            assertThat(result.getStartMinute()).isEqualTo(600);
+            assertThat(result.getEndMinute()).isEqualTo(720);
             verify(blockedSlotRepository).save(any(BlockedSlot.class));
         }
 
@@ -312,9 +312,9 @@ class AvailabilityServiceTest {
         void blockSlot_duplicate_throwsException() {
             LocalDate date = LocalDate.now().plusDays(5);
             BlockSlotRequest request = BlockSlotRequest.builder()
-                    .date(date).startHour(10).endHour(12).build();
+                .date(date).startMinute(600).endMinute(720).build();
 
-            when(blockedSlotRepository.existsBySlotDateAndStartHour(date, 10)).thenReturn(true);
+            when(blockedSlotRepository.existsBySlotDateAndStartHour(date, 600)).thenReturn(true);
 
             assertThatThrownBy(() -> availabilityService.blockSlot(request, 1L))
                     .isInstanceOf(DuplicateResourceException.class);
@@ -325,9 +325,9 @@ class AvailabilityServiceTest {
         void unblockSlot_success() {
             LocalDate date = LocalDate.now().plusDays(5);
 
-            availabilityService.unblockSlot(date, 10);
+            availabilityService.unblockSlot(date, 600);
 
-            verify(blockedSlotRepository).deleteBySlotDateAndStartHour(date, 10);
+            verify(blockedSlotRepository).deleteBySlotDateAndStartHour(date, 600);
         }
     }
 

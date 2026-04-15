@@ -1,5 +1,6 @@
 package com.skbingegalaxy.booking.listener;
 
+import com.skbingegalaxy.booking.config.AdminEventBus;
 import com.skbingegalaxy.booking.entity.Booking;
 import com.skbingegalaxy.booking.entity.ProcessedEvent;
 import com.skbingegalaxy.booking.entity.SagaState;
@@ -28,6 +29,7 @@ public class PaymentEventListener {
     private final BookingService bookingService;
     private final ProcessedEventRepository processedEventRepository;
     private final SagaOrchestrator sagaOrchestrator;
+    private final AdminEventBus adminEventBus;
 
     @KafkaListener(topics = KafkaTopics.PAYMENT_SUCCESS, groupId = "booking-group")
     @Transactional
@@ -59,6 +61,8 @@ public class PaymentEventListener {
 
         sagaOrchestrator.advanceTo(event.getBookingRef(),
             SagaState.SagaStatus.PAYMENT_RECEIVED, "PAYMENT_SUCCESS");
+        adminEventBus.publish("booking", java.util.Map.of(
+            "type", "payment.success", "ref", event.getBookingRef(), "ts", System.currentTimeMillis()));
         markProcessed(key);
     }
 

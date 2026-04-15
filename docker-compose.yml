@@ -137,7 +137,9 @@ services:
 
   # ── Spring Cloud Infrastructure ────────────────────────────
   discovery-server:
-    build: ./backend/discovery-server
+    build:
+      context: ./backend
+      dockerfile: discovery-server/Dockerfile
     container_name: skbg-discovery
     restart: unless-stopped
     environment:
@@ -155,7 +157,9 @@ services:
           cpus: "0.50"
 
   config-server:
-    build: ./backend/config-server
+    build:
+      context: ./backend
+      dockerfile: config-server/Dockerfile
     container_name: skbg-config
     restart: unless-stopped
     depends_on:
@@ -178,7 +182,9 @@ services:
           cpus: "0.50"
 
   api-gateway:
-    build: ./backend/api-gateway
+    build:
+      context: ./backend
+      dockerfile: api-gateway/Dockerfile
     container_name: skbg-gateway
     restart: unless-stopped
     depends_on:
@@ -207,7 +213,9 @@ services:
 
   # ── Application Services ───────────────────────────────────
   auth-service:
-    build: ./backend/auth-service
+    build:
+      context: ./backend
+      dockerfile: auth-service/Dockerfile
     container_name: skbg-auth
     restart: unless-stopped
     depends_on:
@@ -242,7 +250,9 @@ services:
           cpus: "0.50"
 
   availability-service:
-    build: ./backend/availability-service
+    build:
+      context: ./backend
+      dockerfile: availability-service/Dockerfile
     container_name: skbg-availability
     restart: unless-stopped
     depends_on:
@@ -268,7 +278,9 @@ services:
           cpus: "0.50"
 
   booking-service:
-    build: ./backend/booking-service
+    build:
+      context: ./backend
+      dockerfile: booking-service/Dockerfile
     container_name: skbg-booking
     restart: unless-stopped
     depends_on:
@@ -299,7 +311,9 @@ services:
           cpus: "0.50"
 
   payment-service:
-    build: ./backend/payment-service
+    build:
+      context: ./backend
+      dockerfile: payment-service/Dockerfile
     container_name: skbg-payment
     restart: unless-stopped
     depends_on:
@@ -335,7 +349,9 @@ services:
           cpus: "0.50"
 
   notification-service:
-    build: ./backend/notification-service
+    build:
+      context: ./backend
+      dockerfile: notification-service/Dockerfile
     container_name: skbg-notification
     restart: unless-stopped
     depends_on:
@@ -360,8 +376,16 @@ services:
       EMAIL_PASS: "${EMAIL_PASS}"
       EMAIL_FROM: "${EMAIL_FROM}"
       MANAGEMENT_HEALTH_MAIL_ENABLED: ${MANAGEMENT_HEALTH_MAIL_ENABLED:-false}
-      SMS_PROVIDER: disabled
-      WHATSAPP_PROVIDER: disabled
+      SMS_PROVIDER: ${SMS_PROVIDER:-disabled}
+      WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-disabled}
+      PUSH_PROVIDER: ${PUSH_PROVIDER:-disabled}
+      TWILIO_ACCOUNT_SID: "${TWILIO_ACCOUNT_SID:-}"
+      TWILIO_AUTH_TOKEN: "${TWILIO_AUTH_TOKEN:-}"
+      TWILIO_SMS_FROM: "${TWILIO_SMS_FROM:-}"
+      TWILIO_WHATSAPP_FROM: "${TWILIO_WHATSAPP_FROM:-}"
+      FCM_CREDENTIALS_PATH: "${FCM_CREDENTIALS_PATH:-}"
+      NOTIFICATION_UNSUBSCRIBE_URL: "${NOTIFICATION_UNSUBSCRIBE_URL:-https://skbingegalaxy.com/account/notifications}"
+      REMINDER_CHECK_INTERVAL_MS: "${REMINDER_CHECK_INTERVAL_MS:-60000}"
       JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
     deploy:
       resources:

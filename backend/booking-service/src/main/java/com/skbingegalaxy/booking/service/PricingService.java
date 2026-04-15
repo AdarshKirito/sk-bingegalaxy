@@ -28,6 +28,7 @@ public class PricingService {
     private final AddOnRepository addOnRepository;
     private final RateCodeChangeLogRepository rateCodeChangeLogRepository;
     private final BookingRepository bookingRepository;
+    private final SurgePricingRuleRepository surgePricingRuleRepository;
 
     /** Thread-local admin ID for audit logging (set by controllers). */
     private static final ThreadLocal<Long> currentAdminId = new ThreadLocal<>();
@@ -432,6 +433,120 @@ public class PricingService {
         }
 
         return new ResolvedAddonPrice(addon.getPrice(), "DEFAULT", null);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  SURGE PRICING RESOLUTION
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Resolves the applicable surge multiplier for a given booking date and start time.
+     * Returns the highest matching active surge rule, or null if no surge applies.
+     */
+    public SurgeResult resolveSurge(java.time.LocalDate bookingDate, java.time.LocalTime startTime) {
+        Long bid = BingeContext.getBingeId();
+        if (bid == null) return null;
+
+        int dow = bookingDate.getDayOfWeek().getValue(); // 1=Monday...7=Sunday
+        int minute = startTime.getHour() * 60 + startTime.getMinute();
+
+        List<SurgePricingRule> rules = surgePricingRuleRepository.findMatchingRules(bid, dow, minute);
+        if (rules.isEmpty()) return null;
+
+        // Take the rule with the highest multiplier
+        SurgePricingRule best = rules.stream()
+            .max(java.util.Comparator.comparing(SurgePricingRule::getMultiplier))
+            .orElse(null);
+        if (best == null || best.getMultiplier().compareTo(BigDecimal.ONE) <= 0) return null;
+
+        return new SurgeResult(best.getMultiplier(), best.getLabel() != null ? best.getLabel() : best.getName());
+    }
+
+    public record SurgeResult(BigDecimal multiplier, String label) {}
+
+    // ═══════════════════════════════════════════════════════════
+    //  SURGE PRICING RULE CRUD
+    // ═══════════════════════════════════════════════════════════
+
+    public List<com.skbingegalaxy.booking.dto.SurgePricingRuleDto> getSurgeRules() {
+        Long bid = requireSelectedBinge("viewing surge pricing rules");
+        return surgePricingRuleRepository.findByBingeIdOrderByDayOfWeekAscStartMinuteAsc(bid)
+            .stream().map(this::toSurgeRuleDto).toList();
+    }
+
+    public List<com.skbingegalaxy.booking.dto.SurgePricingRuleDto> getActiveSurgeRules() {
+        Long bid = requireSelectedBinge("viewing surge pricing rules");
+        return surgePricingRuleRepository.findByBingeIdAndActiveTrueOrderByDayOfWeekAscStartMinuteAsc(bid)
+            .stream().map(this::toSurgeRuleDto).toList();
+    }
+
+    @Transactional
+    public com.skbingegalaxy.booking.dto.SurgePricingRuleDto createSurgeRule(com.skbingegalaxy.booking.dto.SurgePricingRuleSaveRequest request) {
+        Long bid = requireSelectedBinge("creating surge pricing rule");
+        if (request.getStartMinute() >= request.getEndMinute()) {
+            throw new BusinessException("Start minute must be less than end minute");
+        }
+        SurgePricingRule rule = SurgePricingRule.builder()
+            .bingeId(bid)
+            .name(request.getName())
+            .dayOfWeek(request.getDayOfWeek())
+            .startMinute(request.getStartMinute())
+            .endMinute(request.getEndMinute())
+            .multiplier(request.getMultiplier())
+            .label(request.getLabel())
+            .active(request.isActive())
+            .build();
+        rule = surgePricingRuleRepository.save(rule);
+        log.info("Surge pricing rule created: {} ({}x)", rule.getName(), rule.getMultiplier());
+        return toSurgeRuleDto(rule);
+    }
+
+    @Transactional
+    public com.skbingegalaxy.booking.dto.SurgePricingRuleDto updateSurgeRule(Long id, com.skbingegalaxy.booking.dto.SurgePricingRuleSaveRequest request) {
+        Long bid = requireSelectedBinge("updating surge pricing rule");
+        SurgePricingRule rule = surgePricingRuleRepository.findByIdAndBingeId(id, bid)
+            .orElseThrow(() -> new ResourceNotFoundException("SurgePricingRule", "id", id));
+        if (request.getStartMinute() >= request.getEndMinute()) {
+            throw new BusinessException("Start minute must be less than end minute");
+        }
+        rule.setName(request.getName());
+        rule.setDayOfWeek(request.getDayOfWeek());
+        rule.setStartMinute(request.getStartMinute());
+        rule.setEndMinute(request.getEndMinute());
+        rule.setMultiplier(request.getMultiplier());
+        rule.setLabel(request.getLabel());
+        rule.setActive(request.isActive());
+        rule = surgePricingRuleRepository.save(rule);
+        log.info("Surge pricing rule updated: {}", rule.getName());
+        return toSurgeRuleDto(rule);
+    }
+
+    @Transactional
+    public void toggleSurgeRule(Long id) {
+        Long bid = requireSelectedBinge("toggling surge pricing rule");
+        SurgePricingRule rule = surgePricingRuleRepository.findByIdAndBingeId(id, bid)
+            .orElseThrow(() -> new ResourceNotFoundException("SurgePricingRule", "id", id));
+        rule.setActive(!rule.isActive());
+        surgePricingRuleRepository.save(rule);
+        log.info("Surge pricing rule {} toggled to active={}", rule.getName(), rule.isActive());
+    }
+
+    @Transactional
+    public void deleteSurgeRule(Long id) {
+        Long bid = requireSelectedBinge("deleting surge pricing rule");
+        SurgePricingRule rule = surgePricingRuleRepository.findByIdAndBingeId(id, bid)
+            .orElseThrow(() -> new ResourceNotFoundException("SurgePricingRule", "id", id));
+        surgePricingRuleRepository.delete(rule);
+        log.info("Surge pricing rule deleted: {}", rule.getName());
+    }
+
+    private com.skbingegalaxy.booking.dto.SurgePricingRuleDto toSurgeRuleDto(SurgePricingRule r) {
+        return com.skbingegalaxy.booking.dto.SurgePricingRuleDto.builder()
+            .id(r.getId()).bingeId(r.getBingeId()).name(r.getName())
+            .dayOfWeek(r.getDayOfWeek()).startMinute(r.getStartMinute()).endMinute(r.getEndMinute())
+            .multiplier(r.getMultiplier()).label(r.getLabel()).active(r.isActive())
+            .createdAt(r.getCreatedAt()).updatedAt(r.getUpdatedAt())
+            .build();
     }
 
     private Optional<CustomerPricingProfile> findReadableCustomerProfile(Long customerId, Long bingeId) {

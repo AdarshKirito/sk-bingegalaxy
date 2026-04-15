@@ -1,9 +1,15 @@
 export default function StepReview({
   form, setForm, isAdmin, selectedEvent, selectedCustomer,
-  resolvedPricing, editBookingData, calculateTotal,
+  resolvedPricing, editBookingData, calculateTotal, calculateLoyaltyDiscount,
   fmtTime, fmtDuration,
   loading, onSubmit, onBack,
+  capacityFull, onJoinWaitlist,
+  venueRooms, activeSurge, loyalty,
 }) {
+  const selectedRoom = venueRooms?.find(r => r.id === form.venueRoomId);
+  const loyaltyDiscount = calculateLoyaltyDiscount ? calculateLoyaltyDiscount() : 0;
+  const finalTotal = calculateTotal() - loyaltyDiscount;
+
   return (
     <div className="booking-section">
       <h2>Review Your Booking</h2>
@@ -28,6 +34,14 @@ export default function StepReview({
           </span>
           <span>{form.numberOfGuests}</span>
         </div>
+
+        {selectedRoom && (
+          <div className="review-row">
+            <span>Room / Space</span>
+            <span>{selectedRoom.name} ({selectedRoom.roomType?.replace(/_/g, ' ')})</span>
+          </div>
+        )}
+
         {(() => {
           const rep = resolvedPricing?.eventPricings?.find(ep => ep.eventTypeId === selectedEvent?.id);
           const ppg = rep ? rep.pricePerGuest : selectedEvent?.pricePerGuest;
@@ -38,6 +52,14 @@ export default function StepReview({
             </div>
           ) : null;
         })()}
+
+        {activeSurge && (
+          <div className="review-row review-surge-row">
+            <span>⚡ {activeSurge.label || 'Peak Pricing'}</span>
+            <span>{activeSurge.multiplier}× multiplier</span>
+          </div>
+        )}
+
         {form.addOns.length > 0 && (
           <div className="review-row">
             <span>Add-Ons</span>
@@ -48,6 +70,39 @@ export default function StepReview({
         {isAdmin && form.adminNotes && <div className="review-row"><span>Admin Notes</span><span>{form.adminNotes}</span></div>}
 
         <hr style={{ borderColor: 'var(--border)', margin: '1rem 0' }} />
+
+        {/* Loyalty Points Redemption */}
+        {!isAdmin && loyalty && loyalty.currentBalance > 0 && (
+          <div className="loyalty-redeem-card">
+            <div className="loyalty-redeem-header">
+              <strong className="loyalty-redeem-title">🎁 Loyalty Points</strong>
+              <span className="loyalty-redeem-balance">
+                {loyalty.tierLevel} · {loyalty.currentBalance.toLocaleString()} pts available
+              </span>
+            </div>
+            <div className="loyalty-redeem-controls">
+              <label>Redeem:</label>
+              <input
+                type="number"
+                min="0"
+                max={loyalty.currentBalance}
+                value={form.redeemLoyaltyPoints || ''}
+                onChange={(e) => setForm(f => ({ ...f, redeemLoyaltyPoints: Math.min(Number(e.target.value) || 0, loyalty.currentBalance) }))}
+                placeholder="0"
+                className="loyalty-redeem-input"
+              />
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setForm(f => ({ ...f, redeemLoyaltyPoints: loyalty.currentBalance }))}>
+                Use all
+              </button>
+            </div>
+            {loyaltyDiscount > 0 && (
+              <p className="loyalty-redeem-discount">
+                Discount: −₹{loyaltyDiscount.toLocaleString()} ({form.redeemLoyaltyPoints} pts × {loyalty.redemptionRate || 100} pts/₹)
+              </p>
+            )}
+          </div>
+        )}
+
         {isAdmin ? (
           editBookingData && (editBookingData.paymentStatus === 'SUCCESS' || editBookingData.paymentStatus === 'PARTIALLY_REFUNDED') ? (
             <div className="review-row" style={{ alignItems: 'center' }}>
@@ -91,12 +146,30 @@ export default function StepReview({
 
         <div className="review-row total">
           <span>Estimated Total</span>
-          <span aria-live="polite">₹{calculateTotal().toLocaleString()}</span>
+          <span aria-live="polite">
+            {loyaltyDiscount > 0 ? (
+              <>
+                <span className="price-original">₹{calculateTotal().toLocaleString()}</span>
+                ₹{Math.max(0, finalTotal).toLocaleString()}
+              </>
+            ) : (
+              <>₹{calculateTotal().toLocaleString()}</>
+            )}
+          </span>
         </div>
       </div>
+      {capacityFull && (
+        <div className="waitlist-card">
+          <p className="waitlist-card-title">This slot is fully booked</p>
+          <p className="waitlist-card-sub">Join the waitlist and we'll notify you as soon as a spot opens up.</p>
+          <button className="btn btn-primary" onClick={onJoinWaitlist} disabled={loading}>
+            {loading ? 'Joining...' : 'Join Waitlist'}
+          </button>
+        </div>
+      )}
       <div className="booking-nav">
         <button className="btn btn-secondary" onClick={onBack}>Back</button>
-        <button className="btn btn-primary" onClick={onSubmit} disabled={loading}>
+        <button className="btn btn-primary" onClick={onSubmit} disabled={loading || capacityFull}>
           {loading ? 'Processing...' : editBookingData ? 'Update Reservation' : 'Confirm Booking'}
         </button>
       </div>

@@ -2,7 +2,11 @@ package com.skbingegalaxy.notification.service;
 
 import com.skbingegalaxy.common.enums.NotificationChannel;
 import com.skbingegalaxy.notification.dto.NotificationDto;
+import com.skbingegalaxy.notification.model.DeliveryStatus;
 import com.skbingegalaxy.notification.model.Notification;
+import com.skbingegalaxy.notification.provider.PushProvider;
+import com.skbingegalaxy.notification.provider.SmsProvider;
+import com.skbingegalaxy.notification.provider.WhatsAppProvider;
 import com.skbingegalaxy.notification.repository.NotificationRepository;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
@@ -16,9 +20,9 @@ import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
 @Slf4j
@@ -27,6 +31,10 @@ public class NotificationService {
     private final NotificationRepository notificationRepository;
     private final JavaMailSender mailSender;
     private final TemplateEngine templateEngine;
+    private final NotificationPreferenceService preferenceService;
+    private final SmsProvider smsProvider;
+    private final WhatsAppProvider whatsAppProvider;
+    private final PushProvider pushProvider;
 
     @Value("${app.notification.from-email:noreply@skbingegalaxy.com}")
     private String fromEmail;
@@ -34,22 +42,29 @@ public class NotificationService {
     @Value("${app.notification.max-retries:3}")
     private int maxRetries;
 
-    @Value("${app.sms.provider:disabled}")
-    private String smsProvider;
+    @Value("${app.notification.unsubscribe-url:https://skbingegalaxy.com/account/notifications}")
+    private String unsubscribeUrl;
 
-    @Value("${app.whatsapp.provider:disabled}")
-    private String whatsappProvider;
-
-    private final AtomicBoolean retryInProgress = new AtomicBoolean(false);
     private static final int RETRY_BATCH_SIZE = 100;
+
+    /** Exponential backoff intervals in minutes: 1m, 5m, 30m (capped). */
+    private static final long[] BACKOFF_MINUTES = {1, 5, 30};
 
     public NotificationService(
             NotificationRepository notificationRepository,
             @Autowired(required = false) JavaMailSender mailSender,
-            TemplateEngine templateEngine) {
+            TemplateEngine templateEngine,
+            NotificationPreferenceService preferenceService,
+            @Autowired(required = false) SmsProvider smsProvider,
+            @Autowired(required = false) WhatsAppProvider whatsAppProvider,
+            @Autowired(required = false) PushProvider pushProvider) {
         this.notificationRepository = notificationRepository;
         this.mailSender = mailSender;
         this.templateEngine = templateEngine;
+        this.preferenceService = preferenceService;
+        this.smsProvider = smsProvider;
+        this.whatsAppProvider = whatsAppProvider;
+        this.pushProvider = pushProvider;
     }
 
     public NotificationDto sendNotification(
@@ -62,6 +77,20 @@ public class NotificationService {
             String body,
             String bookingRef,
             Map<String, Object> metadata) {
+
+        // ── Check user preferences before persisting ──
+        if (recipientEmail != null
+                && preferenceService.isSuppressed(recipientEmail, type, channel.name())) {
+            log.info("Notification suppressed by user preference: type={} channel={} email={}",
+                    type, channel, recipientEmail);
+            Notification suppressed = Notification.builder()
+                    .type(type).channel(channel).recipientEmail(recipientEmail)
+                    .recipientPhone(recipientPhone).recipientName(recipientName)
+                    .subject(subject).body(body).bookingRef(bookingRef).metadata(metadata)
+                    .sent(false).failureReason("Suppressed by user preference")
+                    .retryCount(0).createdAt(LocalDateTime.now()).build();
+            return toDto(notificationRepository.save(suppressed));
+        }
 
         Notification notification = Notification.builder()
             .type(type)
@@ -84,6 +113,10 @@ public class NotificationService {
         notification.setSent(success);
         if (success) {
             notification.setSentAt(LocalDateTime.now());
+            notification.setDeliveryStatus(DeliveryStatus.SENT);
+        } else {
+            notification.setDeliveryStatus(DeliveryStatus.PENDING);
+            notification.setNextRetryAt(computeNextRetryAt(0));
         }
         notification = notificationRepository.save(notification);
 
@@ -105,30 +138,42 @@ public class NotificationService {
             .stream().map(this::toDto).toList();
     }
 
+    /**
+     * Retry failed notifications. Cluster-safety is handled by ShedLock at
+     * the scheduler layer — no in-process AtomicBoolean needed.
+     */
     public void retryFailedNotifications() {
-        if (!retryInProgress.compareAndSet(false, true)) {
-            log.info("Retry already in progress, skipping");
-            return;
-        }
-        try {
-            List<Notification> failed = notificationRepository
-                .findBySentFalseAndRetryCountLessThan(maxRetries,
-                    org.springframework.data.domain.PageRequest.of(0, RETRY_BATCH_SIZE))
-                .getContent();
+        LocalDateTime now = LocalDateTime.now();
+        List<Notification> failed = notificationRepository
+            .findRetryableNotifications(maxRetries, now,
+                org.springframework.data.domain.PageRequest.of(0, RETRY_BATCH_SIZE));
 
-            for (Notification n : failed) {
-                n.setRetryCount(n.getRetryCount() + 1);
-                boolean success = dispatchNotification(n);
-                n.setSent(success);
-                if (success) {
-                    n.setSentAt(LocalDateTime.now());
-                }
-                notificationRepository.save(n);
+        for (Notification n : failed) {
+            // Skip notifications that were suppressed by preference
+            if ("Suppressed by user preference".equals(n.getFailureReason())) continue;
+
+            n.setRetryCount(n.getRetryCount() + 1);
+            boolean success = dispatchNotification(n);
+            n.setSent(success);
+            if (success) {
+                n.setSentAt(LocalDateTime.now());
+                n.setDeliveryStatus(DeliveryStatus.SENT);
+                n.setNextRetryAt(null);
+            } else {
+                n.setNextRetryAt(computeNextRetryAt(n.getRetryCount()));
             }
-            log.info("Retried {} failed notifications", failed.size());
-        } finally {
-            retryInProgress.set(false);
+            notificationRepository.save(n);
         }
+        log.info("Retried {} failed notifications", failed.size());
+    }
+
+    /**
+     * Compute the next retry time using exponential backoff.
+     * Intervals: 1 min → 5 min → 30 min (capped).
+     */
+    static LocalDateTime computeNextRetryAt(int retryCount) {
+        int idx = Math.min(retryCount, BACKOFF_MINUTES.length - 1);
+        return LocalDateTime.now().plusMinutes(BACKOFF_MINUTES[idx]);
     }
 
     private boolean dispatchNotification(Notification notification) {
@@ -144,8 +189,8 @@ public class NotificationService {
                 }
                 case SMS -> sendSms(notification);
                 case WHATSAPP -> sendWhatsApp(notification);
+                case PUSH -> sendPush(notification);
             }
-            // If the channel handler set a failureReason without throwing, treat as not sent
             return notification.getFailureReason() == null;
         } catch (Exception e) {
             log.error("Failed to send {} notification to {}: {}",
@@ -161,7 +206,8 @@ public class NotificationService {
         "PAYMENT_SUCCESS", "payment-success",
         "PAYMENT_FAILED", "payment-failed",
         "USER_REGISTERED", "welcome",
-        "PASSWORD_RESET", "password-reset"
+        "PASSWORD_RESET", "password-reset",
+        "BOOKING_REMINDER", "booking-reminder"
     );
 
     private void sendEmail(Notification notification) throws MessagingException {
@@ -174,12 +220,18 @@ public class NotificationService {
         helper.setTo(notification.getRecipientEmail());
         helper.setSubject(notification.getSubject());
 
+        // ── CAN-SPAM / List-Unsubscribe headers ──
+        String personalUnsubUrl = unsubscribeUrl + "?email=" + notification.getRecipientEmail();
+        mimeMessage.addHeader("List-Unsubscribe", "<" + personalUnsubUrl + ">");
+        mimeMessage.addHeader("List-Unsubscribe-Post", "List-Unsubscribe=One-Click");
+
         String templateName = TEMPLATE_MAP.get(notification.getType());
         if (templateName != null) {
             Context ctx = new Context();
             ctx.setVariable("recipientName", notification.getRecipientName());
             ctx.setVariable("customerName", notification.getRecipientName());
             ctx.setVariable("bookingRef", notification.getBookingRef());
+            ctx.setVariable("unsubscribeUrl", personalUnsubUrl);
             if (notification.getMetadata() != null) {
                 notification.getMetadata().forEach(ctx::setVariable);
             }
@@ -199,13 +251,13 @@ public class NotificationService {
             notification.setFailureReason("No recipient phone number");
             return;
         }
-        if (smsProvider == null || smsProvider.isBlank() || "mock".equalsIgnoreCase(smsProvider) || "disabled".equalsIgnoreCase(smsProvider)) {
-            log.info("SMS notification {} skipped — SMS provider is disabled", notification.getId());
-            notification.setFailureReason("SMS provider not configured");
+        if (smsProvider == null) {
+            log.warn("SMS notification {} skipped — no SMS provider configured", notification.getId());
+            notification.setFailureReason("SMS provider not configured (set app.sms.provider)");
             return;
         }
-        log.warn("SMS notification {} cannot be sent — provider '{}' not implemented", notification.getId(), smsProvider);
-        notification.setFailureReason("SMS provider not implemented: " + smsProvider);
+        String sid = smsProvider.send(notification.getRecipientPhone(), notification.getBody());
+        log.info("SMS dispatched via {} — SID/ID: {}", smsProvider.providerName(), sid);
     }
 
     private void sendWhatsApp(Notification notification) {
@@ -214,13 +266,36 @@ public class NotificationService {
             notification.setFailureReason("No recipient phone number");
             return;
         }
-        if (whatsappProvider == null || whatsappProvider.isBlank() || "mock".equalsIgnoreCase(whatsappProvider) || "disabled".equalsIgnoreCase(whatsappProvider)) {
-            log.info("WhatsApp notification {} skipped — WhatsApp provider is disabled", notification.getId());
-            notification.setFailureReason("WhatsApp provider not configured");
+        if (whatsAppProvider == null) {
+            log.warn("WhatsApp notification {} skipped — no WhatsApp provider configured", notification.getId());
+            notification.setFailureReason("WhatsApp provider not configured (set app.whatsapp.provider)");
             return;
         }
-        log.warn("WhatsApp notification {} cannot be sent — provider '{}' not implemented", notification.getId(), whatsappProvider);
-        notification.setFailureReason("WhatsApp provider not implemented: " + whatsappProvider);
+        String sid = whatsAppProvider.send(notification.getRecipientPhone(), notification.getBody());
+        log.info("WhatsApp dispatched via {} — SID/ID: {}", whatsAppProvider.providerName(), sid);
+    }
+
+    private void sendPush(Notification notification) {
+        if (pushProvider == null) {
+            log.warn("Push notification {} skipped — no push provider configured", notification.getId());
+            notification.setFailureReason("Push provider not configured (set app.push.provider)");
+            return;
+        }
+        // deviceToken is expected in metadata
+        String deviceToken = notification.getMetadata() != null
+                ? String.valueOf(notification.getMetadata().getOrDefault("deviceToken", ""))
+                : "";
+        if (deviceToken.isBlank()) {
+            log.warn("Push notification {} skipped — no device token in metadata", notification.getId());
+            notification.setFailureReason("No device token provided");
+            return;
+        }
+        Map<String, String> data = new HashMap<>();
+        data.put("type", notification.getType());
+        if (notification.getBookingRef() != null) data.put("bookingRef", notification.getBookingRef());
+
+        String msgId = pushProvider.send(deviceToken, notification.getSubject(), notification.getBody(), data);
+        log.info("Push dispatched via {} — messageId: {}", pushProvider.providerName(), msgId);
     }
 
     private NotificationDto toDto(Notification n) {
@@ -240,6 +315,12 @@ public class NotificationService {
             .retryCount(n.getRetryCount())
             .sentAt(n.getSentAt())
             .createdAt(n.getCreatedAt())
+            .deliveryStatus(n.getDeliveryStatus())
+            .deliveredAt(n.getDeliveredAt())
+            .openedAt(n.getOpenedAt())
+            .clickedAt(n.getClickedAt())
+            .bouncedAt(n.getBouncedAt())
+            .nextRetryAt(n.getNextRetryAt())
             .build();
     }
 }
