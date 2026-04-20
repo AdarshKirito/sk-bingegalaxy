@@ -52,13 +52,21 @@ public class AdminBookingController {
     private static final Set<String> BINGE_OPTIONAL_SUFFIXES = Set.of(
             "/dashboard-stats", "/operational-date");
 
+    /** Returns true for endpoints that are accessible without a mandatory binge selection. */
+    private static boolean isBingeOptional(String uri) {
+        if (BINGE_OPTIONAL_SUFFIXES.stream().anyMatch(uri::endsWith)) return true;
+        // Cross-customer review aggregation endpoints work across all binges
+        return uri.contains("/admin/customers/")
+            && (uri.endsWith("/reviews") || uri.endsWith("/review-summary"));
+    }
+
     @ModelAttribute
     void validateManagedBinge(
             @RequestHeader("X-User-Id") Long adminId,
             @RequestHeader("X-User-Role") String role,
             HttpServletRequest request) {
         String uri = request.getRequestURI();
-        if (BINGE_OPTIONAL_SUFFIXES.stream().anyMatch(uri::endsWith)) {
+        if (isBingeOptional(uri)) {
             // These endpoints allow null bingeId (SUPER_ADMIN cross-binge view),
             // but if a bingeId IS provided, the admin must own it.
             Long bingeId = BingeContext.getBingeId();
@@ -411,6 +419,30 @@ public class AdminBookingController {
     @GetMapping("/customer-booking-count/{customerId}")
     public ResponseEntity<ApiResponse<Long>> getCustomerBookingCount(@PathVariable Long customerId) {
         return ResponseEntity.ok(ApiResponse.ok(bookingService.getCustomerBookingCount(customerId)));
+    }
+
+    // ── Customer review summary (avg admin rating + counts) ──
+
+    @GetMapping("/customers/{customerId}/review-summary")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> getCustomerReviewSummary(
+            @PathVariable Long customerId) {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.getCustomerReviewSummary(customerId)));
+    }
+
+    // ── Customer admin reviews (paginated, most-recent first) ─
+
+    @GetMapping("/customers/{customerId}/reviews")
+    public ResponseEntity<ApiResponse<PagedResponse<BookingReviewDto>>> getCustomerAdminReviews(
+            @PathVariable Long customerId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        size = Math.min(size, MAX_PAGE_SIZE);
+        org.springframework.data.domain.Page<BookingReviewDto> result =
+            bookingService.getAdminReviewsForCustomer(
+                customerId,
+                PageRequest.of(page, size,
+                    Sort.by("createdAt").descending()));
+        return ResponseEntity.ok(ApiResponse.ok(toPagedResponse(result)));
     }
 
     // ── Booked slots for a date (double-booking prevention) ──

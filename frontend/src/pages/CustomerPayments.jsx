@@ -193,14 +193,18 @@ export default function CustomerPayments() {
             return (
               <article key={payment.transactionId || `${payment.bookingRef}-${payment.id}`} className="card customer-payment-card">
                 <div className="customer-booking-topline">
-                  <span className={`badge ${statusBadge(payment.status)}`}>{payment.status}</span>
-                  <span className="customer-booking-ref">{payment.transactionId || 'Transaction pending'}</span>
+                  <span className={`badge ${statusBadge(payment.status)}`}>{payment.status?.replace(/_/g, ' ')}</span>
+                  {payment.bookingRef && (
+                    <span className="customer-booking-ref">Booking {payment.bookingRef}</span>
+                  )}
                 </div>
 
                 <div className="customer-payment-head">
                   <div>
                     <h3>{booking?.eventType?.name || booking?.eventType || 'Booking payment'}</h3>
-                    <p>{payment.bookingRef ? `Booking ${payment.bookingRef}` : 'Booking reference unavailable'}</p>
+                    <p style={{ fontSize: '0.78rem', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>
+                      {payment.transactionId || 'Transaction ID assigned after payment'}
+                    </p>
                   </div>
                   <strong>{formatAmount(payment.amount)}</strong>
                 </div>

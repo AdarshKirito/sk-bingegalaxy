@@ -213,4 +213,7 @@ export const adminService = {
   // Loyalty (admin)
   getCustomerLoyalty: (customerId) => api.get(`/bookings/admin/loyalty/${customerId}`),
   adjustLoyaltyPoints: (customerId, data) => api.post(`/bookings/admin/loyalty/${customerId}/adjust`, data),
+  // Customer review assessment (admin-side)
+  getCustomerReviewSummary: (customerId) => api.get(`/bookings/admin/customers/${customerId}/review-summary`),
+  getCustomerAdminReviews: (customerId, page = 0, size = 10) => api.get(`/bookings/admin/customers/${customerId}/reviews`, { params: { page, size } }),
 };

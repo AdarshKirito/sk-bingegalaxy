@@ -54,6 +54,20 @@ export default function PaymentPage() {
   const [processing, setProcessing] = useState(false);
   const paymentCallbackRef = useRef(false);
 
+  // ── Derived financial state ──────────────────────────────
+  // balanceDue: prefer the server-computed field; fall back to totalAmount − collectedAmount.
+  // This stays accurate after admin price changes and partial refunds without requiring
+  // an extra round-trip.
+  const balanceDue = booking
+    ? (booking.balanceDue != null
+        ? Number(booking.balanceDue)
+        : Math.max(0, Number(booking.totalAmount || 0) - Number(booking.collectedAmount || 0)))
+    : 0;
+  const hasOutstandingBalance = balanceDue > 0.01;
+  // Amount the customer should pay on the NEXT transaction: the remaining balance when
+  // something was already collected, otherwise the full booking total.
+  const amountToPay = hasOutstandingBalance ? balanceDue : Number(booking?.totalAmount || 0);
+
   const loadData = async () => {
     setLoading(true);
     try {
@@ -96,16 +110,16 @@ export default function PaymentPage() {
     });
 
   const handleInitiate = async () => {
-    if (!booking.totalAmount || booking.totalAmount <= 0) {
+    if (!amountToPay || amountToPay <= 0) {
       toast.error('Booking amount is invalid. Please contact support.');
       return;
     }
     setProcessing(true);
-    trackPaymentStarted(ref, booking.totalAmount);
+    trackPaymentStarted(ref, amountToPay);
     try {
       const res = await paymentService.initiate({
         bookingRef: ref,
-        amount: booking.totalAmount,
+        amount: amountToPay,
         paymentMethod,
       });
       const payData = res.data.data;
@@ -137,7 +151,7 @@ export default function PaymentPage() {
                 status: 'success',
               });
               toast.success('Payment successful!');
-              trackPaymentCompleted(ref, booking.totalAmount, paymentMethod);
+              trackPaymentCompleted(ref, amountToPay, paymentMethod);
               await loadData();
             } catch (err) {
               trackPaymentFailed(ref, err.response?.data?.message || 'verification_error');
@@ -204,10 +218,18 @@ export default function PaymentPage() {
   const venueLabel = selectedBinge?.name || booking.venueName || booking.bingeName || 'Selected venue';
   const paymentState = String(payment?.status || booking.paymentStatus || 'PENDING').toUpperCase();
   const paymentStatusLabel = formatLabel(paymentState, 'Awaiting Payment');
-  const isSuccess = paymentState === 'SUCCESS' || paymentState === 'REFUNDED' || paymentState === 'PARTIALLY_REFUNDED';
-  const isInitiated = paymentState === 'INITIATED';
-  const isFailed = paymentState === 'FAILED';
+  // isBalanceDue: payment was made but admin later increased the price OR a partial refund
+  // created an open gap.  The customer needs a Pay button even though the gateway considers
+  // the original transaction "successful".
+  const isBalanceDue = hasOutstandingBalance
+    && (paymentState === 'SUCCESS' || paymentState === 'PARTIALLY_REFUNDED' || paymentState === 'PARTIALLY_PAID');
+  // isSuccess is only true when the reservation is genuinely settled — no open balance.
+  const isSuccess = !isBalanceDue
+    && (paymentState === 'SUCCESS' || paymentState === 'REFUNDED' || paymentState === 'PARTIALLY_REFUNDED');
+  const isInitiated = !isBalanceDue && paymentState === 'INITIATED';
+  const isFailed = !isBalanceDue && paymentState === 'FAILED';
   const amountLabel = formatAmount(booking.totalAmount);
+  const balanceDueLabel = formatAmount(balanceDue);
   const durationLabel = formatDuration(booking);
   const addOnsLabel = (booking.addOns || []).map((item) => item.name ?? item.addOnName).filter(Boolean).join(', ');
   const bookingDetails = [
@@ -219,8 +241,13 @@ export default function PaymentPage() {
     { icon: <FiMapPin />, label: 'Venue', value: venueLabel },
   ];
   const summaryFacts = [
-    { label: 'Total payable', value: amountLabel },
-    { label: 'Status', value: paymentStatusLabel },
+    { label: 'Total booking amount', value: amountLabel },
+    ...(isBalanceDue
+      ? [
+          { label: 'Amount paid', value: formatAmount(booking.collectedAmount || 0) },
+          { label: 'Balance due', value: balanceDueLabel },
+        ]
+      : [{ label: 'Status', value: paymentStatusLabel }]),
     { label: 'Booking ref', value: ref, mono: true },
     { label: 'Transaction', value: payment?.transactionId || payment?.gatewayOrderId || (isSuccess ? 'Recorded on booking' : 'Created after initiation'), mono: true },
   ];
@@ -232,6 +259,10 @@ export default function PaymentPage() {
   if ((booking.guestAmount || 0) > 0) {
     breakdownRows.push({ label: 'Guest charge', value: formatAmount(booking.guestAmount || 0) });
   }
+  if (isBalanceDue) {
+    breakdownRows.push({ label: 'Already paid', value: formatAmount(booking.collectedAmount || 0) });
+    breakdownRows.push({ label: 'Balance due', value: balanceDueLabel });
+  }
 
   const actionFacts = [
     { label: 'Method in focus', value: formatLabel(payment?.paymentMethod || paymentMethod, formatLabel(paymentMethod)) },
@@ -239,29 +270,35 @@ export default function PaymentPage() {
     { label: 'Booking status', value: formatLabel(booking.status, 'Pending') },
     { label: 'Customer name', value: booking.customerName || 'Primary account holder' },
   ];
-  const paymentBannerClass = isSuccess
-    ? 'customer-flow-note-success'
-    : isInitiated
-      ? 'customer-flow-note-warning'
-      : isFailed
-        ? 'customer-flow-note-danger'
-        : 'customer-flow-note-info';
-  const paymentBannerTitle = isSuccess
-    ? paymentState === 'SUCCESS'
-      ? 'Payment captured for this reservation'
-      : `Payment marked ${paymentStatusLabel.toLowerCase()}`
-    : isInitiated
-      ? 'Payment handoff already started'
-      : isFailed
-        ? 'The last payment attempt did not complete'
-        : 'Choose a method and continue when ready';
-  const paymentBannerBody = isSuccess
-    ? 'You can move directly to the booking confirmation page or review the full payment trail from the payments hub.'
-    : isInitiated
-      ? 'If you just completed the provider step, refresh once. Start a new payment only if the previous handoff was abandoned.'
-      : isFailed
-        ? (payment?.failureReason || 'Retry with the same method or switch to another one for a cleaner attempt.')
-        : 'This screen keeps the booking details, amount, and transaction status together so you do not have to cross-check another page before paying.';
+  const paymentBannerClass = isBalanceDue
+    ? 'customer-flow-note-warning'
+    : isSuccess
+      ? 'customer-flow-note-success'
+      : isInitiated
+        ? 'customer-flow-note-warning'
+        : isFailed
+          ? 'customer-flow-note-danger'
+          : 'customer-flow-note-info';
+  const paymentBannerTitle = isBalanceDue
+    ? `Outstanding balance of ${balanceDueLabel}`
+    : isSuccess
+      ? paymentState === 'SUCCESS'
+        ? 'Payment captured for this reservation'
+        : `Payment marked ${paymentStatusLabel.toLowerCase()}`
+      : isInitiated
+        ? 'Payment handoff already started'
+        : isFailed
+          ? 'The last payment attempt did not complete'
+          : 'Choose a method and continue when ready';
+  const paymentBannerBody = isBalanceDue
+    ? `You have paid ${formatAmount(booking.collectedAmount || 0)} out of ${amountLabel}. Please pay the remaining ${balanceDueLabel} to fully settle this reservation. This can happen when an admin adjusts the booking price or a partial refund is applied.`
+    : isSuccess
+      ? 'You can move directly to the booking confirmation page or review the full payment trail from the payments hub.'
+      : isInitiated
+        ? 'If you just completed the provider step, refresh once. Start a new payment only if the previous handoff was abandoned.'
+        : isFailed
+          ? (payment?.failureReason || 'Retry with the same method or switch to another one for a cleaner attempt.')
+          : 'This screen keeps the booking details, amount, and transaction status together so you do not have to cross-check another page before paying.';
   const nextSteps = isSuccess
     ? [
         {
@@ -330,7 +367,15 @@ export default function PaymentPage() {
     },
     {
       title: 'Payment',
-      caption: isSuccess ? 'Captured and synced.' : isInitiated ? 'In progress with the provider.' : isFailed ? 'Needs a retry.' : 'Waiting for checkout.',
+      caption: isSuccess
+        ? 'Captured and synced.'
+        : isBalanceDue
+          ? `Balance of ${balanceDueLabel} outstanding.`
+          : isInitiated
+            ? 'In progress with the provider.'
+            : isFailed
+              ? 'Needs a retry.'
+              : 'Waiting for checkout.',
       icon: <FiCreditCard />,
       state: isSuccess ? 'complete' : 'active',
     },
@@ -430,8 +475,8 @@ export default function PaymentPage() {
               </div>
             ))}
             <div className="customer-flow-total">
-              <span>Total payable</span>
-              <strong className="customer-flow-amount">{amountLabel}</strong>
+              <span>{isBalanceDue ? 'Balance due' : 'Total payable'}</span>
+              <strong className="customer-flow-amount">{isBalanceDue ? balanceDueLabel : amountLabel}</strong>
             </div>
           </div>
         </article>
@@ -443,11 +488,11 @@ export default function PaymentPage() {
               <h2>Make the next move without second-guessing the status.</h2>
               <p>The actions below adapt to the current payment state instead of leaving the screen looking identical in every scenario.</p>
             </div>
-            <strong className="customer-flow-amount">{amountLabel}</strong>
+            <strong className="customer-flow-amount">{isBalanceDue ? balanceDueLabel : amountLabel}</strong>
           </div>
 
           <div className={`customer-flow-note ${paymentBannerClass}`}>
-            <strong>{isSuccess ? <FiCheckCircle /> : isInitiated ? <FiClock /> : isFailed ? <FiAlertCircle /> : <FiCreditCard />}{paymentBannerTitle}</strong>
+            <strong>{isBalanceDue ? <FiAlertCircle /> : isSuccess ? <FiCheckCircle /> : isInitiated ? <FiClock /> : isFailed ? <FiAlertCircle /> : <FiCreditCard />}{paymentBannerTitle}</strong>
             <p>{paymentBannerBody}</p>
           </div>
 
@@ -483,6 +528,13 @@ export default function PaymentPage() {
             <div className="customer-flow-actions customer-flow-actions-left">
               <Link className="btn btn-primary" to={`/booking/${ref}`}>Open Booking Summary <FiArrowRight /></Link>
               <Link className="btn btn-secondary" to="/payments">View Payment History</Link>
+            </div>
+          ) : isBalanceDue ? (
+            <div className="customer-flow-actions customer-flow-actions-left">
+              <button className="btn btn-primary" onClick={handleInitiate} disabled={processing}>
+                <FiCreditCard /> {processing ? 'Processing...' : `Pay Outstanding Balance ${balanceDueLabel}`}
+              </button>
+              <Link className="btn btn-secondary" to={`/booking/${ref}`}>View Booking</Link>
             </div>
           ) : isInitiated ? (
             <div className="customer-flow-actions customer-flow-actions-left">

@@ -338,8 +338,10 @@ export default function MyBookings() {
               <strong>{formatAmount(nextBooking.totalAmount)}</strong>
               <div className="customer-hub-inline-actions">
                 <Link to={`/booking/${nextBooking.bookingRef}`} className="btn btn-primary btn-sm">View Booking</Link>
-                {nextBooking.paymentStatus !== 'SUCCESS' && (
-                  <Link to={`/payment/${nextBooking.bookingRef}`} className="btn btn-secondary btn-sm">Pay Pending Balance</Link>
+                {(nextBooking.paymentStatus !== 'SUCCESS' || (nextBooking.balanceDue > 0.01)) && (
+                  <Link to={`/payment/${nextBooking.bookingRef}`} className="btn btn-secondary btn-sm">
+                    {nextBooking.balanceDue > 0.01 ? `Pay Balance ${formatAmount(nextBooking.balanceDue)}` : 'Pay Pending Balance'}
+                  </Link>
                 )}
               </div>
             </>
@@ -677,8 +679,10 @@ export default function MyBookings() {
                       <FiSend /> Transfer
                     </button>
                   )}
-                  {booking.paymentStatus !== 'SUCCESS' && booking.status !== 'CANCELLED' && (
-                    <Link to={`/payment/${booking.bookingRef}`} className="btn btn-primary btn-sm">Pay Pending Balance</Link>
+                  {(booking.paymentStatus !== 'SUCCESS' || (booking.balanceDue > 0.01)) && booking.status !== 'CANCELLED' && booking.status !== 'COMPLETED' && (
+                    <Link to={`/payment/${booking.bookingRef}`} className="btn btn-primary btn-sm">
+                      {booking.balanceDue > 0.01 ? `Pay Balance ${formatAmount(booking.balanceDue)}` : 'Pay Pending Balance'}
+                    </Link>
                   )}
                   {(booking.eventType?.id || booking.eventTypeId) && (
                     <Link to="/book" state={getRepeatBookingState(booking)} className="btn btn-secondary btn-sm">

@@ -657,6 +657,12 @@ public class BookingService {
             }
         }
 
+        // ── Sync paymentStatus with actual balance ────────────
+        // When the admin changes the price, totalAmount may no longer match what has
+        // been collected.  Keep paymentStatus consistent so the customer sees the
+        // correct state (PARTIALLY_PAID) and is shown a "pay balance" call-to-action.
+        syncPaymentStatusToBalance(booking);
+
         Booking updated = bookingRepository.save(booking);
 
         // Award loyalty when admin transitions status to COMPLETED
@@ -1320,6 +1326,15 @@ public class BookingService {
         );
     }
 
+    // ── Admin: paginated admin reviews for a customer ────────
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<BookingReviewDto> getAdminReviewsForCustomer(
+            Long customerId, org.springframework.data.domain.Pageable pageable) {
+        return bookingReviewRepository
+            .findByCustomerIdAndReviewerRoleAndSkippedFalseAndRatingIsNotNull(customerId, "ADMIN", pageable)
+            .map(this::toReviewDto);
+    }
+
     // ── System: cancel booking without request-scoped binge context ──
     @Transactional
     public BookingDto cancelBookingForSystem(String bookingRef, String reason) {
@@ -1703,6 +1718,42 @@ public class BookingService {
             }
         }
         return count;
+    }
+
+    /**
+     * Keeps the booking's paymentStatus consistent with its actual financial balance.
+     * Called after any admin price mutation so the customer-facing state stays accurate:
+     * <ul>
+     *   <li>SUCCESS → PARTIALLY_PAID  when the new total exceeds what has been collected</li>
+     *   <li>PARTIALLY_PAID → SUCCESS  when a top-up closes the gap (defensive: normally
+     *       Kafka does this, but the guard is cheap)</li>
+     * </ul>
+     * Refunded / FAILED / PENDING statuses are intentionally left untouched — those have
+     * their own lifecycle managed by the PaymentEventListener saga.
+     */
+    private void syncPaymentStatusToBalance(Booking booking) {
+        PaymentStatus current = booking.getPaymentStatus();
+        if (current == null) return;
+        // Only act on statuses that represent a "paid" state
+        if (current != PaymentStatus.SUCCESS && current != PaymentStatus.PARTIALLY_PAID) return;
+
+        BigDecimal collected = booking.getCollectedAmount() != null
+            ? booking.getCollectedAmount() : java.math.BigDecimal.ZERO;
+        BigDecimal total = booking.getTotalAmount() != null
+            ? booking.getTotalAmount() : java.math.BigDecimal.ZERO;
+        if (total.compareTo(java.math.BigDecimal.ZERO) <= 0) return;
+
+        if (current == PaymentStatus.SUCCESS
+                && collected.compareTo(total) < 0) {
+            booking.setPaymentStatus(PaymentStatus.PARTIALLY_PAID);
+            log.info("Booking {} paymentStatus adjusted SUCCESS→PARTIALLY_PAID after price change "
+                + "(collected={}, newTotal={})", booking.getBookingRef(), collected, total);
+        } else if (current == PaymentStatus.PARTIALLY_PAID
+                && collected.compareTo(total) >= 0) {
+            booking.setPaymentStatus(PaymentStatus.SUCCESS);
+            log.info("Booking {} paymentStatus adjusted PARTIALLY_PAID→SUCCESS after price change "
+                + "(collected={}, newTotal={})", booking.getBookingRef(), collected, total);
+        }
     }
 
     /** Award loyalty points when a booking is completed. */
