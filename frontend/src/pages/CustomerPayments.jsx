@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { bookingService, paymentService } from '../services/endpoints';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import SEO from '../components/SEO';
-import { FiAlertCircle, FiArrowRight, FiCheckCircle, FiCreditCard, FiFilter, FiRefreshCw, FiSearch, FiTrendingUp, FiX } from 'react-icons/fi';
+import { FiAlertCircle, FiCalendar, FiCheckCircle, FiCreditCard, FiFilter, FiRefreshCw, FiSearch, FiTrendingUp } from 'react-icons/fi';
 import DOMPurify from 'dompurify';
 import './CustomerHub.css';
 
@@ -15,32 +15,30 @@ export default function CustomerPayments() {
   const [query, setQuery] = useState('');
   const [appliedQuery, setAppliedQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
-  const [refInput, setRefInput] = useState('');
-  const [refError, setRefError] = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const searchInputRef = useRef(null);
 
-  const applySearch = () => setAppliedQuery(query.trim());
+  const applySearch = () => {
+    const trimmed = query.trim();
+    // Exact match on booking ref or transaction ID → navigate directly
+    const upper = trimmed.toUpperCase();
+    const matchedBooking = bookings.find(b => b.bookingRef?.toUpperCase() === upper);
+    const matchedPayment = payments.find(p =>
+      p.bookingRef?.toUpperCase() === upper || p.transactionId?.toUpperCase() === upper
+    );
+    if (trimmed && (matchedBooking || matchedPayment)) {
+      const ref = matchedBooking?.bookingRef || matchedPayment?.bookingRef;
+      navigate(`/payment/${ref}`);
+      return;
+    }
+    setAppliedQuery(trimmed);
+  };
 
   const handleSearchKey = (event) => {
     if (event.key === 'Enter') applySearch();
   };
 
-  const handleFindReservation = () => {
-    const trimmed = refInput.trim().toUpperCase();
-    if (!trimmed) { setRefError('Enter a booking reference to continue.'); return; }
-    const matchedBooking = bookings.find(b => b.bookingRef?.toUpperCase() === trimmed);
-    const matchedPayment = payments.find(p => p.bookingRef?.toUpperCase() === trimmed || p.transactionId?.toUpperCase() === trimmed);
-    if (matchedBooking || matchedPayment) {
-      const ref = matchedBooking?.bookingRef || matchedPayment?.bookingRef;
-      navigate(`/payment/${ref}`);
-    } else {
-      setRefError(`No reservation found for "${trimmed}". Check the reference and try again.`);
-    }
-  };
-
-  const handleFindKey = (event) => {
-    if (event.key === 'Enter') handleFindReservation();
-  };
 
   useEffect(() => {
     setLoading(true);
@@ -103,7 +101,10 @@ export default function CustomerPayments() {
       .toLowerCase();
     const matchesQuery = !appliedQuery || searchTarget.includes(appliedQuery.toLowerCase());
     const matchesStatus = statusFilter === 'ALL' || payment.status === statusFilter;
-    return matchesQuery && matchesStatus;
+    const paymentTs = new Date(payment.createdAt || payment.paidAt || 0);
+    const matchesFrom = !fromDate || paymentTs >= new Date(fromDate);
+    const matchesTo = !toDate || paymentTs <= new Date(toDate + 'T23:59:59');
+    return matchesQuery && matchesStatus && matchesFrom && matchesTo;
   });
 
   const initiatedPayments = sortedPayments.filter(payment => payment.status === 'INITIATED');
@@ -205,40 +206,6 @@ export default function CustomerPayments() {
       )}
 
       <section className="customer-hub-toolbar card">
-        <div className="customer-hub-panel-head" style={{ marginBottom: '1rem' }}>
-          <div>
-            <span className="customer-hub-panel-label">Find a reservation</span>
-            <h2 style={{ margin: '0.25rem 0 0.3rem', fontSize: '1rem', fontWeight: 700 }}>Open any booking directly by reference or transaction ID</h2>
-          </div>
-        </div>
-
-        <div className="customer-hub-filters" style={{ marginBottom: '0.85rem' }}>
-          <label className="customer-hub-search" style={{ maxWidth: '400px' }}>
-            <FiSearch />
-            <input
-              type="search"
-              value={refInput}
-              onChange={(event) => { setRefInput(event.target.value); setRefError(''); }}
-              onKeyDown={handleFindKey}
-              placeholder="Booking ref or transaction ID (e.g. BK-001)"
-            />
-          </label>
-          <button className="btn btn-primary btn-sm" onClick={handleFindReservation}>
-            <FiArrowRight /> Open Reservation
-          </button>
-          {refInput && (
-            <button className="btn btn-secondary btn-sm" onClick={() => { setRefInput(''); setRefError(''); }}>
-              <FiX />
-            </button>
-          )}
-        </div>
-        {refError && (
-          <p style={{ margin: '0 0 0.75rem', fontSize: '0.87rem', color: 'var(--danger)' }}>{refError}</p>
-        )}
-
-        <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '0.5rem 0 0.85rem' }} />
-
-        <div className="customer-hub-panel-label" style={{ marginBottom: '0.55rem' }}>Filter payment history</div>
         <div className="customer-hub-filters customer-hub-filters-wide">
           <label className="customer-hub-search">
             <FiSearch />
@@ -248,7 +215,7 @@ export default function CustomerPayments() {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={handleSearchKey}
-              placeholder="Search by ref, event, method, status"
+              placeholder="Search or enter exact booking ref / transaction ID"
             />
           </label>
 
@@ -264,13 +231,33 @@ export default function CustomerPayments() {
             </select>
           </label>
 
+          <label className="customer-hub-date-field">
+            <span><FiCalendar /> From</span>
+            <input
+              type="date"
+              value={fromDate}
+              max={toDate || undefined}
+              onChange={(event) => setFromDate(event.target.value)}
+            />
+          </label>
+
+          <label className="customer-hub-date-field">
+            <span><FiCalendar /> To</span>
+            <input
+              type="date"
+              value={toDate}
+              min={fromDate || undefined}
+              onChange={(event) => setToDate(event.target.value)}
+            />
+          </label>
+
           <button className="btn btn-primary btn-sm" onClick={applySearch}>
             <FiSearch /> Search
           </button>
 
           <button
             className="btn btn-secondary btn-sm"
-            onClick={() => { setQuery(''); setAppliedQuery(''); setStatusFilter('ALL'); }}
+            onClick={() => { setQuery(''); setAppliedQuery(''); setStatusFilter('ALL'); setFromDate(''); setToDate(''); }}
           >
             <FiRefreshCw /> Reset
           </button>
