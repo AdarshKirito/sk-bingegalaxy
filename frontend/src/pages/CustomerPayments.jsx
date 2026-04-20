@@ -1,18 +1,46 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { bookingService, paymentService } from '../services/endpoints';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import SEO from '../components/SEO';
-import { FiAlertCircle, FiCheckCircle, FiCreditCard, FiFilter, FiRefreshCw, FiSearch, FiTrendingUp } from 'react-icons/fi';
+import { FiAlertCircle, FiArrowRight, FiCheckCircle, FiCreditCard, FiFilter, FiRefreshCw, FiSearch, FiTrendingUp, FiX } from 'react-icons/fi';
 import DOMPurify from 'dompurify';
 import './CustomerHub.css';
 
 export default function CustomerPayments() {
+  const navigate = useNavigate();
   const [payments, setPayments] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
+  const [appliedQuery, setAppliedQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [refInput, setRefInput] = useState('');
+  const [refError, setRefError] = useState('');
+  const searchInputRef = useRef(null);
+
+  const applySearch = () => setAppliedQuery(query.trim());
+
+  const handleSearchKey = (event) => {
+    if (event.key === 'Enter') applySearch();
+  };
+
+  const handleFindReservation = () => {
+    const trimmed = refInput.trim().toUpperCase();
+    if (!trimmed) { setRefError('Enter a booking reference to continue.'); return; }
+    const matchedBooking = bookings.find(b => b.bookingRef?.toUpperCase() === trimmed);
+    const matchedPayment = payments.find(p => p.bookingRef?.toUpperCase() === trimmed || p.transactionId?.toUpperCase() === trimmed);
+    if (matchedBooking || matchedPayment) {
+      const ref = matchedBooking?.bookingRef || matchedPayment?.bookingRef;
+      navigate(`/payment/${ref}`);
+    } else {
+      setRefError(`No reservation found for "${trimmed}". Check the reference and try again.`);
+    }
+  };
+
+  const handleFindKey = (event) => {
+    if (event.key === 'Enter') handleFindReservation();
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -73,7 +101,7 @@ export default function CustomerPayments() {
       .filter(Boolean)
       .join(' ')
       .toLowerCase();
-    const matchesQuery = !query.trim() || searchTarget.includes(query.trim().toLowerCase());
+    const matchesQuery = !appliedQuery || searchTarget.includes(appliedQuery.toLowerCase());
     const matchesStatus = statusFilter === 'ALL' || payment.status === statusFilter;
     return matchesQuery && matchesStatus;
   });
@@ -177,14 +205,50 @@ export default function CustomerPayments() {
       )}
 
       <section className="customer-hub-toolbar card">
+        <div className="customer-hub-panel-head" style={{ marginBottom: '1rem' }}>
+          <div>
+            <span className="customer-hub-panel-label">Find a reservation</span>
+            <h2 style={{ margin: '0.25rem 0 0.3rem', fontSize: '1rem', fontWeight: 700 }}>Open any booking directly by reference or transaction ID</h2>
+          </div>
+        </div>
+
+        <div className="customer-hub-filters" style={{ marginBottom: '0.85rem' }}>
+          <label className="customer-hub-search" style={{ maxWidth: '400px' }}>
+            <FiSearch />
+            <input
+              type="search"
+              value={refInput}
+              onChange={(event) => { setRefInput(event.target.value); setRefError(''); }}
+              onKeyDown={handleFindKey}
+              placeholder="Booking ref or transaction ID (e.g. BK-001)"
+            />
+          </label>
+          <button className="btn btn-primary btn-sm" onClick={handleFindReservation}>
+            <FiArrowRight /> Open Reservation
+          </button>
+          {refInput && (
+            <button className="btn btn-secondary btn-sm" onClick={() => { setRefInput(''); setRefError(''); }}>
+              <FiX />
+            </button>
+          )}
+        </div>
+        {refError && (
+          <p style={{ margin: '0 0 0.75rem', fontSize: '0.87rem', color: 'var(--danger)' }}>{refError}</p>
+        )}
+
+        <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '0.5rem 0 0.85rem' }} />
+
+        <div className="customer-hub-panel-label" style={{ marginBottom: '0.55rem' }}>Filter payment history</div>
         <div className="customer-hub-filters customer-hub-filters-wide">
           <label className="customer-hub-search">
             <FiSearch />
             <input
+              ref={searchInputRef}
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search by transaction, booking ref, event"
+              onKeyDown={handleSearchKey}
+              placeholder="Search by ref, event, method, status"
             />
           </label>
 
@@ -200,10 +264,23 @@ export default function CustomerPayments() {
             </select>
           </label>
 
-          <button className="btn btn-secondary btn-sm" onClick={() => { setQuery(''); setStatusFilter('ALL'); }}>
+          <button className="btn btn-primary btn-sm" onClick={applySearch}>
+            <FiSearch /> Search
+          </button>
+
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => { setQuery(''); setAppliedQuery(''); setStatusFilter('ALL'); }}
+          >
             <FiRefreshCw /> Reset
           </button>
         </div>
+        {appliedQuery && (
+          <p style={{ marginTop: '0.55rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+            Showing results for <strong style={{ color: 'var(--text)' }}>"{appliedQuery}"</strong>
+            {' '}&mdash; <button style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: 0, fontSize: 'inherit' }} onClick={() => { setQuery(''); setAppliedQuery(''); }}>Clear</button>
+          </p>
+        )}
       </section>
 
       {loading ? (
