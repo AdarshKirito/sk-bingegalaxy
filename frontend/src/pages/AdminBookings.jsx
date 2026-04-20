@@ -1249,6 +1249,33 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
             return null;
           })()}
 
+          {/* Loyalty Points */}
+          {(b.loyaltyPointsEarned > 0 || b.loyaltyPointsRedeemed > 0) && (
+            <div style={{ marginTop: '0.5rem', marginBottom: '0.25rem', padding: '0.6rem 0.8rem', background: 'rgba(108, 92, 231, 0.08)', border: '1px solid rgba(108, 92, 231, 0.3)', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>⭐ Loyalty Points</div>
+              {b.loyaltyPointsEarned > 0 && (
+                <div style={{ ...rowStyle, marginBottom: '0.2rem' }}>
+                  <span style={labelStyle}>Points Earned</span>
+                  <span style={{ color: '#6c5ce7', fontWeight: 600 }}>+{b.loyaltyPointsEarned.toLocaleString()} pts</span>
+                </div>
+              )}
+              {b.loyaltyPointsRedeemed > 0 && (
+                <>
+                  <div style={{ ...rowStyle, marginBottom: '0.2rem' }}>
+                    <span style={labelStyle}>Points Redeemed</span>
+                    <span style={{ color: '#e17055', fontWeight: 600 }}>−{b.loyaltyPointsRedeemed.toLocaleString()} pts</span>
+                  </div>
+                  {b.loyaltyDiscountAmount > 0 && (
+                    <div style={rowStyle}>
+                      <span style={labelStyle}>Loyalty Discount</span>
+                      <span style={{ color: '#00b894', fontWeight: 600 }}>−₹{Number(b.loyaltyDiscountAmount).toLocaleString()}</span>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
           <div style={rowStyle}>
             <span style={labelStyle}>Status</span>
             <span className={`badge ${statusBadge(b.status)}`}>{b.status?.replace('_', ' ')}</span>

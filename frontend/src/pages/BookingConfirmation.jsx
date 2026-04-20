@@ -142,7 +142,22 @@ export default function BookingConfirmation() {
         : 'badge-info';
   const durationLabel = formatDuration(booking);
   const cleanNotes = booking.specialNotes ? DOMPurify.sanitize(booking.specialNotes, { ALLOWED_TAGS: [] }) : '';
-  const cleanEarlyCheckoutNote = booking.earlyCheckoutNote ? DOMPurify.sanitize(booking.earlyCheckoutNote, { ALLOWED_TAGS: [] }) : '';
+  // Build a clean customer-facing early checkout message from raw booking data (not the operational note)
+  const earlyCheckoutDisplay = (() => {
+    if (!booking.earlyCheckoutNote && !booking.actualCheckoutTime) return null;
+    if (booking.actualCheckoutTime) {
+      const checkoutTime = new Date(booking.actualCheckoutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const mins = booking.actualUsedMinutes;
+      if (mins != null) {
+        const h = Math.floor(mins / 60);
+        const m = mins % 60;
+        const dur = h > 0 && m > 0 ? `${h}h ${m}m` : h > 0 ? `${h}h` : `${m}m`;
+        return `Checked out at ${checkoutTime}. Session duration: ${dur}.`;
+      }
+      return `Checked out at ${checkoutTime}.`;
+    }
+    return null;
+  })();
   const addOnsLabel = (booking.addOns || []).map((item) => item.name ?? item.addOnName).filter(Boolean).join(', ');
   const detailCards = [
     { icon: <FiLayers />, label: 'Event', value: eventLabel },
@@ -416,10 +431,10 @@ export default function BookingConfirmation() {
             </div>
           )}
 
-          {cleanEarlyCheckoutNote && (
+          {earlyCheckoutDisplay && (
             <div className="customer-flow-note customer-flow-note-success">
-              <strong><FiClock /> Early checkout note</strong>
-              <p>{cleanEarlyCheckoutNote}</p>
+              <strong><FiClock /> Early checkout</strong>
+              <p>{earlyCheckoutDisplay}</p>
             </div>
           )}
         </article>

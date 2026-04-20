@@ -1821,35 +1821,33 @@ public class BookingService {
         long usedMinutes = java.time.Duration.between(scheduledStart, now).toMinutes();
         if (usedMinutes < 0) usedMinutes = 0;
 
-        // Round up used minutes to nearest 30-minute boundary
+        // For slot/availability release: round up to nearest 30-min boundary
         int roundedUsed = ((int) Math.ceil(usedMinutes / 30.0)) * 30;
         long remainingMinutes = bookedMinutes - roundedUsed;
         if (remainingMinutes < 0) remainingMinutes = 0;
 
-        // Build a human-readable note
+        // Build human-readable duration strings using ACTUAL minutes (no rounding in display)
         long usedHours = usedMinutes / 60;
-        long usedMins = usedMinutes % 60;
-        String usedStr = usedHours > 0
+        long usedMins  = usedMinutes % 60;
+        String usedStr = usedHours > 0 && usedMins > 0
             ? String.format("%dh %dm", usedHours, usedMins)
-            : String.format("%dm", usedMins);
-
-        long remHours = remainingMinutes / 60;
-        long remMins = remainingMinutes % 60;
-        String remStr = remHours > 0
-            ? String.format("%dh %dm", remHours, remMins)
-            : String.format("%dm", remMins);
+            : usedHours > 0
+                ? String.format("%dh", usedHours)
+                : String.format("%dm", usedMins);
 
         // Build booked duration string
         long bookedH = bookedMinutes / 60;
         long bookedM = bookedMinutes % 60;
-        String bookedStr = bookedM > 0
+        String bookedStr = bookedH > 0 && bookedM > 0
             ? String.format("%dh %dm", bookedH, bookedM)
-            : String.format("%dh", bookedH);
+            : bookedH > 0
+                ? String.format("%dh", bookedH)
+                : String.format("%dm", bookedM);
 
         String note = String.format(
-            "Early checkout at %s. Used %s of %s booked (rounded to %dm). %s remaining time released.",
+            "Early checkout at %s. Used %s of %s booked.",
             now.toLocalTime().format(java.time.format.DateTimeFormatter.ofPattern("hh:mm a")),
-            usedStr, bookedStr, roundedUsed, remStr);
+            usedStr, bookedStr);
 
         booking.setStatus(BookingStatus.COMPLETED);
         booking.setCheckedIn(false);
