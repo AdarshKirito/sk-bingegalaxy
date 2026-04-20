@@ -14,5 +14,5 @@ RUN chown appuser:appgroup app.jar
 USER appuser
 EXPOSE 8084
 HEALTHCHECK --interval=15s --timeout=5s --start-period=120s --retries=5 \
-  CMD wget --spider -q http://localhost:8084/actuator/health || exit 1
+  CMD wget --spider -q http://localhost:8080/actuator/health || exit 1
 ENTRYPOINT ["java", "-jar", "app.jar"]
