@@ -20,6 +20,10 @@ public class SecurityConfig {
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .addFilterBefore(new GatewayHeaderAuthFilter(), UsernamePasswordAuthenticationFilter.class)
             .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/api/v1/notifications/admin/templates/**").hasRole("SUPER_ADMIN")
+                .requestMatchers("/api/v1/notifications/admin/templates").hasRole("SUPER_ADMIN")
+                .requestMatchers("/api/v1/notifications/admin/whatsapp-templates/**").hasRole("SUPER_ADMIN")
+                .requestMatchers("/api/v1/notifications/admin/whatsapp-templates").hasRole("SUPER_ADMIN")
                 .requestMatchers("/api/v1/notifications/admin/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                 .requestMatchers("/api/v1/notifications/webhooks/**").permitAll()
                 .requestMatchers("/actuator/**").permitAll()

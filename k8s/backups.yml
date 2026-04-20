@@ -34,13 +34,13 @@ spec:
                 - name: PGUSER
                   valueFrom:
                     secretKeyRef:
-                      name: db-secrets
-                      key: SPRING_DATASOURCE_USERNAME
+                      name: postgres-admin-creds
+                      key: POSTGRES_USER
                 - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: db-secrets
-                      key: SPRING_DATASOURCE_PASSWORD
+                      name: postgres-admin-creds
+                      key: POSTGRES_PASSWORD
                 - name: BACKUP_S3_BUCKET
                   valueFrom:
                     secretKeyRef:
@@ -132,13 +132,13 @@ spec:
                 - name: MONGO_USER
                   valueFrom:
                     secretKeyRef:
-                      name: db-secrets
-                      key: MONGO_USER
+                      name: mongo-secrets
+                      key: MONGO_INITDB_ROOT_USERNAME
                 - name: MONGO_PASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: db-secrets
-                      key: MONGO_PASSWORD
+                      name: mongo-secrets
+                      key: MONGO_INITDB_ROOT_PASSWORD
                 - name: BACKUP_S3_BUCKET
                   valueFrom:
                     secretKeyRef:
@@ -236,13 +236,13 @@ spec:
                 - name: PGUSER
                   valueFrom:
                     secretKeyRef:
-                      name: db-secrets
-                      key: SPRING_DATASOURCE_USERNAME
+                      name: postgres-admin-creds
+                      key: POSTGRES_USER
                 - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: db-secrets
-                      key: SPRING_DATASOURCE_PASSWORD
+                      name: postgres-admin-creds
+                      key: POSTGRES_PASSWORD
               command:
                 - sh
                 - -c

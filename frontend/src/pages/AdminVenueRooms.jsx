@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { adminService } from '../services/endpoints';
+import { adminService, toArray } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import { FiEdit2, FiPlus, FiToggleLeft, FiToggleRight, FiTrash2, FiX } from 'react-icons/fi';
 import './AdminPages.css';
@@ -14,11 +14,12 @@ export default function AdminVenueRooms() {
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
   const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
 
   const fetchRooms = async () => {
     try {
       const res = await adminService.getVenueRooms();
-      setRooms(res.data.data || []);
+      setRooms(toArray(res.data?.data));
     } catch {
       toast.error('Failed to load venue rooms');
     } finally {
@@ -48,7 +49,10 @@ export default function AdminVenueRooms() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (saving) return;
     if (!form.name.trim()) { toast.error('Room name is required'); return; }
+    if (!Number.isFinite(form.capacity) || form.capacity < 1) { toast.error('Capacity must be at least 1'); return; }
+    setSaving(true);
     try {
       if (editId) {
         await adminService.updateVenueRoom(editId, form);
@@ -61,6 +65,8 @@ export default function AdminVenueRooms() {
       fetchRooms();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to save room');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -130,7 +136,7 @@ export default function AdminVenueRooms() {
             </div>
             <div className="adm-form-actions">
               <button type="button" className="btn btn-secondary" onClick={resetForm}>Cancel</button>
-              <button type="submit" className="btn btn-primary">{editId ? 'Update Room' : 'Create Room'}</button>
+              <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving...' : editId ? 'Update Room' : 'Create Room'}</button>
             </div>
           </form>
         </section>

@@ -10,8 +10,8 @@ spring:
     name: availability-service
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/availability_db}
-    username: ${SPRING_DATASOURCE_USERNAME:skbg_admin}
-    password: ${SPRING_DATASOURCE_PASSWORD}
+    username: ${SPRING_DATASOURCE_USERNAME:availability_svc}
+    password: ${SPRING_DATASOURCE_PASSWORD:availability_svc_dev}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:8}
@@ -32,6 +32,7 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
+        jakarta.persistence.query.timeout: ${JPA_QUERY_TIMEOUT_MS:10000}
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
@@ -43,6 +44,7 @@ spring:
         spring.json.trusted.packages: com.skbingegalaxy.*
     listener:
       observation-enabled: true
+      concurrency: ${KAFKA_LISTENER_CONCURRENCY:3}
 
 app:
   theater:
@@ -50,6 +52,12 @@ app:
     closing-hour: 24
     slot-duration-minutes: 60
     max-concurrent-bookings: 1
+
+springdoc:
+  api-docs:
+    enabled: ${SPRINGDOC_ENABLED:true}
+  swagger-ui:
+    enabled: ${SPRINGDOC_ENABLED:true}
 
 logging:
   level:
@@ -112,7 +120,7 @@ management:
       enabled: true
   tracing:
     sampling:
-      probability: ${TRACING_SAMPLING:0.05}
+      probability: ${TRACING_SAMPLING:0.10}
     propagation:
       type: b3
   zipkin:

@@ -3,6 +3,15 @@ import '@testing-library/jest-dom';
 // Initialize i18n so useTranslation works in test env without warnings
 import '../services/i18n';
 
+// Mock virtual:pwa-register/react — only exists at Vite build time
+vi.mock('virtual:pwa-register/react', () => ({
+  useRegisterSW: () => ({
+    needRefresh: [false, () => {}],
+    offlineReady: [false, () => {}],
+    updateServiceWorker: () => Promise.resolve(),
+  }),
+}));
+
 // Global test helpers
 
 // Mock dialog methods not available in jsdom

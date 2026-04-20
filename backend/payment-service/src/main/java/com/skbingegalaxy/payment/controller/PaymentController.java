@@ -87,10 +87,14 @@ public class PaymentController {
     }
 
     @GetMapping("/my")
-    public ResponseEntity<ApiResponse<List<PaymentDto>>> getMyPayments(
-            @RequestHeader("X-User-Id") Long userId) {
-        List<PaymentDto> payments = paymentService.getCustomerPayments(userId);
-        return ResponseEntity.ok(ApiResponse.ok("Your payments", payments));
+    public ResponseEntity<ApiResponse<org.springframework.data.domain.Page<PaymentDto>>> getMyPayments(
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        if (size > 100) size = 100;
+        var pageable = org.springframework.data.domain.PageRequest.of(page, size);
+        var result = paymentService.getCustomerPaymentsPaginated(userId, pageable);
+        return ResponseEntity.ok(ApiResponse.ok("Your payments", result));
     }
 
     @PostMapping("/admin/refund")

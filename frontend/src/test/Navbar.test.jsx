@@ -60,7 +60,7 @@ describe('Navbar', () => {
     it('shows Login and Sign Up links', () => {
       renderNavbar();
       expect(screen.getByText('Login')).toBeInTheDocument();
-      expect(screen.getByText('Sign Up')).toBeInTheDocument();
+      expect(screen.getByText('Register')).toBeInTheDocument();
     });
 
     it('shows "Private Screenings" label', () => {
@@ -93,8 +93,8 @@ describe('Navbar', () => {
     it('shows customer navigation links', () => {
       renderNavbar('/dashboard');
       expect(screen.getAllByText('Dashboard').length).toBeGreaterThanOrEqual(1);
-      expect(screen.getAllByText('Book').length).toBeGreaterThanOrEqual(1);
-      expect(screen.getAllByText('Bookings').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText('Book Now').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText('My Bookings').length).toBeGreaterThanOrEqual(1);
       expect(screen.getAllByText('Payments').length).toBeGreaterThanOrEqual(1);
     });
 
@@ -127,7 +127,7 @@ describe('Navbar', () => {
     it('changes binge on venue button click', async () => {
       const user = userEvent.setup();
       renderNavbar('/dashboard');
-      const venueButtons = screen.getAllByTitle('Change venue');
+      const venueButtons = screen.getAllByTitle('Change Binge');
       await user.click(venueButtons[0]);
       expect(bingeState.clearBinge).toHaveBeenCalled();
       expect(mockNavigate).toHaveBeenCalledWith('/binges');
@@ -187,8 +187,8 @@ describe('Navbar', () => {
       expect(screen.getAllByText('Dashboard').length).toBeGreaterThanOrEqual(1);
       expect(screen.getAllByText('Bookings').length).toBeGreaterThanOrEqual(1);
       expect(screen.getAllByText('Create').length).toBeGreaterThanOrEqual(1);
-      expect(screen.getAllByText('Availability').length).toBeGreaterThanOrEqual(1);
-      expect(screen.getAllByText('Catalog').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText('Blocked Dates').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText('Event Types').length).toBeGreaterThanOrEqual(1);
       expect(screen.getAllByText('Users').length).toBeGreaterThanOrEqual(1);
       expect(screen.getAllByText('Reports').length).toBeGreaterThanOrEqual(1);
     });

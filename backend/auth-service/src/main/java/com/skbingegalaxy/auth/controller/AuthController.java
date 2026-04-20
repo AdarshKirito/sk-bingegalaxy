@@ -228,7 +228,13 @@ public class AuthController {
     }
 
     @PostMapping("/admin/bulk-delete")
-    public ResponseEntity<ApiResponse<Integer>> bulkDelete(@RequestBody java.util.List<Long> userIds) {
+    public ResponseEntity<ApiResponse<Integer>> bulkDelete(
+            @RequestBody java.util.List<Long> userIds,
+            @RequestHeader("X-User-Role") String role) {
+        if (!"SUPER_ADMIN".equalsIgnoreCase(role)) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Only super admins can bulk delete users", HttpStatus.FORBIDDEN);
+        }
         int count = authService.bulkDeleteUsers(userIds);
         return ResponseEntity.ok(ApiResponse.ok(count + " users deleted", count));
     }
@@ -260,6 +266,9 @@ public class AuthController {
             sb.append("; Secure");
         }
         if (cookieDomain != null && !cookieDomain.isBlank()) {
+            if (!cookieDomain.matches("^[a-zA-Z0-9.-]+$")) {
+                throw new IllegalArgumentException("Invalid cookie domain configuration");
+            }
             sb.append("; Domain=").append(cookieDomain);
         }
         return sb.toString();

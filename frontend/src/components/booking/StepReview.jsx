@@ -9,6 +9,8 @@ export default function StepReview({
   const selectedRoom = venueRooms?.find(r => r.id === form.venueRoomId);
   const loyaltyDiscount = calculateLoyaltyDiscount ? calculateLoyaltyDiscount() : 0;
   const finalTotal = calculateTotal() - loyaltyDiscount;
+  const perBookingTotal = Math.max(0, finalTotal);
+  const recurringTotal = form.recurringEnabled ? perBookingTotal * Number(form.recurringOccurrences || 1) : perBookingTotal;
 
   return (
     <div className="booking-section">
@@ -158,6 +160,55 @@ export default function StepReview({
           </span>
         </div>
       </div>
+
+      {/* Recurring Booking Option */}
+      {!isAdmin && !editBookingData && (
+        <div className="recurring-card">
+          <div className="recurring-header">
+            <label className="recurring-toggle">
+              <input
+                type="checkbox"
+                checked={form.recurringEnabled}
+                onChange={(e) => setForm(f => ({ ...f, recurringEnabled: e.target.checked }))}
+              />
+              <span className="recurring-toggle-label">🔁 Make this a recurring booking</span>
+            </label>
+          </div>
+          {form.recurringEnabled && (
+            <div className="recurring-controls">
+              <div className="recurring-field">
+                <label>Frequency</label>
+                <select
+                  value={form.recurringPattern}
+                  onChange={(e) => setForm(f => ({ ...f, recurringPattern: e.target.value }))}
+                  className="recurring-select"
+                >
+                  <option value="WEEKLY">Every week</option>
+                  <option value="BIWEEKLY">Every 2 weeks</option>
+                  <option value="MONTHLY">Every month</option>
+                </select>
+              </div>
+              <div className="recurring-field">
+                <label>Number of bookings</label>
+                <div className="recurring-stepper">
+                  <button type="button" className="btn btn-secondary btn-sm"
+                    onClick={() => setForm(f => ({ ...f, recurringOccurrences: Math.max(2, (f.recurringOccurrences || 4) - 1) }))}>−</button>
+                  <span className="recurring-count">{form.recurringOccurrences || 4}</span>
+                  <button type="button" className="btn btn-secondary btn-sm"
+                    onClick={() => setForm(f => ({ ...f, recurringOccurrences: Math.min(12, (f.recurringOccurrences || 4) + 1) }))}>+</button>
+                </div>
+              </div>
+              <p className="recurring-summary">
+                {form.recurringOccurrences || 4} bookings × ₹{perBookingTotal.toLocaleString()} each = <strong>₹{recurringTotal.toLocaleString()} est. total</strong>
+              </p>
+              <p className="recurring-note">
+                Each booking is created independently. Dates without availability will be skipped automatically.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
       {capacityFull && (
         <div className="waitlist-card">
           <p className="waitlist-card-title">This slot is fully booked</p>
@@ -170,7 +221,7 @@ export default function StepReview({
       <div className="booking-nav">
         <button className="btn btn-secondary" onClick={onBack}>Back</button>
         <button className="btn btn-primary" onClick={onSubmit} disabled={loading || capacityFull}>
-          {loading ? 'Processing...' : editBookingData ? 'Update Reservation' : 'Confirm Booking'}
+          {loading ? 'Processing...' : editBookingData ? 'Update Reservation' : form.recurringEnabled ? `Book ${form.recurringOccurrences || 4} Sessions` : 'Confirm Booking'}
         </button>
       </div>
     </div>

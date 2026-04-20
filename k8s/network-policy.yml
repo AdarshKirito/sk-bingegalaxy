@@ -245,3 +245,103 @@ spec:
       ports:
         - port: 8761
         - port: 8888
+---
+# Allow Promtail → Loki (log forwarding)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-promtail-to-loki
+  namespace: sk-binge-galaxy
+spec:
+  podSelector:
+    matchLabels:
+      app: loki
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: promtail
+      ports:
+        - port: 3100
+          protocol: TCP
+---
+# Allow Grafana → Loki (datasource queries)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-grafana-to-loki
+  namespace: sk-binge-galaxy
+spec:
+  podSelector:
+    matchLabels:
+      app: loki
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: grafana
+      ports:
+        - port: 3100
+          protocol: TCP
+---
+# Allow Promtail egress to Loki
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-promtail-egress
+  namespace: sk-binge-galaxy
+spec:
+  podSelector:
+    matchLabels:
+      app: promtail
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: loki
+      ports:
+        - port: 3100
+          protocol: TCP
+---
+# Allow Grafana → Zipkin (log-to-trace correlation via derivedFields)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-grafana-to-zipkin
+  namespace: sk-binge-galaxy
+spec:
+  podSelector:
+    matchLabels:
+      app: zipkin
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: grafana
+      ports:
+        - port: 9411
+          protocol: TCP
+---
+# Allow Promtail egress to Kubernetes API (pod discovery via kubernetes_sd_configs)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-promtail-kube-api
+  namespace: sk-binge-galaxy
+spec:
+  podSelector:
+    matchLabels:
+      app: promtail
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP

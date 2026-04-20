@@ -64,16 +64,6 @@ export const ACCOUNT_PREFERENCES_DEFAULTS = {
   conciergeSupport: true,
 };
 
-export function getMemberTier(completedBookings = 0, totalSpend = 0) {
-  if (completedBookings >= 8 || totalSpend >= 40000) {
-    return 'Galaxy Circle';
-  }
-  if (completedBookings >= 4 || totalSpend >= 18000) {
-    return 'Spotlight Member';
-  }
-  return 'Private Guest';
-}
-
 export function getAccountPreferences(user = {}) {
   return {
     ...ACCOUNT_PREFERENCES_DEFAULTS,

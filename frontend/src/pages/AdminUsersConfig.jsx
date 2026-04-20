@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { authService, adminService } from '../services/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
@@ -79,6 +79,7 @@ export default function AdminUsersConfig() {
   /* ── Edit user inline ───────────────────────────────── */
   const [editingUser, setEditingUser] = useState(null);
   const [editForm, setEditForm] = useState({});
+  const [editSaving, setEditSaving] = useState(false);
   const [editingMemberLabel, setEditingMemberLabel] = useState(false);
   const [memberLabelValue, setMemberLabelValue] = useState('');
 
@@ -132,7 +133,7 @@ export default function AdminUsersConfig() {
     try {
       const res = await adminService.getCustomerDetail(customerId);
       setCustomerDetail(res.data?.data || res.data);
-    } catch { /* detail tabs will show empty state */ }
+    } catch { toast.error('Failed to load customer details'); }
     finally { setDetailLoading(false); }
   }, []);
 
@@ -297,6 +298,8 @@ export default function AdminUsersConfig() {
   };
 
   const saveEdit = async () => {
+    if (editSaving) return;
+    setEditSaving(true);
     try {
       if (detailUser?.role === 'ADMIN' || detailUser?.role === 'SUPER_ADMIN') {
         await authService.updateAdmin(editingUser, editForm);
@@ -310,7 +313,7 @@ export default function AdminUsersConfig() {
       // refresh detail
       const res = await authService.getCustomerById(editingUser);
       setDetailUser(res.data?.data || res.data);
-    } catch (e) { toast.error(e.response?.data?.message || 'Update failed'); }
+    } catch (e) { toast.error(e.response?.data?.message || 'Update failed'); } finally { setEditSaving(false); }
   };
 
   const saveMemberLabel = async (customerId) => {
@@ -503,7 +506,7 @@ export default function AdminUsersConfig() {
   const renderConfigTab = () => (
     <>
       <p className="auc-config-hint">
-        Manage rate code details on the dedicated <a href="/admin/rate-codes">Rate Codes page</a>.
+        Manage rate code details on the dedicated <Link to="/admin/rate-codes">Rate Codes page</Link>.
         Below is a quick overview.
       </p>
       {rcLoading ? <p className="auc-loading">Loading…</p> : (
@@ -591,7 +594,7 @@ export default function AdminUsersConfig() {
                         onChange={e => setEditForm(p => ({ ...p, phone: e.target.value }))} />
                     </label>
                     <div className="ab-action-row">
-                      <button className="btn btn-sm btn-primary" onClick={saveEdit}>Save</button>
+                      <button className="btn btn-sm btn-primary" onClick={saveEdit} disabled={editSaving}>{editSaving ? 'Saving...' : 'Save'}</button>
                       <button className="btn btn-sm btn-secondary" onClick={() => setEditingUser(null)}>Cancel</button>
                     </div>
                   </div>

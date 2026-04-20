@@ -26,6 +26,10 @@ public class UpdateCustomerRequest {
     private String phone;
 
     // Optional: if provided, admin resets the customer's password
-    @Size(min = 6, max = 100, message = "Password must be between 6 and 100 characters")
+    @Size(min = 10, max = 100, message = "Password must be between 10 and 100 characters")
+    @Pattern(
+        regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[@$!%*?&#])[A-Za-z\\d@$!%*?&#.\\-_~+^]{10,}$",
+        message = "Password must contain at least one uppercase, one lowercase, one digit and one special character"
+    )
     private String password;
 }

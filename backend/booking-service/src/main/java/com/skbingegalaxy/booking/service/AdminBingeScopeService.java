@@ -40,4 +40,23 @@ public class AdminBingeScopeService {
 
         return binge;
     }
+
+    /**
+     * Validates that the admin owns the binge identified by an explicit path-variable ID
+     * (not the BingeContext header). Use this when the bingeId comes from the URL path.
+     */
+    public Binge requireBingeOwnership(Long bingeId, Long adminId, String role, String action) {
+        if (bingeId == null) {
+            throw new BusinessException("Binge ID is required for " + action, HttpStatus.BAD_REQUEST);
+        }
+
+        Binge binge = bingeRepository.findById(bingeId)
+            .orElseThrow(() -> new ResourceNotFoundException("Binge", "id", bingeId));
+
+        if (!"SUPER_ADMIN".equalsIgnoreCase(role) && !binge.getAdminId().equals(adminId)) {
+            throw new BusinessException("Access denied: you do not own this binge", HttpStatus.FORBIDDEN);
+        }
+
+        return binge;
+    }
 }

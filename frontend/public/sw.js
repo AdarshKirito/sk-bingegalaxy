@@ -34,7 +34,15 @@ self.addEventListener('fetch', (event) => {
   }
 
   // For static assets: Cache-First strategy
-  if (request.destination === 'style' || request.destination === 'script' || request.destination === 'image' || request.destination === 'font') {
+  // Skip non-http(s) schemes (e.g. chrome-extension://) which the Cache API rejects
+  // Skip Vite dev server modules (contain ?v= or ?t= query params) to avoid caching
+  // stale dependency chunks that create duplicate React instances
+  if (
+    (request.destination === 'style' || request.destination === 'script' || request.destination === 'image' || request.destination === 'font') &&
+    request.url.startsWith('http') &&
+    !request.url.includes('?v=') &&
+    !request.url.includes('?t=')
+  ) {
     event.respondWith(
       caches.match(request).then((cached) => {
         if (cached) return cached;

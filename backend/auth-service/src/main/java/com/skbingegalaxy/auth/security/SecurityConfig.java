@@ -25,12 +25,14 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/auth/admin/login").permitAll()
                 .requestMatchers("/api/v1/auth/admin/register").hasRole("SUPER_ADMIN")
                 .requestMatchers("/api/v1/auth/admin/user/**").hasRole("SUPER_ADMIN")
+                .requestMatchers("/api/v1/auth/admin/bulk-delete").hasRole("SUPER_ADMIN")
                 .requestMatchers("/api/v1/auth/admin/admins/**").hasRole("SUPER_ADMIN")
                 .requestMatchers("/api/v1/auth/admin/admins").hasRole("SUPER_ADMIN")
                 .requestMatchers("/api/v1/auth/admin/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                 .requestMatchers("/api/v1/auth/**").permitAll()
-                .requestMatchers("/actuator/**").permitAll()
-                .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                .requestMatchers("/actuator/health/**", "/actuator/health").permitAll()
+                .requestMatchers("/actuator/**").hasRole("SYSTEM")
+                .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                 .anyRequest().authenticated()
             );
         return http.build();

@@ -15,4 +15,7 @@ public interface BookingEventLogRepository extends JpaRepository<BookingEventLog
     Page<BookingEventLog> findByBookingRefOrderByCreatedAtAsc(String bookingRef, Pageable pageable);
 
     List<BookingEventLog> findByBookingRefAndEventTypeOrderByCreatedAtDesc(String bookingRef, BookingEventType eventType);
+
+    @org.springframework.data.jpa.repository.Query("SELECT DISTINCT e.bookingRef FROM BookingEventLog e")
+    List<String> findDistinctBookingRefs();
 }

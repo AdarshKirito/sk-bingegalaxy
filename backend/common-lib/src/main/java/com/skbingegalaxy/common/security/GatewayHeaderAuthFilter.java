@@ -4,6 +4,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.MDC;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -15,6 +16,10 @@ import java.util.List;
  * Reads X-User-Id / X-User-Role headers set by the API-Gateway
  * and populates the Spring Security context so downstream
  * {@code SecurityFilterChain} matchers (hasRole, hasAuthority) work.
+ * <p>
+ * Also sets MDC keys (userId, bingeId) so every log line in the request
+ * lifecycle includes these fields — picked up by LogstashEncoder in
+ * logback-spring.xml for structured JSON output and searchable in Grafana/Loki.
  */
 public class GatewayHeaderAuthFilter extends jakarta.servlet.http.HttpFilter {
 
@@ -27,6 +32,10 @@ public class GatewayHeaderAuthFilter extends jakarta.servlet.http.HttpFilter {
 
         String userId = request.getHeader("X-User-Id");
         String role = request.getHeader("X-User-Role");
+        String bingeId = request.getHeader("X-Binge-Id");
+        if (bingeId == null || bingeId.isBlank()) {
+            bingeId = request.getParameter("bingeId");
+        }
 
         if (userId != null && role != null && VALID_ROLES.contains(role)) {
             var authorities = List.of(new SimpleGrantedAuthority("ROLE_" + role));
@@ -34,10 +43,21 @@ public class GatewayHeaderAuthFilter extends jakarta.servlet.http.HttpFilter {
             SecurityContextHolder.getContext().setAuthentication(auth);
         }
 
+        // Set MDC for structured logging — every log line in this request
+        // will include userId and bingeId fields in the JSON output.
+        if (userId != null && !userId.isBlank()) {
+            MDC.put("userId", userId);
+        }
+        if (bingeId != null && !bingeId.isBlank()) {
+            MDC.put("bingeId", bingeId);
+        }
+
         try {
             chain.doFilter(request, response);
         } finally {
             SecurityContextHolder.clearContext();
+            MDC.remove("userId");
+            MDC.remove("bingeId");
         }
     }
 }

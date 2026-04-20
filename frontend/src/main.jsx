@@ -16,21 +16,14 @@ if (import.meta.env.VITE_SENTRY_DSN) {
       Sentry.browserTracingIntegration(),
       Sentry.replayIntegration({ maskAllText: false, blockAllMedia: false }),
     ],
-    tracesSampleRate: import.meta.env.PROD ? 0.2 : 1.0,
-    replaysSessionSampleRate: 0.1,
+    tracesSampleRate: import.meta.env.PROD ? 1.0 : 0.1,
+    replaysSessionSampleRate: import.meta.env.PROD ? 0.1 : 0,
     replaysOnErrorSampleRate: 1.0,
   });
 }
 
 // ── Analytics ────────────────────────────────────────
 initAnalytics();
-
-// ── Service Worker (PWA) ─────────────────────────────
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
-  });
-}
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

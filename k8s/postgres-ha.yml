@@ -1,0 +1,215 @@
+# ── PostgreSQL HA: CloudNativePG Operator ────────────────────────────────────
+# Prerequisites:
+#   kubectl apply --server-side -f \
+#     https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.23/releases/cnpg-1.23.2.yaml
+#
+# This replaces the single-node StatefulSet in postgres.yml with a 3-instance
+# CloudNativePG Cluster CRD providing:
+#   - Streaming replication with automatic failover (< 30s)
+#   - Continuous WAL archiving to object storage
+#   - Scheduled base backups
+#   - Connection pooling via PgBouncer
+#   - Anti-affinity across nodes
+#
+# When using this file, DISABLE the StatefulSet and headless Service in postgres.yml.
+# The CNPG operator creates its own Service named '<cluster>-rw' (read-write),
+# '<cluster>-ro' (read-only replicas), and '<cluster>-r' (any read replica).
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+  namespace: sk-binge-galaxy
+  labels:
+    app: postgres
+spec:
+  instances: 3
+
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.3
+
+  # ── Storage ──────────────────────────────────────────────────────────────────
+  storage:
+    size: 20Gi
+    storageClass: __STORAGE_CLASS_NAME__
+
+  walStorage:
+    size: 5Gi
+    storageClass: __STORAGE_CLASS_NAME__
+
+  # ── Bootstrap — initialise the four databases ──────────────────────────────
+  bootstrap:
+    initdb:
+      database: auth_db
+      owner: skbg_admin
+      secret:
+        name: postgres-admin-creds    # Uses 'username' and 'password' keys (produced by ExternalSecret)
+      postInitSQL:
+        - SELECT 'CREATE DATABASE availability_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'availability_db')\gexec
+        - SELECT 'CREATE DATABASE booking_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'booking_db')\gexec
+        - SELECT 'CREATE DATABASE payment_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'payment_db')\gexec
+
+  # ── PostgreSQL configuration ───────────────────────────────────────────────
+  postgresql:
+    parameters:
+      max_connections: "200"
+      shared_buffers: "256MB"
+      effective_cache_size: "768MB"
+      maintenance_work_mem: "128MB"
+      checkpoint_completion_target: "0.9"
+      wal_buffers: "16MB"
+      default_statistics_target: "100"
+      random_page_cost: "1.1"
+      effective_io_concurrency: "200"
+      min_wal_size: "1GB"
+      max_wal_size: "4GB"
+      max_worker_processes: "4"
+      max_parallel_workers_per_gather: "2"
+      max_parallel_workers: "4"
+      max_parallel_maintenance_workers: "2"
+      log_min_duration_statement: "500"   # Log slow queries > 500ms
+      log_checkpoints: "on"
+      log_connections: "off"
+      log_disconnections: "off"
+      log_lock_waits: "on"
+      log_temp_files: "0"
+      log_autovacuum_min_duration: "0"
+    pg_hba:
+      - host all all 10.0.0.0/8 scram-sha-256           # Pod CIDR
+      - host all all 172.16.0.0/12 scram-sha-256
+      - host replication all 10.0.0.0/8 scram-sha-256   # Replication from replicas
+
+  # ── Resources ──────────────────────────────────────────────────────────────
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "2000m"
+
+  # ── Affinity — spread instances across nodes ───────────────────────────────
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
+
+  # ── Monitoring — Prometheus metrics ────────────────────────────────────────
+  monitoring:
+    enablePodMonitor: true
+
+  # ── Backup — WAL archiving + scheduled base backups ────────────────────────
+  # Uncomment and configure for production. Supports S3, GCS, Azure Blob, or Barman.
+  #
+  # backup:
+  #   barmanObjectStore:
+  #     destinationPath: "s3://__BACKUP_BUCKET__/postgres/"
+  #     endpointURL: "https://s3.__REGION__.amazonaws.com"
+  #     s3Credentials:
+  #       accessKeyId:
+  #         name: postgres-backup-creds
+  #         key: ACCESS_KEY_ID
+  #       secretAccessKey:
+  #         name: postgres-backup-creds
+  #         key: ACCESS_SECRET_KEY
+  #     wal:
+  #       compression: gzip
+  #       maxParallel: 4
+  #     data:
+  #       compression: gzip
+  #   retentionPolicy: "30d"
+
+  # ── Switchover / Failover ──────────────────────────────────────────────────
+  primaryUpdateStrategy: unsupervised    # Automatic switchover during rolling updates
+  primaryUpdateMethod: switchover
+
+  # ── Connection Pooling — PgBouncer ─────────────────────────────────────────
+  # Reduces connection overhead for microservices with many short-lived connections.
+  enablePDB: true
+  minSyncReplicas: 1
+  maxSyncReplicas: 1
+
+---
+# ── ScheduledBackup — daily base backup at 02:00 UTC ────────────────────────
+# Uncomment when barmanObjectStore is configured above.
+#
+# apiVersion: postgresql.cnpg.io/v1
+# kind: ScheduledBackup
+# metadata:
+#   name: postgres-daily-backup
+#   namespace: sk-binge-galaxy
+# spec:
+#   schedule: "0 2 * * *"
+#   backupOwnerReference: self
+#   cluster:
+#     name: postgres
+#   immediate: false
+
+---
+# ── PgBouncer Pooler — read-write connection pool ───────────────────────────
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: postgres-pooler-rw
+  namespace: sk-binge-galaxy
+spec:
+  cluster:
+    name: postgres
+  instances: 2
+  type: rw
+  pgbouncer:
+    poolMode: transaction
+    parameters:
+      max_client_conn: "200"
+      default_pool_size: "25"
+      min_pool_size: "5"
+      reserve_pool_size: "5"
+      reserve_pool_timeout: "3"
+      server_reset_query: DISCARD ALL
+  template:
+    metadata:
+      labels:
+        app: postgres-pooler
+    spec:
+      containers:
+        - name: pgbouncer
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
+
+---
+# ── PgBouncer Pooler — read-only connection pool (for read replicas) ────────
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: postgres-pooler-ro
+  namespace: sk-binge-galaxy
+spec:
+  cluster:
+    name: postgres
+  instances: 2
+  type: ro
+  pgbouncer:
+    poolMode: transaction
+    parameters:
+      max_client_conn: "200"
+      default_pool_size: "25"
+      min_pool_size: "5"
+  template:
+    metadata:
+      labels:
+        app: postgres-pooler-ro
+    spec:
+      containers:
+        - name: pgbouncer
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"

@@ -16,9 +16,15 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Manages the booking saga lifecycle:
+ * Manages the booking saga lifecycle with a strict state machine.
+ * <pre>
  * STARTED → AWAITING_PAYMENT → PAYMENT_RECEIVED → CONFIRMED → COMPLETED
- *                               ↘ COMPENSATING → COMPENSATED / FAILED
+ *            ↘ COMPENSATING ────→ COMPENSATED / FAILED
+ * </pre>
+ * Only transitions defined in {@link #VALID_TRANSITIONS} are allowed.
+ * Defense-in-depth: before advancing to CONFIRMED, the orchestrator verifies
+ * that collected amount ≥ total amount; on underpayment it enters COMPENSATING
+ * (not just a silent refusal) to trigger automatic booking cancellation.
  */
 @Service
 @RequiredArgsConstructor

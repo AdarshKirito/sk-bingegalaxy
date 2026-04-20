@@ -14,6 +14,7 @@ import com.skbingegalaxy.payment.dto.RefundDto;
 import com.skbingegalaxy.payment.dto.RefundRequest;
 import com.skbingegalaxy.payment.entity.Payment;
 import com.skbingegalaxy.payment.entity.Refund;
+import com.skbingegalaxy.payment.event.PaymentKafkaEvent;
 import com.skbingegalaxy.payment.repository.PaymentRepository;
 import com.skbingegalaxy.payment.repository.RefundRepository;
 import org.junit.jupiter.api.AfterEach;
@@ -24,7 +25,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import javax.crypto.Mac;
@@ -44,13 +45,16 @@ class PaymentServiceTest {
 
     @Mock private PaymentRepository paymentRepository;
     @Mock private RefundRepository refundRepository;
-    @Mock private KafkaTemplate<String, Object> kafkaTemplate;
+    @Mock private ApplicationEventPublisher eventPublisher;
+    @Mock private com.skbingegalaxy.payment.client.RazorpayGatewayClient razorpayGatewayClient;
+    @Mock private com.skbingegalaxy.payment.client.BookingAmountClient bookingAmountClient;
+    @Mock private com.skbingegalaxy.payment.repository.PaymentStatusHistoryRepository statusHistoryRepository;
 
     @InjectMocks private PaymentService paymentService;
 
     private Payment testPayment;
 
-    /** Stub both refund-enrichment calls with "no refunds yet" defaults. */
+    /** Stub both refund-enrichment calls with "no refunds yet" defaults (singular – for single-payment lookups). */
     private void stubNoRefunds(Long paymentId) {
         when(refundRepository.sumCompletedRefundsByPaymentId(eq(paymentId), anyList()))
                 .thenReturn(BigDecimal.ZERO);
@@ -58,11 +62,21 @@ class PaymentServiceTest {
                 .thenReturn(0L);
     }
 
+    /** Stub batch refund-enrichment calls with empty results (for list endpoints). */
+    private void stubNoRefundsBatch() {
+        when(refundRepository.sumCompletedRefundsByPaymentIds(anyList(), anyList()))
+                .thenReturn(List.of());
+        when(refundRepository.countRefundsByPaymentIds(anyList(), anyList()))
+                .thenReturn(List.of());
+    }
+
     @BeforeEach
     void setUp() {
                 BingeContext.clear();
                 ReflectionTestUtils.setField(paymentService, "razorpayKeySecret", "test-razorpay-secret");
                 ReflectionTestUtils.setField(paymentService, "paymentSimulationEnabled", true);
+                // Wire self-reference for split initiatePayment / saveInitiatedPayment flow
+                ReflectionTestUtils.setField(paymentService, "self", paymentService);
         testPayment = Payment.builder()
                 .id(1L)
                 .bookingRef("SKBG25123456")
@@ -98,6 +112,8 @@ class PaymentServiceTest {
         when(paymentRepository.findFirstByBookingRefAndStatusOrderByCreatedAtDesc(
                 "SKBG25123456", PaymentStatus.INITIATED))
                 .thenReturn(Optional.empty());
+        when(bookingAmountClient.getRemainingBalance("SKBG25123456"))
+                .thenReturn(BigDecimal.valueOf(5000));
         when(paymentRepository.save(any(Payment.class))).thenReturn(testPayment);
         stubNoRefunds(1L);
 
@@ -176,6 +192,8 @@ class PaymentServiceTest {
         when(paymentRepository.findFirstByBookingRefAndStatusAndBingeIdOrderByCreatedAtDesc(
                 "SKBG25123456", PaymentStatus.INITIATED, 11L))
                 .thenReturn(Optional.empty());
+        when(bookingAmountClient.getRemainingBalance("SKBG25123456"))
+                .thenReturn(BigDecimal.valueOf(5000));
         when(paymentRepository.save(any(Payment.class))).thenReturn(savedPayment);
         stubNoRefunds(1L);
 
@@ -198,7 +216,7 @@ class PaymentServiceTest {
                 .status("success")
                 .build();
 
-        when(paymentRepository.findByGatewayOrderId("ORD-EFGH5678"))
+        when(paymentRepository.findByGatewayOrderIdForUpdate("ORD-EFGH5678"))
                 .thenReturn(Optional.of(testPayment));
         when(paymentRepository.save(any(Payment.class))).thenReturn(testPayment);
         stubNoRefunds(1L);
@@ -207,7 +225,7 @@ class PaymentServiceTest {
 
         assertThat(testPayment.getStatus()).isEqualTo(PaymentStatus.SUCCESS);
         assertThat(testPayment.getGatewayPaymentId()).isEqualTo("PAY-12345");
-        verify(kafkaTemplate).send(anyString(), anyString(), any());
+        verify(eventPublisher).publishEvent(any(PaymentKafkaEvent.class));
     }
 
     @Test
@@ -219,7 +237,7 @@ class PaymentServiceTest {
                 .gatewaySignature(sign("ORD-EFGH5678|"))
                 .build();
 
-        when(paymentRepository.findByGatewayOrderId("ORD-EFGH5678"))
+        when(paymentRepository.findByGatewayOrderIdForUpdate("ORD-EFGH5678"))
                 .thenReturn(Optional.of(testPayment));
         when(paymentRepository.save(any(Payment.class))).thenReturn(testPayment);
         stubNoRefunds(1L);
@@ -238,7 +256,7 @@ class PaymentServiceTest {
                                 .status("success")
                                 .build();
 
-                when(paymentRepository.findByGatewayOrderId("ORD-EFGH5678"))
+                when(paymentRepository.findByGatewayOrderIdForUpdate("ORD-EFGH5678"))
                         .thenReturn(Optional.of(testPayment));
 
                 assertThatThrownBy(() -> paymentService.handleCallback(request))
@@ -254,7 +272,7 @@ class PaymentServiceTest {
                 .status("success")
                 .build();
 
-        when(paymentRepository.findByGatewayOrderId("ORD-EFGH5678"))
+        when(paymentRepository.findByGatewayOrderIdForUpdate("ORD-EFGH5678"))
                 .thenReturn(Optional.of(testPayment));
         stubNoRefunds(1L);
 
@@ -268,7 +286,7 @@ class PaymentServiceTest {
                 .gatewayOrderId("INVALID")
                 .build();
 
-        when(paymentRepository.findByGatewayOrderId("INVALID")).thenReturn(Optional.empty());
+        when(paymentRepository.findByGatewayOrderIdForUpdate("INVALID")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> paymentService.handleCallback(request))
                 .isInstanceOf(ResourceNotFoundException.class);
@@ -287,7 +305,7 @@ class PaymentServiceTest {
 
         assertThat(testPayment.getStatus()).isEqualTo(PaymentStatus.SUCCESS);
         assertThat(testPayment.getPaidAt()).isNotNull();
-        verify(kafkaTemplate).send(anyString(), anyString(), any());
+        verify(eventPublisher).publishEvent(any(PaymentKafkaEvent.class));
     }
 
     @Test
@@ -390,7 +408,7 @@ class PaymentServiceTest {
         assertThat(result.getAmount()).isEqualByComparingTo(BigDecimal.valueOf(2000));
         assertThat(result.getGatewayRefundId()).isEqualTo("RFD-XYZ12345");
         verify(refundRepository).save(any(Refund.class));
-        verify(kafkaTemplate).send(anyString(), anyString(), any());
+        verify(eventPublisher).publishEvent(any(PaymentKafkaEvent.class));
     }
 
     @Test
@@ -533,7 +551,7 @@ class PaymentServiceTest {
     void getCustomerPayments_returnsList() {
         when(paymentRepository.findByCustomerIdOrderByCreatedAtDesc(1L))
                 .thenReturn(List.of(testPayment));
-        stubNoRefunds(1L);
+        stubNoRefundsBatch();
 
         List<PaymentDto> result = paymentService.getCustomerPayments(1L);
         assertThat(result).hasSize(1);
@@ -546,7 +564,7 @@ class PaymentServiceTest {
 
                 when(paymentRepository.findByCustomerIdAndBingeIdOrderByCreatedAtDesc(1L, 11L))
                                 .thenReturn(List.of(testPayment));
-                stubNoRefunds(1L);
+                stubNoRefundsBatch();
 
                 List<PaymentDto> result = paymentService.getCustomerPayments(1L);
 
@@ -559,7 +577,7 @@ class PaymentServiceTest {
     void getPaymentsByBookingRef_returnsList() {
         when(paymentRepository.findByBookingRefOrderByCreatedAtDesc("SKBG25123456"))
                 .thenReturn(List.of(testPayment));
-        stubNoRefunds(1L);
+        stubNoRefundsBatch();
 
         List<PaymentDto> result = paymentService.getPaymentsByBookingRef("SKBG25123456", 1L, "CUSTOMER");
         assertThat(result).hasSize(1);
@@ -580,7 +598,7 @@ class PaymentServiceTest {
     void getPaymentsByBookingRef_adminCanAccessAnyBooking() {
         when(paymentRepository.findByBookingRefOrderByCreatedAtDesc("SKBG25123456"))
                 .thenReturn(List.of(testPayment));
-        stubNoRefunds(1L);
+        stubNoRefundsBatch();
 
         List<PaymentDto> result = paymentService.getPaymentsByBookingRef("SKBG25123456", 77L, "ADMIN");
 
@@ -621,7 +639,7 @@ class PaymentServiceTest {
         assertThat(result.getBookingRef()).isEqualTo("SKBG25999999");
         assertThat(result.getPaymentMethod()).isEqualTo(PaymentMethod.CASH);
         assertThat(result.getStatus()).isEqualTo(PaymentStatus.SUCCESS);
-        verify(kafkaTemplate).send(anyString(), anyString(), any());
+        verify(eventPublisher).publishEvent(any(PaymentKafkaEvent.class));
     }
 
     @Test
@@ -674,7 +692,7 @@ class PaymentServiceTest {
 
         assertThat(result.getAmount()).isEqualByComparingTo(BigDecimal.valueOf(3000));
         assertThat(result.getStatus()).isEqualTo(PaymentStatus.SUCCESS);
-        verify(kafkaTemplate).send(anyString(), anyString(), any());
+        verify(eventPublisher).publishEvent(any(PaymentKafkaEvent.class));
     }
 
     @Test
@@ -799,7 +817,7 @@ class PaymentServiceTest {
         paymentService.simulatePayment("TXN-ABCD1234");
 
         assertThat(testPayment.getStatus()).isEqualTo(PaymentStatus.SUCCESS);
-        verify(kafkaTemplate).send(anyString(), anyString(), any());
+        verify(eventPublisher).publishEvent(any(PaymentKafkaEvent.class));
     }
 
     // ── handleCallback with "captured" status ───────────────────────────────
@@ -814,7 +832,7 @@ class PaymentServiceTest {
                 .status("captured")
                 .build();
 
-        when(paymentRepository.findByGatewayOrderId("ORD-EFGH5678"))
+        when(paymentRepository.findByGatewayOrderIdForUpdate("ORD-EFGH5678"))
                 .thenReturn(Optional.of(testPayment));
         when(paymentRepository.save(any(Payment.class))).thenReturn(testPayment);
         stubNoRefunds(1L);
@@ -822,7 +840,7 @@ class PaymentServiceTest {
         paymentService.handleCallback(request);
 
         assertThat(testPayment.getStatus()).isEqualTo(PaymentStatus.SUCCESS);
-        verify(kafkaTemplate).send(anyString(), anyString(), any());
+        verify(eventPublisher).publishEvent(any(PaymentKafkaEvent.class));
     }
 
     // ── ensurePaymentAccess null-safety tests ───────────────────────────────

@@ -35,6 +35,11 @@ cat > "$ENV_FILE" <<EOF
 # ── Database ──────────────────────────────────────────────────
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 MONGO_PASSWORD=${MONGO_PASSWORD}
+# Per-service DB passwords (only needed if overriding init-databases.sql defaults)
+# AUTH_SVC_PASSWORD=
+# AVAILABILITY_SVC_PASSWORD=
+# BOOKING_SVC_PASSWORD=
+# PAYMENT_SVC_PASSWORD=
 
 # ── Service Discovery ────────────────────────────────────────
 EUREKA_PASSWORD=${EUREKA_PASSWORD}

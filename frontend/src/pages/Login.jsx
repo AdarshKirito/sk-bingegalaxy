@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
+import { trackLogin, identifyUser } from '../services/analytics';
 import { FiCheckCircle, FiClock, FiEye, FiEyeOff, FiShield } from 'react-icons/fi';
 import SEO from '../components/SEO';
 import './Auth.css';
@@ -174,6 +175,9 @@ export default function Login() {
     setLoading(true);
     try {
       await login({ email: trimmedEmail, password: form.password });
+      trackLogin('email');
+      const u = JSON.parse(localStorage.getItem('user') || '{}');
+      if (u.id) identifyUser(String(u.id), { role: u.role });
       toast.success('Welcome back!');
       // PublicOnlyRoute redirects once isAuthenticated becomes true
     } catch (err) {
@@ -226,7 +230,7 @@ export default function Login() {
 
             {error && <div className="error-message">{error}</div>}
 
-            <form onSubmit={handleSubmit}>
+            <form onSubmit={handleSubmit} noValidate>
               <div className="input-group">
                 <label>Email</label>
                 <input type="email" required value={form.email}

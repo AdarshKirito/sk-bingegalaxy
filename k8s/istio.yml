@@ -1,0 +1,243 @@
+# ── Service Mesh: Istio mTLS + AuthorizationPolicies ─────────────────────────
+# Prerequisites:
+#   istioctl install --set profile=minimal
+#   kubectl label namespace sk-binge-galaxy istio-injection=enabled
+#
+# This file provides:
+#   1. PeerAuthentication — STRICT mTLS for all pod-to-pod traffic
+#   2. AuthorizationPolicies — fine-grained L7 ACLs (who can call whom)
+#   3. DestinationRules — mTLS enforcement + connection pool tuning
+#
+# IMPORTANT: When Istio sidecar injection is enabled, the existing NetworkPolicies
+# in network-policy.yml still apply at L3/L4. Istio adds L7 (HTTP path/method)
+# enforcement on top. Keep both for defense-in-depth.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── STRICT mTLS — all traffic within the namespace must be encrypted ─────────
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: sk-binge-galaxy
+spec:
+  mtls:
+    mode: STRICT
+---
+# ── DestinationRule — enforce mTLS for all services in the mesh ──────────────
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: default-mtls
+  namespace: sk-binge-galaxy
+spec:
+  host: "*.sk-binge-galaxy.svc.cluster.local"
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    connectionPool:
+      tcp:
+        maxConnections: 100
+        connectTimeout: 5s
+      http:
+        h2UpgradePolicy: DEFAULT
+        maxRequestsPerConnection: 100
+        maxRetries: 3
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+---
+# ── AuthorizationPolicy: deny-all baseline ───────────────────────────────────
+# All traffic is denied by default. Subsequent policies explicitly allow
+# specific source → destination paths.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: deny-all
+  namespace: sk-binge-galaxy
+spec:
+  {}
+---
+# ── Allow: api-gateway → all backend services ────────────────────────────────
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-gateway-to-backends
+  namespace: sk-binge-galaxy
+spec:
+  selector:
+    matchLabels:
+      app: auth-service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/sk-binge-galaxy/sa/spring-cloud-kubernetes"]
+      to:
+        - operation:
+            methods: ["GET", "POST", "PUT", "DELETE", "PATCH"]
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-gateway-to-availability
+  namespace: sk-binge-galaxy
+spec:
+  selector:
+    matchLabels:
+      app: availability-service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/sk-binge-galaxy/sa/spring-cloud-kubernetes"]
+      to:
+        - operation:
+            methods: ["GET", "POST", "PUT", "DELETE", "PATCH"]
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-gateway-to-booking
+  namespace: sk-binge-galaxy
+spec:
+  selector:
+    matchLabels:
+      app: booking-service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/sk-binge-galaxy/sa/spring-cloud-kubernetes"]
+      to:
+        - operation:
+            methods: ["GET", "POST", "PUT", "DELETE", "PATCH"]
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-gateway-to-payment
+  namespace: sk-binge-galaxy
+spec:
+  selector:
+    matchLabels:
+      app: payment-service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/sk-binge-galaxy/sa/spring-cloud-kubernetes"]
+      to:
+        - operation:
+            methods: ["GET", "POST", "PUT", "DELETE", "PATCH"]
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-gateway-to-notification
+  namespace: sk-binge-galaxy
+spec:
+  selector:
+    matchLabels:
+      app: notification-service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/sk-binge-galaxy/sa/spring-cloud-kubernetes"]
+      to:
+        - operation:
+            methods: ["GET", "POST", "PUT", "DELETE", "PATCH"]
+---
+# ── Allow: booking-service → availability-service (inter-service Feign) ──────
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-booking-to-availability
+  namespace: sk-binge-galaxy
+spec:
+  selector:
+    matchLabels:
+      app: availability-service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/sk-binge-galaxy/sa/spring-cloud-kubernetes"]
+      when:
+        - key: source.principal
+          values: ["cluster.local/ns/sk-binge-galaxy/sa/spring-cloud-kubernetes"]
+      to:
+        - operation:
+            paths: ["/api/v1/internal/*"]
+            methods: ["GET", "POST", "PUT"]
+---
+# ── Allow: all backend services → discovery-server & config-server ───────────
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-service-registration
+  namespace: sk-binge-galaxy
+spec:
+  selector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [discovery-server, config-server]
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            namespaces: ["sk-binge-galaxy"]
+---
+# ── Allow: Prometheus scraping ───────────────────────────────────────────────
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: sk-binge-galaxy
+spec:
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            namespaces: ["monitoring"]
+      to:
+        - operation:
+            paths: ["/actuator/prometheus", "/actuator/health*", "/metrics"]
+            methods: ["GET"]
+---
+# ── Allow: health checks from kubelet (non-mesh traffic) ─────────────────────
+# Kubelet probes do not go through the Istio sidecar, but this policy is a
+# safety net for environments where probes are re-routed.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-health-probes
+  namespace: sk-binge-galaxy
+spec:
+  action: ALLOW
+  rules:
+    - to:
+        - operation:
+            paths: ["/actuator/health", "/actuator/health/*"]
+            methods: ["GET"]
+---
+# ── Allow: ingress gateway → frontend & api-gateway ─────────────────────────
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-ingress-to-frontend
+  namespace: sk-binge-galaxy
+spec:
+  selector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [api-gateway, frontend]
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            namespaces: ["istio-system"]

@@ -30,6 +30,7 @@ export function createDashboardSlide() {
     ctaLabel: '',
     imageUrl: '',
     theme: 'celebration',
+    linkedEventTypeId: null,
   };
 }
 
@@ -46,6 +47,7 @@ export function normalizeDashboardExperience(config) {
         ctaLabel: cleanString(slide?.ctaLabel),
         imageUrl: cleanString(slide?.imageUrl),
         theme: DASHBOARD_THEME_OPTIONS.some((option) => option.value === slide?.theme) ? slide.theme : 'celebration',
+        linkedEventTypeId: slide?.linkedEventTypeId != null ? Number(slide.linkedEventTypeId) : null,
       }))
     : [];
 

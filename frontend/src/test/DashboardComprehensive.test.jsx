@@ -62,6 +62,9 @@ vi.mock('../services/endpoints', () => ({
     getEventTypes: mockGetEventTypes,
     getAllActiveBinges: vi.fn().mockResolvedValue({ data: { data: [] } }),
     getBingeDashboardExperience: mockGetBingeDashboardExperience,
+    getPendingReviews: vi.fn().mockResolvedValue({ data: { data: [] } }),
+    getMyWaitlist: vi.fn().mockResolvedValue({ data: { data: [] } }),
+    getMyLoyalty: vi.fn().mockResolvedValue({ data: { data: null } }),
   },
   paymentService: {
     getMyPayments: mockGetMyPayments,
@@ -164,6 +167,34 @@ describe('Dashboard Comprehensive Tests', () => {
       renderDashboard();
       await waitFor(() => {
         expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
+      });
+    });
+
+    it('handles paginated payments payload without crashing', async () => {
+      mockGetMyPayments.mockResolvedValue({
+        data: {
+          data: {
+            content: [
+              {
+                id: 42,
+                transactionId: 'txn-42',
+                status: 'INITIATED',
+                amount: 1200,
+              },
+            ],
+            totalElements: 1,
+            totalPages: 1,
+            number: 0,
+            size: 20,
+          },
+        },
+      });
+
+      renderDashboard();
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
+        expect(screen.getByText('1 in-progress payment')).toBeInTheDocument();
       });
     });
   });

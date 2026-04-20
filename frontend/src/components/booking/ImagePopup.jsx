@@ -1,4 +1,13 @@
+import { useEffect } from 'react';
+
 export default function ImagePopup({ imagePopup, setImagePopup }) {
+  useEffect(() => {
+    if (!imagePopup) return;
+    const handleKey = (e) => { if (e.key === 'Escape') setImagePopup(null); };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [imagePopup, setImagePopup]);
+
   if (!imagePopup) return null;
 
   const popupOverlay = {

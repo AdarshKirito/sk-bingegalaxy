@@ -7,6 +7,7 @@
 
 /**
  * Convert an array of objects to a CSV string.
+ * Handles nested objects by JSON-stringifying them, and escapes newlines.
  * @param {Array<object>} rows   Data rows
  * @param {string[]}      columns  Column keys to include
  * @param {object}         [headings]  Optional label map { key: 'Label' }
@@ -14,13 +15,19 @@
 export function toCSV(rows, columns, headings = {}) {
   const header = columns.map(c => quote(headings[c] || c)).join(',');
   const body = rows.map(row =>
-    columns.map(c => quote(String(row[c] ?? ''))).join(',')
+    columns.map(c => {
+      const val = row[c];
+      if (val == null) return '""';
+      if (typeof val === 'object') return quote(JSON.stringify(val));
+      return quote(String(val));
+    }).join(',')
   );
   return [header, ...body].join('\r\n');
 }
 
 function quote(value) {
-  const escaped = value.replace(/"/g, '""');
+  // Escape double quotes and replace newlines (which break CSV parsers)
+  const escaped = value.replace(/"/g, '""').replace(/\r?\n/g, ' ');
   return `"${escaped}"`;
 }
 
@@ -163,4 +170,27 @@ export function exportReportPDF(report, label) {
     headings: REPORT_HEADINGS,
     subtitle: label,
   });
+}
+
+/* ── Server-side PDF invoice ────────────────────────── */
+
+/**
+ * Download a branded PDF invoice from the server.
+ * Falls back to client-side PDF if the server endpoint is unavailable.
+ *
+ * @param {string} bookingRef  The booking reference (e.g. 'BK-ABC123')
+ */
+export async function downloadServerInvoice(bookingRef) {
+  try {
+    const { default: api } = await import('./api');
+    const res = await api.get(`/bookings/${encodeURIComponent(bookingRef)}/invoice`, {
+      responseType: 'blob',
+    });
+    const blob = new Blob([res.data], { type: 'application/pdf' });
+    triggerDownload(blob, `invoice-${bookingRef}.pdf`);
+  } catch (err) {
+    // Let the caller decide how to handle (e.g. show client-side fallback)
+    console.warn('Server invoice unavailable:', err.message);
+    throw err;
+  }
 }

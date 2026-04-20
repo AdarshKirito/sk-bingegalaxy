@@ -14,7 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.*;
-import java.util.stream.Collectors;
+
 
 @Service
 @RequiredArgsConstructor
@@ -325,7 +325,7 @@ public class PricingService {
                     .basePrice(rcp.getBasePrice()).hourlyRate(rcp.getHourlyRate())
                     .pricePerGuest(rcp.getPricePerGuest()).source("RATE_CODE").build());
                 if ("DEFAULT".equals(overallSource)) overallSource = "RATE_CODE";
-                rateCodeName = rateCode.getName();
+                if (rateCode != null) rateCodeName = rateCode.getName();
             } else {
                 eventPricings.add(ResolvedPricingDto.EventPricing.builder()
                     .eventTypeId(et.getId()).eventTypeName(et.getName())
@@ -349,7 +349,7 @@ public class PricingService {
                     .addOnId(addon.getId()).addOnName(addon.getName())
                     .price(rap.getPrice()).source("RATE_CODE").build());
                 if ("DEFAULT".equals(overallSource)) overallSource = "RATE_CODE";
-                rateCodeName = rateCode.getName();
+                if (rateCode != null) rateCodeName = rateCode.getName();
             } else {
                 addonPricings.add(ResolvedPricingDto.AddonPricing.builder()
                     .addOnId(addon.getId()).addOnName(addon.getName())
@@ -474,6 +474,7 @@ public class PricingService {
             .stream().map(this::toSurgeRuleDto).toList();
     }
 
+    @org.springframework.cache.annotation.Cacheable(value = "surgeRules", key = "T(com.skbingegalaxy.common.context.BingeContext).getBingeId()")
     public List<com.skbingegalaxy.booking.dto.SurgePricingRuleDto> getActiveSurgeRules() {
         Long bid = requireSelectedBinge("viewing surge pricing rules");
         return surgePricingRuleRepository.findByBingeIdAndActiveTrueOrderByDayOfWeekAscStartMinuteAsc(bid)
@@ -481,6 +482,7 @@ public class PricingService {
     }
 
     @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "surgeRules", allEntries = true)
     public com.skbingegalaxy.booking.dto.SurgePricingRuleDto createSurgeRule(com.skbingegalaxy.booking.dto.SurgePricingRuleSaveRequest request) {
         Long bid = requireSelectedBinge("creating surge pricing rule");
         if (request.getStartMinute() >= request.getEndMinute()) {
@@ -502,6 +504,7 @@ public class PricingService {
     }
 
     @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "surgeRules", allEntries = true)
     public com.skbingegalaxy.booking.dto.SurgePricingRuleDto updateSurgeRule(Long id, com.skbingegalaxy.booking.dto.SurgePricingRuleSaveRequest request) {
         Long bid = requireSelectedBinge("updating surge pricing rule");
         SurgePricingRule rule = surgePricingRuleRepository.findByIdAndBingeId(id, bid)
@@ -522,6 +525,7 @@ public class PricingService {
     }
 
     @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "surgeRules", allEntries = true)
     public void toggleSurgeRule(Long id) {
         Long bid = requireSelectedBinge("toggling surge pricing rule");
         SurgePricingRule rule = surgePricingRuleRepository.findByIdAndBingeId(id, bid)
@@ -532,6 +536,7 @@ public class PricingService {
     }
 
     @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "surgeRules", allEntries = true)
     public void deleteSurgeRule(Long id) {
         Long bid = requireSelectedBinge("deleting surge pricing rule");
         SurgePricingRule rule = surgePricingRuleRepository.findByIdAndBingeId(id, bid)

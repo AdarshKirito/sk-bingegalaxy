@@ -1,9 +1,11 @@
 package com.skbingegalaxy.booking.controller;
 
+import com.skbingegalaxy.booking.service.AdminBingeScopeService;
 import com.skbingegalaxy.common.dto.ApiResponse;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpStatus;
@@ -27,11 +29,14 @@ class MediaControllerTest {
     @TempDir
     Path tempDir;
 
+    @Mock
+    private AdminBingeScopeService adminBingeScopeService;
+
     private MediaController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new MediaController(tempDir.toString());
+        controller = new MediaController(tempDir.toString(), adminBingeScopeService);
     }
 
     // ── Upload Tests ─────────────────────────────────────────

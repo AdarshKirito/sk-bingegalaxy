@@ -106,6 +106,11 @@ public class BookingService {
         Long bingeId = BingeContext.requireBingeId();
         EventType eventType = findBookableEventType(request.getEventTypeId());
 
+        // Reject bookings in the past
+        if (request.getBookingDate().isBefore(LocalDate.now())) {
+            throw new BusinessException("Booking date cannot be in the past");
+        }
+
         // Resolve duration in minutes (30-min granularity)
         int durMin = resolveDurationMinutes(request.getDurationMinutes(), request.getDurationHours());
         if (durMin < 30 || durMin > 720) {
@@ -194,8 +199,10 @@ public class BookingService {
         if (surge != null) {
             surgeMultiplier = surge.multiplier();
             surgeLabel = surge.label();
+            // Apply surge to total; keep component amounts (base, addOn, guest) as pre-surge
+            // values so admins can see the breakdown clearly. The surgeMultiplier field
+            // on the booking records the factor for transparency.
             totalAmount = totalAmount.multiply(surgeMultiplier).setScale(2, RoundingMode.HALF_UP);
-            baseAmount = baseAmount.multiply(surgeMultiplier).setScale(2, RoundingMode.HALF_UP);
         }
 
         // ── Venue room assignment ────────────────────────────
@@ -220,7 +227,7 @@ public class BookingService {
         BigDecimal loyaltyDiscountAmount = BigDecimal.ZERO;
         if (request.getRedeemLoyaltyPoints() != null && request.getRedeemLoyaltyPoints() > 0) {
             LoyaltyService.RedemptionResult redemption = loyaltyService.redeemPoints(
-                customerId, bingeId, bookingRef,
+                customerId, bookingRef,
                 request.getRedeemLoyaltyPoints(), totalAmount);
             loyaltyPointsRedeemed = redemption.pointsRedeemed();
             loyaltyDiscountAmount = redemption.discountAmount();
@@ -483,6 +490,19 @@ public class BookingService {
             if (hasTimeConflict(booking.getBookingDate(), startMinute, durMin, booking.getId())) {
                 throw new BusinessException("Selected time slot is no longer available");
             }
+            // Validate venue room capacity at the new time slot
+            if (booking.getVenueRoomId() != null) {
+                VenueRoom room = venueRoomRepository.findById(booking.getVenueRoomId()).orElse(null);
+                if (room == null || !room.isActive()) {
+                    booking.setVenueRoomId(null);
+                    booking.setVenueRoomName(null);
+                } else {
+                    int roomOcc = countRoomBookings(room.getId(), booking.getBookingDate(), startMinute, durMin, booking.getId());
+                    if (roomOcc >= room.getCapacity()) {
+                        throw new BusinessException("Room '" + room.getName() + "' is fully booked for the new time slot");
+                    }
+                }
+            }
         }
 
         // Guest count change
@@ -612,7 +632,40 @@ public class BookingService {
             log.info("Booking {} pricing recalculated: {} → {}", bookingRef, oldTotal, newTotal);
         }
 
+        // ── Recalculate surge when date/time changed OR pricing changed ──
+        if (!directPriceOverride && (dateTimeChanged || pricingChanged)) {
+            if (dateTimeChanged) {
+                // Re-resolve surge for the new time slot
+                PricingService.SurgeResult surge = pricingService.resolveSurge(
+                    booking.getBookingDate(), booking.getStartTime());
+                BigDecimal preSurgeTotal = booking.getBaseAmount()
+                    .add(booking.getAddOnAmount()).add(booking.getGuestAmount());
+                if (surge != null) {
+                    booking.setSurgeMultiplier(surge.multiplier());
+                    booking.setSurgeLabel(surge.label());
+                    booking.setTotalAmount(preSurgeTotal.multiply(surge.multiplier()).setScale(2, RoundingMode.HALF_UP));
+                } else {
+                    booking.setSurgeMultiplier(null);
+                    booking.setSurgeLabel(null);
+                    booking.setTotalAmount(preSurgeTotal);
+                }
+            } else if (booking.getSurgeMultiplier() != null) {
+                // Pricing fields changed but date/time didn't — reapply existing surge multiplier
+                BigDecimal preSurgeTotal = booking.getBaseAmount()
+                    .add(booking.getAddOnAmount()).add(booking.getGuestAmount());
+                booking.setTotalAmount(preSurgeTotal.multiply(booking.getSurgeMultiplier()).setScale(2, RoundingMode.HALF_UP));
+            }
+        }
+
         Booking updated = bookingRepository.save(booking);
+
+        // Award loyalty when admin transitions status to COMPLETED
+        if (!previousStatus.equals("COMPLETED")
+                && updated.getStatus() == BookingStatus.COMPLETED
+                && updated.getLoyaltyPointsEarned() == 0) {
+            awardLoyaltyPoints(updated);
+        }
+
         BookingEventType eventType = booking.getStatus().name().equals(previousStatus)
             ? BookingEventType.MODIFIED
             : BookingEventType.valueOf(booking.getStatus().name());
@@ -637,7 +690,7 @@ public class BookingService {
     // ── Admin: cancel booking ────────────────────────────────
     @Transactional
     public BookingDto cancelBooking(String bookingRef) {
-        return cancelBooking(findScopedBookingByRef(bookingRef), "ADMIN", "Booking cancelled by admin");
+        return cancelBooking(findScopedBookingByRef(bookingRef), "ADMIN", "Booking cancelled by admin", 100);
     }
 
     // ── Customer: cancel own PENDING booking ─────────────────
@@ -655,7 +708,7 @@ public class BookingService {
         if (!decision.allowed()) {
             throw new BusinessException(decision.message());
         }
-        return cancelBooking(booking, "CUSTOMER", "Booking cancelled by customer");
+        return cancelBooking(booking, "CUSTOMER", "Booking cancelled by customer", decision.refundPercentage());
     }
 
     // ── Customer: reschedule own booking ─────────────────────
@@ -762,6 +815,41 @@ public class BookingService {
             booking.setTotalAmount(totalAmount);
         }
 
+        // Recalculate surge pricing for the new date/time
+        PricingService.SurgeResult newSurge = pricingService.resolveSurge(
+            request.getNewBookingDate(), request.getNewStartTime());
+        if (newSurge != null) {
+            booking.setSurgeMultiplier(newSurge.multiplier());
+            booking.setSurgeLabel(newSurge.label());
+            BigDecimal preSurgeTotal = booking.getBaseAmount()
+                .add(booking.getAddOnAmount()).add(booking.getGuestAmount());
+            booking.setTotalAmount(preSurgeTotal.multiply(newSurge.multiplier()).setScale(2, RoundingMode.HALF_UP));
+        } else {
+            // New slot has no surge — clear it and recalculate without surge
+            if (booking.getSurgeMultiplier() != null) {
+                booking.setSurgeMultiplier(null);
+                booking.setSurgeLabel(null);
+                booking.setTotalAmount(booking.getBaseAmount()
+                    .add(booking.getAddOnAmount()).add(booking.getGuestAmount()));
+            }
+        }
+
+        // Re-validate venue room if one is assigned (check active + capacity for new slot)
+        if (booking.getVenueRoomId() != null) {
+            VenueRoom room = venueRoomRepository.findById(booking.getVenueRoomId()).orElse(null);
+            if (room == null || !room.isActive()) {
+                booking.setVenueRoomId(null);
+                booking.setVenueRoomName(null);
+            } else {
+                // Check room capacity for the new time slot (exclude this booking from the count)
+                int newStartMinute = request.getNewStartTime().getHour() * 60 + request.getNewStartTime().getMinute();
+                int roomOccupancy = countRoomBookings(room.getId(), request.getNewBookingDate(), newStartMinute, newDurMin, booking.getId());
+                if (roomOccupancy >= room.getCapacity()) {
+                    throw new BusinessException("Selected room '" + room.getName() + "' is fully booked for the new time slot");
+                }
+            }
+        }
+
         // Record old values for audit
         String oldDetails = String.format("Date: %s, Time: %s, Duration: %d min",
             booking.getBookingDate(), booking.getStartTime(), existingDuration);
@@ -810,7 +898,7 @@ public class BookingService {
         }
 
         // Cannot transfer to yourself
-        if (booking.getCustomerEmail().equalsIgnoreCase(request.getRecipientEmail())) {
+        if (booking.getCustomerEmail() != null && booking.getCustomerEmail().equalsIgnoreCase(request.getRecipientEmail())) {
             throw new BusinessException("Cannot transfer a booking to yourself");
         }
 
@@ -858,6 +946,20 @@ public class BookingService {
                                                           Long customerId, String customerName,
                                                           String customerEmail, String customerPhone) {
         Long bingeId = BingeContext.requireBingeId();
+
+        // Anti-abuse: same limits as single booking creation
+        long pendingCount = bookingRepository.countPendingByCustomerId(customerId);
+        if (pendingCount >= maxPendingPerCustomer) {
+            throw new BusinessException(
+                "You already have " + pendingCount + " pending booking(s). Please complete or cancel them before creating new ones.");
+        }
+        LocalDateTime cooldownSince = LocalDateTime.now().minusMinutes(cooldownMinutesAfterTimeout);
+        long recentTimeouts = bookingRepository.countRecentTimeoutCancellations(customerId, cooldownSince);
+        if (recentTimeouts >= 2) {
+            throw new BusinessException(
+                "Too many unpaid bookings were auto-cancelled recently. Please wait a few minutes before trying again.");
+        }
+
         String groupId = "RG-" + Year.now().getValue() + "-"
             + String.format("%08X", ThreadLocalRandom.current().nextInt());
 
@@ -866,11 +968,17 @@ public class BookingService {
             throw new BusinessException("Duration must be between 30 minutes and 12 hours in 30-minute increments");
         }
 
+        // Anti-abuse: cap occurrences at 12 (3 months weekly)
+        int occurrences = Math.min(request.getOccurrences(), 12);
+        if (occurrences < 1) {
+            throw new BusinessException("At least 1 occurrence is required");
+        }
+
         EventType eventType = findBookableEventType(request.getEventTypeId());
         List<BookingDto> createdBookings = new ArrayList<>();
         List<RecurringBookingResult.SkippedOccurrence> skipped = new ArrayList<>();
 
-        for (int i = 0; i < request.getOccurrences(); i++) {
+        for (int i = 0; i < occurrences; i++) {
             LocalDate date = calculateRecurrenceDate(request.getStartDate(), request.getPattern(), i);
 
             // Skip dates in the past
@@ -940,6 +1048,31 @@ public class BookingService {
                     .multiply(BigDecimal.valueOf(Math.max(guests - 1, 0)));
                 BigDecimal totalAmount = baseAmount.add(addOnTotal).add(guestAmount);
 
+                // Apply surge pricing per occurrence date/time
+                BigDecimal surgeMultiplier = null;
+                String surgeLabel = null;
+                PricingService.SurgeResult surge = pricingService.resolveSurge(date, request.getStartTime());
+                if (surge != null) {
+                    surgeMultiplier = surge.multiplier();
+                    surgeLabel = surge.label();
+                    totalAmount = totalAmount.multiply(surgeMultiplier).setScale(2, RoundingMode.HALF_UP);
+                }
+
+                // Validate venue room if requested
+                Long venueRoomId = null;
+                String venueRoomName = null;
+                if (request.getVenueRoomId() != null) {
+                    VenueRoom room = venueRoomRepository.findByIdAndBingeId(request.getVenueRoomId(), bingeId).orElse(null);
+                    if (room != null && room.isActive()) {
+                        int roomOccupancy = countRoomBookings(room.getId(), date, startMinute, durMin);
+                        if (roomOccupancy < room.getCapacity()) {
+                            venueRoomId = room.getId();
+                            venueRoomName = room.getName();
+                        }
+                        // silently skip room assignment if at capacity (don't fail the whole occurrence)
+                    }
+                }
+
                 Booking booking = Booking.builder()
                     .bookingRef(generateBookingRef())
                     .bingeId(bingeId)
@@ -958,8 +1091,12 @@ public class BookingService {
                     .addOnAmount(addOnTotal)
                     .guestAmount(guestAmount)
                     .totalAmount(totalAmount)
+                    .surgeMultiplier(surgeMultiplier)
+                    .surgeLabel(surgeLabel)
                     .pricingSource(eventPrice.source())
                     .rateCodeName(eventPrice.rateCodeName())
+                    .venueRoomId(venueRoomId)
+                    .venueRoomName(venueRoomName)
                     .status(BookingStatus.PENDING)
                     .paymentStatus(PaymentStatus.PENDING)
                     .recurringGroupId(groupId)
@@ -1143,7 +1280,7 @@ public class BookingService {
     }
 
     // ── Public: binge review summary (overall rating + distribution) ──
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, timeout = 10)
     public BingeReviewSummaryDto getBingeReviewSummary(Long bingeId) {
         long count = bookingReviewRepository.countBingeCustomerReviews(bingeId);
         double avg = count > 0 ? bookingReviewRepository.averageBingeRating(bingeId) : 0;
@@ -1170,7 +1307,7 @@ public class BookingService {
     }
 
     // ── Admin: customer review summary (avg admin rating + count) ──
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, timeout = 10)
     public java.util.Map<String, Object> getCustomerReviewSummary(Long customerId) {
         double avgAdmin = bookingReviewRepository.averageAdminRatingForCustomer(customerId);
         long countAdmin = bookingReviewRepository.countAdminReviewsForCustomer(customerId);
@@ -1186,10 +1323,10 @@ public class BookingService {
     // ── System: cancel booking without request-scoped binge context ──
     @Transactional
     public BookingDto cancelBookingForSystem(String bookingRef, String reason) {
-        return cancelBooking(findBookingByRef(bookingRef), "SYSTEM", reason);
+        return cancelBooking(findBookingByRef(bookingRef), "SYSTEM", reason, 100);
     }
 
-    private BookingDto cancelBooking(Booking booking, String actorRole, String description) {
+    private BookingDto cancelBooking(Booking booking, String actorRole, String description, int refundPercentage) {
         String bookingRef = booking.getBookingRef();
 
         if (booking.getStatus() == BookingStatus.CANCELLED) {
@@ -1209,6 +1346,28 @@ public class BookingService {
             subtractFromCollectedAmount(bookingRef, saved.getCollectedAmount());
             log.info("Reversed collectedAmount {} for cancelled booking {}",
                     saved.getCollectedAmount(), bookingRef);
+        }
+
+        // Reverse loyalty points proportionally based on tiered refund percentage
+        if (saved.getLoyaltyPointsRedeemed() > 0) {
+            long pointsToReverse = refundPercentage >= 100
+                ? saved.getLoyaltyPointsRedeemed()
+                : Math.round(saved.getLoyaltyPointsRedeemed() * refundPercentage / 100.0);
+            if (pointsToReverse > 0) {
+                loyaltyService.reverseRedemption(
+                    saved.getCustomerId(),
+                    bookingRef, pointsToReverse);
+                log.info("Reversed {} of {} loyalty points ({}% refund) for cancelled booking {}",
+                    pointsToReverse, saved.getLoyaltyPointsRedeemed(), refundPercentage, bookingRef);
+            }
+        }
+
+        // Reverse earned points (clawback) — only if points were awarded (COMPLETED bookings being cancelled)
+        if (saved.getLoyaltyPointsEarned() > 0) {
+            loyaltyService.reverseEarnedPoints(
+                saved.getCustomerId(), bookingRef);
+            log.info("Clawed back {} earned loyalty points for cancelled booking {}",
+                saved.getLoyaltyPointsEarned(), bookingRef);
         }
 
         String eventDescription = StringUtils.hasText(description)
@@ -1266,6 +1425,7 @@ public class BookingService {
     }
 
     // ── Dashboard stats ──────────────────────────────────────
+    @Transactional(readOnly = true, timeout = 10)
     public DashboardStatsDto getDashboardStats(LocalDate clientToday) {
         Long bid = BingeContext.getBingeId();
         LocalDate today = systemSettingsService.getOperationalDate(bid, clientToday);
@@ -1520,6 +1680,11 @@ public class BookingService {
 
     /** Count active bookings assigned to a specific venue room for a given time slot. */
     private int countRoomBookings(Long roomId, LocalDate date, int startMinute, int durationMinutes) {
+        return countRoomBookings(roomId, date, startMinute, durationMinutes, null);
+    }
+
+    /** Count active bookings assigned to a specific venue room, optionally excluding one booking. */
+    private int countRoomBookings(Long roomId, LocalDate date, int startMinute, int durationMinutes, Long excludeBookingId) {
         Long bid = BingeContext.getBingeId();
         List<Booking> activeBookings = bid != null
             ? bookingRepository.findActiveBookingsForReadByBingeAndDate(bid, date)
@@ -1527,6 +1692,7 @@ public class BookingService {
         int newEnd = startMinute + durationMinutes;
         int count = 0;
         for (Booking b : activeBookings) {
+            if (excludeBookingId != null && excludeBookingId.equals(b.getId())) continue;
             if (!roomId.equals(b.getVenueRoomId())) continue;
             int effectiveDuration = getEffectiveDurationMinutes(b);
             if (effectiveDuration == 0) continue;
@@ -1545,14 +1711,14 @@ public class BookingService {
             BigDecimal payableAmount = booking.getCollectedAmount() != null
                 ? booking.getCollectedAmount() : booking.getTotalAmount();
             long earned = loyaltyService.earnPoints(
-                booking.getCustomerId(), booking.getBingeId(),
+                booking.getCustomerId(),
                 booking.getBookingRef(), payableAmount);
             if (earned > 0) {
                 booking.setLoyaltyPointsEarned(earned);
                 bookingRepository.save(booking);
             }
         } catch (Exception e) {
-            log.warn("Failed to award loyalty points for booking {}: {}", booking.getBookingRef(), e.getMessage());
+            log.error("Failed to award loyalty points for booking {}: {}", booking.getBookingRef(), e.getMessage(), e);
         }
     }
 
@@ -1936,6 +2102,7 @@ public class BookingService {
     }
 
     // ── Admin: Event type CRUD ─────────────────────────────
+    @org.springframework.cache.annotation.Cacheable(value = "eventTypes", key = "T(com.skbingegalaxy.common.context.BingeContext).getBingeId()")
     public List<EventTypeDto> getAllEventTypes() {
         Long bid = requireSelectedBinge("managing event types");
         return eventTypeRepository.findByBingeId(bid)
@@ -1943,6 +2110,7 @@ public class BookingService {
     }
 
     @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "eventTypes", allEntries = true)
     public EventTypeDto createEventType(EventTypeSaveRequest req) {
         Long bid = requireSelectedBinge("creating an event type");
         EventType et = EventType.builder()
@@ -1961,6 +2129,7 @@ public class BookingService {
     }
 
     @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "eventTypes", allEntries = true)
     public EventTypeDto updateEventType(Long id, EventTypeSaveRequest req) {
         EventType et = findManagedEventType(id);
         et.setName(req.getName());
@@ -1976,6 +2145,7 @@ public class BookingService {
     }
 
     @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "eventTypes", allEntries = true)
     public void deactivateEventType(Long id) {
         EventType et = findManagedEventType(id);
         et.setActive(!et.isActive());
@@ -1983,6 +2153,7 @@ public class BookingService {
     }
 
     @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "eventTypes", allEntries = true)
     public void deleteEventType(Long id) {
         EventType eventType = findManagedEventType(id);
         if (eventType.isActive()) {
@@ -2003,6 +2174,7 @@ public class BookingService {
     }
 
     // ── Admin: Add-on CRUD ───────────────────────────────────
+    @org.springframework.cache.annotation.Cacheable(value = "addOns", key = "T(com.skbingegalaxy.common.context.BingeContext).getBingeId()")
     public List<AddOnDto> getAllAddOns() {
         Long bid = requireSelectedBinge("managing add-ons");
         return addOnRepository.findByBingeId(bid)
@@ -2010,6 +2182,7 @@ public class BookingService {
     }
 
     @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "addOns", allEntries = true)
     public AddOnDto createAddOn(AddOnSaveRequest req) {
         Long bid = requireSelectedBinge("creating an add-on");
         AddOn a = AddOn.builder()
@@ -2025,6 +2198,7 @@ public class BookingService {
     }
 
     @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "addOns", allEntries = true)
     public AddOnDto updateAddOn(Long id, AddOnSaveRequest req) {
         AddOn a = findManagedAddOn(id);
         a.setName(req.getName());
@@ -2037,6 +2211,7 @@ public class BookingService {
     }
 
     @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "addOns", allEntries = true)
     public void deactivateAddOn(Long id) {
         AddOn a = findManagedAddOn(id);
         a.setActive(!a.isActive());
@@ -2044,6 +2219,7 @@ public class BookingService {
     }
 
     @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "addOns", allEntries = true)
     public void deleteAddOn(Long id) {
         AddOn addOn = findManagedAddOn(id);
         if (addOn.isActive()) {
@@ -2076,6 +2252,15 @@ public class BookingService {
     private Booking findBookingByRef(String bookingRef) {
         return bookingRepository.findByBookingRef(bookingRef)
             .orElseThrow(() -> new ResourceNotFoundException("Booking", "ref", bookingRef));
+    }
+
+    /**
+     * Returns all bookings for a binge within a date range, ordered by date.
+     * Used for server-side CSV/PDF export (no pagination — export targets).
+     */
+    @Transactional(readOnly = true)
+    public List<Booking> getBookingsForExport(Long bingeId, java.time.LocalDate from, java.time.LocalDate to) {
+        return bookingRepository.findByBingeIdAndBookingDateBetweenOrderByBookingDateAscStartTimeAsc(bingeId, from, to);
     }
 
     private EventType findBookableEventType(Long id) {
@@ -2443,7 +2628,10 @@ public class BookingService {
             .pricePerGuest(et.getPricePerGuest())
             .minHours(et.getMinHours())
             .maxHours(et.getMaxHours())
-            .imageUrls(et.getImageUrls() != null ? et.getImageUrls() : List.of())
+            // Copy into a plain ArrayList so no Hibernate PersistentBag reference
+            // leaks outside the transaction (would cause LazyInitializationException
+            // when Jackson serializes the response after the session is closed).
+            .imageUrls(et.getImageUrls() != null ? new ArrayList<>(et.getImageUrls()) : new ArrayList<>())
             .active(et.isActive())
             .build();
     }
@@ -2456,7 +2644,7 @@ public class BookingService {
             .description(a.getDescription())
             .price(a.getPrice())
             .category(a.getCategory())
-            .imageUrls(a.getImageUrls() != null ? a.getImageUrls() : List.of())
+            .imageUrls(a.getImageUrls() != null ? new ArrayList<>(a.getImageUrls()) : new ArrayList<>())
             .active(a.isActive())
             .build();
     }

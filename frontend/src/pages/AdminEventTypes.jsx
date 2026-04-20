@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { adminService } from '../services/endpoints';
+import { adminService, toArray } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import { FiPackage, FiPlus, FiEdit2, FiToggleLeft, FiToggleRight, FiTrash2, FiX, FiImage } from 'react-icons/fi';
 import './AdminPages.css';
@@ -25,8 +25,8 @@ export default function AdminEventTypes() {
     setLoading(true);
     Promise.all([adminService.getAllEventTypes(), adminService.getAllAddOns()])
       .then(([etRes, aoRes]) => {
-        setEventTypes(etRes.data.data || []);
-        setAddOns(aoRes.data.data || []);
+        setEventTypes(toArray(etRes.data?.data));
+        setAddOns(toArray(aoRes.data?.data));
       })
       .catch(() => toast.error('Failed to load data'))
       .finally(() => setLoading(false));

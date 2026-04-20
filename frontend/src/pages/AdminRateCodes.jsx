@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { adminService } from '../services/endpoints';
+import { adminService, toArray } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import { FiTrash2 } from 'react-icons/fi';
+import './AdminPages.css';
 
 export default function AdminRateCodes() {
   const [searchParams] = useSearchParams();
@@ -13,15 +14,16 @@ export default function AdminRateCodes() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
+  const [saving, setSaving] = useState(false);
 
   const [form, setForm] = useState({ name: '', description: '', eventPricings: [], addonPricings: [] });
 
   const load = () => {
     Promise.all([adminService.getRateCodes(), adminService.getAllEventTypes(), adminService.getAllAddOns()])
       .then(([rcRes, etRes, aoRes]) => {
-        setRateCodes(rcRes.data.data || []);
-        setEventTypes(etRes.data.data || []);
-        setAddOns(aoRes.data.data || []);
+        setRateCodes(toArray(rcRes.data?.data));
+        setEventTypes(toArray(etRes.data?.data));
+        setAddOns(toArray(aoRes.data?.data));
       })
       .catch(() => toast.error('Failed to load data'))
       .finally(() => setLoading(false));
@@ -78,7 +80,9 @@ export default function AdminRateCodes() {
   };
 
   const handleSave = async () => {
+    if (saving) return;
     if (!form.name.trim()) { toast.error('Name is required'); return; }
+    setSaving(true);
     const payload = {
       name: form.name.trim(),
       description: form.description.trim(),
@@ -101,6 +105,8 @@ export default function AdminRateCodes() {
       load();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Save failed');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -233,7 +239,7 @@ export default function AdminRateCodes() {
               eventPricings: eventTypes.map(et => ({ eventTypeId: et.id, eventTypeName: et.name, basePrice: '', hourlyRate: '', pricePerGuest: '' })),
               addonPricings: addOns.map(a => ({ addOnId: a.id, addOnName: a.name, price: '' })),
             })}>Clear Form</button>
-            <button className="btn btn-primary" onClick={handleSave}>{editing ? 'Update' : 'Create'}</button>
+            <button className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : editing ? 'Update' : 'Create'}</button>
           </div>
         </div>
       </div>

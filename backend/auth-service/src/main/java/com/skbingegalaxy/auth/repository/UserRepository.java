@@ -19,6 +19,15 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByEmailAndRole(String email, UserRole role);
 
     /**
+     * Atomically increment failed_login_attempts at the DB level (single UPDATE)
+     * to prevent race conditions when concurrent login attempts read stale counts.
+     * Returns the new count so the caller can decide whether to lock the account.
+     */
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @Query("UPDATE User u SET u.failedLoginAttempts = u.failedLoginAttempts + 1 WHERE u.id = :id")
+    void incrementFailedLoginAttempts(@Param("id") Long id);
+
+    /**
      * Full-text customer search. Uses LIKE with leading wildcard which prevents
      * standard B-tree index usage. For production at scale, create a pg_trgm GIN
      * index: CREATE INDEX idx_user_search ON users USING gin (

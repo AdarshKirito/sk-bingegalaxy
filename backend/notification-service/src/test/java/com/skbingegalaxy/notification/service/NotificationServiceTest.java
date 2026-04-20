@@ -30,6 +30,8 @@ class NotificationServiceTest {
     @Mock private NotificationRepository notificationRepository;
     @Mock private NotificationPreferenceRepository preferenceRepository;
     @Mock private TemplateEngine templateEngine;
+    @Mock private TemplateService templateService;
+    @Mock private com.skbingegalaxy.notification.repository.WhatsAppTemplateRepository whatsAppTemplateRepository;
 
     private NotificationService notificationService;
     private NotificationPreferenceService preferenceService;
@@ -41,7 +43,7 @@ class NotificationServiceTest {
         // smsProvider, whatsAppProvider, pushProvider are null (disabled)
         notificationService = new NotificationService(
                 notificationRepository, null, templateEngine, preferenceService,
-                null, null, null);
+                templateService, whatsAppTemplateRepository, null, null, null);
         ReflectionTestUtils.setField(notificationService, "fromEmail", "test@skbingegalaxy.com");
         ReflectionTestUtils.setField(notificationService, "maxRetries", 3);
         ReflectionTestUtils.setField(notificationService, "unsubscribeUrl", "https://example.com/unsub");

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { adminService, bookingService, paymentService } from '../services/endpoints';
+import { adminService, bookingService, paymentService, toArray } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import BookingWizard from '../components/BookingWizard';
 import { FiCheckCircle, FiCreditCard, FiTrendingDown, FiTrendingUp } from 'react-icons/fi';
@@ -216,7 +216,7 @@ export default function AdminBookingCreate() {
       } else if (wasPaid) {
         // Price decreased & customer already paid — issue refund
         const payRes = await paymentService.getByBooking(priceDiff.bookingRef);
-        const payments = payRes.data.data || [];
+        const payments = toArray(payRes.data?.data);
         const refundable = payments.find(p => p.status === 'SUCCESS' || p.status === 'PARTIALLY_REFUNDED');
         if (!refundable) {
           toast.error('No refundable payment found. Issue refund manually from the Payment tab.');

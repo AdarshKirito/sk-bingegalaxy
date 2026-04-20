@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { useAuth } from '../context/AuthContext';
 import { useBinge } from '../context/BingeContext';
-import { authService, bookingService, paymentService } from '../services/endpoints';
+import { authService, bookingService, paymentService, toArray } from '../services/endpoints';
 import SEO from '../components/SEO';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import {
@@ -15,7 +15,6 @@ import {
   EXPERIENCE_STEPS,
   getAccountPreferences,
   getCallSupportHref,
-  getMemberTier,
   HELP_FAQS,
   mergeSupportContact,
   MEMBER_OFFERS,
@@ -33,6 +32,7 @@ export default function AccountCenter() {
   const [pastBookings, setPastBookings] = useState([]);
   const [payments, setPayments] = useState([]);
   const [myPricing, setMyPricing] = useState(null);
+  const [loyaltyAccount, setLoyaltyAccount] = useState(null);
   const [preferences, setPreferences] = useState({ ...ACCOUNT_PREFERENCES_DEFAULTS });
 
   useEffect(() => {
@@ -49,7 +49,8 @@ export default function AccountCenter() {
       selectedBinge ? bookingService.getPastBookings() : Promise.resolve({ data: { data: [] } }),
       selectedBinge ? paymentService.getMyPayments() : Promise.resolve({ data: { data: [] } }),
       selectedBinge ? bookingService.getMyPricing() : Promise.resolve({ data: { data: null } }),
-    ]).then(([profileRes, supportRes, currentRes, pastRes, paymentRes, pricingRes]) => {
+      bookingService.getMyLoyalty().catch(() => ({ data: { data: null } })),
+    ]).then(([profileRes, supportRes, currentRes, pastRes, paymentRes, pricingRes, loyaltyRes]) => {
       const profileData = profileRes.status === 'fulfilled' ? (profileRes.value.data.data || null) : null;
       if (profileData) {
         setProfile(profileData);
@@ -57,10 +58,11 @@ export default function AccountCenter() {
       }
 
       setSupportContact(supportRes.status === 'fulfilled' ? mergeSupportContact(supportRes.value.data.data) : CUSTOMER_SUPPORT);
-      setCurrentBookings(currentRes.status === 'fulfilled' ? (currentRes.value.data.data || []) : []);
-      setPastBookings(pastRes.status === 'fulfilled' ? (pastRes.value.data.data || []) : []);
-      setPayments(paymentRes.status === 'fulfilled' ? (paymentRes.value.data.data || []) : []);
+      setCurrentBookings(currentRes.status === 'fulfilled' ? toArray(currentRes.value?.data?.data) : []);
+      setPastBookings(pastRes.status === 'fulfilled' ? toArray(pastRes.value?.data?.data) : []);
+      setPayments(paymentRes.status === 'fulfilled' ? toArray(paymentRes.value?.data?.data) : []);
       setMyPricing(pricingRes.status === 'fulfilled' ? (pricingRes.value.data.data || null) : null);
+      setLoyaltyAccount(loyaltyRes.status === 'fulfilled' ? (loyaltyRes.value.data.data || null) : null);
     }).finally(() => setLoading(false));
   }, [selectedBinge]);
 
@@ -76,12 +78,12 @@ export default function AccountCenter() {
   const successfulPayments = payments.filter((payment) => payment.status === 'SUCCESS');
   const totalSpend = successfulPayments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
   const pendingPayments = currentBookings.filter((booking) => booking.paymentStatus !== 'SUCCESS' && booking.status !== 'CANCELLED');
-  const memberTier = useMemo(() => getMemberTier(completedCount, totalSpend), [completedCount, totalSpend]);
+  const loyaltyTier = loyaltyAccount?.tierLevel || 'BRONZE';
   const pricingLabel = myPricing?.pricingSource === 'CUSTOMER'
     ? (myPricing.memberLabel || 'Custom')
     : myPricing?.pricingSource === 'RATE_CODE'
       ? (myPricing.memberLabel || myPricing.rateCodeName || 'Rate Code')
-      : memberTier;
+      : loyaltyTier;
   const reminderSummary = buildReminderSummary(preferences);
 
   const updatePreference = (key, value) => {
@@ -134,25 +136,33 @@ export default function AccountCenter() {
         </div>
 
         <aside className="customer-hub-highlight card">
-          <span className="customer-hub-panel-label">Member snapshot</span>
-          <h2>{myPricing?.pricingSource === 'CUSTOMER' && !myPricing.memberLabel ? 'Custom Pricing'
-            : pricingLabel === memberTier ? `${memberTier} Circle`
-            : pricingLabel}</h2>
-          <p>{!hasVenueSelected
-            ? 'Choose a venue to unlock your booking timeline, payments, and venue-specific pricing view.'
+          <span className="customer-hub-panel-label">Loyalty snapshot</span>
+          <h2>{loyaltyAccount ? `${loyaltyTier} Tier` : 'BRONZE Tier'}</h2>
+          <p>{!hasVenueSelected && !loyaltyAccount
+            ? 'Start booking to earn loyalty points and unlock higher tiers.'
             : myPricing?.pricingSource === 'CUSTOMER'
               ? 'Personalized pricing has been configured for your account.'
               : myPricing?.pricingSource === 'RATE_CODE'
                 ? `${myPricing.memberLabel || myPricing.rateCodeName || 'Rate code'} pricing is active on your account.`
-                : `Your pricing matches your ${memberTier.toLowerCase()} member tier.`}</p>
-          {hasVenueSelected && (
+                : `Your pricing matches your ${loyaltyTier} loyalty tier.`}</p>
+          {loyaltyAccount && (
             <>
               <div className="customer-hub-highlight-meta">
-                <span className="badge badge-success">{completedCount} completed visits</span>
-                <span className="badge badge-info">{pendingPayments.length} active booking items</span>
+                <span className="badge badge-success">{loyaltyAccount.currentBalance?.toLocaleString() || 0} pts balance</span>
+                <span className="badge badge-info">{loyaltyAccount.totalPointsEarned?.toLocaleString() || 0} lifetime pts</span>
               </div>
-              <strong>Rs {Number(totalSpend || 0).toLocaleString()}</strong>
+              {loyaltyAccount.pointsToNextTier != null && loyaltyAccount.nextTierLevel && (
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  {loyaltyAccount.pointsToNextTier?.toLocaleString()} pts to {loyaltyAccount.nextTierLevel}
+                </p>
+              )}
             </>
+          )}
+          {!loyaltyAccount && hasVenueSelected && (
+            <div className="customer-hub-highlight-meta">
+              <span className="badge badge-success">{completedCount} completed visits</span>
+              <span className="badge badge-info">{pendingPayments.length} active booking items</span>
+            </div>
           )}
           <div className="customer-hub-inline-actions">
             {support.whatsappRaw && <a href={buildSupportWhatsAppHref({ supportContact: support, customerName: `${customer?.firstName || ''} ${customer?.lastName || ''}`.trim(), topic: 'account help' })} target="_blank" rel="noreferrer" className="btn btn-primary btn-sm">WhatsApp Support</a>}
@@ -341,7 +351,7 @@ export default function AccountCenter() {
             <span className="customer-hub-panel-label">Benefits and retention</span>
             <h2>Reasons to keep coming back</h2>
           </div>
-          <span className="customer-hub-inline-link">Your current tier: {memberTier}</span>
+          <span className="customer-hub-inline-link">Your current tier: {loyaltyTier}</span>
         </div>
         <div className="customer-benefits-grid">
           {MEMBER_OFFERS.map((offer) => (

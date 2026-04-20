@@ -70,6 +70,7 @@ public class BingeService {
             .stream().map(this::toDto).toList();
     }
 
+    @org.springframework.cache.annotation.Cacheable(value = "activeBinges")
     public List<BingeDto> getAllActiveBinges() {
         return bingeRepository.findByActiveTrueOrderByNameAsc()
             .stream().map(this::toDto).toList();
@@ -106,6 +107,7 @@ public class BingeService {
     }
 
     @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "activeBinges", allEntries = true)
     public BingeDto createBinge(BingeSaveRequest request, Long adminId, LocalDate clientDate) {
         if (bingeRepository.existsByNameAndAdminId(request.getName(), adminId)) {
             throw new DuplicateResourceException("Binge", "name", request.getName());
@@ -132,6 +134,7 @@ public class BingeService {
     }
 
     @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "activeBinges", allEntries = true)
     public BingeDto updateBinge(Long id, BingeSaveRequest request, Long adminId, String role) {
         Binge binge = getManagedBinge(id, adminId, role);
 
@@ -175,6 +178,7 @@ public class BingeService {
     }
 
     @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "activeBinges", allEntries = true)
     public void toggleBinge(Long id, Long adminId, String role) {
         Binge binge = getManagedBinge(id, adminId, role);
 
@@ -306,6 +310,7 @@ public class BingeService {
             .ctaLabel(defaultIfBlank(ctaLabel, DEFAULT_SLIDE_CTA))
             .imageUrl(imageUrl)
             .theme(normalizeTheme(raw.getTheme()))
+            .linkedEventTypeId(raw.getLinkedEventTypeId())
             .build();
     }
 

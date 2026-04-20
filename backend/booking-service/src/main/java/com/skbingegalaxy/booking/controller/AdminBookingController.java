@@ -1,7 +1,6 @@
 package com.skbingegalaxy.booking.controller;
 
 import com.skbingegalaxy.booking.dto.*;
-import com.skbingegalaxy.booking.entity.BookingEventLog;
 import com.skbingegalaxy.booking.service.AdminBingeScopeService;
 import com.skbingegalaxy.booking.service.BookingEventLogService;
 import com.skbingegalaxy.booking.service.BookingService;
@@ -11,7 +10,6 @@ import com.skbingegalaxy.common.dto.ApiResponse;
 import com.skbingegalaxy.common.dto.PagedResponse;
 import com.skbingegalaxy.common.enums.BookingStatus;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.Positive;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +24,7 @@ import org.springframework.web.bind.annotation.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.util.Set;
 import org.springframework.validation.annotation.Validated;
 
 @RestController
@@ -45,12 +44,33 @@ public class AdminBookingController {
     private final com.skbingegalaxy.booking.service.LoyaltyService loyaltyService;
 
     private static final int MAX_PAGE_SIZE = 100;
+    private static final Set<String> ALLOWED_SORT_FIELDS = Set.of(
+            "createdAt", "bookingDate", "startTime", "status", "totalAmount",
+            "customerName", "bookingRef", "paymentStatus", "updatedAt");
+    private static final int MAX_SEARCH_QUERY_LENGTH = 100;
+
+    private static final Set<String> BINGE_OPTIONAL_SUFFIXES = Set.of(
+            "/dashboard-stats", "/operational-date");
 
     @ModelAttribute
     void validateManagedBinge(
             @RequestHeader("X-User-Id") Long adminId,
             @RequestHeader("X-User-Role") String role,
             HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        if (BINGE_OPTIONAL_SUFFIXES.stream().anyMatch(uri::endsWith)) {
+            // These endpoints allow null bingeId (SUPER_ADMIN cross-binge view),
+            // but if a bingeId IS provided, the admin must own it.
+            Long bingeId = BingeContext.getBingeId();
+            if (bingeId != null) {
+                adminBingeScopeService.requireManagedBinge(adminId, role, "accessing " + uri);
+            } else if (!"SUPER_ADMIN".equalsIgnoreCase(role)) {
+                // Only SUPER_ADMIN may view cross-binge (null bingeId) stats
+                throw new com.skbingegalaxy.common.exception.BusinessException(
+                    "Select a binge before accessing " + uri, HttpStatus.BAD_REQUEST);
+            }
+            return;
+        }
         adminBingeScopeService.requireManagedBinge(adminId, role, "managing bookings");
     }
 
@@ -69,6 +89,10 @@ public class AdminBookingController {
             @RequestParam(defaultValue = "createdAt") String sortBy,
             @RequestParam(defaultValue = "desc") String direction) {
         size = Math.min(size, MAX_PAGE_SIZE);
+        if (!ALLOWED_SORT_FIELDS.contains(sortBy)) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Invalid sort field: " + sortBy + ". Allowed: " + ALLOWED_SORT_FIELDS);
+        }
         Sort sort = direction.equalsIgnoreCase("asc") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
         Page<BookingDto> result = bookingService.getAllBookings(PageRequest.of(page, size, sort));
         return ResponseEntity.ok(ApiResponse.ok(toPagedResponse(result)));
@@ -132,6 +156,9 @@ public class AdminBookingController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate) {
+        if (q.length() > MAX_SEARCH_QUERY_LENGTH) {
+            q = q.substring(0, MAX_SEARCH_QUERY_LENGTH);
+        }
         size = Math.min(size, MAX_PAGE_SIZE);
         Page<BookingDto> result = bookingService.searchBookingsForToday(q, clientDate, PageRequest.of(page, size));
         return ResponseEntity.ok(ApiResponse.ok(toPagedResponse(result)));
@@ -545,8 +572,10 @@ public class AdminBookingController {
     @PostMapping("/loyalty/{customerId}/adjust")
     public ResponseEntity<ApiResponse<LoyaltyAccountDto>> adjustLoyaltyPoints(
             @PathVariable Long customerId,
-            @RequestParam long points,
-            @RequestParam(required = false) String description) {
-        return ResponseEntity.ok(ApiResponse.ok("Points adjusted", loyaltyService.adjustPoints(customerId, points, description)));
+            @RequestBody java.util.Map<String, Object> body,
+            @RequestHeader("X-User-Role") String role) {
+        long points = ((Number) body.get("points")).longValue();
+        String description = (String) body.getOrDefault("description", null);
+        return ResponseEntity.ok(ApiResponse.ok("Points adjusted", loyaltyService.adjustPoints(customerId, points, description, role)));
     }
 }

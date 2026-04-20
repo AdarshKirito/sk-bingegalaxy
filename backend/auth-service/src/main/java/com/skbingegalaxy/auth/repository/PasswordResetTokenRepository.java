@@ -7,8 +7,6 @@ import java.util.Optional;
 
 public interface PasswordResetTokenRepository extends JpaRepository<PasswordResetToken, Long> {
     Optional<PasswordResetToken> findByTokenAndUsedFalse(String token);
-    Optional<PasswordResetToken> findByOtpAndUsedFalse(String otp);
-    Optional<PasswordResetToken> findByTokenAndOtpAndUsedFalse(String token, String otp);
 
     @org.springframework.data.jpa.repository.Modifying
     @org.springframework.data.jpa.repository.Query("UPDATE PasswordResetToken t SET t.used = true WHERE t.user.id = :userId AND t.used = false")

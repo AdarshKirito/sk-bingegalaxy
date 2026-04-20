@@ -52,6 +52,7 @@ class BookingCheckoutAndRevenueTest {
     @Mock private PricingService pricingService;
     @Mock private BookingEventLogService eventLogService;
     @Mock private SagaOrchestrator sagaOrchestrator;
+        @Mock private LoyaltyService loyaltyService;
 
     @InjectMocks private BookingService bookingService;
 
@@ -62,6 +63,9 @@ class BookingCheckoutAndRevenueTest {
                 BingeContext.clear();
                 BingeContext.setBingeId(11L);
         ReflectionTestUtils.setField(bookingService, "refPrefix", "SKBG");
+                lenient().when(loyaltyService.earnPoints(anyLong(), anyString(), any(BigDecimal.class))).thenReturn(0L);
+                lenient().when(loyaltyService.redeemPoints(anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
+                        .thenReturn(new LoyaltyService.RedemptionResult(0L, BigDecimal.ZERO));
 
         EventType eventType = EventType.builder()
                 .id(1L).name("Birthday Party")

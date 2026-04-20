@@ -55,6 +55,7 @@ export default function BookingConfirmation() {
   const [error, setError] = useState(null);
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
+  const [recurringGroupBookings, setRecurringGroupBookings] = useState(null);
   const [rescheduleForm, setRescheduleForm] = useState({ newBookingDate: '', newStartTime: '', newDurationMinutes: '' });
   const [transferForm, setTransferForm] = useState({ recipientName: '', recipientEmail: '', recipientPhone: '' });
   const [actionLoading, setActionLoading] = useState(false);
@@ -64,7 +65,10 @@ export default function BookingConfirmation() {
       .then(res => setBooking(res.data.data))
       .catch(err => {
         console.error('Failed to load booking:', err);
-        setError(err?.response?.status === 404 ? 'Booking not found' : 'Failed to load booking details');
+        const status = err?.response?.status;
+        if (status === 404) setError('Booking not found');
+        else if (status === 403) setError('You do not have permission to view this booking');
+        else setError(err?.response?.data?.message || 'Failed to load booking details');
       })
       .finally(() => setLoading(false));
   }, [ref]);
@@ -475,13 +479,51 @@ export default function BookingConfirmation() {
               {booking.recurringGroupId && (
                 <div className="customer-flow-row">
                   <span><FiRepeat /> Recurring series</span>
-                  <strong>{booking.recurringGroupId}</strong>
+                  <button type="button" className="btn btn-secondary btn-sm" style={{ fontSize: '0.8rem' }}
+                    onClick={async () => {
+                      try {
+                        setRecurringGroupBookings([]);
+                        const res = await bookingService.getRecurringGroup(booking.recurringGroupId);
+                        setRecurringGroupBookings(toArray(res.data?.data));
+                      } catch { toast.error('Failed to load recurring series'); setRecurringGroupBookings(null); }
+                    }}>View all in series</button>
                 </div>
               )}
             </div>
           </article>
         )}
       </section>
+
+      {/* Recurring Group Modal */}
+      {recurringGroupBookings !== null && (
+        <div className="modal-overlay" onClick={() => setRecurringGroupBookings(null)}>
+          <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '560px', padding: '2rem' }}>
+            <h2 style={{ marginBottom: '1rem' }}><FiRepeat /> Recurring Series</h2>
+            {recurringGroupBookings.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)' }}>Loading...</p>
+            ) : (
+              <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                {recurringGroupBookings.map(b => (
+                  <div key={b.bookingRef} className="card" style={{ padding: '0.75rem 1rem', marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <strong>{b.bookingRef}</strong>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                        {b.bookingDate} · {b.startTime}
+                      </div>
+                    </div>
+                    <span className={`badge ${b.status === 'CONFIRMED' ? 'badge-success' : b.status === 'CANCELLED' ? 'badge-danger' : 'badge-warning'}`}>
+                      {b.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ textAlign: 'right', marginTop: '1rem' }}>
+              <button className="btn btn-secondary" onClick={() => setRecurringGroupBookings(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Reschedule Modal */}
       {rescheduleOpen && (

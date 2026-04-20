@@ -13,7 +13,7 @@ import java.util.Set;
 
 /**
  * Resolves the best notification channel for a given recipient
- * using a cascading priority: PUSH → SMS → EMAIL.
+ * using a cascading priority: PUSH → WHATSAPP → SMS → EMAIL.
  *
  * <p>The router checks:
  * <ol>
@@ -62,28 +62,41 @@ public class ChannelRouter {
 
         // Security-critical notifications always go via email
         if (EMAIL_ONLY_TYPES.contains(type)) {
+            log.debug("Channel routing → EMAIL (security-critical) for type={}", type);
             return NotificationChannel.EMAIL;
         }
 
         String deviceToken = extractDeviceToken(metadata);
+        boolean hasPhone = recipientPhone != null && !recipientPhone.isBlank();
 
         // Priority 1: PUSH — if provider configured, device token present, and not muted
-        if (pushProvider != null
-                && deviceToken != null && !deviceToken.isBlank()
-                && !isMuted(recipientEmail, type, NotificationChannel.PUSH)) {
-            log.debug("Channel routing → PUSH for type={} email={}", type, recipientEmail);
-            return NotificationChannel.PUSH;
+        if (pushProvider != null && deviceToken != null && !deviceToken.isBlank()) {
+            if (!isMuted(recipientEmail, type, NotificationChannel.PUSH)) {
+                log.debug("Channel routing → PUSH for type={} email={}", type, recipientEmail);
+                return NotificationChannel.PUSH;
+            }
+            log.debug("Channel routing: PUSH skipped (muted) for type={} email={}", type, recipientEmail);
         }
 
-        // Priority 2: SMS — if provider configured, phone present, and not muted
-        if (smsProvider != null
-                && recipientPhone != null && !recipientPhone.isBlank()
-                && !isMuted(recipientEmail, type, NotificationChannel.SMS)) {
-            log.debug("Channel routing → SMS for type={} email={}", type, recipientEmail);
-            return NotificationChannel.SMS;
+        // Priority 2: WHATSAPP — if provider configured, phone present, and not muted
+        if (whatsAppProvider != null && hasPhone) {
+            if (!isMuted(recipientEmail, type, NotificationChannel.WHATSAPP)) {
+                log.debug("Channel routing → WHATSAPP for type={} email={}", type, recipientEmail);
+                return NotificationChannel.WHATSAPP;
+            }
+            log.debug("Channel routing: WHATSAPP skipped (muted) for type={} email={}", type, recipientEmail);
         }
 
-        // Priority 3 (fallback): EMAIL
+        // Priority 3: SMS — if provider configured, phone present, and not muted
+        if (smsProvider != null && hasPhone) {
+            if (!isMuted(recipientEmail, type, NotificationChannel.SMS)) {
+                log.debug("Channel routing → SMS for type={} email={}", type, recipientEmail);
+                return NotificationChannel.SMS;
+            }
+            log.debug("Channel routing: SMS skipped (muted) for type={} email={}", type, recipientEmail);
+        }
+
+        // Priority 4 (fallback): EMAIL
         log.debug("Channel routing → EMAIL (fallback) for type={} email={}", type, recipientEmail);
         return NotificationChannel.EMAIL;
     }

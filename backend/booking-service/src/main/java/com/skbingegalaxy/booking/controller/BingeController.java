@@ -1,12 +1,12 @@
 package com.skbingegalaxy.booking.controller;
 
 import com.skbingegalaxy.booking.dto.*;
+import com.skbingegalaxy.booking.service.AdminBingeScopeService;
 import com.skbingegalaxy.booking.service.BingeService;
 import com.skbingegalaxy.booking.service.BookingService;
 import com.skbingegalaxy.booking.service.CancellationTierService;
 import com.skbingegalaxy.common.dto.ApiResponse;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -30,6 +30,7 @@ public class BingeController {
     private final BingeService bingeService;
     private final BookingService bookingService;
     private final CancellationTierService cancellationTierService;
+    private final AdminBingeScopeService adminBingeScopeService;
 
     // ── Public: list all active binges (for user selection) ──
     @GetMapping("/binges")
@@ -79,7 +80,13 @@ public class BingeController {
 
     // ── Super-Admin: get binges by a specific admin ──────────
     @GetMapping("/admin/binges/by-admin/{adminId}")
-    public ResponseEntity<ApiResponse<List<BingeDto>>> getBingesByAdmin(@PathVariable Long adminId) {
+    public ResponseEntity<ApiResponse<List<BingeDto>>> getBingesByAdmin(
+            @PathVariable Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        if (!"SUPER_ADMIN".equalsIgnoreCase(role)) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Only super-admins can view other admins' binges", org.springframework.http.HttpStatus.FORBIDDEN);
+        }
         return ResponseEntity.ok(ApiResponse.ok(bingeService.getBingesByAdminId(adminId)));
     }
 
@@ -164,14 +171,20 @@ public class BingeController {
     // ── Admin: cancellation tiers ────────────────────────────
     @GetMapping("/admin/binges/{id}/cancellation-tiers")
     public ResponseEntity<ApiResponse<List<CancellationTierDto>>> getCancellationTiers(
-            @PathVariable Long id) {
+            @PathVariable Long id,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        adminBingeScopeService.requireBingeOwnership(id, adminId, role, "viewing cancellation tiers");
         return ResponseEntity.ok(ApiResponse.ok(cancellationTierService.getTiers(id)));
     }
 
     @PutMapping("/admin/binges/{id}/cancellation-tiers")
     public ResponseEntity<ApiResponse<List<CancellationTierDto>>> saveCancellationTiers(
             @PathVariable Long id,
-            @Valid @RequestBody CancellationTierSaveRequest request) {
+            @Valid @RequestBody CancellationTierSaveRequest request,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        adminBingeScopeService.requireBingeOwnership(id, adminId, role, "saving cancellation tiers");
         return ResponseEntity.ok(ApiResponse.ok("Cancellation tiers saved",
             cancellationTierService.saveTiers(id, request)));
     }

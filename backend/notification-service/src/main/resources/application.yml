@@ -29,7 +29,9 @@ app:
     from-email: ${EMAIL_FROM:noreply@skbingegalaxy.com}
     max-retries: 3
     retry-interval-ms: 300000
+    digest-interval-ms: ${DIGEST_INTERVAL_MS:3600000}
     unsubscribe-url: ${NOTIFICATION_UNSUBSCRIBE_URL:https://skbingegalaxy.com/account/notifications}
+    webhook-secret: ${NOTIFICATION_WEBHOOK_SECRET:}
   sms:
     provider: ${SMS_PROVIDER:disabled}          # disabled | mock | twilio
   whatsapp:

@@ -134,6 +134,8 @@
 .stat-label {
   color: var(--text-secondary);
   font-size: 0.85rem;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 /* ── Nav Cards ────────────────────────────────────────────── */

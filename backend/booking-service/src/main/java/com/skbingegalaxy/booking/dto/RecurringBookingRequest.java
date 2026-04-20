@@ -39,6 +39,9 @@ public class RecurringBookingRequest {
     @Size(max = 1000, message = "Special notes limited to 1000 characters")
     private String specialNotes;
 
+    /** Optional venue room selection for all occurrences. */
+    private Long venueRoomId;
+
     @NotNull(message = "Recurrence pattern is required")
     private RecurrencePattern pattern;
 

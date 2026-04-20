@@ -11,6 +11,8 @@
   max-width: 1100px;
   margin: 0 auto;
   padding: 2rem 0 3rem;
+  min-width: 0;
+  overflow-x: hidden;
 }
 
 .adm-flow-shell {
@@ -64,10 +66,12 @@
 .adm-flow-copy h1 {
   margin: 0.85rem 0 0.7rem;
   font-size: clamp(2rem, 3vw, 3rem);
-  line-height: 1.04;
+  line-height: 1.1;
   letter-spacing: -0.04em;
   color: var(--text);
   max-width: 14ch;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .adm-flow-copy p,
@@ -356,14 +360,18 @@
 
 .adm-header h1 {
   font-size: 1.85rem;
-  line-height: 1.1;
+  line-height: 1.15;
   color: var(--text);
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .adm-header p {
   color: var(--text-secondary);
   font-size: 0.92rem;
   max-width: 50ch;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 /* ── Tabs (pill-style) ─────────────────────────────────── */
@@ -376,6 +384,13 @@
   background:
     linear-gradient(180deg, rgba(var(--primary-rgb), 0.03), rgba(var(--accent-rgb), 0.025) 85%),
     var(--bg-input);
+  overflow-x: auto;
+  scrollbar-width: none;
+  max-width: 100%;
+}
+
+.adm-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .adm-tab {
@@ -388,6 +403,8 @@
   color: var(--text-secondary);
   background: transparent;
   transition: var(--transition);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .adm-tab:hover {
@@ -1086,6 +1103,32 @@
   flex-wrap: wrap;
 }
 
+/* ── Admin Waitlist ── */
+.admin-toolbar { display: flex; align-items: center; gap: 1.25rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+.admin-toolbar-group { display: flex; align-items: center; gap: 0.5rem; }
+.admin-toolbar-label { font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; gap: 0.3rem; color: var(--text-secondary); }
+.admin-select {
+  padding: 0.55rem 0.8rem; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--bg-input); color: var(--text); font-size: 0.85rem;
+  line-height: 1.5; /* Indic scripts need taller line-height */
+}
+.admin-toolbar-count {
+  font-size: 0.85rem; font-weight: 600; color: var(--text-muted);
+  padding: 0.35rem 0.75rem; border-radius: 999px;
+  background: rgba(var(--primary-rgb), 0.08); border: 1px solid rgba(var(--primary-rgb), 0.15);
+}
+.admin-loading { text-align: center; padding: 3rem 0; color: var(--text-muted); font-size: 0.95rem; }
+.admin-empty-state { text-align: center; padding: 4rem 0; color: var(--text-muted); }
+.admin-empty-state h3 { margin: 1rem 0 0.5rem; color: var(--text); }
+.admin-empty-state p { font-size: 0.9rem; }
+.waitlist-sections { display: flex; flex-direction: column; gap: 1.5rem; }
+.waitlist-status-group { }
+.waitlist-status-heading { display: flex; align-items: center; gap: 0.65rem; margin-bottom: 0.75rem; font-size: 1rem; }
+.waitlist-status-count { font-size: 0.82rem; color: var(--text-muted); }
+.waitlist-customer { display: flex; flex-direction: column; gap: 0.15rem; }
+.waitlist-customer strong { display: flex; align-items: center; gap: 0.3rem; font-size: 0.9rem; }
+.waitlist-customer small { display: flex; align-items: center; gap: 0.3rem; font-size: 0.78rem; color: var(--text-muted); }
+
 .adm-subtabs {
   display: inline-flex;
   gap: 0.35rem;
@@ -1229,6 +1272,36 @@
 
 .adm-empty.compact {
   padding: 1.5rem;
+}
+
+/* ── Page-level header with title + action button ── */
+.adm-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.adm-page-header h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text);
+}
+.adm-page-header p {
+  margin: 0.25rem 0 0;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+/* ── Inactive / deactivated table row ── */
+.adm-row-inactive {
+  opacity: 0.55;
+  background: var(--bg-surface, rgba(0,0,0,0.02));
+}
+.adm-row-inactive td {
+  text-decoration: line-through;
+  text-decoration-color: var(--text-muted);
 }
 
 .adm-empty.compact .adm-empty-icon {

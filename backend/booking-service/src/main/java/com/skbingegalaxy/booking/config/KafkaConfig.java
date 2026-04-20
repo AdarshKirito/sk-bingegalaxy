@@ -65,6 +65,11 @@ public class KafkaConfig {
         return deadLetterTopic(KafkaTopics.PAYMENT_REFUNDED);
     }
 
+    @Bean
+    public NewTopic bookingCancelledDltTopic() {
+        return deadLetterTopic(KafkaTopics.BOOKING_CANCELLED);
+    }
+
     private NewTopic deadLetterTopic(String topic) {
         return TopicBuilder.name(topic + "-dlt").partitions(3).replicas(1).build();
     }

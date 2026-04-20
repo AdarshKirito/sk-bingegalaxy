@@ -25,7 +25,7 @@ export default function AdminDashboard() {
   const refreshStats = useCallback(() => {
     adminService.getDashboardStats()
       .then(res => setStats(res.data.data))
-      .catch(() => {});
+      .catch(() => toast.error('Failed to refresh dashboard stats'));
   }, []);
 
   // Real-time updates: auto-refresh stats when a booking/payment event arrives

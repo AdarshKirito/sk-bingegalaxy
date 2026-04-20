@@ -11,8 +11,8 @@ spring:
   # ── Fallback: critical settings if Config Server is unreachable ──
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/availability_db}
-    username: ${SPRING_DATASOURCE_USERNAME:skbg_admin}
-    password: ${SPRING_DATASOURCE_PASSWORD:}
+    username: ${SPRING_DATASOURCE_USERNAME:availability_svc}
+    password: ${SPRING_DATASOURCE_PASSWORD:availability_svc_dev}
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
 

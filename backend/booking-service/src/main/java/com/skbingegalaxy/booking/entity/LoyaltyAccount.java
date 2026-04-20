@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "loyalty_accounts", uniqueConstraints = {
-    @UniqueConstraint(name = "uq_loyalty_customer_binge", columnNames = {"customerId", "bingeId"})
+    @UniqueConstraint(name = "uq_loyalty_customer", columnNames = {"customerId"})
 })
 @Getter @Setter
 @NoArgsConstructor @AllArgsConstructor
@@ -20,11 +20,8 @@ public class LoyaltyAccount {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
+    @Column(nullable = false, unique = true)
     private Long customerId;
-
-    @Column(nullable = false)
-    private Long bingeId;
 
     @Column(nullable = false)
     @Builder.Default

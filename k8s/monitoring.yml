@@ -113,6 +113,24 @@ data:
         url: http://prometheus-operated.sk-binge-galaxy.svc.cluster.local:9090
         isDefault: true
         editable: false
+      - name: Loki
+        type: loki
+        access: proxy
+        url: http://loki:3100
+        editable: false
+        jsonData:
+          derivedFields:
+            - datasourceUid: zipkin
+              matcherRegex: '"traceId":"(\w+)"'
+              name: TraceID
+              url: '$${__value.raw}'
+          maxLines: 1000
+      - name: Zipkin
+        type: zipkin
+        uid: zipkin
+        access: proxy
+        url: http://zipkin:9411
+        editable: false
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -324,3 +342,66 @@ spec:
           annotations:
             summary: "Circuit breaker {{ $labels.name }} is OPEN on {{ $labels.app }}"
             description: "Downstream service may be unavailable. Check logs and dependencies."
+    - name: payment-health
+      rules:
+        - alert: HighPaymentFailureRate
+          expr: |
+            (
+              sum(rate(http_server_requests_seconds_count{namespace="sk-binge-galaxy", app="payment-service", uri=~"/api/v1/payments/callback", status=~"4..|5.."}[10m]))
+              /
+              sum(rate(http_server_requests_seconds_count{namespace="sk-binge-galaxy", app="payment-service", uri=~"/api/v1/payments/callback"}[10m]))
+            ) > 0.30
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Payment callback failure rate above 30%"
+            description: "{{ $value | humanizePercentage }} of payment callbacks are failing."
+        - alert: StaleInitiatedPayments
+          expr: |
+            count(payment_initiated_stale_total{namespace="sk-binge-galaxy"}) > 10
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "More than 10 stale INITIATED payments detected"
+            description: "Reconciliation may be delayed or payment gateway may be unresponsive."
+---
+# Alertmanager configuration for notification routing
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: sk-binge-galaxy
+data:
+  alertmanager.yml: |
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: default-receiver
+      group_by: ['alertname', 'namespace']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      routes:
+        - match:
+            severity: critical
+          receiver: critical-receiver
+          repeat_interval: 1h
+    receivers:
+      - name: default-receiver
+        slack_configs:
+          - api_url: ${SLACK_WEBHOOK_URL}
+            channel: '#sk-binge-alerts'
+            title: '{{ .GroupLabels.alertname }}'
+            text: '{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}'
+      - name: critical-receiver
+        slack_configs:
+          - api_url: ${SLACK_WEBHOOK_URL}
+            channel: '#sk-binge-critical'
+            title: 'CRITICAL: {{ .GroupLabels.alertname }}'
+            text: '{{ range .Alerts }}{{ .Annotations.description }}\n{{ end }}'
+        pagerduty_configs:
+          - routing_key: ${PAGERDUTY_ROUTING_KEY}
+            severity: critical
+            description: '{{ .GroupLabels.alertname }}: {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'

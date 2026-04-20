@@ -5,8 +5,10 @@ import com.skbingegalaxy.availability.entity.BlockedDate;
 import com.skbingegalaxy.availability.entity.BlockedSlot;
 import com.skbingegalaxy.availability.repository.BlockedDateRepository;
 import com.skbingegalaxy.availability.repository.BlockedSlotRepository;
+import com.skbingegalaxy.common.context.BingeContext;
 import com.skbingegalaxy.common.exception.BusinessException;
 import com.skbingegalaxy.common.exception.DuplicateResourceException;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -37,6 +39,11 @@ class AvailabilityServiceTest {
     void setUp() {
         ReflectionTestUtils.setField(availabilityService, "openingHour", 9);
         ReflectionTestUtils.setField(availabilityService, "closingHour", 22);
+    }
+
+    @AfterEach
+    void tearDown() {
+        BingeContext.clear();
     }
 
     // ══════════════════════════════════════════════════════
@@ -342,11 +349,12 @@ class AvailabilityServiceTest {
         @Test
         @DisplayName("getAllBlockedDates returns all blocked dates")
         void getAllBlockedDates_returnsList() {
+            BingeContext.setBingeId(1L);
             BlockedDate bd = BlockedDate.builder()
                     .id(1L).blockedDate(LocalDate.now().plusDays(1))
                     .reason("Holiday").blockedBy(1L).build();
 
-            when(blockedDateRepository.findAll()).thenReturn(List.of(bd));
+            when(blockedDateRepository.findByBingeId(1L)).thenReturn(List.of(bd));
 
             List<BlockedDateDto> result = availabilityService.getAllBlockedDates();
 

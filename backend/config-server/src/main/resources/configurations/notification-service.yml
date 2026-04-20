@@ -22,6 +22,7 @@ spring:
       observation-enabled: true
     listener:
       observation-enabled: true
+      concurrency: ${KAFKA_LISTENER_CONCURRENCY:3}
     template:
       observation-enabled: true
   mail:
@@ -101,7 +102,7 @@ management:
       enabled: true
   tracing:
     sampling:
-      probability: ${TRACING_SAMPLING:0.05}
+        probability: ${TRACING_SAMPLING:0.10}
     propagation:
       type: b3
   zipkin:

@@ -21,6 +21,16 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
+/**
+ * Distributed token-bucket rate limiter with dual-bucket design:
+ * each client IP gets two independent buckets — auth endpoints
+ * ({@code /api/v1/auth/*}) at 30 req/min and all other endpoints
+ * at 100 req/min. This prevents brute-force login attempts from
+ * exhausting the general API budget.
+ * <p>
+ * Primary: Redis-backed sliding-window counters (distributed across gateway replicas).
+ * Fallback: local LRU cache (max 10K entries) when Redis is unavailable.
+ */
 @Slf4j
 @Component
 public class RateLimitFilter implements GlobalFilter, Ordered {
@@ -112,7 +122,7 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
     }
 
     private Bucket createBucket(int limit) {
-        Bandwidth bandwidth = Bandwidth.classic(limit, Refill.greedy(limit, RATE_LIMIT_WINDOW));
+        Bandwidth bandwidth = Bandwidth.classic(limit, Refill.intervally(limit, RATE_LIMIT_WINDOW));
         return Bucket.builder().addLimit(bandwidth).build();
     }
 

@@ -42,13 +42,13 @@ spec:
             - name: MONGO_INITDB_ROOT_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: db-secrets
-                  key: MONGO_USER
+                  name: mongo-secrets
+                  key: MONGO_INITDB_ROOT_USERNAME
             - name: MONGO_INITDB_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: db-secrets
-                  key: MONGO_PASSWORD
+                  name: mongo-secrets
+                  key: MONGO_INITDB_ROOT_PASSWORD
           volumeMounts:
             - name: mongo-data
               mountPath: /data/db
@@ -122,13 +122,13 @@ spec:
             - name: MONGO_USER
               valueFrom:
                 secretKeyRef:
-                  name: db-secrets
-                  key: MONGO_USER
+                  name: mongo-secrets
+                  key: MONGO_INITDB_ROOT_USERNAME
             - name: MONGO_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: db-secrets
-                  key: MONGO_PASSWORD
+                  name: mongo-secrets
+                  key: MONGO_INITDB_ROOT_PASSWORD
           command:
             - bash
             - -c

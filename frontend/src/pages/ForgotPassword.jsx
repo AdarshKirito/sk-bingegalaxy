@@ -15,7 +15,7 @@ export default function ForgotPassword() {
     setError('');
     setLoading(true);
     try {
-      await authService.forgotPassword({ email });
+      await authService.forgotPassword({ email: email.trim() });
       setSent(true);
       toast.success('Reset instructions sent!');
     } catch (err) {

@@ -20,8 +20,13 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Polls the outbox_event table and publishes unsent events to Kafka.
- * Runs every 2 seconds. Each batch is published then marked as sent
- * within the same transaction.
+ * <p>
+ * Runs every 2 seconds with distributed locking (ShedLock) to prevent
+ * duplicate publishing across replicas. On first Kafka send failure the
+ * loop breaks immediately to preserve event ordering — already-sent events
+ * in the batch are persisted via {@code saveAll} while the failed event
+ * retries on the next poll. SSE events are pushed to the admin dashboard
+ * after each successful publish.
  */
 @Component
 @RequiredArgsConstructor
@@ -42,6 +47,7 @@ public class OutboxPublisher {
         List<OutboxEvent> pending = outboxRepo.findTop100BySentFalseOrderByCreatedAtAsc();
         if (pending.isEmpty()) return;
 
+        int published = 0;
         for (OutboxEvent event : pending) {
             try {
                 Object payload = toKafkaPayload(event);
@@ -49,20 +55,29 @@ public class OutboxPublisher {
                     .get(KAFKA_SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 event.setSent(true);
                 event.setSentAt(LocalDateTime.now());
-                // Push to admin SSE stream for real-time dashboard updates
-                adminEventBus.publish("booking", java.util.Map.of(
-                    "type", event.getTopic(),
-                    "ref", event.getAggregateKey(),
-                    "ts", System.currentTimeMillis()
-                ));
+                // Persist immediately after successful Kafka send to prevent
+                // re-publishing this event if a later event in the batch fails.
+                outboxRepo.save(event);
+                published++;
+
+                // Push to binge-scoped admin SSE stream for real-time dashboard updates
+                Long bingeId = extractBingeId(event.getPayload());
+                if (bingeId != null) {
+                    adminEventBus.publish(bingeId, "booking", java.util.Map.of(
+                        "type", event.getTopic(),
+                        "ref", event.getAggregateKey(),
+                        "ts", System.currentTimeMillis()
+                    ));
+                }
             } catch (Exception e) {
                 log.error("Outbox: failed to publish event {} to {}: {}",
                     event.getId(), event.getTopic(), e.getMessage());
                 break; // Stop on first failure to preserve ordering
             }
         }
-        outboxRepo.saveAll(pending);
-        log.debug("Outbox: published {} events", pending.stream().filter(OutboxEvent::isSent).count());
+        if (published > 0) {
+            log.debug("Outbox: published {} events", published);
+        }
     }
 
     private Object toKafkaPayload(OutboxEvent event) throws Exception {
@@ -72,5 +87,21 @@ public class OutboxPublisher {
             return objectMapper.readValue(event.getPayload(), BookingEvent.class);
         }
         return event.getPayload();
+    }
+
+    /**
+     * Extract bingeId from the outbox event JSON payload.
+     * Returns null if not present or not a booking event.
+     * Logs a warning on parse failure for observability.
+     */
+    private Long extractBingeId(String payload) {
+        try {
+            var tree = objectMapper.readTree(payload);
+            var node = tree.get("bingeId");
+            return (node != null && !node.isNull()) ? node.asLong() : null;
+        } catch (Exception e) {
+            log.warn("Outbox: failed to extract bingeId from payload (SSE notification skipped): {}", e.getMessage());
+            return null;
+        }
     }
 }

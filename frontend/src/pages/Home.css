@@ -100,11 +100,13 @@
 }
 
 .home-hero-copy h1 {
-  max-width: 12ch;
+  max-width: 14ch;
   font-size: clamp(2.8rem, 6vw, 5.25rem);
-  line-height: 0.96;
+  line-height: 1;
   letter-spacing: -0.05em;
   color: var(--home-ink);
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .home-hero-copy h1 span {

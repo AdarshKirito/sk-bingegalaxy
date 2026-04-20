@@ -109,6 +109,7 @@ html.theme-switching *::after {
 html {
   font-size: 16px;
   scroll-behavior: smooth;
+  overflow-x: hidden;
 }
 
 body {
@@ -155,10 +156,13 @@ body::after {
   position: relative;
   z-index: 1;
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 #main-content {
   position: relative;
+  min-width: 0;
+  overflow-x: hidden;
 }
 
 #main-content::before,
@@ -207,6 +211,7 @@ input, select, textarea {
   font-family: inherit;
   color: var(--text);
   caret-color: var(--primary);
+  line-height: 1.5; /* Indic scripts need taller line-height to avoid glyph clipping */
 }
 
 input::placeholder,
@@ -231,6 +236,7 @@ select optgroup {
   max-width: 1200px;
   margin: 0 auto;
   padding: 0 1.5rem;
+  min-width: 0;
 }
 
 /* Utility */
@@ -247,6 +253,11 @@ select optgroup {
   transition: var(--transition);
   text-decoration: none;
   letter-spacing: 0.01em;
+  white-space: nowrap;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .btn-primary {
@@ -298,6 +309,9 @@ select optgroup {
   transition: var(--transition);
   box-shadow: var(--shadow-sm), var(--panel-glow);
   background-clip: padding-box;
+  min-width: 0;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .card::before {
@@ -389,8 +403,9 @@ td,
   background: var(--bg-input);
   color: var(--text);
   font-size: 0.95rem;
-  line-height: 1.4;
+  line-height: 1.5;   /* taller for Indic glyphs */
   transition: var(--transition);
+  overflow: visible;
 }
 
 .input-group input:focus,
@@ -431,15 +446,22 @@ td,
   background-size: 100% 1px;
   background-position: bottom;
   background-repeat: no-repeat;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 .page-header h1 {
   font-size: 1.8rem;
   font-weight: 700;
   color: var(--text);
+  word-break: break-word;
+  overflow-wrap: break-word;
+  line-height: 1.2;
 }
 .page-header p {
   color: var(--text-secondary);
   margin-top: 0.25rem;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .loading {
@@ -504,6 +526,9 @@ td,
   .input-group input,
   .input-group select,
   .input-group textarea { padding: 0.65rem 0.75rem; font-size: 0.9rem; }
+  .pagination { gap: 0.2rem; }
+  .pagination-btn { min-width: 32px; height: 32px; font-size: 0.8rem; }
+  .badge { font-size: 0.68rem; padding: 0.25rem 0.65rem; }
 }
 
 /* Toast overrides */
@@ -708,6 +733,8 @@ td,
   justify-content: center;
   gap: 0.3rem;
   margin-top: 1.5rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0;
 }
 .pagination-btn {
   display: inline-flex;
@@ -724,6 +751,7 @@ td,
   font-weight: 500;
   cursor: pointer;
   transition: var(--transition);
+  flex-shrink: 0;
 }
 .pagination-btn:hover:not(:disabled) {
   border-color: var(--primary);

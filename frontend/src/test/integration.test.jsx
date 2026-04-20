@@ -96,13 +96,13 @@ vi.mock('../services/endpoints', () => ({
   },
 }));
 
-import App from '../App';
+import { AppContent } from '../App';
 
 function renderApp(route = '/') {
   return render(
     <HelmetProvider>
       <MemoryRouter initialEntries={[route]}>
-        <App />
+        <AppContent />
       </MemoryRouter>
     </HelmetProvider>
   );

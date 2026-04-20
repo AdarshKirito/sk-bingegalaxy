@@ -44,6 +44,9 @@ vi.mock('../services/endpoints', () => ({
     getEventTypes: vi.fn().mockResolvedValue({ data: { data: [] } }),
     getAllActiveBinges: vi.fn().mockResolvedValue({ data: { data: [] } }),
     getBingeDashboardExperience: mockGetBingeDashboardExperience,
+    getPendingReviews: vi.fn().mockResolvedValue({ data: { data: [] } }),
+    getMyWaitlist: vi.fn().mockResolvedValue({ data: { data: [] } }),
+    getMyLoyalty: vi.fn().mockResolvedValue({ data: { data: null } }),
   },
   paymentService: {
     getMyPayments: vi.fn().mockResolvedValue({ data: { data: [] } }),

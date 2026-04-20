@@ -73,21 +73,37 @@ PAYMENT_DB_PASSWORD=${PAYMENT_DB_PASSWORD:-$(echo -n "${POSTGRES_PASSWORD}_payme
 
 kubectl get namespace "$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$NAMESPACE"
 
-kubectl -n "$NAMESPACE" create secret generic db-secrets \
+kubectl -n "$NAMESPACE" create secret generic postgres-admin-creds \
   --from-literal=POSTGRES_USER=skbg_admin \
   --from-literal=POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
-  --from-literal=AUTH_DB_USERNAME="$AUTH_DB_USERNAME" \
-  --from-literal=AUTH_DB_PASSWORD="$AUTH_DB_PASSWORD" \
-  --from-literal=AVAILABILITY_DB_USERNAME="$AVAILABILITY_DB_USERNAME" \
-  --from-literal=AVAILABILITY_DB_PASSWORD="$AVAILABILITY_DB_PASSWORD" \
-  --from-literal=BOOKING_DB_USERNAME="$BOOKING_DB_USERNAME" \
-  --from-literal=BOOKING_DB_PASSWORD="$BOOKING_DB_PASSWORD" \
-  --from-literal=PAYMENT_DB_USERNAME="$PAYMENT_DB_USERNAME" \
-  --from-literal=PAYMENT_DB_PASSWORD="$PAYMENT_DB_PASSWORD" \
-  --from-literal=MONGO_USER=skbg_admin \
-  --from-literal=MONGO_PASSWORD="$MONGO_PASSWORD" \
-  --from-literal=SPRING_DATASOURCE_USERNAME=skbg_admin \
-  --from-literal=SPRING_DATASOURCE_PASSWORD="$POSTGRES_PASSWORD" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl -n "$NAMESPACE" create secret generic auth-db-creds \
+  --from-literal=username="$AUTH_DB_USERNAME" \
+  --from-literal=password="$AUTH_DB_PASSWORD" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl -n "$NAMESPACE" create secret generic availability-db-creds \
+  --from-literal=username="$AVAILABILITY_DB_USERNAME" \
+  --from-literal=password="$AVAILABILITY_DB_PASSWORD" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl -n "$NAMESPACE" create secret generic booking-db-creds \
+  --from-literal=username="$BOOKING_DB_USERNAME" \
+  --from-literal=password="$BOOKING_DB_PASSWORD" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl -n "$NAMESPACE" create secret generic payment-db-creds \
+  --from-literal=username="$PAYMENT_DB_USERNAME" \
+  --from-literal=password="$PAYMENT_DB_PASSWORD" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl -n "$NAMESPACE" create secret generic mongo-secrets \
+  --from-literal=MONGO_INITDB_ROOT_USERNAME=skbg_admin \
+  --from-literal=MONGO_INITDB_ROOT_PASSWORD="$MONGO_PASSWORD" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl -n "$NAMESPACE" create secret generic notification-secrets \
   --from-literal=SPRING_DATA_MONGODB_URI="mongodb://skbg_admin:${MONGO_PASSWORD}@mongodb-0.mongodb:27017,mongodb-1.mongodb:27017,mongodb-2.mongodb:27017/notification_db?authSource=admin&replicaSet=rs0" \
   --dry-run=client -o yaml | kubectl apply -f -
 

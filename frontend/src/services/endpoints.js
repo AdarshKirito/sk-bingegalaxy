@@ -1,5 +1,13 @@
 import api from './api';
 
+/**
+ * Safely coerce an API response value to an array.
+ * Prevents "x.filter/map is not a function" crashes when the backend returns
+ * an unexpected object `{}` instead of an array `[]`.
+ * Use: toArray(res.data?.data) instead of (res.data.data || [])
+ */
+export const toArray = (val) => Array.isArray(val) ? val : [];
+
 // Helper: returns the local date (YYYY-MM-DD) and time (HH:MM) from the browser
 const clientDate = () => {
   const now = new Date();

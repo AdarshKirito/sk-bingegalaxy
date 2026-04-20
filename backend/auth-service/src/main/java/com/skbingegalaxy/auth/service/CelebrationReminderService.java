@@ -7,6 +7,7 @@ import com.skbingegalaxy.common.enums.NotificationChannel;
 import com.skbingegalaxy.common.event.NotificationEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -48,6 +49,7 @@ public class CelebrationReminderService {
     private String supportEmail;
 
     @Scheduled(cron = "${app.reminders.cron:0 0 9 * * *}", zone = "${app.reminders.zone:Asia/Kolkata}")
+    @SchedulerLock(name = "celebrationReminders", lockAtMostFor = "10m", lockAtLeastFor = "1m")
     public void runDailyCelebrationReminders() {
         if (!remindersEnabled) {
             return;

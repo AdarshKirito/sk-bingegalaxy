@@ -5,80 +5,116 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * In-memory event bus that pushes admin-relevant events to connected
- * Server-Sent Event (SSE) clients.
+ * Server-Sent Event (SSE) clients, scoped by binge (multi-tenant).
  *
- * Kafka listeners call {@link #publish(String, Object)} when booking/payment
- * events occur; the SSE controller registers emitters via {@link #subscribe()}.
+ * <p>Each admin subscribes to a specific bingeId channel so they only
+ * receive events for the venue they are managing.</p>
+ *
+ * <p>Thread-safety: The outer {@code ConcurrentHashMap} is safe for concurrent
+ * get/put. The inner {@code CopyOnWriteArrayList} is safe for concurrent
+ * iteration, but remove-during-iteration only skips, never corrupts.
+ * We collect dead emitters into a separate list and remove after iteration
+ * to avoid ConcurrentModificationException on compound operations.</p>
  */
 @Component
 @Slf4j
 public class AdminEventBus {
 
-    private final CopyOnWriteArrayList<SseEmitter> emitters = new CopyOnWriteArrayList<>();
+    /** bingeId → list of SSE emitters for that binge */
+    private final ConcurrentHashMap<Long, CopyOnWriteArrayList<SseEmitter>> channels = new ConcurrentHashMap<>();
 
     /**
-     * Create a new SSE emitter for an admin client.
+     * Subscribe an admin client to a specific binge channel.
      * Timeout set to 5 minutes; the client is expected to reconnect.
      */
-    public SseEmitter subscribe() {
+    public SseEmitter subscribe(Long bingeId) {
         SseEmitter emitter = new SseEmitter(5 * 60 * 1000L);
-        emitters.add(emitter);
-        emitter.onCompletion(() -> emitters.remove(emitter));
-        emitter.onTimeout(() -> emitters.remove(emitter));
-        emitter.onError(e -> emitters.remove(emitter));
-        log.debug("Admin SSE client connected. Total: {}", emitters.size());
+        CopyOnWriteArrayList<SseEmitter> list = channels.computeIfAbsent(bingeId, k -> new CopyOnWriteArrayList<>());
+        list.add(emitter);
+
+        Runnable cleanup = () -> {
+            list.remove(emitter);
+            if (list.isEmpty()) channels.remove(bingeId, list);
+        };
+        emitter.onCompletion(cleanup);
+        emitter.onTimeout(cleanup);
+        emitter.onError(e -> {
+            log.debug("SSE emitter error for binge {}: {}", bingeId, e.getMessage());
+            cleanup.run();
+        });
+        log.debug("Admin SSE client connected for binge {}. Channel size: {}", bingeId, list.size());
         return emitter;
     }
 
     /**
-     * Publish an event to all connected admin SSE clients.
+     * Publish an event to all admin clients subscribed to the given binge.
      *
+     * @param bingeId   the binge channel to target
      * @param eventType e.g. "booking", "payment"
      * @param payload   serializable data (will be JSON-encoded by Spring)
      */
-    public void publish(String eventType, Object payload) {
-        if (emitters.isEmpty()) return;
+    public void publish(Long bingeId, String eventType, Object payload) {
+        if (bingeId == null) return;
+        CopyOnWriteArrayList<SseEmitter> list = channels.get(bingeId);
+        if (list == null || list.isEmpty()) return;
 
         SseEmitter.SseEventBuilder event = SseEmitter.event()
                 .name(eventType)
                 .data(payload);
 
-        for (SseEmitter emitter : emitters) {
+        List<SseEmitter> dead = new ArrayList<>();
+        for (SseEmitter emitter : list) {
             try {
                 emitter.send(event);
             } catch (IOException | IllegalStateException e) {
-                emitters.remove(emitter);
+                log.debug("Publish failed for binge {} emitter ({}), marking for removal", bingeId, e.getClass().getSimpleName());
+                dead.add(emitter);
             }
+        }
+        if (!dead.isEmpty()) {
+            list.removeAll(dead);
+            if (list.isEmpty()) channels.remove(bingeId, list);
+            log.debug("Removed {} dead SSE emitters for binge {}", dead.size(), bingeId);
         }
     }
 
     /**
-     * Send a heartbeat to all connected clients to keep connections alive.
-     * Call this from a scheduled method every ~30 seconds.
+     * Send a heartbeat to all connected clients across all binge channels.
+     * Dead emitters are collected and removed per-channel after iteration.
      */
     public void heartbeat() {
-        if (emitters.isEmpty()) return;
+        if (channels.isEmpty()) return;
 
         SseEmitter.SseEventBuilder beat = SseEmitter.event()
                 .name("heartbeat")
                 .data(Map.of("ts", System.currentTimeMillis()));
 
-        for (SseEmitter emitter : emitters) {
-            try {
-                emitter.send(beat);
-            } catch (IOException | IllegalStateException e) {
-                emitters.remove(emitter);
+        channels.forEach((bingeId, list) -> {
+            List<SseEmitter> dead = new ArrayList<>();
+            for (SseEmitter emitter : list) {
+                try {
+                    emitter.send(beat);
+                } catch (IOException | IllegalStateException e) {
+                    dead.add(emitter);
+                }
             }
-        }
+            if (!dead.isEmpty()) {
+                list.removeAll(dead);
+                if (list.isEmpty()) channels.remove(bingeId, list);
+            }
+        });
     }
 
+    /** Count of all connected SSE clients across all binge channels. */
     public int getClientCount() {
-        return emitters.size();
+        return channels.values().stream().mapToInt(CopyOnWriteArrayList::size).sum();
     }
 }

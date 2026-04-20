@@ -65,6 +65,12 @@
   gap: 0.25rem;
   border-bottom: 2px solid var(--border);
   flex-wrap: wrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ab-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .ab-tabs--no-margin {
@@ -85,6 +91,8 @@
   background: transparent;
   color: var(--text-secondary);
   transition: all 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .ab-tab.active {
@@ -351,11 +359,16 @@
   border-bottom: 1px solid var(--border);
   font-size: 0.88rem;
   align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
 }
 
 .ab-detail-label {
   color: var(--text-secondary);
   font-weight: 500;
+  flex-shrink: 0;
+  min-width: 0;
+  word-break: break-word;
 }
 
 .ab-detail-edit-input {

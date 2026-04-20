@@ -3,7 +3,7 @@ import { format } from 'date-fns';
 export default function StepDateTime({
   form, setForm, isAdmin, selectedEvent,
   durationOptions, durationSlots, availability, resolvedPricing,
-  venueRooms, activeSurge,
+  venueRooms, activeSurge, availableRoomIds,
   fmtTime, fmtDuration,
   onNext, onBack,
 }) {
@@ -95,17 +95,22 @@ export default function StepDateTime({
               onClick={() => setForm(f => ({ ...f, venueRoomId: '' }))}>
               Any available
             </button>
-            {venueRooms.map(room => (
-              <button key={room.id}
-                className={`room-card ${form.venueRoomId === room.id ? 'selected' : ''}`}
-                aria-selected={form.venueRoomId === room.id}
-                onClick={() => setForm(f => ({ ...f, venueRoomId: room.id }))}>
-                <span className="room-card-name">{room.name}</span>
-                <span className="room-card-detail">
-                  {room.roomType?.replace(/_/g, ' ')} · {room.capacity} guests
-                </span>
-              </button>
-            ))}
+            {venueRooms.map(room => {
+              const isAvailable = availableRoomIds === null || availableRoomIds.has(room.id);
+              return (
+                <button key={room.id}
+                  className={`room-card ${form.venueRoomId === room.id ? 'selected' : ''} ${!isAvailable ? 'room-card-full' : ''}`}
+                  aria-selected={form.venueRoomId === room.id}
+                  disabled={!isAvailable}
+                  onClick={() => setForm(f => ({ ...f, venueRoomId: room.id }))}>
+                  <span className="room-card-name">{room.name}</span>
+                  <span className="room-card-detail">
+                    {room.roomType?.replace(/_/g, ' ')} · {room.capacity} guests
+                  </span>
+                  {!isAvailable && <span className="room-card-full-label">Full</span>}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}

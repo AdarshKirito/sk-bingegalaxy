@@ -43,11 +43,11 @@ export default function BookingFormCore({ form, setForm, isAdmin = false }) {
     if (form.bookingDate) {
       availabilityService.getSlots(form.bookingDate)
         .then(res => setRawSlots(res.data.data?.availableSlots || []))
-        .catch(() => {});
+        .catch(() => toast.error('Failed to load time slots'));
       const fetchBooked = isAdmin ? adminService.getBookedSlots(form.bookingDate) : bookingService.getBookedSlots(form.bookingDate);
       fetchBooked
         .then(res => setBookedSlots(res.data.data || []))
-        .catch(() => setBookedSlots([]));
+        .catch(() => { setBookedSlots([]); toast.error('Failed to load booked slots'); });
     }
   }, [form.bookingDate, isAdmin]);
 

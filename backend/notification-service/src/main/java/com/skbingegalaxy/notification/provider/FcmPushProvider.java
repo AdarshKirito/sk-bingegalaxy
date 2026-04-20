@@ -35,16 +35,36 @@ public class FcmPushProvider implements PushProvider {
 
     @Override
     public String send(String deviceToken, String title, String body, Map<String, String> data) {
+        return sendRich(deviceToken, title, body, data, null, null, null);
+    }
+
+    @Override
+    public String sendRich(String deviceToken, String title, String body,
+                           Map<String, String> data, String imageUrl,
+                           String deepLinkUrl, Map<String, String> actionButtons) {
         try {
+            Notification.Builder notifBuilder = Notification.builder()
+                    .setTitle(title)
+                    .setBody(body);
+            if (imageUrl != null && !imageUrl.isBlank()) {
+                notifBuilder.setImage(imageUrl);
+            }
+
             Message.Builder builder = Message.builder()
                     .setToken(deviceToken)
-                    .setNotification(Notification.builder()
-                            .setTitle(title)
-                            .setBody(body)
-                            .build());
-            if (data != null && !data.isEmpty()) {
-                builder.putAllData(data);
+                    .setNotification(notifBuilder.build());
+
+            // Merge all data
+            Map<String, String> allData = new java.util.HashMap<>();
+            if (data != null) allData.putAll(data);
+            if (deepLinkUrl != null && !deepLinkUrl.isBlank()) allData.put("deepLinkUrl", deepLinkUrl);
+            if (actionButtons != null) {
+                actionButtons.forEach((k, v) -> allData.put("action_" + k, v));
             }
+            if (!allData.isEmpty()) {
+                builder.putAllData(allData);
+            }
+
             String messageId = FirebaseMessaging.getInstance().send(builder.build());
             log.info("Push sent via FCM to token={}… — id={}", deviceToken.substring(0, Math.min(12, deviceToken.length())), messageId);
             return messageId;

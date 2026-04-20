@@ -108,9 +108,18 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
 
             String firstName = claims.get("firstName", String.class);
             String phone = claims.get("phone", String.class);
+            String subject = claims.getSubject();
+            String email = claims.get("email", String.class);
+
+            if (subject == null || subject.isBlank()) {
+                log.warn("JWT missing subject claim for path {}", path);
+                exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
+                return exchange.getResponse().setComplete();
+            }
+
             ServerHttpRequest mutatedRequest = request.mutate()
-                .header("X-User-Id", claims.getSubject())
-                .header("X-User-Email", claims.get("email", String.class))
+                .header("X-User-Id", subject)
+                .header("X-User-Email", email != null ? email : "")
                 .header("X-User-Role", role)
                 .header("X-User-Name", firstName != null ? firstName : "Customer")
                 .header("X-User-Phone", phone != null ? phone : "")
@@ -128,7 +137,8 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         // 1. Authorization: Bearer <token>
         String authHeader = request.getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            return authHeader.substring(7);
+            String token = authHeader.substring(7).trim();
+            return token.isEmpty() ? null : token;
         }
         // 2. httpOnly cookie named "token"
         HttpCookie cookie = request.getCookies().getFirst("token");

@@ -12,7 +12,6 @@ import java.util.List;
 public class LoyaltyAccountDto {
     private Long id;
     private Long customerId;
-    private Long bingeId;
     private long totalPointsEarned;
     private long currentBalance;
     private String tierLevel;
@@ -21,5 +20,6 @@ public class LoyaltyAccountDto {
     private String nextTierLevel;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private int redemptionRate;
     private List<LoyaltyTransactionDto> recentTransactions;
 }

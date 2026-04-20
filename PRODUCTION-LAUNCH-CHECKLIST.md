@@ -12,7 +12,7 @@
 - No public payment simulation path is exposed to customers.
 - Successful payment callbacks require verified gateway signatures.
 - Customer payment lookups are owner-scoped; only admins can inspect arbitrary bookings.
-- All runtime secrets come from `app-secrets` and `db-secrets`, not local defaults.
+- All runtime secrets come from per-service Vault-synced secrets (`app-secrets`, `auth-db-creds`, `availability-db-creds`, `booking-db-creds`, `payment-db-creds`, `mongo-secrets`, `notification-secrets`, `postgres-admin-creds`), not local defaults.
 - Public traffic reaches the platform only through ingress and TLS.
 
 ## Payments

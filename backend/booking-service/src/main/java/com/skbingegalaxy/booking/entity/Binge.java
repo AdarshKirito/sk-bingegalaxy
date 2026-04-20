@@ -63,21 +63,6 @@ public class Binge {
     @Column
     private Integer maxConcurrentBookings;
 
-    // ── Loyalty program ──────────────────────────────────────
-    @Column(nullable = false)
-    @Builder.Default
-    private boolean loyaltyEnabled = false;
-
-    /** How many loyalty points customers earn per ₹1 spent. E.g. 10 = 10 pts/₹ */
-    @Column(nullable = false)
-    @Builder.Default
-    private int loyaltyPointsPerRupee = 10;
-
-    /** Points value when redeemed: how many points = ₹1 discount. E.g. 100 = 100 pts = ₹1 */
-    @Column(nullable = false)
-    @Builder.Default
-    private int loyaltyRedemptionRate = 100;
-
     @CreationTimestamp
     @Column(updatable = false)
     private LocalDateTime createdAt;

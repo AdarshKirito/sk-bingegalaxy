@@ -37,19 +37,20 @@ public class JwtProvider {
     private long refreshExpirationMs;
 
     public String generateToken(User user) {
-        return buildToken(user, jwtExpirationMs);
+        return buildToken(user, jwtExpirationMs, "access");
     }
 
     public String generateRefreshToken(User user) {
-        return buildToken(user, refreshExpirationMs);
+        return buildToken(user, refreshExpirationMs, "refresh");
     }
 
-    private String buildToken(User user, long expirationMs) {
+    private String buildToken(User user, long expirationMs, String tokenType) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("email", user.getEmail());
         claims.put("role", user.getRole().name());
         claims.put("firstName", user.getFirstName());
         claims.put("phone", user.getPhone());
+        claims.put("token_type", tokenType);
 
         return Jwts.builder()
             .claims(claims)
@@ -72,6 +73,19 @@ public class JwtProvider {
         try {
             parseToken(token);
             return true;
+        } catch (JwtException | IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Validates that the token is a genuine refresh token (not an access token).
+     * Prevents access tokens from being used at the /refresh endpoint.
+     */
+    public boolean validateRefreshToken(String token) {
+        try {
+            Claims claims = parseToken(token);
+            return "refresh".equals(claims.get("token_type", String.class));
         } catch (JwtException | IllegalArgumentException e) {
             return false;
         }

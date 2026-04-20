@@ -21,6 +21,7 @@ import java.util.concurrent.CompletableFuture;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -59,7 +60,7 @@ class OutboxPublisherTest {
 
         assertThat(event.isSent()).isTrue();
         assertThat(event.getSentAt()).isNotNull();
-        verify(outboxEventRepository).saveAll(List.of(event));
+        verify(outboxEventRepository).save(event);
     }
 
     @Test
@@ -86,6 +87,6 @@ class OutboxPublisherTest {
 
         assertThat(event.isSent()).isFalse();
         assertThat(event.getSentAt()).isNull();
-        verify(outboxEventRepository).saveAll(List.of(event));
+        verify(outboxEventRepository, never()).save(any());
     }
 }

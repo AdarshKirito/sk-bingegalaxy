@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
+import { trackSignUp, identifyUser } from '../services/analytics';
 import { FiCalendar, FiEye, FiEyeOff, FiGift, FiUsers } from 'react-icons/fi';
 import SEO from '../components/SEO';
 import './Auth.css';
@@ -39,6 +40,9 @@ export default function Register() {
       const { confirmPassword, ...data } = form;
       data.phone = data.phone.replace(/\D/g, '').slice(-10);
       await register(data);
+      trackSignUp('email');
+      const u = JSON.parse(localStorage.getItem('user') || '{}');
+      if (u.id) identifyUser(String(u.id), { role: u.role });
       toast.success('Account created!');
       // PublicOnlyRoute redirects to /binges via resolveAuthenticatedLanding
     } catch (err) {

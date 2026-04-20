@@ -39,18 +39,24 @@ GRANT CONNECT ON DATABASE payment_db TO payment_svc;
 -- auth_db grants
 \c auth_db;
 GRANT ALL PRIVILEGES ON SCHEMA public TO auth_svc;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO auth_svc;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO auth_svc;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO auth_svc;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO auth_svc;
 
 -- availability_db grants
 \c availability_db;
 GRANT ALL PRIVILEGES ON SCHEMA public TO availability_svc;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO availability_svc;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO availability_svc;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO availability_svc;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO availability_svc;
 
 -- booking_db grants
 \c booking_db;
 GRANT ALL PRIVILEGES ON SCHEMA public TO booking_svc;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO booking_svc;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO booking_svc;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO booking_svc;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO booking_svc;
 
@@ -63,9 +69,12 @@ CREATE TABLE IF NOT EXISTS shedlock (
     PRIMARY KEY (name)
 );
 GRANT ALL ON TABLE shedlock TO booking_svc;
+ALTER TABLE shedlock OWNER TO booking_svc;
 
 -- payment_db grants
 \c payment_db;
 GRANT ALL PRIVILEGES ON SCHEMA public TO payment_svc;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO payment_svc;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO payment_svc;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO payment_svc;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO payment_svc;

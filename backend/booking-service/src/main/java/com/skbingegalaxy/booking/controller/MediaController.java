@@ -1,6 +1,9 @@
 package com.skbingegalaxy.booking.controller;
 
+import com.skbingegalaxy.booking.service.AdminBingeScopeService;
 import com.skbingegalaxy.common.dto.ApiResponse;
+import jakarta.servlet.http.HttpServletRequest;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
@@ -33,13 +36,26 @@ public class MediaController {
     private static final long MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 
     private final Path uploadDir;
+    private final AdminBingeScopeService adminBingeScopeService;
 
-    public MediaController(@Value("${app.media.upload-dir:/app/uploads}") String uploadPath) {
+    public MediaController(@Value("${app.media.upload-dir:/app/uploads}") String uploadPath,
+                           AdminBingeScopeService adminBingeScopeService) {
         this.uploadDir = Paths.get(uploadPath).toAbsolutePath().normalize();
+        this.adminBingeScopeService = adminBingeScopeService;
         try {
             Files.createDirectories(this.uploadDir);
         } catch (IOException e) {
             throw new RuntimeException("Could not create upload directory: " + uploadPath, e);
+        }
+    }
+
+    @ModelAttribute
+    void validateAdminBingeScope(
+            @RequestHeader(value = "X-User-Id", required = false) Long adminId,
+            @RequestHeader(value = "X-User-Role", required = false) String role,
+            HttpServletRequest request) {
+        if (request.getRequestURI().contains("/admin/media")) {
+            adminBingeScopeService.requireManagedBinge(adminId, role, "uploading media");
         }
     }
 

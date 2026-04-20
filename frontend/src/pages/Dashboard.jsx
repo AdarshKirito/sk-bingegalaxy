@@ -7,7 +7,6 @@ import { normalizeDashboardExperience } from '../services/dashboardExperience';
 import useBingeStore from '../stores/bingeStore';
 import {
   EXPERIENCE_STEPS,
-  getMemberTier,
   HELP_FAQS,
   mergeSupportContact,
   MEMBER_OFFERS,
@@ -30,23 +29,33 @@ export default function Dashboard() {
   const [myPricing, setMyPricing] = useState(null);
   const [supportContact, setSupportContact] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loyaltyAccount, setLoyaltyAccount] = useState(null);
   const [page, setPage] = useState(1);
   const [experienceIndex, setExperienceIndex] = useState(0);
   const perPage = 4;
 
+  // Handles both plain arrays and paginated payloads like { content: [...] }
+  const toList = (payload) => {
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload?.content)) return payload.content;
+    if (Array.isArray(payload?.items)) return payload.items;
+    return [];
+  };
+
   useEffect(() => {
     const loads = [
       authService.getSupportContact().then(r => setSupportContact(r.data.data || null)).catch(() => null),
-      bookingService.getCurrentBookings().then(r => setCurrentBookings(r.data.data || [])).catch(() => null),
-      bookingService.getPastBookings().then(r => setPastBookings(r.data.data || [])).catch(() => null),
-      paymentService.getMyPayments().then(r => setPayments(r.data.data || [])).catch(() => null),
-      bookingService.getEventTypes().then(r => setEventTypes((r.data.data || r.data || []).filter(e => e.active !== false))).catch(() => null),
+      bookingService.getCurrentBookings().then(r => setCurrentBookings(toList(r.data?.data ?? r.data))).catch(() => null),
+      bookingService.getPastBookings().then(r => setPastBookings(toList(r.data?.data ?? r.data))).catch(() => null),
+      paymentService.getMyPayments().then(r => setPayments(toList(r.data?.data ?? r.data))).catch(() => null),
+      bookingService.getEventTypes().then(r => setEventTypes(toList(r.data?.data ?? r.data).filter(e => e.active !== false))).catch(() => null),
       selectedBinge?.id
         ? bookingService.getBingeDashboardExperience(selectedBinge.id)
           .then(r => setDashboardExperience(normalizeDashboardExperience(r.data.data || r.data || null)))
           .catch(() => null)
         : Promise.resolve(setDashboardExperience(normalizeDashboardExperience(null))),
       bookingService.getMyPricing().then(r => setMyPricing(r.data.data || null)).catch(() => null),
+      bookingService.getMyLoyalty().then(r => setLoyaltyAccount(r.data.data || null)).catch(() => null),
     ];
     Promise.allSettled(loads).then(results => {
       const failed = results.filter(r => r.status === 'rejected' || r.value === null).length;
@@ -68,17 +77,17 @@ export default function Dashboard() {
     .filter(b => b.paymentStatus === 'SUCCESS')
     .reduce((sum, b) => sum + (b.totalAmount || 0), 0);
   const support = mergeSupportContact(supportContact, selectedBinge);
-  const memberTier = useMemo(() => getMemberTier(pastCount, totalSpend), [pastCount, totalSpend]);
+  const loyaltyTier = loyaltyAccount?.tierLevel || 'BRONZE';
   const pricingLabel = myPricing?.pricingSource === 'CUSTOMER'
     ? (myPricing.memberLabel || 'Custom')
     : myPricing?.pricingSource === 'RATE_CODE'
       ? (myPricing.memberLabel || myPricing.rateCodeName || 'Rate Code')
-      : memberTier;
+      : loyaltyTier;
   const pricingSourceLabel = myPricing?.pricingSource === 'CUSTOMER'
     ? 'Personalized pricing has been configured for your account.'
     : myPricing?.pricingSource === 'RATE_CODE'
       ? `${myPricing.memberLabel || myPricing.rateCodeName || 'Rate code'} pricing is active on your account.`
-      : `You are on ${memberTier.toLowerCase()} member pricing.`;
+      : `You are on ${loyaltyTier} tier pricing.`;
 
   const pendingPayments = payments.filter(p => p.status === 'INITIATED');
   const lastPayment = payments.length > 0 ? payments[0] : null;
@@ -152,19 +161,26 @@ export default function Dashboard() {
   };
 
   const customExperienceItems = useMemo(() => (
-    dashboardExperience.slides.map((slide, index) => ({
-      key: `custom-${index}`,
-      type: 'custom',
-      badge: slide.badge || getThemeLabel(slide.theme),
-      title: slide.headline || 'Custom setup',
-      description: slide.description || 'Guide customers toward the atmosphere you want highlighted first.',
-      ctaLabel: slide.ctaLabel || 'Open Booking',
-      theme: slide.theme || 'celebration',
-      imageUrl: slide.imageUrl || '',
-      icon: getThemeIcon(slide.theme),
-      metaValue: selectedBinge?.name || 'Featured setup',
-    }))
-  ), [dashboardExperience.slides, selectedBinge?.name]);
+    dashboardExperience.slides.map((slide, index) => {
+      const linkedEvent = slide.linkedEventTypeId
+        ? eventTypes.find((et) => et.id === slide.linkedEventTypeId)
+        : null;
+      return {
+        key: `custom-${index}`,
+        type: 'custom',
+        badge: slide.badge || getThemeLabel(slide.theme),
+        title: slide.headline || 'Custom setup',
+        description: slide.description || 'Guide customers toward the atmosphere you want highlighted first.',
+        ctaLabel: slide.ctaLabel || 'Open Booking',
+        theme: slide.theme || 'celebration',
+        imageUrl: slide.imageUrl || '',
+        icon: getThemeIcon(slide.theme),
+        metaValue: selectedBinge?.name || 'Featured setup',
+        linkState: linkedEvent ? { eventTypeId: linkedEvent.id, eventTypeName: linkedEvent.name } : undefined,
+        price: linkedEvent ? formatAmount(linkedEvent.basePrice) : undefined,
+      };
+    })
+  ), [dashboardExperience.slides, selectedBinge?.name, eventTypes]);
 
   const defaultExperienceItems = useMemo(() => (
     eventTypes.slice(0, 6).map((evt) => {
@@ -408,8 +424,8 @@ export default function Dashboard() {
 
         <article className="dash-member-card card">
           <span className="dash-card-kicker">Pricing Snapshot</span>
-          <h3>{loading ? 'Checking your plan...' : `${memberTier} tier`}</h3>
-          <p>{loading ? 'We are resolving your current customer pricing.' : pricingLabel === memberTier ? `Your pricing matches your ${memberTier.toLowerCase()} member tier.` : `${pricingLabel} pricing is paired with your ${memberTier.toLowerCase()} member status.`}</p>
+          <h3>{loading ? 'Checking your plan...' : `${loyaltyTier} tier`}</h3>
+          <p>{loading ? 'We are resolving your current customer pricing.' : pricingLabel === loyaltyTier ? `Your pricing matches your ${loyaltyTier} tier.` : `${pricingLabel} pricing is paired with your ${loyaltyTier} loyalty status.`}</p>
           <div className="dash-member-metrics">
             <div>
               <span>Completed visits</span>
@@ -428,19 +444,36 @@ export default function Dashboard() {
           <div className="dash-section-header">
             <div>
               <span className="dash-section-kicker">Loyalty</span>
-              <h2>Reasons to keep booking through your account</h2>
+              <h2>{loyaltyAccount ? 'Your Rewards' : 'Reasons to keep booking through your account'}</h2>
             </div>
-            <Link to="/account" className="dash-inline-link">Account center</Link>
+            <Link to="/my-bookings" className="dash-inline-link">Book now</Link>
           </div>
-          <div className="dash-loyalty-offers">
-            {MEMBER_OFFERS.map((offer) => (
-              <article key={offer.title} className="dash-loyalty-offer">
-                <span className="dash-card-kicker">{offer.title}</span>
-                <h3>{offer.title}</h3>
-                <p>{offer.description}</p>
-              </article>
-            ))}
-          </div>
+          {loyaltyAccount ? (
+            <div className="dash-loyalty-summary">
+              <div className="dash-loyalty-stat">
+                <span className="dash-loyalty-stat-value">{loyaltyAccount.currentBalance?.toLocaleString() || 0}</span>
+                <span className="dash-loyalty-stat-label">Points Balance</span>
+              </div>
+              <div className="dash-loyalty-stat">
+                <span className="dash-loyalty-stat-value">{loyaltyAccount.tierLevel || 'BRONZE'}</span>
+                <span className="dash-loyalty-stat-label">Current Tier</span>
+              </div>
+              <div className="dash-loyalty-stat">
+                <span className="dash-loyalty-stat-value">{loyaltyAccount.totalPointsEarned?.toLocaleString() || 0}</span>
+                <span className="dash-loyalty-stat-label">Lifetime Points</span>
+              </div>
+            </div>
+          ) : (
+            <div className="dash-loyalty-offers">
+              {MEMBER_OFFERS.map((offer) => (
+                <article key={offer.title} className="dash-loyalty-offer">
+                  <span className="dash-card-kicker">{offer.title}</span>
+                  <h3>{offer.title}</h3>
+                  <p>{offer.description}</p>
+                </article>
+              ))}
+            </div>
+          )}
         </article>
 
         <article className="dash-help-card card">

@@ -33,6 +33,7 @@ const {
   mockGetBingesByAdmin,
   mockGetBingeDashboardExperience,
   mockUpdateBingeDashboardExperience,
+  mockGetAllEventTypes,
 } = vi.hoisted(() => ({
   mockGetAdminBinges: vi.fn(),
   mockCreateBinge: vi.fn(),
@@ -43,6 +44,7 @@ const {
   mockGetBingesByAdmin: vi.fn(),
   mockGetBingeDashboardExperience: vi.fn(),
   mockUpdateBingeDashboardExperience: vi.fn(),
+  mockGetAllEventTypes: vi.fn(),
 }));
 vi.mock('../services/endpoints', () => ({
   adminService: {
@@ -54,6 +56,7 @@ vi.mock('../services/endpoints', () => ({
     getBingesByAdmin: mockGetBingesByAdmin,
     getBingeDashboardExperience: mockGetBingeDashboardExperience,
     updateBingeDashboardExperience: mockUpdateBingeDashboardExperience,
+    getAllEventTypes: mockGetAllEventTypes,
   },
   authService: {
     getAllAdmins: mockGetAllAdmins,
@@ -96,6 +99,7 @@ describe('BingeManagement (Super Admin)', () => {
       },
     });
     mockUpdateBingeDashboardExperience.mockResolvedValue({ data: { data: {} } });
+    mockGetAllEventTypes.mockResolvedValue({ data: { data: [] } });
   });
 
   it('renders binge management heading', async () => {

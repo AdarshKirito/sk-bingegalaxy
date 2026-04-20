@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { adminService } from '../services/endpoints';
+import { adminService, toArray } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import { FiEdit2, FiPlus, FiToggleLeft, FiToggleRight, FiTrash2, FiX, FiZap } from 'react-icons/fi';
 import './AdminPages.css';
@@ -34,11 +34,12 @@ export default function AdminSurgeRules() {
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
   const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
 
   const fetchRules = async () => {
     try {
       const res = await adminService.getSurgeRules();
-      setRules(res.data.data || []);
+      setRules(toArray(res.data?.data));
     } catch {
       toast.error('Failed to load surge rules');
     } finally {
@@ -69,8 +70,11 @@ export default function AdminSurgeRules() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (saving) return;
     if (!form.name.trim()) { toast.error('Rule name is required'); return; }
-    if (form.multiplier < 1 || form.multiplier > 5) { toast.error('Multiplier must be between 1.0 and 5.0'); return; }
+    if (!Number.isFinite(form.multiplier) || form.multiplier < 1 || form.multiplier > 5) { toast.error('Multiplier must be a number between 1.0 and 5.0'); return; }
+    if (Number(form.startMinute) >= Number(form.endMinute)) { toast.error('End time must be after start time'); return; }
+    setSaving(true);
     const payload = {
       ...form,
       dayOfWeek: form.dayOfWeek === '' ? null : Number(form.dayOfWeek),
@@ -90,6 +94,8 @@ export default function AdminSurgeRules() {
       fetchRules();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to save surge rule');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -157,7 +163,7 @@ export default function AdminSurgeRules() {
               </div>
               <div className="input-group">
                 <label>Multiplier (1.0 – 5.0)</label>
-                <input type="number" step="0.1" min="1" max="5" value={form.multiplier} onChange={(e) => setForm({ ...form, multiplier: e.target.value })} />
+                <input type="number" step="0.1" min="1" max="5" value={form.multiplier} onChange={(e) => setForm({ ...form, multiplier: Number(e.target.value) || '' })} />
                 <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>e.g., 1.5 = 50% price increase</span>
               </div>
               <div className="input-group">
@@ -168,7 +174,7 @@ export default function AdminSurgeRules() {
             </div>
             <div className="adm-form-actions">
               <button type="button" className="btn btn-secondary" onClick={resetForm}>Cancel</button>
-              <button type="submit" className="btn btn-primary">{editId ? 'Update Rule' : 'Create Rule'}</button>
+              <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving...' : editId ? 'Update Rule' : 'Create Rule'}</button>
             </div>
           </form>
         </section>

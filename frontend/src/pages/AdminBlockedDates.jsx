@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { adminService } from '../services/endpoints';
+import { adminService, toArray } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import { format } from 'date-fns';
 import { FiCalendar, FiClock, FiSlash, FiTrash2 } from 'react-icons/fi';
@@ -25,6 +25,7 @@ export default function AdminBlockedDates() {
 
   const [dateForm, setDateForm] = useState({ date: '', reason: '' });
   const [slotForm, setSlotForm] = useState({ date: '', startMinute: '', endMinute: '', reason: '' });
+  const [saving, setSaving] = useState(false);
 
   // Compute available start times (filter past for today)
   const startOptions = useMemo(() => {
@@ -68,8 +69,8 @@ export default function AdminBlockedDates() {
     setLoading(true);
     Promise.all([adminService.getBlockedDates(), adminService.getBlockedSlots()])
       .then(([dRes, sRes]) => {
-        setBlockedDates(dRes.data.data || []);
-        setBlockedSlots(sRes.data.data || []);
+        setBlockedDates(toArray(dRes.data?.data));
+        setBlockedSlots(toArray(sRes.data?.data));
       })
       .catch(() => toast.error('Failed to load blocked dates/slots.'))
       .finally(() => setLoading(false));
@@ -79,6 +80,8 @@ export default function AdminBlockedDates() {
 
   const handleBlockDate = async (e) => {
     e.preventDefault();
+    if (saving) return;
+    setSaving(true);
     try {
       await adminService.blockDate({ date: dateForm.date, reason: dateForm.reason });
       toast.success('Date blocked');
@@ -86,6 +89,8 @@ export default function AdminBlockedDates() {
       fetchData();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -102,10 +107,12 @@ export default function AdminBlockedDates() {
 
   const handleBlockSlot = async (e) => {
     e.preventDefault();
+    if (saving) return;
     const start = Number(slotForm.startMinute);
     const end = Number(slotForm.endMinute);
     if (!slotForm.date) { toast.error('Please select a date.'); return; }
     if (end <= start) { toast.error('End time must be after start time.'); return; }
+    setSaving(true);
     try {
       await adminService.blockSlot({
         date: slotForm.date,
@@ -118,6 +125,8 @@ export default function AdminBlockedDates() {
       fetchData();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to block slot.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -165,7 +174,7 @@ export default function AdminBlockedDates() {
                 <input value={dateForm.reason} onChange={(e) => setDateForm({ ...dateForm, reason: e.target.value })}
                   placeholder="Maintenance, holiday, etc." />
               </div>
-              <button type="submit" className="btn btn-primary btn-sm">Block Date</button>
+              <button type="submit" className="btn btn-primary btn-sm" disabled={saving}>{saving ? 'Blocking...' : 'Block Date'}</button>
             </form>
           </div>
 
@@ -235,7 +244,7 @@ export default function AdminBlockedDates() {
                 <input value={slotForm.reason} onChange={(e) => setSlotForm({ ...slotForm, reason: e.target.value })}
                   placeholder="Cleaning, private event, etc." />
               </div>
-              <button type="submit" className="btn btn-primary btn-sm">Block Slot</button>
+              <button type="submit" className="btn btn-primary btn-sm" disabled={saving}>{saving ? 'Blocking...' : 'Block Slot'}</button>
             </form>
           </div>
 

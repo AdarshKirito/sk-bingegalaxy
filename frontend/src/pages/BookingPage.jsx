@@ -1,6 +1,7 @@
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { bookingService } from '../services/endpoints';
 import { toast } from 'react-toastify';
+import { trackBookingCompleted } from '../services/analytics';
 import BookingWizard from '../components/BookingWizard';
 import SEO from '../components/SEO';
 import useBingeStore from '../stores/bingeStore';
@@ -16,11 +17,22 @@ export default function BookingPage() {
   const initialEventTypeId = Number.isFinite(rawEventTypeId) && rawEventTypeId > 0 ? rawEventTypeId : null;
   const prefilledEventName = location.state?.eventTypeName || null;
 
-  const handleSubmit = async (payload) => {
-    const res = await bookingService.createBooking(payload);
-    const ref = res.data.data.bookingRef;
-    toast.success('Booking created!');
-    navigate(`/booking/${ref}`);
+  const handleSubmit = async (payload, opts) => {
+    if (opts?.recurring) {
+      const res = await bookingService.createRecurringBookings(payload);
+      const result = res.data.data;
+      const firstRef = result.createdBookings?.[0]?.bookingRef;
+      const msg = `${result.successfulOccurrences} booking${result.successfulOccurrences > 1 ? 's' : ''} created` +
+        (result.skippedOccurrences > 0 ? ` (${result.skippedOccurrences} skipped)` : '');
+      toast.success(msg);
+      navigate(firstRef ? `/booking/${firstRef}` : '/my-bookings');
+    } else {
+      const res = await bookingService.createBooking(payload);
+      const ref = res.data.data.bookingRef;
+      trackBookingCompleted(ref, payload.totalAmount);
+      toast.success('Booking created!');
+      navigate(`/booking/${ref}`);
+    }
   };
 
   return (

@@ -32,6 +32,10 @@ public class AdminSeeder implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
+        if (adminEmail == null || adminEmail.isBlank() || adminPassword == null || adminPassword.isBlank()) {
+            log.error("Admin seed skipped — app.admin.email and app.admin.password must be configured");
+            return;
+        }
         var existing = userRepository.findByEmail(adminEmail);
         if (existing.isPresent()) {
             User admin = existing.get();

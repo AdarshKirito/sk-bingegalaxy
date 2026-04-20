@@ -61,7 +61,7 @@ public class PaymentEventListener {
 
         sagaOrchestrator.advanceTo(event.getBookingRef(),
             SagaState.SagaStatus.PAYMENT_RECEIVED, "PAYMENT_SUCCESS");
-        adminEventBus.publish("booking", java.util.Map.of(
+        adminEventBus.publish(booking.getBingeId(), "booking", java.util.Map.of(
             "type", "payment.success", "ref", event.getBookingRef(), "ts", System.currentTimeMillis()));
         markProcessed(key);
     }

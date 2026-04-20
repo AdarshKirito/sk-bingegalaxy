@@ -95,21 +95,18 @@ public class BookingProjectionService {
         readModelRepository.deleteAll();
         readModelRepository.flush();
 
-        List<BookingEventLog> allEvents = eventLogRepository.findAll();
+        List<String> bookingRefs = eventLogRepository.findDistinctBookingRefs();
 
-        // Group events by bookingRef, preserving order
-        Map<String, List<BookingEventLog>> grouped = new java.util.LinkedHashMap<>();
-        for (BookingEventLog event : allEvents) {
-            grouped.computeIfAbsent(event.getBookingRef(), k -> new java.util.ArrayList<>()).add(event);
-        }
+        for (String ref : bookingRefs) {
+            List<BookingEventLog> events = eventLogRepository
+                .findByBookingRefOrderByCreatedAtAsc(ref);
 
-        for (Map.Entry<String, List<BookingEventLog>> entry : grouped.entrySet()) {
             BookingReadModel model = BookingReadModel.builder()
-                .bookingRef(entry.getKey())
+                .bookingRef(ref)
                 .eventCount(0)
                 .build();
 
-            for (BookingEventLog event : entry.getValue()) {
+            for (BookingEventLog event : events) {
                 applySnapshot(model, event);
                 model.setEventCount(model.getEventCount() + 1);
                 model.setLastEventId(event.getId());
@@ -118,8 +115,8 @@ public class BookingProjectionService {
             readModelRepository.save(model);
         }
 
-        log.info("Full replay complete: {} bookings projected", grouped.size());
-        return grouped.size();
+        log.info("Full replay complete: {} bookings projected", bookingRefs.size());
+        return bookingRefs.size();
     }
 
     private void applySnapshot(BookingReadModel model, BookingEventLog event) {

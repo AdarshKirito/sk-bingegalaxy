@@ -3,6 +3,8 @@ kind: Deployment
 metadata:
   name: auth-service
   namespace: sk-binge-galaxy
+  annotations:
+    reloader.stakater.com/auto: "true"
 spec:
   replicas: 2
   selector:
@@ -45,8 +47,6 @@ spec:
             - configMapRef:
                 name: app-config
             - secretRef:
-                name: db-secrets
-            - secretRef:
                 name: app-secrets
           env:
             - name: SPRING_DATASOURCE_URL
@@ -54,13 +54,13 @@ spec:
             - name: SPRING_DATASOURCE_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: db-secrets
-                  key: AUTH_DB_USERNAME
+                  name: auth-db-creds
+                  key: username
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: db-secrets
-                  key: AUTH_DB_PASSWORD
+                  name: auth-db-creds
+                  key: password
             - name: JAVA_TOOL_OPTIONS
               value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
           resources:
@@ -114,6 +114,8 @@ kind: Deployment
 metadata:
   name: availability-service
   namespace: sk-binge-galaxy
+  annotations:
+    reloader.stakater.com/auto: "true"
 spec:
   replicas: 2
   selector:
@@ -156,8 +158,6 @@ spec:
             - configMapRef:
                 name: app-config
             - secretRef:
-                name: db-secrets
-            - secretRef:
                 name: app-secrets
           env:
             - name: SPRING_DATASOURCE_URL
@@ -165,13 +165,13 @@ spec:
             - name: SPRING_DATASOURCE_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: db-secrets
-                  key: AVAILABILITY_DB_USERNAME
+                  name: availability-db-creds
+                  key: username
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: db-secrets
-                  key: AVAILABILITY_DB_PASSWORD
+                  name: availability-db-creds
+                  key: password
             - name: JAVA_TOOL_OPTIONS
               value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
           resources:
@@ -225,6 +225,8 @@ kind: Deployment
 metadata:
   name: booking-service
   namespace: sk-binge-galaxy
+  annotations:
+    reloader.stakater.com/auto: "true"
 spec:
   replicas: 2
   selector:
@@ -267,8 +269,6 @@ spec:
             - configMapRef:
                 name: app-config
             - secretRef:
-                name: db-secrets
-            - secretRef:
                 name: app-secrets
           env:
             - name: SPRING_DATASOURCE_URL
@@ -276,13 +276,13 @@ spec:
             - name: SPRING_DATASOURCE_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: db-secrets
-                  key: BOOKING_DB_USERNAME
+                  name: booking-db-creds
+                  key: username
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: db-secrets
-                  key: BOOKING_DB_PASSWORD
+                  name: booking-db-creds
+                  key: password
             - name: JAVA_TOOL_OPTIONS
               value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
           resources:
@@ -336,6 +336,8 @@ kind: Deployment
 metadata:
   name: payment-service
   namespace: sk-binge-galaxy
+  annotations:
+    reloader.stakater.com/auto: "true"
 spec:
   replicas: 2
   selector:
@@ -378,8 +380,6 @@ spec:
             - configMapRef:
                 name: app-config
             - secretRef:
-                name: db-secrets
-            - secretRef:
                 name: app-secrets
           env:
             - name: SPRING_DATASOURCE_URL
@@ -387,13 +387,13 @@ spec:
             - name: SPRING_DATASOURCE_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: db-secrets
-                  key: PAYMENT_DB_USERNAME
+                  name: payment-db-creds
+                  key: username
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: db-secrets
-                  key: PAYMENT_DB_PASSWORD
+                  name: payment-db-creds
+                  key: password
             - name: JAVA_TOOL_OPTIONS
               value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
           resources:
@@ -447,6 +447,8 @@ kind: Deployment
 metadata:
   name: notification-service
   namespace: sk-binge-galaxy
+  annotations:
+    reloader.stakater.com/auto: "true"
 spec:
   replicas: 2
   selector:
@@ -489,9 +491,11 @@ spec:
             - configMapRef:
                 name: app-config
             - secretRef:
-                name: db-secrets
-            - secretRef:
                 name: app-secrets
+            - secretRef:
+                name: notification-secrets
+            - secretRef:
+                name: mongo-secrets
           env:
             - name: JAVA_TOOL_OPTIONS
               value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"

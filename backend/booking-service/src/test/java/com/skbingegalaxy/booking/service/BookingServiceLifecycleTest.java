@@ -55,6 +55,7 @@ class BookingServiceLifecycleTest {
     @Mock private PricingService pricingService;
     @Mock private BookingEventLogService eventLogService;
     @Mock private SagaOrchestrator sagaOrchestrator;
+        @Mock private LoyaltyService loyaltyService;
 
     @InjectMocks private BookingService bookingService;
 
@@ -69,6 +70,9 @@ class BookingServiceLifecycleTest {
         ReflectionTestUtils.setField(bookingService, "refPrefix", "SKBG");
         ReflectionTestUtils.setField(bookingService, "maxPendingPerCustomer", 2);
         ReflectionTestUtils.setField(bookingService, "cooldownMinutesAfterTimeout", 10);
+                lenient().when(loyaltyService.earnPoints(anyLong(), anyString(), any(BigDecimal.class))).thenReturn(0L);
+                lenient().when(loyaltyService.redeemPoints(anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
+                        .thenReturn(new LoyaltyService.RedemptionResult(0L, BigDecimal.ZERO));
         lenient().when(bingeRepository.findById(anyLong())).thenReturn(Optional.empty());
         lenient().when(cancellationTierRepository.findByBingeIdOrderByHoursBeforeStartDesc(anyLong())).thenReturn(List.of());
 

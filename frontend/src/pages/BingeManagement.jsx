@@ -45,9 +45,6 @@ export default function BingeManagement() {
     customerCancellationEnabled: true,
     customerCancellationCutoffMinutes: 180,
     maxConcurrentBookings: '',
-    loyaltyEnabled: false,
-    loyaltyPointsPerRupee: 10,
-    loyaltyRedemptionRate: 100,
   };
   const [binges, setBinges] = useState([]);
   const [reviewSummaries, setReviewSummaries] = useState({});
@@ -59,6 +56,7 @@ export default function BingeManagement() {
   const [dashboardForm, setDashboardForm] = useState(() => normalizeDashboardExperience(null));
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [dashboardSaving, setDashboardSaving] = useState(false);
+  const [dashboardEventTypes, setDashboardEventTypes] = useState([]);
   const [aboutEditor, setAboutEditor] = useState({ open: false, binge: null });
   const [aboutForm, setAboutForm] = useState(() => normalizeAboutExperience(null));
   const [aboutLoading, setAboutLoading] = useState(false);
@@ -150,6 +148,7 @@ export default function BingeManagement() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!form.name.trim()) { toast.error('Venue name is required'); return; }
     try {
       if (editId) {
         await adminService.updateBinge(editId, form);
@@ -176,9 +175,6 @@ export default function BingeManagement() {
       customerCancellationEnabled: b.customerCancellationEnabled !== false,
       customerCancellationCutoffMinutes: b.customerCancellationCutoffMinutes ?? 180,
       maxConcurrentBookings: b.maxConcurrentBookings ?? '',
-      loyaltyEnabled: b.loyaltyEnabled || false,
-      loyaltyPointsPerRupee: b.loyaltyPointsPerRupee ?? 10,
-      loyaltyRedemptionRate: b.loyaltyRedemptionRate ?? 100,
     });
     setShowForm(true);
   };
@@ -187,8 +183,12 @@ export default function BingeManagement() {
     setDashboardEditor({ open: true, binge });
     setDashboardLoading(true);
     try {
-      const res = await adminService.getBingeDashboardExperience(binge.id);
-      setDashboardForm(normalizeDashboardExperience(res.data.data || res.data || null));
+      const [dashRes, etRes] = await Promise.all([
+        adminService.getBingeDashboardExperience(binge.id),
+        adminService.getAllEventTypes().catch(() => ({ data: { data: [] } })),
+      ]);
+      setDashboardForm(normalizeDashboardExperience(dashRes.data.data || dashRes.data || null));
+      setDashboardEventTypes((etRes.data.data || etRes.data || []).filter((e) => e.active !== false));
     } catch (err) {
       toast.error(err.userMessage || 'Failed to load customer dashboard setup');
       setDashboardEditor({ open: false, binge: null });
@@ -460,28 +460,6 @@ export default function BingeManagement() {
                 <input type="number" min="1" value={form.maxConcurrentBookings} onChange={(e) => setForm({ ...form, maxConcurrentBookings: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Unlimited" />
                 <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Leave empty for unlimited capacity</span>
               </div>
-              <div className="input-group">
-                <label>Loyalty Program</label>
-                <select value={form.loyaltyEnabled ? 'enabled' : 'disabled'} onChange={(e) => setForm({ ...form, loyaltyEnabled: e.target.value === 'enabled' })}>
-                  <option value="disabled">Disabled</option>
-                  <option value="enabled">Enabled</option>
-                </select>
-                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Customers earn + redeem loyalty points for this venue</span>
-              </div>
-              {form.loyaltyEnabled && (
-                <>
-                  <div className="input-group">
-                    <label>Points per ₹ spent</label>
-                    <input type="number" min="1" max="100" value={form.loyaltyPointsPerRupee} onChange={(e) => setForm({ ...form, loyaltyPointsPerRupee: Number(e.target.value) || 10 })} />
-                    <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>e.g., 10 = earn 10 points per ₹1 spent</span>
-                  </div>
-                  <div className="input-group">
-                    <label>Redemption Rate (points per ₹1 discount)</label>
-                    <input type="number" min="1" max="1000" value={form.loyaltyRedemptionRate} onChange={(e) => setForm({ ...form, loyaltyRedemptionRate: Number(e.target.value) || 100 })} />
-                    <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>e.g., 100 = 100 points = ₹1 discount</span>
-                  </div>
-                </>
-              )}
             </div>
             <div className="adm-form-actions">
               <button type="button" className="btn btn-secondary" onClick={resetForm}>Cancel</button>
@@ -651,6 +629,20 @@ export default function BingeManagement() {
                           onChange={(e) => updateDashboardSlide(index, 'ctaLabel', e.target.value)}
                           placeholder="Open Booking"
                         />
+                      </div>
+
+                      <div className="input-group">
+                        <label>Link to Event</label>
+                        <select
+                          value={slide.linkedEventTypeId || ''}
+                          onChange={(e) => updateDashboardSlide(index, 'linkedEventTypeId', e.target.value ? Number(e.target.value) : null)}
+                        >
+                          <option value="">None — opens generic booking</option>
+                          {dashboardEventTypes.map((et) => (
+                            <option key={et.id} value={et.id}>{et.name} (Rs {et.basePrice})</option>
+                          ))}
+                        </select>
+                        <p className="adm-hint">When linked, clicking this slide pre-selects the event in the booking flow.</p>
                       </div>
 
                       <div className="input-group">

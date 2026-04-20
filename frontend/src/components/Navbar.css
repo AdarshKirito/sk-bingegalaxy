@@ -79,14 +79,6 @@
   color: color-mix(in srgb, var(--primary) 72%, var(--accent) 28%);
 }
 
-.navbar-customer .nav-customer-links {
-  border-color: rgba(var(--primary-rgb), 0.12);
-  background:
-    linear-gradient(180deg, rgba(var(--primary-rgb), 0.04), transparent 70%),
-    var(--bg-input);
-  box-shadow: 0 8px 20px rgba(var(--primary-rgb), 0.05);
-}
-
 .navbar-customer .nav-link:hover,
 .navbar-customer .nav-link-active {
   color: var(--primary);
@@ -138,7 +130,6 @@
   border-bottom-color: rgba(99, 102, 241, 0.1);
 }
 
-[data-theme="dark"] .navbar-customer .nav-customer-links,
 [data-theme="dark"] .navbar-customer .venue-btn,
 [data-theme="dark"] .navbar-customer .nav-user {
   background:
@@ -167,6 +158,9 @@
   display: flex;
   align-items: center;
   gap: 0.35rem;
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow: visible;
 }
 
 .nav-admin-menu {
@@ -174,36 +168,212 @@
 }
 
 .nav-admin-links {
+  /* Mobile drawer flat list — pill styling reset in the 1320px block below */
   display: flex;
   align-items: center;
   gap: 0.22rem;
   min-width: 0;
-  width: fit-content;
-  padding: 0.24rem;
-  border: 1px solid rgba(var(--primary-rgb), 0.12);
-  border-radius: 999px;
-  background: var(--bg-input);
-  overflow-x: auto;
-  scrollbar-width: none;
+  flex: 1 1 0;
+  overflow: visible;
 }
 
-.nav-admin-links::-webkit-scrollbar {
-  display: none;
+/* ── Desktop admin console grouped nav bar ───────────────── */
+.nav-admin-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: visible; /* dropdowns must escape */
+}
+
+/* ── NavDropdownGroup ─────────────────────────────────────── */
+.nav-group {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.nav-group-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+  cursor: pointer;
+  background: none;
+  border: none;
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.nav-group-chevron {
+  font-size: 0.72rem;
+  transition: transform 0.18s ease;
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.nav-group-chevron-open {
+  transform: rotate(180deg);
+  opacity: 1;
+}
+
+/* Dropdown panel */
+.nav-group-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 210px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow:
+    0 4px 6px -2px rgba(0, 0, 0, 0.06),
+    0 12px 28px -4px rgba(0, 0, 0, 0.1),
+    0 0 0 1px rgba(var(--primary-rgb), 0.04);
+  padding: 0.35rem;
+  z-index: 200;
+  animation: navGroupIn 0.14s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Arrow pointer above the dropdown */
+.nav-group-dropdown::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  width: 9px;
+  height: 9px;
+  background: var(--bg-card);
+  border-left: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+}
+
+/* Each menu item inside dropdown */
+.nav-group-item {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.6rem 0.85rem;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: var(--transition);
+  white-space: nowrap;
+  line-height: 1.5;
+}
+
+.nav-group-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: rgba(var(--primary-rgb), 0.06);
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  flex-shrink: 0;
+  transition: var(--transition);
+}
+
+.nav-group-item:hover {
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+
+.nav-group-item:hover .nav-group-item-icon {
+  background: rgba(var(--primary-rgb), 0.12);
+  color: var(--primary);
+}
+
+.nav-group-item-active {
+  color: var(--primary);
+  background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.1), rgba(var(--accent-rgb), 0.04));
+}
+
+.nav-group-item-active .nav-group-item-icon {
+  background: rgba(var(--primary-rgb), 0.12);
+  color: var(--primary);
+}
+
+[data-theme="dark"] .nav-group-dropdown {
+  box-shadow:
+    0 4px 6px -2px rgba(0, 0, 0, 0.25),
+    0 12px 28px -4px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(var(--primary-rgb), 0.08);
+}
+
+[data-theme="dark"] .nav-group-dropdown::before {
+  background: var(--bg-card);
+}
+
+[data-theme="dark"] .nav-group-item-icon {
+  background: rgba(var(--primary-rgb), 0.1);
+}
+
+@keyframes navGroupIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
 }
 
 .nav-admin-status {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  flex-shrink: 0;
+  flex-shrink: 0; /* status controls (venue+user+logout) must never disappear */
 }
 
 .nav-admin-console {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   gap: 1rem;
-  padding: 0 1rem 0.8rem;
+  padding: 0.25rem 1rem 0.9rem;
+  min-width: 0;
+  overflow: visible;
+}
+
+/* ── Customer sub-console (second row, desktop-only) ─────── */
+.nav-customer-menu {
+  display: none; /* desktop: second row handles customer nav */
+}
+
+.nav-customer-links {
+  /* Mobile drawer flat list */
+  display: flex;
+  align-items: center;
+  gap: 0.22rem;
+  min-width: 0;
+  flex: 1 1 0;
+  overflow: visible;
+}
+
+.nav-customer-console {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.25rem 1rem 0.9rem;
+  min-width: 0;
+  overflow: visible;
+}
+
+.nav-customer-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: visible; /* dropdowns must escape */
 }
 
 .nav-admin-meta {
@@ -222,6 +392,14 @@
   padding: 0.5rem 0.68rem;
   font-size: 0.82rem;
   white-space: nowrap;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.navbar-admin .nav-admin-links .nav-link span {
+  overflow: visible;
+  text-overflow: unset;
+  max-width: none; /* no arbitrary truncation \u2014 let the pill scroll */
 }
 
 .navbar-admin .nav-link:hover,
@@ -262,9 +440,10 @@
 .navbar-inner {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start; /* brand left, links fill, right always visible at end */
   gap: 0.75rem;
   min-height: 70px;
+  min-width: 0;
 }
 
 .navbar-brand {
@@ -274,17 +453,20 @@
   color: var(--text);
   text-decoration: none;
   flex-shrink: 0;
+  min-width: 0;
 }
 
 .brand-copy {
   display: flex;
   flex-direction: column;
   line-height: 1.05;
+  min-width: 0;
 }
 
 .brand-copy strong {
   font-size: 1.08rem;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .brand-meta {
@@ -292,10 +474,12 @@
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.16em;
+  white-space: nowrap;
 }
 
 .brand-icon {
   font-size: 1.6rem;
+  flex-shrink: 0;
 }
 
 .venue-btn {
@@ -309,7 +493,8 @@
   background: rgba(var(--primary-rgb), 0.06);
   padding: 0.5rem 0.8rem;
   min-width: 0;
-  max-width: 172px;
+  max-width: 180px;
+  flex-shrink: 0;
 }
 
 .venue-details {
@@ -356,7 +541,7 @@
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  flex-shrink: 0;
+  flex-shrink: 0; /* NEVER shrink — buttons must always be visible */
   margin-left: auto;
 }
 
@@ -425,22 +610,13 @@
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
   justify-content: center;
+  /* NO overflow:hidden — that clips nav pills and hides last items */
 }
 
-.nav-customer-links {
-  display: flex;
-  align-items: center;
-  gap: 0.2rem;
-  min-width: 0;
-  padding: 0.22rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--bg-input);
-  box-shadow: var(--shadow-sm);
-}
+/* .nav-customer-links is now a flat drawer list — pill styles removed */
 
 .nav-customer-meta {
   display: flex;
@@ -459,7 +635,7 @@
 .nav-link {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.4rem;
   color: var(--text-secondary);
   font-size: 0.86rem;
   font-weight: 600;
@@ -468,6 +644,18 @@
   transition: var(--transition);
   text-decoration: none;
   white-space: nowrap;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.nav-link svg {
+  flex-shrink: 0;
+}
+
+.nav-link span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .nav-link:hover {
@@ -485,7 +673,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 94px;
+  min-width: 80px;
   padding: 0.55rem 0.95rem;
   border-radius: 999px;
   border: 1px solid rgba(var(--primary-rgb), 0.14);
@@ -496,6 +684,9 @@
   text-decoration: none;
   white-space: nowrap;
   transition: var(--transition);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
 }
 
 .nav-auth-link:hover {
@@ -535,6 +726,16 @@
   white-space: nowrap;
   box-shadow: 0 2px 10px rgba(99, 102, 241, 0.25);
   transition: var(--transition);
+  min-width: 0;
+  max-width: 200px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.nav-user span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 .nav-user:hover {
   box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35);
@@ -579,6 +780,17 @@
 
   .venue-name {
     max-width: 82px;
+  }
+
+  /* No hard max-width on spans — rely on pill scroll instead */
+  .nav-link {
+    padding: 0.42rem 0.55rem;
+    font-size: 0.8rem;
+    gap: 0.3rem;
+  }
+
+  .navbar-admin .nav-admin-links .nav-link span {
+    max-width: none;
   }
 }
 
@@ -637,15 +849,10 @@
     right: 0;
   }
 
-  .nav-customer-links {
+.nav-customer-links {  /* old pill — now replaced */
     width: 100%;
     flex-direction: column;
     align-items: stretch;
-    padding: 0;
-    border: none;
-    border-radius: 0;
-    background: transparent;
-    box-shadow: none;
   }
 
   .nav-admin-entry {
@@ -659,6 +866,17 @@
     flex-direction: column;
     gap: 0.45rem;
     width: 100%;
+  }
+
+  .nav-customer-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    width: 100%;
+  }
+
+  .nav-customer-console {
+    display: none;
   }
 
   .nav-admin-links {
@@ -687,13 +905,32 @@
     font-size: 0.95rem;
     padding: 0.75rem 1rem;
     border-radius: 14px;
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  .nav-link span {
+    overflow: visible;
+    text-overflow: unset;
+    max-width: none;
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  .nav-admin-links .nav-link span,
+  .nav-customer-links .nav-link span {
+    max-width: none;
   }
 
   .nav-auth-link {
     width: 100%;
     min-width: 0;
+    max-width: none;
     padding: 0.75rem 1rem;
     border-radius: 14px;
+    overflow: visible;
+    text-overflow: unset;
+    white-space: normal;
   }
 
   .nav-link:hover {
@@ -703,15 +940,198 @@
   .nav-user {
     justify-content: center;
     margin-top: 0.5rem;
+    max-width: none;
+    overflow: visible;
+  }
+
+  .nav-user span {
+    overflow: visible;
+    text-overflow: unset;
+  }
+
+  .nav-user small {
+    display: inline;
   }
 
   .venue-btn {
     width: 100%;
+    max-width: none;
     justify-content: flex-start;
+  }
+
+  .venue-name {
+    max-width: none;
+  }
+
+  .venue-pill-label {
+    display: inline;
+  }
+
+  .brand-meta {
+    display: inline;
+  }
+
+  .nav-action-label {
+    display: inline;
   }
 }
 
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   NavOverflowBar — "Priority+" overflow navigation
+   Used for both admin console links and customer pill nav.
+   Pattern: show items that fit, collapse rest into "More ▾" dropdown.
+   Same pattern as GitHub, Linear, Google, Microsoft Fluent.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* The overflow bar wrapper (rendered by NavOverflowBar) */
+.nav-overflow-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;  /* 6px — matches GAP constant in NavOverflowBar.jsx */
+  min-width: 0;
+  flex: 1 1 0;
+  overflow: visible; /* MUST be visible so dropdown can escape */
+}
+
+/* When .nav-customer-links is applied to the overflow bar,
+   the pill background/border come from .nav-customer-links above.
+   The links inside still get full nav-link styles. */
+
+/* More button trigger */
+.nav-more-wrapper {
+  position: relative; /* dropdown positions relative to this */
+  flex-shrink: 0;
+}
+
+.nav-more-hidden {
+  /* Completely remove from layout when not needed */
+  display: none !important;
+}
+
+.nav-more-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.nav-more-chevron {
+  font-size: 0.7rem;
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.nav-more-chevron-open {
+  transform: rotate(180deg);
+}
+
+/* Dropdown panel */
+.nav-more-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 220px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.1),
+    0 10px 24px -4px rgba(0, 0, 0, 0.12),
+    0 0 0 1px rgba(var(--primary-rgb), 0.04);
+  padding: 0.35rem;
+  z-index: 200;
+  animation: overflowDropIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Each item in the dropdown */
+.nav-more-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.65rem 0.9rem;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: var(--transition);
+  white-space: nowrap;
+  line-height: 1.5; /* Indic script line height */
+}
+
+.nav-more-item svg {
+  flex-shrink: 0;
+  font-size: 0.95rem;
+  color: var(--text-muted);
+}
+
+.nav-more-item:hover {
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+
+.nav-more-item:hover svg {
+  color: var(--primary);
+}
+
+.nav-more-item-active {
+  color: var(--primary);
+  background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.1), rgba(var(--accent-rgb), 0.05));
+}
+
+.nav-more-item-active svg {
+  color: var(--primary);
+}
+
+[data-theme="dark"] .nav-more-dropdown {
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.3),
+    0 10px 24px -4px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(var(--primary-rgb), 0.08);
+}
+
+@keyframes overflowDropIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* In mobile drawer, the overflow bar becomes a vertical stack */
+@media (max-width: 1320px) {
+  .navbar-links .nav-overflow-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    width: 100%;
+    /* pill container styling not needed in drawer */
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    padding: 0;
+  }
+
+  .navbar-links .nav-overflow-bar .nav-more-wrapper {
+    display: none; /* all items are shown in the drawer, no More needed */
+  }
+
+  /* Customer pill nav in mobile drawer */
+  .navbar-links .nav-customer-links {
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    padding: 0;
+  }
 }

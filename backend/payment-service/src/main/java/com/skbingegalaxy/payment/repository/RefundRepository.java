@@ -40,4 +40,24 @@ public interface RefundRepository extends JpaRepository<Refund, Long> {
     @Query("SELECT COALESCE(SUM(r.amount), 0) FROM Refund r WHERE r.status IN :statuses AND r.payment.bingeId = :bingeId")
     BigDecimal sumAllCompletedRefundsByBingeId(@Param("statuses") List<PaymentStatus> statuses,
                                                @Param("bingeId") Long bingeId);
+
+    /**
+     * Batch: sum of completed refunds grouped by payment ID — avoids N+1 in list endpoints.
+     * Returns rows of [paymentId, sumAmount].
+     */
+    @Query("SELECT r.payment.id, COALESCE(SUM(r.amount), 0) FROM Refund r "
+         + "WHERE r.payment.id IN :paymentIds AND r.status IN :statuses GROUP BY r.payment.id")
+    List<Object[]> sumCompletedRefundsByPaymentIds(
+            @Param("paymentIds") List<Long> paymentIds,
+            @Param("statuses") List<PaymentStatus> statuses);
+
+    /**
+     * Batch: count of completed refunds grouped by payment ID — avoids N+1 in list endpoints.
+     * Returns rows of [paymentId, count].
+     */
+    @Query("SELECT r.payment.id, COUNT(r) FROM Refund r "
+         + "WHERE r.payment.id IN :paymentIds AND r.status IN :statuses GROUP BY r.payment.id")
+    List<Object[]> countRefundsByPaymentIds(
+            @Param("paymentIds") List<Long> paymentIds,
+            @Param("statuses") List<PaymentStatus> statuses);
 }

@@ -49,4 +49,8 @@ public interface NotificationRepository extends MongoRepository<Notification, St
 
     /** Find notifications in a digest group that haven't been digested yet. */
     List<Notification> findByDigestGroupAndDigestedFalseAndSentTrue(String digestGroup);
+
+    /** Find ALL un-digested sent notifications that have a non-null digestGroup. */
+    @Query("{ 'digestGroup': { $ne: null }, 'digested': false, 'sent': true }")
+    List<Notification> findUndigestedWithDigestGroup();
 }

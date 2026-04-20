@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { bookingService, paymentService } from '../services/endpoints';
+import { bookingService, paymentService, toArray } from '../services/endpoints';
 import { toast } from 'react-toastify';
+import { trackPaymentStarted, trackPaymentCompleted, trackPaymentFailed } from '../services/analytics';
 import SEO from '../components/SEO';
 import {
   FiAlertCircle,
@@ -51,6 +52,7 @@ export default function PaymentPage() {
   const [payment, setPayment] = useState(null);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
+  const paymentCallbackRef = useRef(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -60,7 +62,7 @@ export default function PaymentPage() {
 
       try {
         const payRes = await paymentService.getByBooking(ref);
-        const payments = payRes.data.data || [];
+        const payments = toArray(payRes.data?.data);
         const sortedPayments = [...payments].sort(
           (left, right) => new Date(right.createdAt || right.updatedAt || right.paidAt || 0) - new Date(left.createdAt || left.updatedAt || left.paidAt || 0)
         );
@@ -99,6 +101,7 @@ export default function PaymentPage() {
       return;
     }
     setProcessing(true);
+    trackPaymentStarted(ref, booking.totalAmount);
     try {
       const res = await paymentService.initiate({
         bookingRef: ref,
@@ -124,6 +127,8 @@ export default function PaymentPage() {
           description: `Booking ${ref}`,
           order_id: payData.gatewayOrderId,
           handler: async (response) => {
+            if (paymentCallbackRef.current) return;
+            paymentCallbackRef.current = true;
             try {
               await paymentService.callback({
                 gatewayOrderId: response.razorpay_order_id,
@@ -132,8 +137,10 @@ export default function PaymentPage() {
                 status: 'success',
               });
               toast.success('Payment successful!');
+              trackPaymentCompleted(ref, booking.totalAmount, paymentMethod);
               await loadData();
             } catch (err) {
+              trackPaymentFailed(ref, err.response?.data?.message || 'verification_error');
               const status = err.response?.status;
               const serverMsg = err.response?.data?.message;
               if (!err.response) {
@@ -145,6 +152,7 @@ export default function PaymentPage() {
               }
             } finally {
               setProcessing(false);
+              paymentCallbackRef.current = false;
             }
           },
           modal: {

@@ -60,13 +60,19 @@ public class WaitlistController {
 
     @GetMapping("/admin")
     public ResponseEntity<ApiResponse<List<WaitlistEntryDto>>> getWaitlistForDate(
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        adminBingeScopeService.requireManagedBinge(adminId, role, "viewing waitlist");
         return ResponseEntity.ok(ApiResponse.ok(waitlistService.getWaitlistForDate(date)));
     }
 
     @GetMapping("/admin/count")
     public ResponseEntity<ApiResponse<Long>> getWaitlistCount(
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        adminBingeScopeService.requireManagedBinge(adminId, role, "viewing waitlist count");
         return ResponseEntity.ok(ApiResponse.ok(waitlistService.getWaitlistCount(date)));
     }
 }

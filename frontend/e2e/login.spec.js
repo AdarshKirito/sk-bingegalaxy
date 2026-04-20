@@ -10,14 +10,24 @@ test.describe('Login flow', () => {
 
   test('shows validation error on empty submit', async ({ page }) => {
     await page.goto('/login');
-    await page.getByRole('button', { name: /sign in|login/i }).click();
-    // Should show some validation feedback (toast or inline error)
-    await expect(page.locator('.Toastify, [role="alert"], .error, .field-error')).toBeVisible({ timeout: 5000 });
+    await page.getByRole('button', { name: 'Sign In', exact: true }).click();
+    await expect(page.locator('.error-message, .Toastify__toast--error').first()).toBeVisible({ timeout: 5000 });
+  });
+
+  test('shows error on invalid credentials', async ({ page }) => {
+    await page.goto('/login');
+    await page.fill('input[type="email"], input[name="email"]', 'wrong@example.com');
+    await page.fill('input[type="password"]', 'WrongPassword123!');
+    await page.getByRole('button', { name: 'Sign In', exact: true }).click();
+    // Expect inline error-message div or error toast
+    await expect(page.locator('.error-message, .Toastify__toast--error').first()).toBeVisible({ timeout: 10000 });
   });
 
   test('navigates to register page', async ({ page }) => {
     await page.goto('/login');
-    await page.getByRole('link', { name: /sign up|register|create/i }).click();
+    const signUpLink = page.locator('.auth-links a[href="/register"]');
+    await signUpLink.scrollIntoViewIfNeeded();
+    await signUpLink.click();
     await expect(page).toHaveURL(/register/);
   });
 
@@ -28,30 +38,43 @@ test.describe('Login flow', () => {
   });
 
   test('redirects authenticated users away from login', async ({ page }) => {
-    // Simulate an active session via localStorage (mock)
+    // Mock auth profile validation so fake localStorage user is accepted
+    await page.route('**/api/v1/auth/profile', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, data: { id: 1, firstName: 'Test', role: 'CUSTOMER', active: true, phone: '9999999999' } }),
+      });
+    });
     await page.goto('/');
     await page.evaluate(() => {
       localStorage.setItem('user', JSON.stringify({ id: 1, firstName: 'Test', role: 'CUSTOMER', active: true, phone: '9999999999' }));
       localStorage.setItem('token_exp', String(Math.floor(Date.now() / 1000) + 3600));
     });
     await page.goto('/login');
-    // Should redirect away from login (exact URL depends on auth state)
-    await page.waitForTimeout(2000);
-    const url = page.url();
-    expect(url).not.toContain('/login');
+    await expect(page).not.toHaveURL(/\/login$/, { timeout: 8000 });
   });
 });
 
 test.describe('Admin login flow', () => {
-  test('shows admin login page', async ({ page }) => {
+  test('shows admin login page with admin branding', async ({ page }) => {
     await page.goto('/admin/login');
     await expect(page.locator('input[type="email"], input[name="email"]')).toBeVisible();
     await expect(page.locator('input[type="password"]')).toBeVisible();
   });
 
-  test('blocks non-admin access to admin dashboard', async ({ page }) => {
+  test('blocks non-admin customer from admin dashboard', async ({ page }) => {
+    await page.goto('/');
+    await page.evaluate(() => {
+      localStorage.setItem('user', JSON.stringify({ id: 1, firstName: 'Customer', role: 'CUSTOMER', active: true, phone: '9999999999' }));
+      localStorage.setItem('token_exp', String(Math.floor(Date.now() / 1000) + 3600));
+    });
     await page.goto('/admin/dashboard');
-    // Should redirect to admin login
+    await expect(page).not.toHaveURL(/admin\/dashboard/, { timeout: 5000 });
+  });
+
+  test('unauthenticated user is redirected to admin login', async ({ page }) => {
+    await page.goto('/admin/dashboard');
     await page.waitForURL(/admin\/login/, { timeout: 5000 });
   });
 });

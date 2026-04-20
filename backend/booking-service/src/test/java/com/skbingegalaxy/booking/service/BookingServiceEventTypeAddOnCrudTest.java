@@ -40,6 +40,7 @@ class BookingServiceEventTypeAddOnCrudTest {
     @Mock private PricingService pricingService;
     @Mock private BookingEventLogService eventLogService;
     @Mock private SagaOrchestrator sagaOrchestrator;
+    @Mock private LoyaltyService loyaltyService;
     @Mock private com.skbingegalaxy.booking.client.AvailabilityClient availabilityClient;
     @Spy  private com.skbingegalaxy.booking.client.AvailabilityClientFallback availabilityFallback;
     @Mock private org.springframework.kafka.core.KafkaTemplate<String, Object> kafkaTemplate;
@@ -54,6 +55,9 @@ class BookingServiceEventTypeAddOnCrudTest {
         ReflectionTestUtils.setField(bookingService, "refPrefix", "SKBG");
         ReflectionTestUtils.setField(bookingService, "maxPendingPerCustomer", 2);
         ReflectionTestUtils.setField(bookingService, "cooldownMinutesAfterTimeout", 10);
+        lenient().when(loyaltyService.earnPoints(anyLong(), anyString(), any(BigDecimal.class))).thenReturn(0L);
+        lenient().when(loyaltyService.redeemPoints(anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
+            .thenReturn(new LoyaltyService.RedemptionResult(0L, BigDecimal.ZERO));
     }
 
     @AfterEach

@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { adminService, authService } from '../services/endpoints';
+import { adminService, authService, toArray } from '../services/endpoints';
 import { toast } from 'react-toastify';
+import './AdminPages.css';
 
 export default function AdminCustomerPricing() {
   const [searchParams] = useSearchParams();
@@ -24,13 +25,14 @@ export default function AdminCustomerPricing() {
   const [bulkRateCodeId, setBulkRateCodeId] = useState('');
   const [selectAll, setSelectAll] = useState(false);
   const [checkedIds, setCheckedIds] = useState(new Set());
+  const [savingIds, setSavingIds] = useState(new Set());
 
   useEffect(() => {
     Promise.all([adminService.getAllEventTypes(), adminService.getAllAddOns(), adminService.getRateCodes()])
       .then(([etRes, aoRes, rcRes]) => {
-        setEventTypes(etRes.data.data || []);
-        setAddOns(aoRes.data.data || []);
-        setRateCodes(rcRes.data.data || []);
+        setEventTypes(toArray(etRes.data?.data));
+        setAddOns(toArray(aoRes.data?.data));
+        setRateCodes(toArray(rcRes.data?.data));
       })
       .catch(() => toast.error('Failed to load data'))
       .finally(() => setLoading(false));
@@ -133,6 +135,8 @@ export default function AdminCustomerPricing() {
   };
 
   const saveCustomerPricing = async (cust) => {
+    if (savingIds.has(cust.id)) return;
+    setSavingIds(prev => new Set(prev).add(cust.id));
     const payload = {
       customerId: cust.id,
       rateCodeId: cust.rateCodeId || null,
@@ -149,6 +153,8 @@ export default function AdminCustomerPricing() {
       setSelectedCustomers(prev => prev.map(c => c.id === cust.id ? { ...c, dirty: false } : c));
     } catch (err) {
       toast.error(err.response?.data?.message || 'Save failed');
+    } finally {
+      setSavingIds(prev => { const s = new Set(prev); s.delete(cust.id); return s; });
     }
   };
 
@@ -261,7 +267,7 @@ export default function AdminCustomerPricing() {
                     {expandedIds.has(cust.id) ? '▲ Minimize' : '▼ Expand'}
                   </button>
                   <button className="btn btn-primary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
-                    onClick={() => saveCustomerPricing(cust)} disabled={!cust.dirty}>Save</button>
+                    onClick={() => saveCustomerPricing(cust)} disabled={!cust.dirty || savingIds.has(cust.id)}>{savingIds.has(cust.id) ? 'Saving...' : 'Save'}</button>
                   <button className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', color: '#ef4444' }}
                     onClick={() => removeCustomer(cust.id)}>✕</button>
                 </div>
@@ -369,8 +375,8 @@ export default function AdminCustomerPricing() {
                     }}>
                       Clear Overrides
                     </button>
-                    <button className="btn btn-primary" onClick={() => saveCustomerPricing(cust)} disabled={!cust.dirty}>
-                      Save Pricing for {cust.firstName}
+                    <button className="btn btn-primary" onClick={() => saveCustomerPricing(cust)} disabled={!cust.dirty || savingIds.has(cust.id)}>
+                      {savingIds.has(cust.id) ? 'Saving...' : `Save Pricing for ${cust.firstName}`}
                     </button>
                   </div>
                 </div>

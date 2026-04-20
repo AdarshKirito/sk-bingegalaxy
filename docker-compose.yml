@@ -57,7 +57,9 @@ services:
           memory: 256M
           cpus: "0.25"
 
-  # ── Kafka ──────────────────────────────────────────────────
+  # ── Kafka (single-broker dev — Zookeeper) ────────────────
+  # Single broker is sufficient for local development.
+  # K8s production uses a multi-broker Strimzi cluster (see k8s/kafka.yml).
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.0
     container_name: skbg-zookeeper
@@ -65,34 +67,39 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
-      KAFKA_OPTS: "-Dzookeeper.4lw.commands.whitelist=ruok,stat"
     healthcheck:
-      test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
+        test: ["CMD-SHELL", "echo srvr | nc localhost 2181 | grep Mode"]
+        interval: 10s
+        timeout: 5s
+        retries: 5
     deploy:
       resources:
         limits:
-          memory: 512M
-          cpus: "0.50"
+          memory: 256M
+          cpus: "0.25"
 
   kafka:
     image: confluentinc/cp-kafka:7.6.0
     container_name: skbg-kafka
-    restart: on-failure
+    restart: unless-stopped
     depends_on:
       zookeeper:
         condition: service_healthy
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1  # ⚠ DEV ONLY — single broker, zero fault tolerance. K8s uses RF=3 with min.insync.replicas=2. Do NOT use docker-compose for production.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+    volumes:
+      - kafka-data:/var/lib/kafka/data
     healthcheck:
       test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
       interval: 15s
@@ -203,7 +210,7 @@ services:
       SPRING_DATA_REDIS_PORT: 6379
       SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       JWT_SECRET: ${JWT_SECRET}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://skbingegalaxy.com,http://localhost:3000,http://localhost:8080}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8080}
       JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
     deploy:
       resources:
@@ -229,8 +236,8 @@ services:
         condition: service_completed_successfully
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/auth_db
-      SPRING_DATASOURCE_USERNAME: skbg_admin
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_DATASOURCE_USERNAME: auth_svc
+      SPRING_DATASOURCE_PASSWORD: ${AUTH_SVC_PASSWORD:-auth_svc_dev}
       SPRING_JPA_HIBERNATE_DDL_AUTO: validate
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:${EUREKA_PASSWORD}@discovery-server:8761/eureka/
       SPRING_CLOUD_CONFIG_URI: http://config-server:8888
@@ -262,8 +269,8 @@ services:
         condition: service_healthy
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/availability_db
-      SPRING_DATASOURCE_USERNAME: skbg_admin
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_DATASOURCE_USERNAME: availability_svc
+      SPRING_DATASOURCE_PASSWORD: ${AVAILABILITY_SVC_PASSWORD:-availability_svc_dev}
       SPRING_JPA_HIBERNATE_DDL_AUTO: validate
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:${EUREKA_PASSWORD}@discovery-server:8761/eureka/
       SPRING_CLOUD_CONFIG_URI: http://config-server:8888
@@ -294,8 +301,8 @@ services:
         condition: service_completed_successfully
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/booking_db
-      SPRING_DATASOURCE_USERNAME: skbg_admin
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_DATASOURCE_USERNAME: booking_svc
+      SPRING_DATASOURCE_PASSWORD: ${BOOKING_SVC_PASSWORD:-booking_svc_dev}
       SPRING_JPA_HIBERNATE_DDL_AUTO: validate
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:${EUREKA_PASSWORD}@discovery-server:8761/eureka/
       SPRING_CLOUD_CONFIG_URI: http://config-server:8888
@@ -327,14 +334,14 @@ services:
         condition: service_completed_successfully
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/payment_db
-      SPRING_DATASOURCE_USERNAME: skbg_admin
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_DATASOURCE_USERNAME: payment_svc
+      SPRING_DATASOURCE_PASSWORD: ${PAYMENT_SVC_PASSWORD:-payment_svc_dev}
       SPRING_JPA_HIBERNATE_DDL_AUTO: validate
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:${EUREKA_PASSWORD}@discovery-server:8761/eureka/
       SPRING_CLOUD_CONFIG_URI: http://config-server:8888
       SPRING_CLOUD_CONFIG_USERNAME: ${CONFIG_SERVER_USER:-configuser}
       SPRING_CLOUD_CONFIG_PASSWORD: ${CONFIG_SERVER_PASSWORD}
-      SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       PAYMENT_CALLBACK_URL: "${PAYMENT_CALLBACK_URL}"
       # Default to simulation for local compose so the service does not crash
       # when Razorpay secrets are intentionally omitted in development.
@@ -369,7 +376,7 @@ services:
       SPRING_CLOUD_CONFIG_URI: http://config-server:8888
       SPRING_CLOUD_CONFIG_USERNAME: ${CONFIG_SERVER_USER:-configuser}
       SPRING_CLOUD_CONFIG_PASSWORD: ${CONFIG_SERVER_PASSWORD}
-      SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka:29092"
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       EMAIL_HOST: "${EMAIL_HOST}"
       EMAIL_PORT: "${EMAIL_PORT}"
       EMAIL_USER: "${EMAIL_USER}"
@@ -384,7 +391,7 @@ services:
       TWILIO_SMS_FROM: "${TWILIO_SMS_FROM:-}"
       TWILIO_WHATSAPP_FROM: "${TWILIO_WHATSAPP_FROM:-}"
       FCM_CREDENTIALS_PATH: "${FCM_CREDENTIALS_PATH:-}"
-      NOTIFICATION_UNSUBSCRIBE_URL: "${NOTIFICATION_UNSUBSCRIBE_URL:-https://skbingegalaxy.com/account/notifications}"
+      NOTIFICATION_UNSUBSCRIBE_URL: "${NOTIFICATION_UNSUBSCRIBE_URL:-http://localhost:3000/account/notifications}"
       REMINDER_CHECK_INTERVAL_MS: "${REMINDER_CHECK_INTERVAL_MS:-60000}"
       JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
     deploy:
@@ -404,7 +411,8 @@ services:
     ports:
       - "3000:8080"
     depends_on:
-      - api-gateway
+      api-gateway:
+        condition: service_healthy
     deploy:
       resources:
         limits:
@@ -414,3 +422,4 @@ services:
 volumes:
   postgres-data:
   mongo-data:
+  kafka-data:

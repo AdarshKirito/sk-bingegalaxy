@@ -56,6 +56,7 @@ export default function StepCustomer({
     if (newCust.email.trim() && !/\S+@\S+\.\S+/.test(newCust.email)) { toast.error('Please enter a valid email address'); return; }
     if (!newCust.password.trim()) { toast.error('Password is required so customer can sign in'); return; }
     if (newCust.password.length < 10) { toast.error('Password must be at least 10 characters'); return; }
+    if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])/.test(newCust.password)) { toast.error('Password must include uppercase, lowercase, number, and special character'); return; }
     try {
       const res = await authService.adminCreateCustomer({
         firstName: newCust.firstName,

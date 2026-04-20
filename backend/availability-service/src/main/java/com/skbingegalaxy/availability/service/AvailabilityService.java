@@ -168,14 +168,16 @@ public class AvailabilityService {
     // ── Admin: list all blocked dates ────────────────────────
     public List<BlockedDateDto> getAllBlockedDates() {
         Long bid = BingeContext.getBingeId();
-        return (bid != null ? blockedDateRepository.findByBingeId(bid) : blockedDateRepository.findAll())
+        if (bid == null) return List.of();
+        return blockedDateRepository.findByBingeId(bid)
             .stream().map(this::toBlockedDateDto).toList();
     }
 
     // ── Admin: list all blocked slots ────────────────────────
     public List<BlockedSlotDto> getAllBlockedSlots() {
         Long bid = BingeContext.getBingeId();
-        return (bid != null ? blockedSlotRepository.findByBingeId(bid) : blockedSlotRepository.findAll())
+        if (bid == null) return List.of();
+        return blockedSlotRepository.findByBingeId(bid)
             .stream().map(this::toBlockedSlotDto).toList();
     }
 
@@ -190,8 +192,9 @@ public class AvailabilityService {
             ? blockedSlotRepository.findByBingeIdAndSlotDate(bid, date)
             : blockedSlotRepository.findBySlotDate(date);
         // Build set of blocked 30-min indices (startHour/endHour store minutes; divide by 30 for half-hour index)
+        // Use ceiling division for endHour so partial half-hours are fully blocked
         Set<Integer> blockedHalfHours = blocked.stream()
-            .flatMap(s -> java.util.stream.IntStream.range(s.getStartHour() / 30, s.getEndHour() / 30).boxed())
+            .flatMap(s -> java.util.stream.IntStream.range(s.getStartHour() / 30, (s.getEndHour() + 29) / 30).boxed())
             .collect(Collectors.toSet());
 
         int endMinute = startMinute + durationMinutes;
@@ -205,8 +208,9 @@ public class AvailabilityService {
     // ── Helpers ──────────────────────────────────────────────
     private DayAvailabilityDto buildDayAvailability(LocalDate date, List<BlockedSlot> blockedSlots) {
         // Build set of blocked half-hour indices (startHour/endHour store minutes; divide by 30 for half-hour index)
+        // Use ceiling division for endHour so partial half-hours are fully blocked
         Set<Integer> blockedHalfHours = blockedSlots.stream()
-            .flatMap(s -> java.util.stream.IntStream.range(s.getStartHour() / 30, s.getEndHour() / 30).boxed())
+            .flatMap(s -> java.util.stream.IntStream.range(s.getStartHour() / 30, (s.getEndHour() + 29) / 30).boxed())
             .collect(Collectors.toSet());
 
         List<SlotDto> available = new ArrayList<>();

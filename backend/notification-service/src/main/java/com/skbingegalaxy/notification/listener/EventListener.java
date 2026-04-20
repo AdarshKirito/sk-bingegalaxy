@@ -182,6 +182,11 @@ public class EventListener {
     public void handleDirectNotification(NotificationEvent event) {
         try {
             log.info("Direct notification event: type={}, to={}", event.getType(), event.getRecipientEmail());
+            if (event.getRecipientEmail() != null && event.getType() != null
+                    && recentlySentForEmail(event.getRecipientEmail(), event.getType())) {
+                log.info("Duplicate NOTIFICATION_SEND ({}) for {} — skipping", event.getType(), event.getRecipientEmail());
+                return;
+            }
             NotificationChannel channel = event.getChannel() != null ? event.getChannel() : NotificationChannel.EMAIL;
 
             notificationService.sendNotification(
@@ -236,6 +241,10 @@ public class EventListener {
             log.info("Password reset event: {}", event.getRecipientEmail());
             if (event.getRecipientEmail() == null) {
                 log.warn("Skipping PASSWORD_RESET — missing recipient email");
+                return;
+            }
+            if (recentlySentForEmail(event.getRecipientEmail(), "PASSWORD_RESET")) {
+                log.info("Duplicate PASSWORD_RESET for {} — skipping (sent within TTL)", event.getRecipientEmail());
                 return;
             }
             Map<String, Object> meta = event.getMetadata() != null ? new HashMap<>(event.getMetadata()) : new HashMap<>();
@@ -415,14 +424,11 @@ public class EventListener {
     private void cancelReminders(String bookingRef) {
         try {
             var reminders = bookingReminderRepository.findByBookingRef(bookingRef);
-            for (var r : reminders) {
-                if (!r.isFired()) {
-                    r.setCancelled(true);
-                    bookingReminderRepository.save(r);
-                }
-            }
-            if (!reminders.isEmpty()) {
-                log.info("Cancelled {} pending reminders for booking {}", reminders.size(), bookingRef);
+            var pending = reminders.stream().filter(r -> !r.isFired()).toList();
+            if (!pending.isEmpty()) {
+                pending.forEach(r -> r.setCancelled(true));
+                bookingReminderRepository.saveAll(pending);
+                log.info("Cancelled {} pending reminders for booking {}", pending.size(), bookingRef);
             }
         } catch (Exception e) {
             log.error("Failed to cancel reminders for {}: {}", bookingRef, e.getMessage());

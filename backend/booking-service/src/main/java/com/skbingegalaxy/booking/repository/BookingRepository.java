@@ -6,6 +6,7 @@ import com.skbingegalaxy.common.enums.PaymentStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -26,6 +27,7 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
 
        Optional<Booking> findByBookingRefAndBingeId(String bookingRef, Long bingeId);
 
+    @EntityGraph(attributePaths = {"eventType"})
     List<Booking> findByCustomerIdOrderByCreatedAtDesc(Long customerId);
 
     Page<Booking> findByCustomerId(Long customerId, Pageable pageable);
@@ -51,10 +53,12 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     Page<Booking> findUpcomingBookings(@Param("date") LocalDate date, Pageable pageable);
 
     // Customer: current bookings (PENDING or CONFIRMED with today or future date)
+    @EntityGraph(attributePaths = {"eventType"})
     @Query("SELECT b FROM Booking b WHERE b.customerId = :cid AND b.bookingDate >= :today AND b.status IN ('PENDING', 'CONFIRMED') ORDER BY b.bookingDate ASC, b.startTime ASC")
     List<Booking> findCustomerCurrentBookings(@Param("cid") Long customerId, @Param("today") LocalDate today);
 
     // Customer: past bookings (COMPLETED, CANCELLED, NO_SHOW, or past-date non-active)
+    @EntityGraph(attributePaths = {"eventType"})
     @Query("SELECT b FROM Booking b WHERE b.customerId = :cid AND (b.status IN ('COMPLETED', 'CANCELLED', 'NO_SHOW') OR b.bookingDate < :today) ORDER BY b.bookingDate DESC, b.startTime DESC")
     List<Booking> findCustomerPastBookings(@Param("cid") Long customerId, @Param("today") LocalDate today);
 
@@ -133,11 +137,17 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     //  BINGE-SCOPED QUERIES
     // ═══════════════════════════════════════════════════════════
 
+    @EntityGraph(attributePaths = {"eventType"})
     Page<Booking> findByBingeId(Long bingeId, Pageable pageable);
+    @EntityGraph(attributePaths = {"eventType"})
     Page<Booking> findByBingeIdAndBookingDate(Long bingeId, LocalDate date, Pageable pageable);
+    @EntityGraph(attributePaths = {"eventType"})
     Page<Booking> findByBingeIdAndStatus(Long bingeId, BookingStatus status, Pageable pageable);
+    @EntityGraph(attributePaths = {"eventType"})
     Page<Booking> findByBingeIdAndBookingDateAndStatus(Long bingeId, LocalDate date, BookingStatus status, Pageable pageable);
+    @EntityGraph(attributePaths = {"eventType"})
     Page<Booking> findByBingeIdAndBookingDateBetween(Long bingeId, LocalDate from, LocalDate to, Pageable pageable);
+    List<Booking> findByBingeIdAndBookingDateBetweenOrderByBookingDateAscStartTimeAsc(Long bingeId, LocalDate from, LocalDate to);
     List<Booking> findByBingeIdAndCustomerIdAndStatus(Long bingeId, Long customerId, BookingStatus status);
 
     @Query("SELECT b FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate >= :date AND b.status IN ('PENDING', 'CONFIRMED')")
@@ -167,9 +177,11 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
            "LOWER(b.eventType.name) LIKE LOWER(CONCAT('%', :q, '%')))")
     Page<Booking> searchBookingsByDate(@Param("date") LocalDate date, @Param("q") String query, Pageable pageable);
 
+    @EntityGraph(attributePaths = {"eventType"})
     @Query("SELECT b FROM Booking b WHERE b.bingeId = :bid AND b.customerId = :cid AND b.bookingDate >= :today AND b.status IN ('PENDING', 'CONFIRMED') ORDER BY b.bookingDate ASC, b.startTime ASC")
     List<Booking> findCustomerCurrentBookingsByBinge(@Param("bid") Long bingeId, @Param("cid") Long customerId, @Param("today") LocalDate today);
 
+    @EntityGraph(attributePaths = {"eventType"})
     @Query("SELECT b FROM Booking b WHERE b.bingeId = :bid AND b.customerId = :cid AND (b.status IN ('COMPLETED', 'CANCELLED', 'NO_SHOW') OR b.bookingDate < :today) ORDER BY b.bookingDate DESC, b.startTime DESC")
     List<Booking> findCustomerPastBookingsByBinge(@Param("bid") Long bingeId, @Param("cid") Long customerId, @Param("today") LocalDate today);
 
@@ -207,6 +219,7 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     @Query("SELECT COALESCE(SUM(COALESCE(b.totalAmount, 0)), 0) FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate BETWEEN :from AND :to AND b.status <> 'CANCELLED'")
     java.math.BigDecimal estimatedRevenueByBingeAndDateRange(@Param("bid") Long bingeId, @Param("from") LocalDate from, @Param("to") LocalDate to);
 
+    @EntityGraph(attributePaths = {"eventType"})
     List<Booking> findByBingeIdAndCustomerIdOrderByCreatedAtDesc(Long bingeId, Long customerId);
     long countByBingeIdAndCustomerId(Long bingeId, Long customerId);
     Page<Booking> findByBingeIdAndPaymentStatus(Long bingeId, PaymentStatus paymentStatus, Pageable pageable);

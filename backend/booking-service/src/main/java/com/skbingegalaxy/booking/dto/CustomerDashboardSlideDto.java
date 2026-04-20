@@ -30,4 +30,6 @@ public class CustomerDashboardSlideDto {
 
     @Pattern(regexp = "(?i)celebration|romance|cinema|team|family|luxury")
     private String theme;
+
+    private Long linkedEventTypeId;
 }

@@ -46,10 +46,18 @@ class DashboardStatsTest {
     @Mock private PricingService pricingService;
     @Mock private BookingEventLogService eventLogService;
     @Mock private SagaOrchestrator sagaOrchestrator;
+    @Mock private LoyaltyService loyaltyService;
 
     @InjectMocks private BookingService bookingService;
 
     private final LocalDate today = LocalDate.of(2026, 4, 3);
+
+    @BeforeEach
+    void initLoyaltyMocks() {
+        lenient().when(loyaltyService.earnPoints(anyLong(), anyString(), any(BigDecimal.class))).thenReturn(0L);
+        lenient().when(loyaltyService.redeemPoints(anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
+            .thenReturn(new LoyaltyService.RedemptionResult(0L, BigDecimal.ZERO));
+    }
 
     @AfterEach
     void tearDown() {

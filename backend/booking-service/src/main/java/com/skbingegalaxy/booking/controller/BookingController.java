@@ -3,7 +3,6 @@ package com.skbingegalaxy.booking.controller;
 import com.skbingegalaxy.booking.dto.*;
 import com.skbingegalaxy.booking.service.AdminBingeScopeService;
 import com.skbingegalaxy.booking.service.BookingService;
-import com.skbingegalaxy.booking.service.LoyaltyService;
 import com.skbingegalaxy.booking.service.PricingService;
 import com.skbingegalaxy.common.dto.ApiResponse;
 import jakarta.validation.Valid;
@@ -26,7 +25,6 @@ public class BookingController {
     private final AdminBingeScopeService adminBingeScopeService;
     private final BookingService bookingService;
     private final PricingService pricingService;
-    private final LoyaltyService loyaltyService;
 
     @ModelAttribute
     void validateSelectedBinge() {
@@ -56,6 +54,10 @@ public class BookingController {
                 && !userId.equals(booking.getCustomerId())) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                 .body(ApiResponse.error("Not authorized to view this booking"));
+        }
+        // Admin callers must own the binge this booking belongs to
+        if ("ADMIN".equalsIgnoreCase(userRole) || "SUPER_ADMIN".equalsIgnoreCase(userRole)) {
+            adminBingeScopeService.requireManagedBinge(userId, userRole, "viewing booking");
         }
         return ResponseEntity.ok(ApiResponse.ok(booking));
     }
@@ -177,13 +179,16 @@ public class BookingController {
             @RequestHeader("X-User-Id") Long userId,
             @RequestHeader("X-User-Role") String role,
             @Valid @RequestBody AdminReviewRequest request) {
+        adminBingeScopeService.requireManagedBinge(userId, role, "submitting admin review");
         return ResponseEntity.ok(ApiResponse.ok("Admin review submitted", bookingService.submitAdminReview(bookingRef, userId, role, request)));
     }
 
     @GetMapping("/admin/{bookingRef}/reviews")
     public ResponseEntity<ApiResponse<List<BookingReviewDto>>> getAdminReviews(
             @PathVariable String bookingRef,
+            @RequestHeader("X-User-Id") Long userId,
             @RequestHeader("X-User-Role") String role) {
+        adminBingeScopeService.requireManagedBinge(userId, role, "viewing admin reviews");
         return ResponseEntity.ok(ApiResponse.ok(bookingService.getAdminReviewsForBooking(bookingRef, role)));
     }
 
@@ -206,14 +211,6 @@ public class BookingController {
             @RequestParam int startMinute,
             @RequestParam int durationMinutes) {
         return ResponseEntity.ok(ApiResponse.ok(bookingService.getAvailableRooms(date, startMinute, durationMinutes)));
-    }
-
-    // ── Loyalty ──────────────────────────────────────────────
-
-    @GetMapping("/loyalty")
-    public ResponseEntity<ApiResponse<LoyaltyAccountDto>> getMyLoyalty(
-            @RequestHeader("X-User-Id") Long userId) {
-        return ResponseEntity.ok(ApiResponse.ok(loyaltyService.getAccount(userId)));
     }
 
     // ── Surge Pricing (public read) ──────────────────────────

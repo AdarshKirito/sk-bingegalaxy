@@ -61,6 +61,14 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
     Optional<Payment> findByIdForUpdate(@Param("id") Long id);
 
     /**
+     * Acquires a pessimistic write lock on the payment by gatewayOrderId to prevent
+     * concurrent callback processing from causing an unhandled OptimisticLockException.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM Payment p WHERE p.gatewayOrderId = :gatewayOrderId")
+    Optional<Payment> findByGatewayOrderIdForUpdate(@Param("gatewayOrderId") String gatewayOrderId);
+
+    /**
      * Check for a recent duplicate admin-added payment (same booking, method, amount, SUCCESS status)
      * created within the last few seconds — used as an idempotency guard for addPayment().
      */
@@ -93,4 +101,19 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
      */
     @Query(value = "SELECT pg_advisory_xact_lock(:lockKey)", nativeQuery = true)
     void acquirePaymentLock(@Param("lockKey") long lockKey);
+
+    /**
+     * Finds INITIATED payments older than the cutoff time (reconciliation).
+     */
+    @Query("SELECT p FROM Payment p WHERE p.status = 'INITIATED' AND p.createdAt < :cutoff")
+    List<Payment> findStaleInitiatedPayments(@Param("cutoff") java.time.LocalDateTime cutoff);
+
+    /**
+     * Paginated customer payment history.
+     */
+    org.springframework.data.domain.Page<Payment> findByCustomerIdAndBingeIdOrderByCreatedAtDesc(
+        Long customerId, Long bingeId, org.springframework.data.domain.Pageable pageable);
+
+    org.springframework.data.domain.Page<Payment> findByCustomerIdOrderByCreatedAtDesc(
+        Long customerId, org.springframework.data.domain.Pageable pageable);
 }

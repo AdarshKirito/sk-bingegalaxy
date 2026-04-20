@@ -26,8 +26,8 @@ public class LoyaltyTransaction {
     @Column(length = 20)
     private String bookingRef;
 
-    /** EARN, REDEEM, EXPIRE, ADJUST */
-    @Column(nullable = false, length = 10)
+    /** EARN, REDEEM, EXPIRE, ADJUST, REVERSAL, EARN_REVERSAL */
+    @Column(nullable = false, length = 20)
     private String type;
 
     /** Positive for EARN/ADJUST, negative for REDEEM/EXPIRE. */
@@ -40,4 +40,7 @@ public class LoyaltyTransaction {
     @CreationTimestamp
     @Column(updatable = false)
     private LocalDateTime createdAt;
+
+    /** For EARN transactions: when these points expire if not redeemed. */
+    private LocalDateTime expiresAt;
 }

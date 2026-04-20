@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
-  getMemberTier,
   getAccountPreferences,
   buildAccountPreferencesPayload,
   ACCOUNT_PREFERENCES_DEFAULTS,
@@ -14,40 +13,6 @@ import {
   MEMBER_OFFERS,
   EXPERIENCE_STEPS,
 } from '../services/customerExperience';
-
-describe('getMemberTier', () => {
-  it('returns "Private Guest" for 0 bookings and 0 spend', () => {
-    expect(getMemberTier(0, 0)).toBe('Private Guest');
-  });
-
-  it('returns "Private Guest" for low bookings and spend', () => {
-    expect(getMemberTier(3, 10000)).toBe('Private Guest');
-  });
-
-  it('returns "Spotlight Member" for 4+ bookings', () => {
-    expect(getMemberTier(4, 0)).toBe('Spotlight Member');
-  });
-
-  it('returns "Spotlight Member" for 18000+ spend', () => {
-    expect(getMemberTier(0, 18000)).toBe('Spotlight Member');
-  });
-
-  it('returns "Galaxy Circle" for 8+ bookings', () => {
-    expect(getMemberTier(8, 0)).toBe('Galaxy Circle');
-  });
-
-  it('returns "Galaxy Circle" for 40000+ spend', () => {
-    expect(getMemberTier(0, 40000)).toBe('Galaxy Circle');
-  });
-
-  it('returns "Galaxy Circle" for high bookings and spend', () => {
-    expect(getMemberTier(10, 50000)).toBe('Galaxy Circle');
-  });
-
-  it('defaults to "Private Guest" with no arguments', () => {
-    expect(getMemberTier()).toBe('Private Guest');
-  });
-});
 
 describe('getAccountPreferences', () => {
   it('returns defaults when called with empty object', () => {

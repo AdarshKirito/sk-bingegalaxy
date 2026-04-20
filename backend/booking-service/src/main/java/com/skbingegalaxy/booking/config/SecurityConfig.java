@@ -1,6 +1,8 @@
 package com.skbingegalaxy.booking.config;
 
 import com.skbingegalaxy.common.security.GatewayHeaderAuthFilter;
+import com.skbingegalaxy.common.security.InternalApiAuthFilter;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -13,15 +15,20 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @EnableWebSecurity
 public class SecurityConfig {
 
+    @Value("${internal.api.secret}")
+    private String internalApiSecret;
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
             .csrf(csrf -> csrf.disable())
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .addFilterBefore(new InternalApiAuthFilter(internalApiSecret), UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(new GatewayHeaderAuthFilter(), UsernamePasswordAuthenticationFilter.class)
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/v1/bookings/admin/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                 .requestMatchers("/api/v1/bookings/waitlist/admin/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
+                .requestMatchers("/api/v1/bookings/internal/**").hasRole("SYSTEM")
                 .requestMatchers(
                     "/api/v1/bookings/binges/**",
                     "/api/v1/bookings/event-types",
@@ -29,10 +36,12 @@ public class SecurityConfig {
                     "/api/v1/bookings/booked-slots",
                     "/api/v1/bookings/slot-capacity",
                     "/api/v1/bookings/venue-rooms",
+                    "/api/v1/bookings/venue-rooms/available",
                     "/api/v1/bookings/surge-rules"
                 ).permitAll()
-                .requestMatchers("/actuator/**").permitAll()
-                .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                .requestMatchers("/actuator/health/**", "/actuator/health").permitAll()
+                .requestMatchers("/actuator/**").hasRole("SYSTEM")
+                .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                 .anyRequest().authenticated()
             );
         return http.build();

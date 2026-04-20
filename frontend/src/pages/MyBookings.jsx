@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useBinge } from '../context/BingeContext';
-import { authService, bookingService } from '../services/endpoints';
+import { authService, bookingService, toArray } from '../services/endpoints';
 import {
   buildSupportEmailHref,
   buildSupportWhatsAppHref,
@@ -62,6 +62,7 @@ export default function MyBookings() {
   const [rescheduleForm, setRescheduleForm] = useState({ newBookingDate: '', newStartTime: '', newDurationMinutes: '' });
   const [transferForm, setTransferForm] = useState({ recipientName: '', recipientEmail: '', recipientPhone: '' });
   const [actionLoading, setActionLoading] = useState(false);
+  const [recurringGroupBookings, setRecurringGroupBookings] = useState(null); // null = closed, 'loading' = fetching, [] = empty, [...] = results
   const perPage = 6;
 
   useEffect(() => {
@@ -76,10 +77,10 @@ export default function MyBookings() {
       .then(([supportRes, currentRes, pastRes, pendingReviewRes, waitlistRes]) => {
         const baseSupport = supportRes.status === 'fulfilled' ? mergeSupportContact(supportRes.value.data.data) : CUSTOMER_SUPPORT;
         setSupportContact(baseSupport);
-        setCurrentBookings(currentRes.status === 'fulfilled' ? (currentRes.value.data.data || []) : []);
-        setPastBookings(pastRes.status === 'fulfilled' ? (pastRes.value.data.data || []) : []);
-        setPendingReviews(pendingReviewRes.status === 'fulfilled' ? (pendingReviewRes.value.data.data || []) : []);
-        setWaitlistEntries(waitlistRes.status === 'fulfilled' ? (waitlistRes.value.data.data || []) : []);
+        setCurrentBookings(currentRes.status === 'fulfilled' ? toArray(currentRes.value?.data?.data) : []);
+        setPastBookings(pastRes.status === 'fulfilled' ? toArray(pastRes.value?.data?.data) : []);
+        setPendingReviews(pendingReviewRes.status === 'fulfilled' ? toArray(pendingReviewRes.value?.data?.data) : []);
+        setWaitlistEntries(waitlistRes.status === 'fulfilled' ? toArray(waitlistRes.value?.data?.data) : []);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -87,7 +88,7 @@ export default function MyBookings() {
   useEffect(() => {
     const interval = setInterval(() => {
       bookingService.getPendingReviews()
-        .then((res) => setPendingReviews(res.data.data || []))
+        .then((res) => setPendingReviews(toArray(res.data?.data)))
         .catch(() => null);
     }, 30000);
     return () => clearInterval(interval);
@@ -663,7 +664,7 @@ export default function MyBookings() {
 
                 <div className="customer-booking-actions">
                   <Link to={`/booking/${booking.bookingRef}`} className="btn btn-secondary btn-sm">View Details</Link>
-                  {booking.status === 'PENDING' && booking.paymentStatus === 'PENDING' && (
+                  {booking.canCustomerCancel !== false && ['PENDING', 'CONFIRMED'].includes(booking.status) && (
                     <button type="button" className="btn btn-danger btn-sm" disabled={booking.canCustomerCancel === false} title={booking.customerCancelMessage || ''} onClick={() => handleCancelBooking(booking.bookingRef, booking.cancellationRefundPercentage)}>Cancel Booking</button>
                   )}
                   {booking.canCustomerReschedule && (
@@ -693,7 +694,15 @@ export default function MyBookings() {
                 )}
                 {booking.recurringGroupId && (
                   <div className="customer-booking-support-note" style={{ borderLeft: '3px solid var(--primary)' }}>
-                    <span><FiRepeat /> Part of recurring series ({booking.recurringGroupId})</span>
+                    <span><FiRepeat /> Part of recurring series</span>
+                    <button type="button" className="btn btn-secondary btn-sm" style={{ marginLeft: '0.5rem', fontSize: '0.75rem' }}
+                      onClick={async () => {
+                        try {
+                          setRecurringGroupBookings('loading');
+                          const res = await bookingService.getRecurringGroup(booking.recurringGroupId);
+                          setRecurringGroupBookings(toArray(res.data?.data));
+                        } catch { toast.error('Failed to load recurring series'); setRecurringGroupBookings(null); }
+                      }}>View all in series</button>
                   </div>
                 )}
                 {booking.rescheduleCount > 0 && (
@@ -778,6 +787,39 @@ export default function MyBookings() {
           </ol>
         </article>
       </section>
+
+      {/* Recurring Group Modal */}
+      {recurringGroupBookings !== null && (
+        <div className="modal-overlay" onClick={() => setRecurringGroupBookings(null)}>
+          <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '560px', padding: '2rem' }}>
+            <h2 style={{ marginBottom: '1rem' }}><FiRepeat /> Recurring Series</h2>
+            {recurringGroupBookings === 'loading' ? (
+              <p style={{ color: 'var(--text-muted)' }}>Loading...</p>
+            ) : recurringGroupBookings.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)' }}>No bookings found in this series.</p>
+            ) : (
+              <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                {recurringGroupBookings.map(b => (
+                  <div key={b.bookingRef} className="card" style={{ padding: '0.75rem 1rem', marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <strong>{b.bookingRef}</strong>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                        {b.bookingDate} · {b.startTime}
+                      </div>
+                    </div>
+                    <span className={`badge ${b.status === 'CONFIRMED' ? 'badge-success' : b.status === 'CANCELLED' ? 'badge-danger' : 'badge-warning'}`}>
+                      {b.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ textAlign: 'right', marginTop: '1rem' }}>
+              <button className="btn btn-secondary" onClick={() => setRecurringGroupBookings(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Reschedule Modal */}
       {rescheduleModal && (

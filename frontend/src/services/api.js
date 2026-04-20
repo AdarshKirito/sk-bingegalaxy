@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { toast } from 'react-toastify';
+import * as Sentry from '@sentry/react';
 
 const api = axios.create({
   baseURL: '/api/v1',
@@ -13,13 +14,28 @@ api.interceptors.request.use(async (config) => {
   const binge = localStorage.getItem('selectedBinge');
   if (binge) {
     try {
-      const { id } = JSON.parse(binge);
-      if (id) config.headers['X-Binge-Id'] = id;
+      const { id, name } = JSON.parse(binge);
+      if (id) {
+        config.headers['X-Binge-Id'] = id;
+        Sentry.setTag('bingeId', String(id));
+        Sentry.setTag('bingeName', name || '');
+      }
     } catch (_) { /* ignore parse errors */ }
   }
 
-  // Proactive token refresh: if the JWT will expire within 60 seconds, silently refresh
-  // before sending the request. Prevents mid-workflow 401s when an admin fills out a long form.
+  // Set Sentry user context from stored user info
+  const storedUser = localStorage.getItem('user');
+  if (storedUser) {
+    try {
+      const u = JSON.parse(storedUser);
+      Sentry.setUser({ id: String(u.id), username: u.firstName, role: u.role });
+    } catch (_) { /* ignore */ }
+  }
+
+  // Proactive token refresh: tokenExp is stored as Unix epoch SECONDS (from JWT `exp` claim),
+  // NOT milliseconds. If the JWT will expire within 60 seconds, silently refresh before sending
+  // the request. Concurrent requests during refresh are queued and released once the new token
+  // arrives — prevents mid-workflow 401s when an admin fills out a long form.
   const tokenExp = localStorage.getItem('token_exp');
   if (tokenExp && !config.url?.includes('/auth/refresh') && !isRefreshing) {
     const secondsLeft = Number(tokenExp) - Math.floor(Date.now() / 1000);
@@ -42,7 +58,11 @@ api.interceptors.request.use(async (config) => {
           } catch { /* ignore */ }
         }
         processQueue(null);
-      } catch (_) { /* fall through; reactive 401 handler will catch real expiry */ }
+      } catch (refreshError) {
+        Sentry.captureException(refreshError, { tags: { flow: 'proactive_token_refresh' } });
+        // Drain the queue on failure — without this, queued requests hang forever
+        processQueue(refreshError);
+      }
       isRefreshing = false;
     }
   }
@@ -109,6 +129,7 @@ function extractErrorMessage(err) {
 // ── Silent refresh token logic ──────────────────────────────
 let isRefreshing = false;
 let failedQueue = [];
+const MAX_QUEUED_REQUESTS = 50;
 
 function processQueue(error, token = null) {
   failedQueue.forEach(({ resolve, reject }) => {
@@ -135,6 +156,9 @@ api.interceptors.response.use(
       }
 
       if (isRefreshing) {
+        if (failedQueue.length >= MAX_QUEUED_REQUESTS) {
+          return Promise.reject(err);
+        }
         // Queue this request until the refresh completes
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });
@@ -171,6 +195,7 @@ api.interceptors.response.use(
         return api(originalRequest);
       } catch (refreshErr) {
         isRefreshing = false;
+        Sentry.captureException(refreshErr, { tags: { flow: 'token_refresh_401' } });
         processQueue(refreshErr, null);
         forceLogout();
         return Promise.reject(refreshErr);
@@ -196,6 +221,7 @@ function forceLogout() {
   localStorage.removeItem('user');
   localStorage.removeItem('selectedBinge');
   localStorage.removeItem('token_exp');
+  Sentry.setUser(null);
   // Call backend logout to clear httpOnly cookies
   axios.post('/api/v1/auth/logout', {}, { withCredentials: true }).catch(() => {});
   const isAdminPath = window.location.pathname.startsWith('/admin');

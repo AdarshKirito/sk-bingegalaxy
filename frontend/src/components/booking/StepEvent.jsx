@@ -11,9 +11,9 @@ export default function StepEvent({
       <div className="grid-3">
         {eventTypes.map(et => (
           <div key={et.id}
-            className={`card event-type-card ${form.eventTypeId == et.id ? 'selected' : ''}`}
+            className={`card event-type-card ${Number(form.eventTypeId) === et.id ? 'selected' : ''}`}
             onClick={() => setForm(f => ({ ...f, eventTypeId: et.id }))}
-            role="radio" aria-checked={form.eventTypeId == et.id} tabIndex={0}
+            role="radio" aria-checked={Number(form.eventTypeId) === et.id} tabIndex={0}
             onKeyDown={e => e.key === 'Enter' && setForm(f => ({ ...f, eventTypeId: et.id }))}>
             {et.imageUrls?.length > 0 && et.imageUrls[0] && (
               <div style={{ marginBottom: '0.75rem', borderRadius: 'var(--radius-sm)', overflow: 'hidden', cursor: 'zoom-in' }}

@@ -1,11 +1,12 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { BingeProvider, useBinge } from './context/BingeContext';
 import ErrorBoundary from './components/ErrorBoundary';
-import usePageTracking from './hooks/usePageTracking';
+import PWAUpdatePrompt from './components/PWAUpdatePrompt';
+import { trackPageView } from './services/analytics';
 
 import Navbar from './components/Navbar';
 import './pages/AdminExperience.css';
@@ -37,6 +38,7 @@ const AdminRateCodes = lazy(() => import('./pages/AdminRateCodes'));
 const AdminCustomerPricing = lazy(() => import('./pages/AdminCustomerPricing'));
 const AdminVenueRooms = lazy(() => import('./pages/AdminVenueRooms'));
 const AdminSurgeRules = lazy(() => import('./pages/AdminSurgeRules'));
+const AdminWaitlist = lazy(() => import('./pages/AdminWaitlist'));
 const BingeManagement = lazy(() => import('./pages/BingeManagement'));
 const BingeSelector = lazy(() => import('./pages/BingeSelector'));
 const PlatformDashboard = lazy(() => import('./pages/PlatformDashboard'));
@@ -65,7 +67,7 @@ function resolveAuthenticatedLanding(isAdmin, user) {
 function PublicOnlyRoute({ children }) {
   const { isAuthenticated, isAdmin, user, loading } = useAuth();
   if (loading) return <PageLoader />;
-  if (isAuthenticated && user?.active !== false) {
+  if (isAuthenticated && user?.active) {
     return <Navigate to={resolveAuthenticatedLanding(isAdmin, user)} replace />;
   }
   return children;
@@ -129,12 +131,13 @@ function AdminBingeRequired({ children }) {
 function AppFrame() {
   const location = useLocation();
   const isAdminRoute = location.pathname.startsWith('/admin');
-  usePageTracking();
+  useEffect(() => { trackPageView(location.pathname + location.search); }, [location]);
 
   return (
     <>
       <a href="#main-content" className="skip-link">Skip to main content</a>
       <Navbar />
+      <PWAUpdatePrompt />
       <ErrorBoundary>
       <main
         id="main-content"
@@ -176,6 +179,7 @@ function AppFrame() {
           <Route path="/admin/customer-pricing" element={<AdminBingeRequired><AdminCustomerPricing /></AdminBingeRequired>} />
           <Route path="/admin/venue-rooms" element={<AdminBingeRequired><AdminVenueRooms /></AdminBingeRequired>} />
           <Route path="/admin/surge-rules" element={<AdminBingeRequired><AdminSurgeRules /></AdminBingeRequired>} />
+          <Route path="/admin/waitlist" element={<AdminBingeRequired><AdminWaitlist /></AdminBingeRequired>} />
           <Route path="/admin/reports" element={<AdminBingeRequired><AdminReports /></AdminBingeRequired>} />
           <Route path="/admin/book" element={<AdminBingeRequired><AdminBookingCreate /></AdminBingeRequired>} />
           <Route path="/admin/users-config" element={<AdminBingeRequired><AdminUsersConfig /></AdminBingeRequired>} />
@@ -191,17 +195,23 @@ function AppFrame() {
   );
 }
 
-function App() {
+export function AppContent() {
   return (
     <ErrorBoundary>
-    <BrowserRouter>
       <AuthProvider>
         <BingeProvider>
           <AppFrame />
         </BingeProvider>
       </AuthProvider>
-    </BrowserRouter>
     </ErrorBoundary>
+  );
+}
+
+function App() {
+  return (
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <AppContent />
+    </BrowserRouter>
   );
 }
 

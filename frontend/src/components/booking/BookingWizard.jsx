@@ -1,7 +1,8 @@
-﻿import { useState, useEffect } from 'react';
+﻿import { useState, useEffect, useRef } from 'react';
 import { bookingService, availabilityService, adminService } from '../../services/endpoints';
 import { toast } from 'react-toastify';
 import { format, addDays } from 'date-fns';
+import { trackBookingStarted, trackBookingStepCompleted } from '../../services/analytics';
 
 import ImagePopup from './ImagePopup';
 import StepCustomer from './StepCustomer';
@@ -43,6 +44,7 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
   const [rawSlots, setRawSlots] = useState([]);
   const [bookedSlots, setBookedSlots] = useState([]);
   const [loading, setLoading] = useState(false);
+  const submittingRef = useRef(false);
   const [error, setError] = useState('');
   const [imagePopup, setImagePopup] = useState(null);
   const [resolvedPricing, setResolvedPricing] = useState(null);
@@ -50,6 +52,7 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
   const [selectedRateCodeId, setSelectedRateCodeId] = useState('');
   const [capacityFull, setCapacityFull] = useState(false);
   const [venueRooms, setVenueRooms] = useState([]);
+  const [availableRoomIds, setAvailableRoomIds] = useState(null); // null = not yet fetched
   const [surgeRules, setSurgeRules] = useState([]);
   const [loyalty, setLoyalty] = useState(null);
   const [activeSurge, setActiveSurge] = useState(null);
@@ -66,6 +69,9 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
     paymentMethod: isAdmin ? 'CASH' : 'UPI',
     venueRoomId: '',
     redeemLoyaltyPoints: 0,
+    recurringEnabled: false,
+    recurringPattern: 'WEEKLY',
+    recurringOccurrences: 4,
   });
 
   // Pre-fill from reinstate/edit data
@@ -126,7 +132,7 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
     if (isAdmin) {
       adminService.getActiveRateCodes()
         .then(res => setActiveRateCodes(res.data.data || []))
-        .catch(() => {});
+        .catch(() => toast.error('Failed to load rate codes'));
     }
   }, [isAdmin]);
 
@@ -135,7 +141,7 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
     if (!isAdmin) {
       bookingService.getMyPricing()
         .then(res => setResolvedPricing(res.data.data || null))
-        .catch(() => {});
+        .catch(() => toast.error('Failed to load your pricing'));
     }
   }, [isAdmin]);
 
@@ -166,14 +172,28 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
   useEffect(() => {
     bookingService.getVenueRooms()
       .then(res => setVenueRooms(res.data.data || []))
-      .catch(() => setVenueRooms([]));
+      .catch(() => { setVenueRooms([]); toast.error('Failed to load venue rooms'); });
   }, []);
+
+  // Filter rooms by availability when date + time + duration are selected
+  useEffect(() => {
+    if (!form.bookingDate || form.startTime === '' || !form.durationMinutes || venueRooms.length === 0) {
+      setAvailableRoomIds(null);
+      return;
+    }
+    bookingService.getAvailableRooms(form.bookingDate, Number(form.startTime), Number(form.durationMinutes))
+      .then(res => {
+        const rooms = res.data.data || [];
+        setAvailableRoomIds(new Set(rooms.map(r => r.id)));
+      })
+      .catch(() => setAvailableRoomIds(null)); // fallback: show all
+  }, [form.bookingDate, form.startTime, form.durationMinutes, venueRooms.length]);
 
   // Load surge rules
   useEffect(() => {
     bookingService.getActiveSurgeRules()
       .then(res => setSurgeRules(res.data.data || []))
-      .catch(() => setSurgeRules([]));
+      .catch(() => { setSurgeRules([]); toast.error('Failed to load surge rules'); });
   }, []);
 
   // Load loyalty (customer only)
@@ -337,13 +357,15 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
   };
 
   const handleSubmit = async () => {
+    if (submittingRef.current) return;
     if (isAdmin && !selectedCustomer) { toast.error('Please select a customer before confirming'); return; }
     if (!form.eventTypeId) { toast.error('Please select an event type'); return; }
     if (!form.bookingDate) { toast.error('Please select a booking date'); return; }
     if (form.startTime === '') { toast.error('Please select a time slot'); return; }
-    if (form.numberOfGuests < 1) { toast.error('Number of guests must be at least 1'); return; }
+    if (!Number.isFinite(form.numberOfGuests) || form.numberOfGuests < 1) { toast.error('Number of guests must be at least 1'); return; }
     setError('');
     setLoading(true);
+    submittingRef.current = true;
     try {
       const startMin = Number(form.startTime);
       const startH = Math.floor(startMin / 60);
@@ -371,7 +393,24 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
         if (!alreadyPaid) payload.paymentMethod = form.paymentMethod;
         if (selectedRateCodeId) payload.rateCodeId = Number(selectedRateCodeId);
       }
-      await onSubmit(payload);
+      // Recurring booking flow
+      if (form.recurringEnabled && !editBookingData) {
+        const recurringPayload = {
+          eventTypeId: payload.eventTypeId,
+          startDate: payload.bookingDate,
+          startTime: payload.startTime,
+          durationMinutes: payload.durationMinutes,
+          numberOfGuests: payload.numberOfGuests,
+          addOns: payload.addOns,
+          specialNotes: payload.specialNotes,
+          pattern: form.recurringPattern,
+          occurrences: Number(form.recurringOccurrences),
+          venueRoomId: payload.venueRoomId,
+        };
+        await onSubmit(recurringPayload, { recurring: true });
+      } else {
+        await onSubmit(payload);
+      }
     } catch (err) {
       const msg = err.userMessage || err.response?.data?.message || 'Booking failed. Please try again.';
       if (msg.startsWith('CAPACITY_FULL:')) {
@@ -384,6 +423,7 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
       toast.error(msg.replace('CAPACITY_FULL:', ''));
     } finally {
       setLoading(false);
+      submittingRef.current = false;
     }
   };
 
@@ -457,6 +497,8 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
           isAdmin={isAdmin}
           onNext={() => {
             if (!form.eventTypeId) { toast.error('Please select an event type to continue'); return; }
+            trackBookingStarted(eventTypes.find(e => e.id === Number(form.eventTypeId))?.name || '');
+            trackBookingStepCompleted(1, 'Event Selection');
             setStep(2);
           }}
           onBack={() => setStep(0)} onCancel={onCancel}
@@ -469,10 +511,12 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
           durationOptions={durationOptions} durationSlots={durationSlots}
           availability={availability} resolvedPricing={resolvedPricing}
           venueRooms={venueRooms} activeSurge={activeSurge}
+          availableRoomIds={availableRoomIds}
           fmtTime={fmtTime} fmtDuration={fmtDuration}
           onNext={() => {
             if (!form.bookingDate) { toast.error('Please select a date before proceeding'); return; }
             if (form.startTime === '') { toast.error('Please select a time slot before proceeding'); return; }
+            trackBookingStepCompleted(2, 'Date & Time');
             setStep(3);
           }}
           onBack={() => setStep(1)}
@@ -484,7 +528,7 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
           addOns={addOns} form={form} setForm={setForm} isAdmin={isAdmin}
           resolvedPricing={resolvedPricing} toggleAddOn={toggleAddOn}
           setImagePopup={setImagePopup}
-          onNext={() => setStep(4)} onBack={() => setStep(2)}
+          onNext={() => { trackBookingStepCompleted(3, 'Add-Ons'); setStep(4); }} onBack={() => setStep(2)}
         />
       )}
 

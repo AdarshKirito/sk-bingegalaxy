@@ -1,23 +1,24 @@
 package com.skbingegalaxy.booking.service;
 
+import com.skbingegalaxy.booking.config.LoyaltyProperties;
 import com.skbingegalaxy.booking.dto.LoyaltyAccountDto;
 import com.skbingegalaxy.booking.dto.LoyaltyTransactionDto;
-import com.skbingegalaxy.booking.entity.Binge;
 import com.skbingegalaxy.booking.entity.LoyaltyAccount;
 import com.skbingegalaxy.booking.entity.LoyaltyTransaction;
-import com.skbingegalaxy.booking.repository.BingeRepository;
 import com.skbingegalaxy.booking.repository.LoyaltyAccountRepository;
 import com.skbingegalaxy.booking.repository.LoyaltyTransactionRepository;
-import com.skbingegalaxy.common.context.BingeContext;
 import com.skbingegalaxy.common.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -29,7 +30,7 @@ public class LoyaltyService {
 
     private final LoyaltyAccountRepository accountRepository;
     private final LoyaltyTransactionRepository transactionRepository;
-    private final BingeRepository bingeRepository;
+    private final LoyaltyProperties loyaltyProps;
 
     // ── Tier thresholds (total points ever earned) ───────────
     private static final Map<String, Long> TIER_THRESHOLDS = Map.of(
@@ -40,29 +41,30 @@ public class LoyaltyService {
     );
     private static final List<String> TIER_ORDER = List.of("BRONZE", "SILVER", "GOLD", "PLATINUM");
 
+    /** Points expire after 365 days by default. */
+    private static final int POINTS_EXPIRY_DAYS = 365;
+
     // ═══════════════════════════════════════════════════════════
     //  GET ACCOUNT
     // ═══════════════════════════════════════════════════════════
 
     @Transactional(readOnly = true)
     public LoyaltyAccountDto getAccount(Long customerId) {
-        Long bingeId = BingeContext.requireBingeId();
-        Binge binge = bingeRepository.findById(bingeId).orElse(null);
-        if (binge == null || !binge.isLoyaltyEnabled()) {
+        if (!loyaltyProps.isEnabled()) {
             return null;
         }
 
-        Optional<LoyaltyAccount> accountOpt = accountRepository.findByCustomerIdAndBingeId(customerId, bingeId);
+        Optional<LoyaltyAccount> accountOpt = accountRepository.findByCustomerId(customerId);
         if (accountOpt.isEmpty()) {
             // Return an empty account DTO (customer has no history yet)
             return LoyaltyAccountDto.builder()
                 .customerId(customerId)
-                .bingeId(bingeId)
                 .totalPointsEarned(0)
                 .currentBalance(0)
                 .tierLevel("BRONZE")
                 .pointsToNextTier(TIER_THRESHOLDS.get("SILVER"))
                 .nextTierLevel("SILVER")
+                .redemptionRate(loyaltyProps.getRedemptionRate())
                 .recentTransactions(List.of())
                 .build();
         }
@@ -81,13 +83,12 @@ public class LoyaltyService {
     // ═══════════════════════════════════════════════════════════
 
     @Transactional
-    public long earnPoints(Long customerId, Long bingeId, String bookingRef, BigDecimal amountPaid) {
-        Binge binge = bingeRepository.findById(bingeId).orElse(null);
-        if (binge == null || !binge.isLoyaltyEnabled() || binge.getLoyaltyPointsPerRupee() <= 0) {
+    public long earnPoints(Long customerId, String bookingRef, BigDecimal amountPaid) {
+        if (!loyaltyProps.isEnabled() || loyaltyProps.getPointsPerRupee() <= 0) {
             return 0;
         }
 
-        LoyaltyAccount account = getOrCreateAccount(customerId, bingeId);
+        LoyaltyAccount account = getOrCreateAccount(customerId);
 
         // Prevent double-earning for the same booking
         if (transactionRepository.existsByAccountIdAndBookingRefAndType(account.getId(), bookingRef, "EARN")) {
@@ -95,7 +96,7 @@ public class LoyaltyService {
             return 0;
         }
 
-        long points = amountPaid.multiply(BigDecimal.valueOf(binge.getLoyaltyPointsPerRupee()))
+        long points = amountPaid.multiply(BigDecimal.valueOf(loyaltyProps.getPointsPerRupee()))
             .setScale(0, RoundingMode.FLOOR).longValue();
         if (points <= 0) return 0;
 
@@ -110,6 +111,7 @@ public class LoyaltyService {
             .type("EARN")
             .points(points)
             .description("Earned " + points + " points for booking " + bookingRef)
+            .expiresAt(LocalDateTime.now().plusDays(POINTS_EXPIRY_DAYS))
             .build());
 
         log.info("Loyalty: customer {} earned {} points for booking {} (new balance: {})",
@@ -126,14 +128,13 @@ public class LoyaltyService {
      * Returns the actual discount amount in ₹.
      */
     @Transactional
-    public RedemptionResult redeemPoints(Long customerId, Long bingeId, String bookingRef,
+    public RedemptionResult redeemPoints(Long customerId, String bookingRef,
                                           long requestedPoints, BigDecimal maxDiscount) {
-        Binge binge = bingeRepository.findById(bingeId).orElse(null);
-        if (binge == null || !binge.isLoyaltyEnabled() || binge.getLoyaltyRedemptionRate() <= 0) {
+        if (!loyaltyProps.isEnabled() || loyaltyProps.getRedemptionRate() <= 0) {
             return new RedemptionResult(0, BigDecimal.ZERO);
         }
 
-        Optional<LoyaltyAccount> accountOpt = accountRepository.findByCustomerIdAndBingeId(customerId, bingeId);
+        Optional<LoyaltyAccount> accountOpt = accountRepository.findByCustomerIdForUpdate(customerId);
         if (accountOpt.isEmpty() || accountOpt.get().getCurrentBalance() <= 0) {
             return new RedemptionResult(0, BigDecimal.ZERO);
         }
@@ -142,14 +143,13 @@ public class LoyaltyService {
         long actualPoints = Math.min(requestedPoints, account.getCurrentBalance());
         if (actualPoints <= 0) return new RedemptionResult(0, BigDecimal.ZERO);
 
-        // Calculate discount: points / redemptionRate = ₹
         BigDecimal discount = BigDecimal.valueOf(actualPoints)
-            .divide(BigDecimal.valueOf(binge.getLoyaltyRedemptionRate()), 2, RoundingMode.FLOOR);
+            .divide(BigDecimal.valueOf(loyaltyProps.getRedemptionRate()), 2, RoundingMode.FLOOR);
 
         // Cap discount at the booking total
         if (discount.compareTo(maxDiscount) > 0) {
             discount = maxDiscount;
-            actualPoints = discount.multiply(BigDecimal.valueOf(binge.getLoyaltyRedemptionRate()))
+            actualPoints = discount.multiply(BigDecimal.valueOf(loyaltyProps.getRedemptionRate()))
                 .setScale(0, RoundingMode.CEILING).longValue();
         }
 
@@ -177,19 +177,26 @@ public class LoyaltyService {
      * Reverse a previous redemption (e.g. on booking cancellation).
      */
     @Transactional
-    public void reverseRedemption(Long customerId, Long bingeId, String bookingRef, long points) {
+    public void reverseRedemption(Long customerId, String bookingRef, long points) {
         if (points <= 0) return;
-        Optional<LoyaltyAccount> accountOpt = accountRepository.findByCustomerIdAndBingeId(customerId, bingeId);
+        Optional<LoyaltyAccount> accountOpt = accountRepository.findByCustomerIdForUpdate(customerId);
         if (accountOpt.isEmpty()) return;
 
         LoyaltyAccount account = accountOpt.get();
+
+        // Idempotency: skip if already reversed for this booking
+        if (transactionRepository.existsByAccountIdAndBookingRefAndType(account.getId(), bookingRef, "REVERSAL")) {
+            log.info("Loyalty reversal already processed for booking {} — skipping", bookingRef);
+            return;
+        }
+
         account.setCurrentBalance(account.getCurrentBalance() + points);
         accountRepository.save(account);
 
         transactionRepository.save(LoyaltyTransaction.builder()
             .accountId(account.getId())
             .bookingRef(bookingRef)
-            .type("ADJUST")
+            .type("REVERSAL")
             .points(points)
             .description("Refunded " + points + " points for cancelled booking " + bookingRef)
             .build());
@@ -199,10 +206,18 @@ public class LoyaltyService {
     //  ADMIN: Manual adjustment
     // ═══════════════════════════════════════════════════════════
 
+    private static final long MAX_SINGLE_ADJUSTMENT = 100_000L;
+
     @Transactional
-    public LoyaltyAccountDto adjustPoints(Long customerId, long points, String description) {
-        Long bingeId = BingeContext.requireBingeId();
-        LoyaltyAccount account = getOrCreateAccount(customerId, bingeId);
+    public LoyaltyAccountDto adjustPoints(Long customerId, long points, String description, String role) {
+        LoyaltyAccount account = getOrCreateAccount(customerId);
+
+        boolean isSuperAdmin = "SUPER_ADMIN".equalsIgnoreCase(role);
+        if (!isSuperAdmin && Math.abs(points) > MAX_SINGLE_ADJUSTMENT) {
+            throw new BusinessException(
+                "Single adjustment cannot exceed " + MAX_SINGLE_ADJUSTMENT + " points. "
+                + "Only SUPER_ADMIN can perform larger adjustments.");
+        }
 
         if (points < 0 && account.getCurrentBalance() + points < 0) {
             throw new BusinessException("Insufficient loyalty balance for this adjustment");
@@ -226,14 +241,98 @@ public class LoyaltyService {
     }
 
     // ═══════════════════════════════════════════════════════════
+    //  EXPIRE POINTS (scheduled daily at 2:00 AM)
+    // ═══════════════════════════════════════════════════════════
+
+    @Scheduled(cron = "0 0 2 * * *")
+    @SchedulerLock(name = "loyalty-expire-points", lockAtMostFor = "PT10M", lockAtLeastFor = "PT1M")
+    @Transactional
+    public void expirePoints() {
+        List<LoyaltyTransaction> expired = transactionRepository.findExpiredEarnTransactions(LocalDateTime.now());
+        int count = 0;
+        for (LoyaltyTransaction earn : expired) {
+            if (earn.getPoints() <= 0) continue;
+
+            LoyaltyAccount account = accountRepository.findById(earn.getAccountId()).orElse(null);
+            if (account == null) continue;
+
+            long pointsToExpire = Math.min(earn.getPoints(), account.getCurrentBalance());
+            if (pointsToExpire <= 0) {
+                // Mark as expired even if balance is 0 (points were already redeemed)
+                earn.setPoints(0);
+                transactionRepository.save(earn);
+                continue;
+            }
+
+            account.setCurrentBalance(account.getCurrentBalance() - pointsToExpire);
+            accountRepository.save(account);
+
+            transactionRepository.save(LoyaltyTransaction.builder()
+                .accountId(account.getId())
+                .bookingRef(earn.getBookingRef())
+                .type("EXPIRE")
+                .points(-pointsToExpire)
+                .description("Expired " + pointsToExpire + " points (earned " + POINTS_EXPIRY_DAYS + "+ days ago)")
+                .build());
+
+            // Zero out the original EARN so it isn't processed again
+            earn.setPoints(0);
+            transactionRepository.save(earn);
+            count++;
+        }
+        if (count > 0) {
+            log.info("Loyalty expiry: expired points for {} transactions", count);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  REVERSE EARNED POINTS (on booking cancellation)
+    // ═══════════════════════════════════════════════════════════
+
+    @Transactional
+    public void reverseEarnedPoints(Long customerId, String bookingRef) {
+        Optional<LoyaltyAccount> accountOpt = accountRepository.findByCustomerIdForUpdate(customerId);
+        if (accountOpt.isEmpty()) return;
+
+        LoyaltyAccount account = accountOpt.get();
+
+        // Idempotency: skip if EARN_REVERSAL already recorded for this booking
+        if (transactionRepository.existsByAccountIdAndBookingRefAndType(account.getId(), bookingRef, "EARN_REVERSAL")) {
+            log.info("Earned points already reversed for booking {} — skipping", bookingRef);
+            return;
+        }
+
+        long earnedForBooking = transactionRepository.sumEarnedPointsForBooking(account.getId(), bookingRef);
+        if (earnedForBooking <= 0) return;
+
+        long actualDeduction = Math.min(earnedForBooking, account.getCurrentBalance());
+        if (actualDeduction > 0) {
+            account.setCurrentBalance(account.getCurrentBalance() - actualDeduction);
+        }
+        account.setTotalPointsEarned(account.getTotalPointsEarned() - earnedForBooking);
+        recalculateTier(account);
+        accountRepository.save(account);
+
+        transactionRepository.save(LoyaltyTransaction.builder()
+            .accountId(account.getId())
+            .bookingRef(bookingRef)
+            .type("EARN_REVERSAL")
+            .points(-actualDeduction)
+            .description("Reversed " + earnedForBooking + " earned points for cancelled booking " + bookingRef)
+            .build());
+
+        log.info("Loyalty: reversed {} earned points (deducted {} from balance) for cancelled booking {}",
+            earnedForBooking, actualDeduction, bookingRef);
+    }
+
+    // ═══════════════════════════════════════════════════════════
     //  HELPERS
     // ═══════════════════════════════════════════════════════════
 
-    private LoyaltyAccount getOrCreateAccount(Long customerId, Long bingeId) {
-        return accountRepository.findByCustomerIdAndBingeId(customerId, bingeId)
+    private LoyaltyAccount getOrCreateAccount(Long customerId) {
+        return accountRepository.findByCustomerId(customerId)
             .orElseGet(() -> accountRepository.save(LoyaltyAccount.builder()
                 .customerId(customerId)
-                .bingeId(bingeId)
                 .build()));
     }
 
@@ -262,7 +361,6 @@ public class LoyaltyService {
         return LoyaltyAccountDto.builder()
             .id(account.getId())
             .customerId(account.getCustomerId())
-            .bingeId(account.getBingeId())
             .totalPointsEarned(account.getTotalPointsEarned())
             .currentBalance(account.getCurrentBalance())
             .tierLevel(account.getTierLevel())
@@ -270,6 +368,7 @@ public class LoyaltyService {
             .nextTierLevel(nextTier)
             .createdAt(account.getCreatedAt())
             .updatedAt(account.getUpdatedAt())
+            .redemptionRate(loyaltyProps.getRedemptionRate())
             .recentTransactions(recent)
             .build();
     }

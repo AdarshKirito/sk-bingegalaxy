@@ -91,7 +91,11 @@ public class AuthService {
             }
 
             GoogleIdToken.Payload payload = idToken.getPayload();
-            String email = payload.getEmail().toLowerCase();
+            String email = payload.getEmail();
+            if (email == null) {
+                throw new BusinessException("Google account has no email address", HttpStatus.UNAUTHORIZED);
+            }
+            email = email.toLowerCase();
             String firstName = (String) payload.get("given_name");
             String lastName = (String) payload.get("family_name");
 
@@ -184,12 +188,15 @@ public class AuthService {
             throw new BusinessException("Account is temporarily locked due to too many failed attempts. Try again later.", HttpStatus.TOO_MANY_REQUESTS);
         }
         if (!passwordMatches) {
-            user.incrementFailedAttempts();
+            // Atomic DB-level increment prevents race condition where concurrent failed logins
+            // both read the same count and lockout triggers one attempt late
+            userRepository.incrementFailedLoginAttempts(user.getId());
+            user = userRepository.findById(user.getId()).orElse(user); // Re-read after atomic increment
             if (user.getFailedLoginAttempts() >= MAX_LOGIN_ATTEMPTS) {
                 user.lockAccount(LOCKOUT_MINUTES);
                 log.warn("Account locked for user {} after {} failed attempts", user.getId(), MAX_LOGIN_ATTEMPTS);
+                userRepository.save(user);
             }
-            userRepository.save(user);
             throw new BusinessException("Invalid email or password", HttpStatus.UNAUTHORIZED);
         }
 
@@ -201,7 +208,7 @@ public class AuthService {
 
     // ── Refresh token ───────────────────────────────────────
     public AuthResponse refreshToken(String refreshToken) {
-        if (!jwtProvider.validateToken(refreshToken)) {
+        if (!jwtProvider.validateRefreshToken(refreshToken)) {
             throw new BusinessException("Invalid or expired refresh token", HttpStatus.UNAUTHORIZED);
         }
         Long userId = jwtProvider.getUserIdFromToken(refreshToken);
@@ -234,12 +241,13 @@ public class AuthService {
             throw new BusinessException("Account is temporarily locked due to too many failed attempts. Try again later.", HttpStatus.TOO_MANY_REQUESTS);
         }
         if (!passwordMatches) {
-            user.incrementFailedAttempts();
+            userRepository.incrementFailedLoginAttempts(user.getId());
+            user = userRepository.findById(user.getId()).orElse(user);
             if (user.getFailedLoginAttempts() >= MAX_LOGIN_ATTEMPTS) {
                 user.lockAccount(LOCKOUT_MINUTES);
                 log.warn("Admin account locked for user {} after {} failed attempts", user.getId(), MAX_LOGIN_ATTEMPTS);
+                userRepository.save(user);
             }
-            userRepository.save(user);
             throw new BusinessException("Invalid admin credentials", HttpStatus.UNAUTHORIZED);
         }
 
@@ -498,32 +506,38 @@ public class AuthService {
     // ── Super Admin: bulk ban/unban ──────────────────────────
     @Transactional
     public int bulkSetActive(java.util.List<Long> userIds, boolean active) {
-        int count = 0;
-        for (Long uid : userIds) {
-            User user = userRepository.findById(uid).orElse(null);
-            if (user == null) continue;
-            if (user.getRole() == UserRole.SUPER_ADMIN) continue;
-            user.setActive(active);
-            userRepository.save(user);
-            count++;
-            log.info("Bulk {} user: {} (ID: {})", active ? "unbanned" : "banned", user.getEmail(), uid);
+        if (userIds == null || userIds.isEmpty()) return 0;
+        if (userIds.size() > 1000) {
+            throw new BusinessException("Bulk operations limited to 1000 users", HttpStatus.BAD_REQUEST);
         }
-        return count;
+        java.util.List<User> users = userRepository.findAllById(userIds);
+        java.util.List<User> toUpdate = users.stream()
+                .filter(u -> u.getRole() != UserRole.SUPER_ADMIN && u.isActive() != active)
+                .toList();
+        for (User user : toUpdate) {
+            user.setActive(active);
+            log.info("Bulk {} user: {} (ID: {})", active ? "unbanned" : "banned", user.getEmail(), user.getId());
+        }
+        userRepository.saveAll(toUpdate);
+        return toUpdate.size();
     }
 
     // ── Super Admin: bulk delete ─────────────────────────────
     @Transactional
     public int bulkDeleteUsers(java.util.List<Long> userIds) {
-        int count = 0;
-        for (Long uid : userIds) {
-            User user = userRepository.findById(uid).orElse(null);
-            if (user == null) continue;
-            if (user.getRole() == UserRole.SUPER_ADMIN) continue;
-            userRepository.delete(user);
-            count++;
-            log.info("Bulk deleted user: {} (ID: {}, role: {})", user.getEmail(), uid, user.getRole());
+        if (userIds == null || userIds.isEmpty()) return 0;
+        if (userIds.size() > 1000) {
+            throw new BusinessException("Bulk operations limited to 1000 users", HttpStatus.BAD_REQUEST);
         }
-        return count;
+        java.util.List<User> users = userRepository.findAllById(userIds);
+        java.util.List<User> toDelete = users.stream()
+                .filter(u -> u.getRole() != UserRole.SUPER_ADMIN)
+                .toList();
+        for (User user : toDelete) {
+            log.info("Bulk deleted user: {} (ID: {}, role: {})", user.getEmail(), user.getId(), user.getRole());
+        }
+        userRepository.deleteAll(toDelete);
+        return toDelete.size();
     }
 
     // ── Admin: update customer ───────────────────────────────

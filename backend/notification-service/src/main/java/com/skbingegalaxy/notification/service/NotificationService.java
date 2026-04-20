@@ -4,10 +4,13 @@ import com.skbingegalaxy.common.enums.NotificationChannel;
 import com.skbingegalaxy.notification.dto.NotificationDto;
 import com.skbingegalaxy.notification.model.DeliveryStatus;
 import com.skbingegalaxy.notification.model.Notification;
+import com.skbingegalaxy.notification.model.NotificationTemplate;
+import com.skbingegalaxy.notification.model.WhatsAppTemplate;
 import com.skbingegalaxy.notification.provider.PushProvider;
 import com.skbingegalaxy.notification.provider.SmsProvider;
 import com.skbingegalaxy.notification.provider.WhatsAppProvider;
 import com.skbingegalaxy.notification.repository.NotificationRepository;
+import com.skbingegalaxy.notification.repository.WhatsAppTemplateRepository;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import lombok.extern.slf4j.Slf4j;
@@ -20,9 +23,12 @@ import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 
 import java.time.LocalDateTime;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 @Service
 @Slf4j
@@ -32,6 +38,8 @@ public class NotificationService {
     private final JavaMailSender mailSender;
     private final TemplateEngine templateEngine;
     private final NotificationPreferenceService preferenceService;
+    private final TemplateService templateService;
+    private final WhatsAppTemplateRepository whatsAppTemplateRepository;
     private final SmsProvider smsProvider;
     private final WhatsAppProvider whatsAppProvider;
     private final PushProvider pushProvider;
@@ -50,11 +58,16 @@ public class NotificationService {
     /** Exponential backoff intervals in minutes: 1m, 5m, 30m (capped). */
     private static final long[] BACKOFF_MINUTES = {1, 5, 30};
 
+    /** Matches unreplaced {{variable}} placeholders left after substitution. */
+    private static final Pattern UNREPLACED_VARS = Pattern.compile("\\{\\{[^}]+}}");
+
     public NotificationService(
             NotificationRepository notificationRepository,
             @Autowired(required = false) JavaMailSender mailSender,
             TemplateEngine templateEngine,
             NotificationPreferenceService preferenceService,
+            TemplateService templateService,
+            WhatsAppTemplateRepository whatsAppTemplateRepository,
             @Autowired(required = false) SmsProvider smsProvider,
             @Autowired(required = false) WhatsAppProvider whatsAppProvider,
             @Autowired(required = false) PushProvider pushProvider) {
@@ -62,6 +75,8 @@ public class NotificationService {
         this.mailSender = mailSender;
         this.templateEngine = templateEngine;
         this.preferenceService = preferenceService;
+        this.templateService = templateService;
+        this.whatsAppTemplateRepository = whatsAppTemplateRepository;
         this.smsProvider = smsProvider;
         this.whatsAppProvider = whatsAppProvider;
         this.pushProvider = pushProvider;
@@ -221,12 +236,37 @@ public class NotificationService {
         helper.setSubject(notification.getSubject());
 
         // ── CAN-SPAM / List-Unsubscribe headers ──
-        String personalUnsubUrl = unsubscribeUrl + "?email=" + notification.getRecipientEmail();
+        String personalUnsubUrl = unsubscribeUrl + "?email=" + URLEncoder.encode(notification.getRecipientEmail(), StandardCharsets.UTF_8);
         mimeMessage.addHeader("List-Unsubscribe", "<" + personalUnsubUrl + ">");
         mimeMessage.addHeader("List-Unsubscribe-Post", "List-Unsubscribe=One-Click");
 
         String templateName = TEMPLATE_MAP.get(notification.getType());
-        if (templateName != null) {
+
+        // Priority 1: Check for a DB-stored active template
+        java.util.Optional<NotificationTemplate> dbTemplate = templateService
+                .getActiveTemplate(notification.getType(), "EMAIL");
+        if (dbTemplate.isPresent()) {
+            NotificationTemplate tpl = dbTemplate.get();
+            // Simple variable substitution: {{key}} → value
+            String html = tpl.getContent();
+            html = html.replace("{{recipientName}}", notification.getRecipientName() != null ? notification.getRecipientName() : "");
+            html = html.replace("{{customerName}}", notification.getRecipientName() != null ? notification.getRecipientName() : "");
+            html = html.replace("{{bookingRef}}", notification.getBookingRef() != null ? notification.getBookingRef() : "");
+            html = html.replace("{{unsubscribeUrl}}", personalUnsubUrl);
+            if (notification.getMetadata() != null) {
+                for (Map.Entry<String, Object> entry : notification.getMetadata().entrySet()) {
+                    String escaped = org.springframework.web.util.HtmlUtils.htmlEscape(String.valueOf(entry.getValue()));
+                    html = html.replace("{{" + entry.getKey() + "}}", escaped);
+                }
+            }
+            // Remove any unreplaced {{variable}} placeholders
+            html = UNREPLACED_VARS.matcher(html).replaceAll("");
+            helper.setText(html, true);
+            if (tpl.getSubject() != null && !tpl.getSubject().isBlank()) {
+                helper.setSubject(tpl.getSubject());
+            }
+        } else if (templateName != null) {
+            // Priority 2: Fall back to Thymeleaf file-based template
             Context ctx = new Context();
             ctx.setVariable("recipientName", notification.getRecipientName());
             ctx.setVariable("customerName", notification.getRecipientName());
@@ -271,8 +311,22 @@ public class NotificationService {
             notification.setFailureReason("WhatsApp provider not configured (set app.whatsapp.provider)");
             return;
         }
-        String sid = whatsAppProvider.send(notification.getRecipientPhone(), notification.getBody());
-        log.info("WhatsApp dispatched via {} — SID/ID: {}", whatsAppProvider.providerName(), sid);
+
+        // Check for a pre-approved Content SID template
+        java.util.Optional<WhatsAppTemplate> waTpl = whatsAppTemplateRepository
+                .findByTemplateNameAndActiveTrue(notification.getType());
+        String sid;
+        if (waTpl.isPresent()) {
+            Map<String, String> vars = new HashMap<>();
+            if (notification.getRecipientName() != null) vars.put("1", notification.getRecipientName());
+            if (notification.getBookingRef() != null) vars.put("2", notification.getBookingRef());
+            sid = whatsAppProvider.sendWithContentSid(
+                    notification.getRecipientPhone(), waTpl.get().getContentSid(), vars);
+            log.info("WhatsApp (ContentSID) dispatched via {} — SID: {}", whatsAppProvider.providerName(), sid);
+        } else {
+            sid = whatsAppProvider.send(notification.getRecipientPhone(), notification.getBody());
+            log.info("WhatsApp dispatched via {} — SID/ID: {}", whatsAppProvider.providerName(), sid);
+        }
     }
 
     private void sendPush(Notification notification) {
@@ -294,8 +348,31 @@ public class NotificationService {
         data.put("type", notification.getType());
         if (notification.getBookingRef() != null) data.put("bookingRef", notification.getBookingRef());
 
-        String msgId = pushProvider.send(deviceToken, notification.getSubject(), notification.getBody(), data);
+        // Rich push fields from metadata
+        String imageUrl = extractString(notification.getMetadata(), "imageUrl");
+        String deepLinkUrl = extractString(notification.getMetadata(), "deepLinkUrl");
+        Map<String, String> actionButtons = extractActionButtons(notification.getMetadata());
+
+        String msgId = pushProvider.sendRich(deviceToken, notification.getSubject(), notification.getBody(),
+                data, imageUrl, deepLinkUrl, actionButtons);
         log.info("Push dispatched via {} — messageId: {}", pushProvider.providerName(), msgId);
+    }
+
+    private String extractString(Map<String, Object> metadata, String key) {
+        if (metadata == null) return null;
+        Object val = metadata.get(key);
+        return val != null ? val.toString() : null;
+    }
+
+    private Map<String, String> extractActionButtons(Map<String, Object> metadata) {
+        if (metadata == null) return null;
+        Object raw = metadata.get("actionButtons");
+        if (raw instanceof Map<?, ?> map) {
+            Map<String, String> result = new HashMap<>();
+            map.forEach((k, v) -> result.put(String.valueOf(k), String.valueOf(v)));
+            return result.isEmpty() ? null : result;
+        }
+        return null;
     }
 
     private NotificationDto toDto(Notification n) {

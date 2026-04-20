@@ -11,7 +11,7 @@ A production-grade, cloud-deployable microservices application for booking priva
 | **API Gateway** | Redis-backed rate limiting (token bucket), JWT validation, path traversal prevention, role-based route guards, CORS config |
 | **Booking** | Event log (immutable audit trail), optimistic locking, idempotent Kafka consumers, dead-letter topics, pending booking timeout |
 | **Payment** | Razorpay integration with HMAC signature verification, over-refund prevention (pessimistic lock), over-collection guard, stale callback rejection |
-| **Frontend** | 32 lazy-loaded routes, Zustand + Context, proactive token refresh, skeleton loaders, dark mode, ARIA/keyboard nav, DOMPurify XSS sanitization |
+| **Frontend** | 35 lazy-loaded routes, Zustand + Context, proactive token refresh, skeleton loaders, dark mode, ARIA/keyboard nav, DOMPurify XSS sanitization |
 | **K8s** | HPA, PDB, network policies (zero-trust deny-all + explicit allow), TLS via cert-manager, least-privilege DB users, daily backup CronJobs |
 | **DevOps** | Multi-stage Docker builds, health checks on all containers, secret generation scripts, K8s manifest rendering |
 

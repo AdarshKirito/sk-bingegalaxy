@@ -21,9 +21,10 @@ export default function CustomerPayments() {
       bookingService.getCurrentBookings(),
       bookingService.getPastBookings(),
     ]).then(([paymentRes, currentRes, pastRes]) => {
-      setPayments(paymentRes.status === 'fulfilled' ? (paymentRes.value.data.data || []) : []);
-      const currentBookings = currentRes.status === 'fulfilled' ? (currentRes.value.data.data || []) : [];
-      const pastBookings = pastRes.status === 'fulfilled' ? (pastRes.value.data.data || []) : [];
+      const toArray = (val) => Array.isArray(val) ? val : [];
+      setPayments(paymentRes.status === 'fulfilled' ? toArray(paymentRes.value?.data?.data) : []);
+      const currentBookings = currentRes.status === 'fulfilled' ? toArray(currentRes.value?.data?.data) : [];
+      const pastBookings = pastRes.status === 'fulfilled' ? toArray(pastRes.value?.data?.data) : [];
       setBookings([...currentBookings, ...pastBookings]);
     }).finally(() => setLoading(false));
   }, []);

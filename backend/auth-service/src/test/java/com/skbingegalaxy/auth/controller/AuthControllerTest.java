@@ -427,11 +427,21 @@ class AuthControllerTest {
         when(authService.bulkDeleteUsers(any())).thenReturn(1);
 
         mockMvc.perform(post("/api/v1/auth/admin/bulk-delete")
+                        .header("X-User-Role", "SUPER_ADMIN")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("[10]"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data").value(1))
                 .andExpect(jsonPath("$.message").value("1 users deleted"));
+    }
+
+    @Test
+    void bulkDelete_adminRole_returns403() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/admin/bulk-delete")
+                        .header("X-User-Role", "ADMIN")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("[10]"))
+                .andExpect(status().isForbidden());
     }
 
     @Test

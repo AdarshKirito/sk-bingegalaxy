@@ -13,6 +13,6 @@ COPY --from=build /build/config-server/target/*.jar app.jar
 RUN chown appuser:appgroup app.jar
 USER appuser
 EXPOSE 8888
-HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
+HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=5 \
   CMD wget --spider -q http://localhost:8888/actuator/health || exit 1
 ENTRYPOINT ["java", "-jar", "app.jar"]

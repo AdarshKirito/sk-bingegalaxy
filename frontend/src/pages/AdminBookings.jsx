@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { adminService, bookingService, paymentService } from '../services/endpoints';
+import { adminService, bookingService, paymentService, toArray } from '../services/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
 import DOMPurify from 'dompurify';
@@ -567,7 +567,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
   useEffect(() => {
     if (b.bookingRef && b.paymentStatus === 'SUCCESS') {
       paymentService.getByBooking(b.bookingRef)
-        .then(res => { setPayments(res.data.data || []); setPaymentsLoaded(true); })
+        .then(res => { setPayments(toArray(res.data?.data)); setPaymentsLoaded(true); })
         .catch(() => {});
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -579,7 +579,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
       setPaymentsLoading(true);
       paymentService.getByBooking(b.bookingRef)
         .then(async res => {
-          const pmts = res.data.data || [];
+          const pmts = toArray(res.data?.data);
           setPayments(pmts);
           setPaymentsLoaded(true);
           // Load refund history for payments that have been (partially) refunded
@@ -587,7 +587,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
           const histories = await Promise.all(
             refundedPmts.map(p =>
               adminService.getRefundsForPayment(p.id)
-                .then(r => ({ id: p.id, refunds: r.data.data || [] }))
+                .then(r => ({ id: p.id, refunds: toArray(r.data?.data) }))
                 .catch(() => ({ id: p.id, refunds: [] }))
             )
           );
@@ -604,7 +604,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
   const ensurePaymentsLoaded = async () => {
     if (paymentsLoaded) return payments;
     const res = await paymentService.getByBooking(b.bookingRef);
-    const pmts = res.data.data || [];
+    const pmts = toArray(res.data?.data);
     setPayments(pmts);
     setPaymentsLoaded(true);
     return pmts;
@@ -612,13 +612,13 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
 
   const refreshPayments = async () => {
     const res = await paymentService.getByBooking(b.bookingRef);
-    const pmts = res.data.data || [];
+    const pmts = toArray(res.data?.data);
     setPayments(pmts);
     const refundedPmts = pmts.filter(p => p.refundCount > 0);
     const histories = await Promise.all(
       refundedPmts.map(p =>
         adminService.getRefundsForPayment(p.id)
-          .then(r => ({ id: p.id, refunds: r.data.data || [] }))
+          .then(r => ({ id: p.id, refunds: toArray(r.data?.data) }))
           .catch(() => ({ id: p.id, refunds: [] }))
       )
     );
@@ -656,7 +656,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
     if (tab !== 'reviews' || !b.bookingRef) return;
     setReviewsLoading(true);
     adminService.getBookingReviews(b.bookingRef)
-      .then((res) => setBookingReviews(res.data.data || []))
+      .then((res) => setBookingReviews(toArray(res.data?.data)))
       .catch(() => setBookingReviews([]))
       .finally(() => setReviewsLoading(false));
   }, [tab, b.bookingRef]);
@@ -673,7 +673,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
         comment: adminReviewForm.comment,
       });
       const refreshed = await adminService.getBookingReviews(b.bookingRef);
-      setBookingReviews(refreshed.data.data || []);
+      setBookingReviews(toArray(refreshed.data?.data));
       setAdminReviewForm({ rating: 5, comment: '' });
       toast.success('Admin review saved.');
     } catch (err) {
@@ -938,7 +938,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
         if (isNaN(amt) || amt <= 0) { toast.error('Enter a valid refund amount'); setActionLoading(false); return; }
         // Find the successful payment to refund
         const payRes = await paymentService.getByBooking(b.bookingRef);
-        const payList = payRes.data.data || [];
+        const payList = toArray(payRes.data?.data);
         const successPayment = payList.find(p => p.status === 'SUCCESS' || p.status === 'PARTIALLY_REFUNDED');
         if (!successPayment) {
           toast.error('No refundable payment record found. For cash bookings, go to the Payment tab and click "Record Cash Payment" first.');
