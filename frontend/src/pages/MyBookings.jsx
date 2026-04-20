@@ -118,7 +118,7 @@ export default function MyBookings() {
     PARTIALLY_REFUNDED: 'Partially Refunded',
   }[paymentStatus] || paymentStatus || 'PENDING');
 
-  const formatAmount = (amount) => `Rs ${Number(amount || 0).toLocaleString()}`;
+  const formatAmount = (amount) => `₹${Number(amount || 0).toLocaleString()}`;
   const formatDuration = (booking) => {
     const totalMinutes = booking.durationMinutes || ((booking.durationHours || 0) * 60);
     if (!totalMinutes) return 'Flexible duration';

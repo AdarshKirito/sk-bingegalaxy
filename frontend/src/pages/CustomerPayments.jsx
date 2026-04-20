@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { bookingService, paymentService } from '../services/endpoints';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import SEO from '../components/SEO';
-import { FiArrowRight, FiCreditCard, FiFilter, FiRefreshCw, FiSearch, FiTrendingUp } from 'react-icons/fi';
+import { FiAlertCircle, FiCheckCircle, FiCreditCard, FiFilter, FiRefreshCw, FiSearch, FiTrendingUp } from 'react-icons/fi';
 import DOMPurify from 'dompurify';
 import './CustomerHub.css';
 
@@ -36,13 +36,36 @@ export default function CustomerPayments() {
 
   const statusBadge = (status) => ({
     SUCCESS: 'badge-success',
+    PARTIALLY_PAID: 'badge-warning',
     PARTIALLY_REFUNDED: 'badge-info',
     REFUNDED: 'badge-info',
     FAILED: 'badge-danger',
     INITIATED: 'badge-warning',
   }[status] || 'badge-warning');
 
+  const statusLabel = (status) => ({
+    SUCCESS: 'Paid',
+    PARTIALLY_PAID: 'Partially Paid',
+    PARTIALLY_REFUNDED: 'Partially Refunded',
+    REFUNDED: 'Refunded',
+    FAILED: 'Failed',
+    INITIATED: 'In Progress',
+    PENDING: 'Pending',
+  }[status] ?? (status?.replace(/_/g, ' ') || 'Pending'));
+
   const formatAmount = (amount) => `₹${Number(amount || 0).toLocaleString()}`;
+
+  const formatDate = (ts) => ts
+    ? new Date(ts).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+    : 'Date unavailable';
+
+  const formatMethodLabel = (method) => ({
+    UPI: 'UPI',
+    CARD: 'Card',
+    BANK_TRANSFER: 'Bank Transfer',
+    WALLET: 'Wallet',
+    CASH: 'Cash',
+  }[method] ?? (method?.replace(/_/g, ' ') || 'Method pending'));
   const sortedPayments = [...payments].sort((left, right) => new Date(right.createdAt || right.paidAt || 0) - new Date(left.createdAt || left.paidAt || 0));
   const filteredPayments = sortedPayments.filter(payment => {
     const booking = bookingByRef[payment.bookingRef] || null;
@@ -59,8 +82,13 @@ export default function CustomerPayments() {
   const successfulPayments = sortedPayments.filter(payment => payment.status === 'SUCCESS');
   const refundedPayments = sortedPayments.filter(payment => payment.status === 'REFUNDED' || payment.status === 'PARTIALLY_REFUNDED');
   const failedPayments = sortedPayments.filter(payment => payment.status === 'FAILED');
-  const totalPaid = successfulPayments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
-  const unpaidBookings = bookings.filter(booking => booking.status === 'PENDING' && booking.paymentStatus !== 'SUCCESS');
+  const totalPaid = sortedPayments
+    .filter(payment => payment.status === 'SUCCESS' || payment.status === 'PARTIALLY_PAID')
+    .reduce((sum, payment) => sum + (payment.amount || 0), 0);
+  const unpaidBookings = bookings.filter(booking =>
+    !['CANCELLED', 'COMPLETED', 'NO_SHOW'].includes(booking.status) &&
+    !['SUCCESS', 'REFUNDED'].includes(booking.paymentStatus)
+  );
 
   return (
     <div className="container customer-hub">
@@ -79,8 +107,8 @@ export default function CustomerPayments() {
 
         <aside className="customer-hub-highlight card">
           <span className="customer-hub-panel-label">Live snapshot</span>
-          <h2>{loading ? 'Loading payments...' : `${initiatedPayments.length} payment${initiatedPayments.length === 1 ? '' : 's'} in progress`}</h2>
-          <p>{loading ? 'Pulling your transaction history.' : 'Use this panel to continue the latest payment or jump into booking history.'}</p>
+          <h2>{loading ? 'Loading payments...' : initiatedPayments.length > 0 ? `${initiatedPayments.length} payment${initiatedPayments.length === 1 ? '' : 's'} in progress` : `${formatAmount(totalPaid)} collected total`}</h2>
+          <p>{loading ? 'Pulling your transaction history.' : initiatedPayments.length > 0 ? 'Continue the in-progress transaction or check the full booking timeline.' : 'No active transactions right now — all payments are settled or recorded.'}</p>
           <div className="customer-hub-highlight-meta">
             <span className="badge badge-success">{successfulPayments.length} successful</span>
             <span className="badge badge-warning">{unpaidBookings.length} unpaid bookings</span>
@@ -95,7 +123,7 @@ export default function CustomerPayments() {
 
       <section className="customer-hub-stats">
         <article className="customer-hub-stat card">
-          <span className="customer-hub-stat-icon"><FiCreditCard /></span>
+          <span className="customer-hub-stat-icon"><FiCheckCircle /></span>
           <span className="customer-hub-stat-label">Successful</span>
           <strong>{loading ? '–' : successfulPayments.length}</strong>
           <p>Transactions completed without follow-up.</p>
@@ -104,16 +132,16 @@ export default function CustomerPayments() {
           <span className="customer-hub-stat-icon"><FiTrendingUp /></span>
           <span className="customer-hub-stat-label">Total Paid</span>
           <strong>{loading ? '–' : formatAmount(totalPaid)}</strong>
-          <p>Total from successful payments only.</p>
+          <p>Cumulative amount across settled payments.</p>
         </article>
         <article className="customer-hub-stat card">
-          <span className="customer-hub-stat-icon"><FiCreditCard /></span>
+          <span className="customer-hub-stat-icon"><FiRefreshCw /></span>
           <span className="customer-hub-stat-label">Refunded</span>
           <strong>{loading ? '–' : refundedPayments.length}</strong>
           <p>Refunded or partially refunded transactions.</p>
         </article>
         <article className="customer-hub-stat card">
-          <span className="customer-hub-stat-icon"><FiCreditCard /></span>
+          <span className="customer-hub-stat-icon"><FiAlertCircle /></span>
           <span className="customer-hub-stat-label">Failed</span>
           <strong>{loading ? '–' : failedPayments.length}</strong>
           <p>Payments that need another attempt.</p>
@@ -193,7 +221,7 @@ export default function CustomerPayments() {
             return (
               <article key={payment.transactionId || `${payment.bookingRef}-${payment.id}`} className="card customer-payment-card">
                 <div className="customer-booking-topline">
-                  <span className={`badge ${statusBadge(payment.status)}`}>{payment.status?.replace(/_/g, ' ')}</span>
+                  <span className={`badge ${statusBadge(payment.status)}`}>{statusLabel(payment.status)}</span>
                   {payment.bookingRef && (
                     <span className="customer-booking-ref">Booking {payment.bookingRef}</span>
                   )}
@@ -202,16 +230,16 @@ export default function CustomerPayments() {
                 <div className="customer-payment-head">
                   <div>
                     <h3>{booking?.eventType?.name || booking?.eventType || 'Booking payment'}</h3>
-                    <p style={{ fontSize: '0.78rem', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>
-                      {payment.transactionId || 'Transaction ID assigned after payment'}
+                    <p className="customer-flow-mono">
+                      {payment.transactionId || 'ID assigned after payment'}
                     </p>
                   </div>
                   <strong>{formatAmount(payment.amount)}</strong>
                 </div>
 
                 <div className="customer-payment-meta">
-                  <span>{payment.paymentMethod?.replace('_', ' ') || 'Method pending'}</span>
-                  <span>{payment.createdAt ? new Date(payment.createdAt).toLocaleString() : 'Recently updated'}</span>
+                  <span><FiCreditCard /> {formatMethodLabel(payment.paymentMethod)}</span>
+                  <span>{formatDate(payment.createdAt)}</span>
                 </div>
 
                 {payment.failureReason && (
@@ -222,10 +250,12 @@ export default function CustomerPayments() {
                   {payment.status === 'INITIATED' && payment.bookingRef && (
                     <Link to={`/payment/${payment.bookingRef}`} className="btn btn-primary btn-sm">Continue Payment</Link>
                   )}
+                  {payment.status === 'FAILED' && payment.bookingRef && (
+                    <Link to={`/payment/${payment.bookingRef}`} className="btn btn-primary btn-sm">Retry Payment</Link>
+                  )}
                   {payment.bookingRef && (
                     <Link to={`/booking/${payment.bookingRef}`} className="btn btn-secondary btn-sm">View Booking</Link>
                   )}
-                  <Link to="/my-bookings" className="btn btn-secondary btn-sm">Open Timeline <FiArrowRight /></Link>
                 </div>
               </article>
             );
