@@ -56,6 +56,7 @@ class BookingServiceLifecycleTest {
     @Mock private BookingEventLogService eventLogService;
     @Mock private SagaOrchestrator sagaOrchestrator;
         @Mock private LoyaltyService loyaltyService;
+        @Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     @InjectMocks private BookingService bookingService;
 
@@ -618,6 +619,89 @@ class BookingServiceLifecycleTest {
             assertThat(testBooking.getStatus()).isEqualTo(BookingStatus.CHECKED_IN);
             assertThat(testBooking.isCheckedIn()).isTrue();
         }
+
+                @Test
+                @DisplayName("admin price increase converts SUCCESS payment status to PARTIALLY_PAID")
+                void priceIncrease_successToPartiallyPaid() {
+                        BingeContext.setBingeId(11L);
+                        testBooking.setStatus(BookingStatus.CONFIRMED);
+                        testBooking.setPaymentStatus(PaymentStatus.SUCCESS);
+                        testBooking.setCollectedAmount(BigDecimal.valueOf(1000));
+                        testBooking.setBaseAmount(BigDecimal.valueOf(1000));
+                        testBooking.setAddOnAmount(BigDecimal.ZERO);
+                        testBooking.setGuestAmount(BigDecimal.ZERO);
+                        testBooking.setTotalAmount(BigDecimal.valueOf(1000));
+
+                        when(bookingRepository.findByBookingRefAndBingeId("SKBG25123456", 11L))
+                                .thenReturn(Optional.of(testBooking));
+                        when(bookingRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+                        UpdateBookingRequest request = new UpdateBookingRequest();
+                        request.setBaseAmount(BigDecimal.valueOf(1200));
+                        request.setAddOnAmount(BigDecimal.ZERO);
+                        request.setGuestAmount(BigDecimal.ZERO);
+                        request.setPriceAdjustmentReason("Duration extension");
+
+                        bookingService.updateBooking("SKBG25123456", request);
+
+                        assertThat(testBooking.getTotalAmount()).isEqualByComparingTo("1200");
+                        assertThat(testBooking.getPaymentStatus()).isEqualTo(PaymentStatus.PARTIALLY_PAID);
+                }
+
+                @Test
+                @DisplayName("admin price decrease converts PARTIALLY_PAID payment status back to SUCCESS")
+                void priceDecrease_partiallyPaidToSuccess() {
+                        BingeContext.setBingeId(11L);
+                        testBooking.setStatus(BookingStatus.CONFIRMED);
+                        testBooking.setPaymentStatus(PaymentStatus.PARTIALLY_PAID);
+                        testBooking.setCollectedAmount(BigDecimal.valueOf(1000));
+                        testBooking.setBaseAmount(BigDecimal.valueOf(1200));
+                        testBooking.setAddOnAmount(BigDecimal.ZERO);
+                        testBooking.setGuestAmount(BigDecimal.ZERO);
+                        testBooking.setTotalAmount(BigDecimal.valueOf(1200));
+
+                        when(bookingRepository.findByBookingRefAndBingeId("SKBG25123456", 11L))
+                                .thenReturn(Optional.of(testBooking));
+                        when(bookingRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+                        UpdateBookingRequest request = new UpdateBookingRequest();
+                        request.setBaseAmount(BigDecimal.valueOf(900));
+                        request.setAddOnAmount(BigDecimal.ZERO);
+                        request.setGuestAmount(BigDecimal.ZERO);
+                        request.setPriceAdjustmentReason("Applied discount");
+
+                        bookingService.updateBooking("SKBG25123456", request);
+
+                        assertThat(testBooking.getTotalAmount()).isEqualByComparingTo("900");
+                        assertThat(testBooking.getPaymentStatus()).isEqualTo(PaymentStatus.SUCCESS);
+                }
+
+                @Test
+                @DisplayName("admin price update does not override REFUNDED payment status")
+                void priceUpdate_keepsRefundedStatus() {
+                        BingeContext.setBingeId(11L);
+                        testBooking.setStatus(BookingStatus.CONFIRMED);
+                        testBooking.setPaymentStatus(PaymentStatus.REFUNDED);
+                        testBooking.setCollectedAmount(BigDecimal.ZERO);
+                        testBooking.setBaseAmount(BigDecimal.valueOf(1000));
+                        testBooking.setAddOnAmount(BigDecimal.ZERO);
+                        testBooking.setGuestAmount(BigDecimal.ZERO);
+                        testBooking.setTotalAmount(BigDecimal.valueOf(1000));
+
+                        when(bookingRepository.findByBookingRefAndBingeId("SKBG25123456", 11L))
+                                .thenReturn(Optional.of(testBooking));
+                        when(bookingRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+                        UpdateBookingRequest request = new UpdateBookingRequest();
+                        request.setBaseAmount(BigDecimal.valueOf(1100));
+                        request.setAddOnAmount(BigDecimal.ZERO);
+                        request.setGuestAmount(BigDecimal.ZERO);
+                        request.setPriceAdjustmentReason("Post-refund surcharge");
+
+                        bookingService.updateBooking("SKBG25123456", request);
+
+                        assertThat(testBooking.getPaymentStatus()).isEqualTo(PaymentStatus.REFUNDED);
+                }
     }
 
     // ── Availability Service Fallback ────────────────────────

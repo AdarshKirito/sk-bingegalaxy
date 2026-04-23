@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useBinge } from '../context/BingeContext';
@@ -84,6 +84,33 @@ export default function MyBookings() {
       })
       .finally(() => setLoading(false));
   }, []);
+
+  // ─── Lightweight "live sync" — refresh current / past reservations when the
+  //    tab regains focus (e.g. after an admin has charged a price difference
+  //    in another tab).  Matches how mainstream apps (Airbnb, Stripe Dashboard)
+  //    keep cached lists fresh without a full-blown websocket.
+  const refreshReservations = useCallback(() => {
+    Promise.allSettled([
+      bookingService.getCurrentBookings(),
+      bookingService.getPastBookings(),
+      bookingService.getPendingReviews(),
+    ]).then(([currentRes, pastRes, pendingReviewRes]) => {
+      if (currentRes.status === 'fulfilled') setCurrentBookings(toArray(currentRes.value?.data?.data));
+      if (pastRes.status === 'fulfilled') setPastBookings(toArray(pastRes.value?.data?.data));
+      if (pendingReviewRes.status === 'fulfilled') setPendingReviews(toArray(pendingReviewRes.value?.data?.data));
+    });
+  }, []);
+
+  useEffect(() => {
+    const onFocus = () => refreshReservations();
+    const onVisibility = () => { if (!document.hidden) refreshReservations(); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [refreshReservations]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -394,7 +421,7 @@ export default function MyBookings() {
             {pendingReviews.map((booking) => {
               const draft = reviewDrafts[booking.bookingRef] || { rating: 0, comment: '' };
               return (
-                <article key={booking.bookingRef} className="customer-mini-card">
+                <article key={booking.bookingRef} className="customer-mini-card customer-review-card">
                   <div>
                     <span className="customer-booking-ref">{booking.bookingRef}</span>
                     <h3>{booking.eventType?.name ?? booking.eventType}</h3>

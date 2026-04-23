@@ -18,6 +18,7 @@ import { useBinge } from '../context/BingeContext';
 import { toast } from 'react-toastify';
 import { FiActivity, FiArrowRight, FiCompass, FiEdit2, FiMapPin, FiPlus, FiStar, FiToggleLeft, FiToggleRight, FiTrash2, FiUpload, FiX } from 'react-icons/fi';
 import './AdminPages.css';
+import BingeLoyaltySection from '../components/admin/BingeLoyaltySection';
 
 function StarRating({ avg, count }) {
   const rounded = Math.round((avg || 0) * 2) / 2;
@@ -65,6 +66,7 @@ export default function BingeManagement() {
   const [tierRows, setTierRows] = useState([]);
   const [tierLoading, setTierLoading] = useState(false);
   const [tierSaving, setTierSaving] = useState(false);
+  const [loyaltyEditor, setLoyaltyEditor] = useState({ open: false, binge: null });
   const { clearBinge, selectBinge, selectedBinge } = useBinge();
   const navigate = useNavigate();
 
@@ -226,6 +228,18 @@ export default function BingeManagement() {
 
   const handleSlideImageUpload = async (index, file) => {
     if (!file) return;
+    // Mirror backend MediaController validation (5 MB + JPEG/PNG/WebP/GIF)
+    // to give immediate feedback and avoid unnecessary upload traffic / UI hang on large files.
+    const MAX_BYTES = 5 * 1024 * 1024;
+    const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (file.size > MAX_BYTES) {
+      toast.error('Image must be 5 MB or smaller');
+      return;
+    }
+    if (file.type && !ALLOWED_MIME.includes(file.type.toLowerCase())) {
+      toast.error('Only JPEG, PNG, WebP, or GIF images are allowed');
+      return;
+    }
     const formData = new FormData();
     formData.append('file', file);
     try {
@@ -962,6 +976,9 @@ export default function BingeManagement() {
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleOpenTierEditor(b)}>
                   Cancellation tiers
                 </button>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setLoyaltyEditor({ open: true, binge: b })}>
+                  Loyalty
+                </button>
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleEdit(b)}>
                   <FiEdit2 style={{ marginRight: 3 }} /> Edit
                 </button>
@@ -979,6 +996,13 @@ export default function BingeManagement() {
             </article>
           ))}
         </div>
+      )}
+
+      {loyaltyEditor.open && (
+        <BingeLoyaltySection
+          binge={loyaltyEditor.binge}
+          onClose={() => setLoyaltyEditor({ open: false, binge: null })}
+        />
       )}
     </div>
   );

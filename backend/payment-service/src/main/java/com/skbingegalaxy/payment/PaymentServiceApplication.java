@@ -7,7 +7,8 @@ import org.springframework.cloud.openfeign.EnableFeignClients;
 
 @SpringBootApplication(scanBasePackages = {
     "com.skbingegalaxy.payment",
-    "com.skbingegalaxy.common.exception"
+    "com.skbingegalaxy.common.exception",
+    "com.skbingegalaxy.common.config"
 })
 @EnableDiscoveryClient
 @EnableFeignClients

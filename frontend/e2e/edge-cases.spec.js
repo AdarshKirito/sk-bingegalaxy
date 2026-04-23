@@ -56,8 +56,12 @@ test.describe('Auth edge cases', () => {
     });
     await page.goto('/admin/dashboard');
     // Server-validated auth should reject — either redirect or show error
-    // The frontend might show the page momentarily, but API calls should fail with 401/403
-    await page.waitForTimeout(3000);
+    // Wait for either an error toast OR a redirect away from /admin/dashboard.
+    const errorLocator = page.locator('.Toastify__toast--error').first();
+    await Promise.race([
+      errorLocator.waitFor({ state: 'visible', timeout: 8000 }).catch(() => null),
+      page.waitForURL((url) => !url.pathname.includes('/admin/dashboard'), { timeout: 8000 }).catch(() => null),
+    ]);
     const hasError = await page.locator('.Toastify__toast--error').count();
     const redirectedAway = !(await page.url()).includes('/admin/dashboard');
     expect(hasError > 0 || redirectedAway).toBeTruthy();
@@ -167,7 +171,8 @@ test.describe('Admin empty states', () => {
     const slotsTab = page.locator('button:has-text("Slot"), button:has-text("slot")').first();
     if (await slotsTab.isVisible()) {
       await slotsTab.click();
-      await page.waitForTimeout(500);
+      // Wait for the tab's heading/panel to be attached instead of a fixed sleep.
+      await page.waitForLoadState('networkidle');
       // Should not crash
       await expect(page.getByRole('heading').first()).toBeVisible();
     }
@@ -207,7 +212,7 @@ test.describe('Navigation robustness', () => {
       localStorage.setItem('selectedBinge', JSON.stringify({ id: 1, name: 'Test Binge' }));
     });
     await page.goto('/payment/NONEXISTENT-REF-12345');
-    await page.waitForTimeout(3000);
+    await page.waitForLoadState('networkidle');
     // Should show error message, not crash
     const text = await page.locator('body').textContent();
     expect(text.length).toBeGreaterThan(0);
@@ -291,7 +296,7 @@ test.describe('Error recovery', () => {
     // Block all API calls to simulate network failure
     await page.route('**/api/**', (route) => route.abort('connectionrefused'));
     await page.goto('/dashboard');
-    await page.waitForTimeout(3000);
+    await page.waitForLoadState('networkidle');
     // App should still render (error boundary or graceful degradation)
     const body = await page.locator('body').textContent();
     expect(body.length).toBeGreaterThan(10);

@@ -167,4 +167,66 @@ class RateLimitFilterTest {
     void order_isNegativeTwo() {
         assertThat(filter.getOrder()).isEqualTo(-2);
     }
+
+    @Test
+    void forgotPassword_usesSensitiveLimitOf5() {
+        // Only 5 attempts per minute are allowed for credential-recovery endpoints
+        // to curb account-enumeration / reset spam.
+        for (int i = 0; i < 5; i++) {
+            MockServerWebExchange exchange = MockServerWebExchange.from(
+                    MockServerHttpRequest.post("/api/v1/auth/forgot-password")
+                            .remoteAddress(new InetSocketAddress("10.0.0.77", 12345))
+                            .build());
+            filter.filter(exchange, chain).block();
+        }
+
+        MockServerWebExchange sixth = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/api/v1/auth/forgot-password")
+                        .remoteAddress(new InetSocketAddress("10.0.0.77", 12345))
+                        .build());
+        filter.filter(sixth, chain).block();
+
+        assertThat(sixth.getResponse().getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    @Test
+    void resetPassword_usesSensitiveLimit() {
+        for (int i = 0; i < 5; i++) {
+            MockServerWebExchange exchange = MockServerWebExchange.from(
+                    MockServerHttpRequest.post("/api/v1/auth/reset-password")
+                            .remoteAddress(new InetSocketAddress("10.0.0.78", 12345))
+                            .build());
+            filter.filter(exchange, chain).block();
+        }
+        MockServerWebExchange sixth = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/api/v1/auth/reset-password")
+                        .remoteAddress(new InetSocketAddress("10.0.0.78", 12345))
+                        .build());
+        filter.filter(sixth, chain).block();
+
+        assertThat(sixth.getResponse().getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    @Test
+    void regularAuthLogin_notAffectedBySensitiveLimit() {
+        // /auth/login should still allow up to 30 — not constrained by the
+        // sensitive-path 5/min bucket.
+        for (int i = 0; i < 10; i++) {
+            MockServerWebExchange exchange = MockServerWebExchange.from(
+                    MockServerHttpRequest.post("/api/v1/auth/login")
+                            .remoteAddress(new InetSocketAddress("10.0.0.79", 12345))
+                            .build());
+            filter.filter(exchange, chain).block();
+        }
+
+        // Ten requests should all have passed; verify the 10th got through.
+        MockServerWebExchange tenth = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/api/v1/auth/login")
+                        .remoteAddress(new InetSocketAddress("10.0.0.79", 12345))
+                        .build());
+        filter.filter(tenth, chain).block();
+
+        assertThat(tenth.getResponse().getStatusCode())
+            .isNotEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+    }
 }

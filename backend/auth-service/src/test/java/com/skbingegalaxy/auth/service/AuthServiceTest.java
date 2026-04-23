@@ -35,6 +35,7 @@ class AuthServiceTest {
     @Mock private PasswordEncoder passwordEncoder;
     @Mock private JwtProvider jwtProvider;
     @Mock private KafkaTemplate<String, Object> kafkaTemplate;
+    @Mock private com.skbingegalaxy.auth.service.TokenRevocationService tokenRevocationService;
 
     @InjectMocks private AuthService authService;
 
@@ -661,5 +662,38 @@ class AuthServiceTest {
         assertThat(count).isEqualTo(1); // only customer deleted
         verify(userRepository).deleteAll(argThat(list ->
                 ((java.util.List<?>) list).size() == 1 && ((java.util.List<?>) list).contains(customer)));
+    }
+
+    // ── Refresh token revocation ────────────────────────────
+
+    @Test
+    void refreshToken_revokedJti_throwsUnauthorized() {
+        when(jwtProvider.validateRefreshToken("revoked-rt")).thenReturn(true);
+        when(jwtProvider.getJtiFromToken("revoked-rt")).thenReturn("jti-revoked");
+        when(tokenRevocationService.isRevoked("jti-revoked")).thenReturn(true);
+
+        assertThatThrownBy(() -> authService.refreshToken("revoked-rt"))
+                .isInstanceOf(com.skbingegalaxy.common.exception.BusinessException.class)
+                .hasMessageContaining("Invalid or expired refresh token");
+
+        verify(userRepository, never()).findById(any());
+    }
+
+    @Test
+    void refreshToken_happyPath_revokesOldRefreshForRotation() {
+        testUser.setId(1L);
+        when(jwtProvider.validateRefreshToken("good-rt")).thenReturn(true);
+        when(jwtProvider.getJtiFromToken("good-rt")).thenReturn("jti-good");
+        when(tokenRevocationService.isRevoked("jti-good")).thenReturn(false);
+        when(jwtProvider.getUserIdFromToken("good-rt")).thenReturn(1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(testUser));
+        when(jwtProvider.generateToken(testUser)).thenReturn("new-access");
+        when(jwtProvider.generateRefreshToken(testUser)).thenReturn("new-refresh");
+
+        AuthResponse response = authService.refreshToken("good-rt");
+
+        assertThat(response.getToken()).isEqualTo("new-access");
+        // Old refresh token is revoked as part of rotation.
+        verify(tokenRevocationService).revoke("good-rt");
     }
 }

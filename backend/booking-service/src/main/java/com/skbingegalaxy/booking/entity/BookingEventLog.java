@@ -51,6 +51,14 @@ public class BookingEventLog {
     @Column(length = 20)
     private String triggeredByRole;
 
+    /**
+     * Human-readable display name of the actor captured at event-time.
+     * Snapshotted so admin/customer renames in the future don't rewrite
+     * the audit trail.  May be null for legacy rows or system events.
+     */
+    @Column(length = 160)
+    private String triggeredByName;
+
     /** Human-readable description of what changed */
     @Column(length = 2000)
     private String description;

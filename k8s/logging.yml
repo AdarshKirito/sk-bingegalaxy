@@ -95,6 +95,17 @@ metadata:
     app: loki
 spec:
   serviceName: loki
+  # NOTE: Single-replica deployment is a documented limitation until object
+  # storage (S3/GCS) + memberlist ring are provisioned. Scaling replicas with
+  # the current filesystem backend (chunks_directory: /loki/chunks on a PVC)
+  # causes chunk divergence because each pod has its own volume and no
+  # hashring to coordinate writes. To achieve HA:
+  #   1. Provision an S3 bucket (or equivalent) + IRSA/WIF credentials.
+  #   2. Change storage_config.tsdb_shipper to use s3 via storage_config.aws.
+  #   3. Add `memberlist:` config with join_members: loki-headless.
+  #   4. Switch to SimpleScalableDeployment (read/write/backend) or raise
+  #      replicas here with the new ring enabled.
+  # Tracked as a P1 infra follow-up; not scaled blindly to avoid data loss.
   replicas: 1
   selector:
     matchLabels:

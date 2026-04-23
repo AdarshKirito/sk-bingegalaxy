@@ -21,6 +21,33 @@ public class CustomerDetailDto {
     private String currentRateCodeName;
     private String memberLabel;
 
+    // ── Membership / loyalty snapshot (populated from LoyaltyService) ──
+    /** BRONZE / SILVER / GOLD / PLATINUM (null when loyalty is disabled) */
+    private String memberTier;
+    /** Current redeemable points balance */
+    private Long loyaltyPoints;
+    /** Lifetime points earned (never decays for tier calculation) */
+    private Long lifetimePointsEarned;
+    /** Points needed to reach next tier; null when already at max tier */
+    private Long pointsToNextTier;
+    private String nextTierLevel;
+    /** When the customer first joined the loyalty program */
+    private LocalDateTime memberSince;
+
+    // ── Review signals (populated from BookingReviewRepository) ──
+    /** Average rating admins have given this customer (1–5). 0 when none yet. */
+    private Double avgAdminRating;
+    /** Number of admin reviews submitted on this customer */
+    private Long adminReviewCount;
+    /** Number of customer reviews this customer has submitted */
+    private Long customerReviewCount;
+    /** Weighted influence this customer's reviews will have (0.5–1.25). */
+    private Double reviewWeight;
+
+    // ── Spend summary (across this binge) ──
+    private BigDecimal lifetimeSpend;
+    private BigDecimal pendingBalance;
+
     // rate code change audit trail
     private List<RateCodeChange> rateCodeChanges;
 

@@ -2,6 +2,7 @@ package com.skbingegalaxy.auth.controller;
 
 import com.skbingegalaxy.auth.dto.*;
 import com.skbingegalaxy.auth.service.AuthService;
+import com.skbingegalaxy.auth.service.TokenRevocationService;
 import com.skbingegalaxy.common.dto.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
 
     private final AuthService authService;
+    private final TokenRevocationService tokenRevocationService;
 
     @Value("${app.jwt.expiration-ms:3600000}")
     private long jwtExpirationMs;
@@ -88,7 +90,20 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<ApiResponse<Void>> logout(HttpServletResponse response) {
+    public ResponseEntity<ApiResponse<Void>> logout(
+            @CookieValue(name = "refreshToken", required = false) String cookieRefreshToken,
+            @RequestHeader(name = "Authorization", required = false) String authHeader,
+            HttpServletResponse response) {
+        // Revoke the refresh token so it can't be replayed against /auth/refresh.
+        if (cookieRefreshToken != null && !cookieRefreshToken.isBlank()) {
+            tokenRevocationService.revoke(cookieRefreshToken);
+        }
+        // Access tokens usually live for ~15 minutes and are picked up by a
+        // gateway-side denylist in a follow-up; revoking on logout here
+        // costs one row and prepares for that rollout.
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            tokenRevocationService.revoke(authHeader.substring(7));
+        }
         clearAuthCookies(response);
         return ResponseEntity.ok(ApiResponse.ok("Logged out", null));
     }
@@ -197,8 +212,9 @@ public class AuthController {
     }
 
     @GetMapping("/admin/admins")
-    public ResponseEntity<ApiResponse<java.util.List<UserDto>>> getAllAdmins() {
-        return ResponseEntity.ok(ApiResponse.ok(authService.getAllAdmins()));
+    public ResponseEntity<ApiResponse<org.springframework.data.domain.Page<UserDto>>> getAllAdmins(
+            @org.springframework.data.web.PageableDefault(size = 20) org.springframework.data.domain.Pageable pageable) {
+        return ResponseEntity.ok(ApiResponse.ok(authService.getAllAdmins(pageable)));
     }
 
     @PutMapping("/admin/admins/{id}")

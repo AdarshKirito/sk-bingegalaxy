@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { authService, adminService } from '../services/endpoints';
+import { formatServerDateTime, formatRelativeTime } from '../services/timeFormat';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
 import DOMPurify from 'dompurify';
@@ -34,8 +35,108 @@ const STATUS_BADGE = {
 /* ─── Helpers ──────────────────────────────────────────── */
 const sanitize = (v) => (typeof v === 'string' ? DOMPurify.sanitize(v) : v);
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString() : '—');
-const fmtDateTime = (d) => (d ? new Date(d).toLocaleString() : '—');
+const fmtDateTime = (d) => (d ? formatServerDateTime(d) : '—');
 const fmtMoney = (n) => (n != null ? `₹${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—');
+
+// ── Tier presentation (aligns with backend LoyaltyService tiers) ──
+const TIER_META = {
+  BRONZE:   { label: 'Bronze',   color: '#a97142', accent: 'rgba(169,113,66,0.15)'  },
+  SILVER:   { label: 'Silver',   color: '#7e8a97', accent: 'rgba(126,138,151,0.15)' },
+  GOLD:     { label: 'Gold',     color: '#c9a227', accent: 'rgba(201,162,39,0.18)'  },
+  PLATINUM: { label: 'Platinum', color: '#6d5bd1', accent: 'rgba(109,91,209,0.18)'  },
+};
+const getTierMeta = (tier) => TIER_META[(tier || 'BRONZE').toUpperCase()] || TIER_META.BRONZE;
+
+// Compact "Membership & signals" panel used across every user-detail tab so
+// an admin always sees who they're looking at regardless of which tab is open.
+function MembershipSummary({ cd }) {
+  if (!cd) return null;
+  const meta = getTierMeta(cd.memberTier);
+  const hasLoyalty = cd.memberTier != null;
+  return (
+    <div className="auc-member-summary" style={{
+      border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+      padding: '0.85rem 1rem', marginBottom: '1rem',
+      background: 'linear-gradient(180deg, rgba(var(--primary-rgb),0.04), transparent 65%)',
+      display: 'grid', gap: '0.75rem',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+    }}>
+      <div>
+        <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-muted)' }}>
+          Membership
+        </div>
+        {hasLoyalty ? (
+          <>
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: '0.45rem',
+              padding: '0.25rem 0.6rem', borderRadius: '999px',
+              background: meta.accent, color: meta.color, fontWeight: 700, marginTop: '0.3rem',
+            }}>● {meta.label}</div>
+            {cd.pointsToNextTier != null && cd.nextTierLevel && (
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>
+                {Number(cd.pointsToNextTier).toLocaleString()} pts to {getTierMeta(cd.nextTierLevel).label}
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={{ color: 'var(--text-muted)', marginTop: '0.3rem' }}>Not enrolled</div>
+        )}
+      </div>
+
+      <div>
+        <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-muted)' }}>
+          Loyalty Points
+        </div>
+        <div style={{ fontSize: '1.1rem', fontWeight: 700, marginTop: '0.3rem' }}>
+          {cd.loyaltyPoints != null ? Number(cd.loyaltyPoints).toLocaleString() : '—'}
+        </div>
+        {cd.lifetimePointsEarned != null && (
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            Lifetime: {Number(cd.lifetimePointsEarned).toLocaleString()}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-muted)' }}>
+          Member Since
+        </div>
+        <div style={{ marginTop: '0.3rem' }}>{cd.memberSince ? fmtDate(cd.memberSince) : '—'}</div>
+      </div>
+
+      <div>
+        <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-muted)' }}>
+          Lifetime Spend
+        </div>
+        <div style={{ fontSize: '1.05rem', fontWeight: 600, marginTop: '0.3rem' }}>{fmtMoney(cd.lifetimeSpend || 0)}</div>
+        {cd.pendingBalance != null && Number(cd.pendingBalance) > 0 && (
+          <div style={{ fontSize: '0.75rem', color: 'var(--warning, #c98b00)' }}>
+            Pending: {fmtMoney(cd.pendingBalance)}
+          </div>
+        )}
+      </div>
+
+      <div title="Internal admin signal: weighted average of admin ratings on this customer. Each admin's rating is scaled by the customer-review reputation of the binge they represent, so admins from well-liked binges carry slightly more signal than admins from struggling ones.">
+        <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-muted)' }}>
+          Review Signals
+        </div>
+        <div style={{ marginTop: '0.3rem' }}>
+          {cd.avgAdminRating != null ? (
+            <span><strong>{cd.avgAdminRating.toFixed(1)}</strong>/5 <span style={{ color: 'var(--text-muted)' }}>· {cd.adminReviewCount} admin · weighted</span></span>
+          ) : (
+            <span style={{ color: 'var(--text-muted)' }}>No admin reviews</span>
+          )}
+        </div>
+        {cd.reviewWeight != null && (
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            Influence weight: <strong>{cd.reviewWeight.toFixed(2)}×</strong>
+            {cd.customerReviewCount > 0 ? ` · ${cd.customerReviewCount} written` : ''}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 /* ═══════════════════════════════════════════════════════════
    AdminUsersConfig – Users, Admins & Config management
@@ -572,6 +673,12 @@ export default function AdminUsersConfig() {
 
           {/* Body */}
           <div className="ab-modal-body">
+            {/* Persistent membership signal across every tab — real-world
+                admin consoles (Intercom, Stripe) always keep identity /
+                tier context visible so admins don't lose track of who
+                they're editing. */}
+            {!isAdminUser && <MembershipSummary cd={cd} />}
+
             {/* ── Info tab ──────────────────────── */}
             {detailTab === 'info' && (
               <>
@@ -730,7 +837,10 @@ export default function AdminUsersConfig() {
                       <div key={ch.id || i} className="auc-audit-entry">
                         <div className="auc-audit-header">
                           <span className="auc-audit-type">{ch.changeType}</span>
-                          <span className="auc-audit-time">{fmtDateTime(ch.changedAt)}</span>
+                          <span className="auc-audit-time" title={ch.changedAt || ''}>
+                            {fmtDateTime(ch.changedAt)}
+                            {ch.changedAt ? ` · ${formatRelativeTime(ch.changedAt)}` : ''}
+                          </span>
                         </div>
                         <div className="auc-audit-detail">
                           {ch.previousRateCodeName && (
@@ -740,7 +850,7 @@ export default function AdminUsersConfig() {
                           <span className="auc-audit-to">To: <strong>{sanitize(ch.newRateCodeName) || 'None'}</strong></span>
                         </div>
                         {ch.changedByAdminId && (
-                          <div className="auc-audit-meta">By Admin ID: {ch.changedByAdminId}</div>
+                          <div className="auc-audit-meta">Changed by admin #{ch.changedByAdminId}</div>
                         )}
                       </div>
                     ))}

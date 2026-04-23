@@ -17,6 +17,19 @@ data:
   SPRING_DATA_REDIS_HOST: "redis"
   SPRING_DATA_REDIS_PORT: "6379"
   ZIPKIN_URL: "http://zipkin:9411/api/v2/spans"
+  # Disable OpenAPI / Swagger UI in production. Swagger is still available
+  # in docker-compose / local dev (default in application.yml is true) and
+  # can be flipped on per-service via overriding this env var.
+  SPRINGDOC_ENABLED: "false"
+  # Force every pod's JVM to UTC. Storing and computing timestamps in UTC
+  # regardless of host timezone eliminates the class of "worked in dev,
+  # broke at midnight in prod" bugs — reservation TTLs, signature windows,
+  # hold expiries, and reconciliation boundaries all compare against the
+  # same clock. Presentation-layer TZ conversion happens in the frontend
+  # based on the user's locale.
+  TZ: "UTC"
+  JAVA_TOOL_OPTIONS: "-Duser.timezone=UTC -Dfile.encoding=UTF-8"
+  SPRING_JACKSON_TIME_ZONE: "UTC"
 ---
 # Runtime secrets are synchronized from the deployment env file.
 # See scripts/sync-k8s-secrets.sh for the supported keys.

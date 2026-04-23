@@ -44,7 +44,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Page<User> findAllCustomers(Pageable pageable);
 
     @Query("SELECT u FROM User u WHERE u.role = 'ADMIN' ORDER BY u.firstName, u.lastName")
-    List<User> findAllAdmins();
+    Page<User> findAllAdmins(Pageable pageable);
 
     @Query("SELECT u FROM User u WHERE u.role = com.skbingegalaxy.common.enums.UserRole.CUSTOMER " +
            "AND u.active = true AND ((u.birthdayMonth IS NOT NULL AND u.birthdayDay IS NOT NULL) " +

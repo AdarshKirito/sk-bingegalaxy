@@ -25,6 +25,8 @@ class JwtProviderTest {
         ReflectionTestUtils.setField(jwtProvider, "jwtSecret", secret);
         ReflectionTestUtils.setField(jwtProvider, "jwtExpirationMs", 3600000L); // 1 hour
         ReflectionTestUtils.setField(jwtProvider, "refreshExpirationMs", 86400000L); // 24 hours
+        ReflectionTestUtils.setField(jwtProvider, "jwtIssuer", "skbingegalaxy-auth");
+        ReflectionTestUtils.setField(jwtProvider, "jwtAudience", "skbingegalaxy-web");
 
         testUser = User.builder()
                 .id(1L).firstName("John").lastName("Doe")
@@ -115,5 +117,54 @@ class JwtProviderTest {
         String token = jwtProvider.generateToken(testUser);
         Claims claims = jwtProvider.parseToken(token);
         assertThat(claims.getExpiration()).isAfter(new java.util.Date());
+    }
+
+    @Test
+    void generateToken_stampsIssuerAndAudience() {
+        String token = jwtProvider.generateToken(testUser);
+        Claims claims = jwtProvider.parseToken(token);
+        assertThat(claims.getIssuer()).isEqualTo("skbingegalaxy-auth");
+        assertThat(claims.getAudience()).contains("skbingegalaxy-web");
+    }
+
+    @Test
+    void parseToken_wrongIssuer_throws() {
+        String token = jwtProvider.generateToken(testUser);
+        // Swap expected issuer so the stored token now has a "wrong" iss claim.
+        ReflectionTestUtils.setField(jwtProvider, "jwtIssuer", "someone-else");
+        assertThatThrownBy(() -> jwtProvider.parseToken(token))
+            .isInstanceOf(io.jsonwebtoken.JwtException.class)
+            .hasMessageContaining("issuer");
+    }
+
+    @Test
+    void parseToken_wrongAudience_throws() {
+        String token = jwtProvider.generateToken(testUser);
+        ReflectionTestUtils.setField(jwtProvider, "jwtAudience", "different-app");
+        assertThatThrownBy(() -> jwtProvider.parseToken(token))
+            .isInstanceOf(io.jsonwebtoken.JwtException.class)
+            .hasMessageContaining("audience");
+    }
+
+    @Test
+    void parseToken_legacyTokenWithoutIssAud_stillAccepted() {
+        // Simulate a token minted by an older build (no iss / no aud).
+        String secret = (String) ReflectionTestUtils.getField(jwtProvider, "jwtSecret");
+        javax.crypto.SecretKey key = io.jsonwebtoken.security.Keys.hmacShaKeyFor(
+            io.jsonwebtoken.io.Decoders.BASE64.decode(secret));
+        java.util.Map<String, Object> claims = new java.util.HashMap<>();
+        claims.put("role", "CUSTOMER");
+        claims.put("token_type", "access");
+        String legacyToken = io.jsonwebtoken.Jwts.builder()
+            .claims(claims)
+            .subject("1")
+            .issuedAt(new java.util.Date())
+            .expiration(new java.util.Date(System.currentTimeMillis() + 60000))
+            .signWith(key)
+            .compact();
+
+        // Should parse successfully — backward-compat with legacy tokens.
+        Claims parsed = jwtProvider.parseToken(legacyToken);
+        assertThat(parsed.getSubject()).isEqualTo("1");
     }
 }

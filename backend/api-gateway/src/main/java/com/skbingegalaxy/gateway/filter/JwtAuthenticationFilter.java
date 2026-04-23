@@ -51,6 +51,20 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
     @Value("${spring.security.jwt.secret}")
     private String jwtSecret;
 
+    /**
+     * Expected issuer ({@code iss}) claim. Tokens carrying a different issuer are rejected.
+     * Auth-service stamps new tokens with the same value. Missing iss is tolerated so that
+     * tokens minted before iss/aud rollout keep working until they expire.
+     */
+    @Value("${spring.security.jwt.issuer:skbingegalaxy-auth}")
+    private String jwtIssuer;
+
+    /**
+     * Expected audience ({@code aud}) claim. Same backward-compat rule as {@link #jwtIssuer}.
+     */
+    @Value("${spring.security.jwt.audience:skbingegalaxy-web}")
+    private String jwtAudience;
+
     @jakarta.annotation.PostConstruct
     void validateConfig() {
         if (jwtSecret == null || jwtSecret.isBlank()) {
@@ -169,12 +183,25 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         // verifyWith(key) enforces HMAC signature validation, preventing alg:none attacks.
         // 30-second clock skew tolerance handles sub-second timing differences between
         // Docker containers without meaningfully extending the effective token lifetime.
-        return Jwts.parser()
+        Claims claims = Jwts.parser()
             .verifyWith(key)
             .clockSkewSeconds(30)
             .build()
             .parseSignedClaims(token)
             .getPayload();
+
+        // Soft iss/aud enforcement: only reject when the claim is present AND wrong.
+        // This keeps existing unexpired tokens (minted before iss/aud rollout) valid
+        // until they naturally expire. New tokens always carry both claims.
+        String iss = claims.getIssuer();
+        if (iss != null && !jwtIssuer.equals(iss)) {
+            throw new io.jsonwebtoken.JwtException("Unexpected token issuer");
+        }
+        java.util.Set<String> aud = claims.getAudience();
+        if (aud != null && !aud.isEmpty() && !aud.contains(jwtAudience)) {
+            throw new io.jsonwebtoken.JwtException("Unexpected token audience");
+        }
+        return claims;
     }
 
     @Override

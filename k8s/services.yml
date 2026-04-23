@@ -25,6 +25,7 @@ spec:
                   matchLabels:
                     app: auth-service
                 topologyKey: kubernetes.io/hostname
+      terminationGracePeriodSeconds: 60
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -90,6 +91,10 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 15
             failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh","-c","sleep 10"]
           volumeMounts:
             - name: tmp
               mountPath: /tmp
@@ -136,6 +141,7 @@ spec:
                   matchLabels:
                     app: availability-service
                 topologyKey: kubernetes.io/hostname
+      terminationGracePeriodSeconds: 60
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -201,6 +207,10 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 15
             failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh","-c","sleep 10"]
           volumeMounts:
             - name: tmp
               mountPath: /tmp
@@ -247,6 +257,7 @@ spec:
                   matchLabels:
                     app: booking-service
                 topologyKey: kubernetes.io/hostname
+      terminationGracePeriodSeconds: 60
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -312,12 +323,24 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 15
             failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh","-c","sleep 10"]
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: uploads
+              mountPath: /app/uploads
       volumes:
         - name: tmp
           emptyDir: {}
+        # NOTE: emptyDir is per-pod — uploaded media is not shared across replicas and is lost on
+        # pod restart. For production, replace with a ReadWriteMany PVC or (preferred) refactor
+        # MediaController to upload directly to object storage (S3/MinIO) and serve via CDN.
+        - name: uploads
+          emptyDir:
+            sizeLimit: 500Mi
 ---
 apiVersion: v1
 kind: Service
@@ -358,6 +381,7 @@ spec:
                   matchLabels:
                     app: payment-service
                 topologyKey: kubernetes.io/hostname
+      terminationGracePeriodSeconds: 60
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -423,6 +447,10 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 15
             failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh","-c","sleep 10"]
           volumeMounts:
             - name: tmp
               mountPath: /tmp
@@ -469,6 +497,7 @@ spec:
                   matchLabels:
                     app: notification-service
                 topologyKey: kubernetes.io/hostname
+      terminationGracePeriodSeconds: 60
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -526,6 +555,10 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 15
             failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh","-c","sleep 10"]
           volumeMounts:
             - name: tmp
               mountPath: /tmp

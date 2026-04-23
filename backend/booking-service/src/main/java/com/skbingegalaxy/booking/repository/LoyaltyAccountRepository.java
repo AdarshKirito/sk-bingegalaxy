@@ -12,6 +12,14 @@ public interface LoyaltyAccountRepository extends JpaRepository<LoyaltyAccount, 
 
     Optional<LoyaltyAccount> findByCustomerId(Long customerId);
 
+    /**
+     * Bulk lookup — used when we need tier info for many customers at
+     * once (e.g. the weighted binge-rating calculation).  Avoids an
+     * N+1 query per review and beats {@code findAll()} which would
+     * stream the entire table.
+     */
+    java.util.List<LoyaltyAccount> findByCustomerIdIn(java.util.Collection<Long> customerIds);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT a FROM LoyaltyAccount a WHERE a.customerId = :customerId")
     Optional<LoyaltyAccount> findByCustomerIdForUpdate(Long customerId);

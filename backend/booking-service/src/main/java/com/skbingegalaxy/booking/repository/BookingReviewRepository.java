@@ -40,4 +40,36 @@ public interface BookingReviewRepository extends JpaRepository<BookingReview, Lo
 
     @Query("SELECT COUNT(r) FROM BookingReview r WHERE r.customerId = :customerId AND r.reviewerRole = 'ADMIN' AND r.rating IS NOT NULL")
     long countAdminReviewsForCustomer(@Param("customerId") Long customerId);
+
+    /**
+     * Returns `[rating, customerId]` tuples for every customer review that
+     * contributes to a binge's public score.  Used by the weighted-average
+     * calculation so we can apply a per-reviewer influence multiplier.
+     */
+    @Query("SELECT r.rating, r.customerId FROM BookingReview r "
+         + "WHERE r.bingeId = :bingeId AND r.reviewerRole = 'CUSTOMER' "
+         + "AND r.skipped = false AND r.rating IS NOT NULL AND r.visibleToCustomer = true")
+    List<Object[]> ratingAndCustomerIdForBinge(@Param("bingeId") Long bingeId);
+
+    /**
+     * Batch lookup of average admin rating for a set of customer ids.
+     * Returns `[customerId, avgRating, count]` tuples.
+     */
+    @Query("SELECT r.customerId, AVG(r.rating), COUNT(r) FROM BookingReview r "
+         + "WHERE r.customerId IN :customerIds AND r.reviewerRole = 'ADMIN' "
+         + "AND r.rating IS NOT NULL GROUP BY r.customerId")
+    List<Object[]> adminRatingStatsForCustomers(@Param("customerIds") java.util.Collection<Long> customerIds);
+
+    /**
+     * Returns `[rating, bingeId]` tuples for every admin review recorded
+     * against a customer.  Used to weight each admin's private rating
+     * by the customer-rated reputation of the binge they represent —
+     * admins from highly-reviewed binges carry slightly more signal,
+     * admins from poorly-reviewed binges slightly less.  Mirrors the
+     * trust model applied to customer reviews.
+     */
+    @Query("SELECT r.rating, r.bingeId FROM BookingReview r "
+         + "WHERE r.customerId = :customerId AND r.reviewerRole = 'ADMIN' "
+         + "AND r.rating IS NOT NULL")
+    List<Object[]> adminRatingAndBingeForCustomer(@Param("customerId") Long customerId);
 }

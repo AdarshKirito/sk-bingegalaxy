@@ -16,6 +16,41 @@ spring:
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
 
+# ── Feign: tight timeouts + circuit-breaker integration ──
+# availability-service is in the booking hot path; any stall here directly
+# delays user-facing slot lookups. Short timeouts + a circuit breaker keep the
+# failure isolated to individual requests.
+spring.cloud.openfeign:
+  client:
+    config:
+      default:
+        connect-timeout: 3000
+        read-timeout: 5000
+        logger-level: basic
+  circuitbreaker:
+    enabled: true
+
+resilience4j.circuitbreaker:
+  configs:
+    default:
+      sliding-window-type: COUNT_BASED
+      sliding-window-size: 20
+      minimum-number-of-calls: 10
+      failure-rate-threshold: 50
+      slow-call-duration-threshold: 4000ms
+      slow-call-rate-threshold: 60
+      wait-duration-in-open-state: 30s
+      permitted-number-of-calls-in-half-open-state: 3
+      automatic-transition-from-open-to-half-open-enabled: true
+  instances:
+    BookingBingeClient:
+      base-config: default
+resilience4j.timelimiter:
+  configs:
+    default:
+      timeout-duration: 6s
+      cancel-running-future: true
+
 eureka:
   client:
     service-url:

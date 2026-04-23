@@ -1,7 +1,16 @@
 server:
   port: 8081
+  # ── DoS / resource-exhaustion hardening ──────────────────────────────
+  max-http-request-header-size: 16KB
+  tomcat:
+    max-http-form-post-size: 256KB
+    max-swallow-size: 2MB
 
 spring:
+  servlet:
+    multipart:
+      max-file-size: 1MB
+      max-request-size: 2MB
   application:
     name: auth-service
   datasource:
@@ -44,6 +53,9 @@ app:
     secret: ${JWT_SECRET}
     expiration-ms: 900000  # 15 minutes
     refresh-expiration-ms: 604800000  # 7 days
+    # iss/aud are stamped on every new token and enforced on parse when present.
+    issuer: ${JWT_ISSUER:skbingegalaxy-auth}
+    audience: ${JWT_AUDIENCE:skbingegalaxy-web}
   cookie:
     secure: ${COOKIE_SECURE:true}
     domain: ${COOKIE_DOMAIN:}
@@ -70,6 +82,7 @@ springdoc:
 
 logging:
   level:
+    root: INFO
     com.skbingegalaxy.auth: WARN
 
 eureka:

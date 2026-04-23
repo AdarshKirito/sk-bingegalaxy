@@ -21,6 +21,8 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const BookingPage = lazy(() => import('./pages/BookingPage'));
 const BookingConfirmation = lazy(() => import('./pages/BookingConfirmation'));
 const MyBookings = lazy(() => import('./pages/MyBookings'));
+const Membership = lazy(() => import('./pages/Membership'));
+const AdminLoyaltyCenter = lazy(() => import('./pages/AdminLoyaltyCenter'));
 const CustomerPayments = lazy(() => import('./pages/CustomerPayments'));
 const AccountCenter = lazy(() => import('./pages/AccountCenter'));
 const PaymentPage = lazy(() => import('./pages/PaymentPage'));
@@ -160,6 +162,7 @@ function AppFrame() {
           <Route path="/book" element={<BingeRequired><BookingPage /></BingeRequired>} />
           <Route path="/booking/:ref" element={<BingeRequired><BookingConfirmation /></BingeRequired>} />
           <Route path="/my-bookings" element={<BingeRequired><MyBookings /></BingeRequired>} />
+          <Route path="/membership" element={<ProtectedRoute><Membership /></ProtectedRoute>} />
           <Route path="/payments" element={<BingeRequired><CustomerPayments /></BingeRequired>} />
           <Route path="/about" element={<BingeRequired><AboutBinge /></BingeRequired>} />
           <Route path="/account" element={<ProtectedRoute><AccountCenter /></ProtectedRoute>} />
@@ -176,6 +179,7 @@ function AppFrame() {
           <Route path="/admin/blocked-dates" element={<AdminBingeRequired><AdminBlockedDates /></AdminBingeRequired>} />
           <Route path="/admin/event-types" element={<AdminBingeRequired><AdminEventTypes /></AdminBingeRequired>} />
           <Route path="/admin/rate-codes" element={<AdminBingeRequired><AdminRateCodes /></AdminBingeRequired>} />
+          <Route path="/admin/loyalty-center" element={<SuperAdminRoute><AdminLoyaltyCenter /></SuperAdminRoute>} />
           <Route path="/admin/customer-pricing" element={<AdminBingeRequired><AdminCustomerPricing /></AdminBingeRequired>} />
           <Route path="/admin/venue-rooms" element={<AdminBingeRequired><AdminVenueRooms /></AdminBingeRequired>} />
           <Route path="/admin/surge-rules" element={<AdminBingeRequired><AdminSurgeRules /></AdminBingeRequired>} />

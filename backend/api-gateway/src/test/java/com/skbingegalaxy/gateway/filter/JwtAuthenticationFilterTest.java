@@ -33,6 +33,8 @@ class JwtAuthenticationFilterTest {
     void setUp() {
         filter = new JwtAuthenticationFilter();
         ReflectionTestUtils.setField(filter, "jwtSecret", SECRET);
+        ReflectionTestUtils.setField(filter, "jwtIssuer", "skbingegalaxy-auth");
+        ReflectionTestUtils.setField(filter, "jwtAudience", "skbingegalaxy-web");
         chain = mock(GatewayFilterChain.class);
         when(chain.filter(any())).thenReturn(Mono.empty());
     }
@@ -298,5 +300,66 @@ class JwtAuthenticationFilterTest {
     @Test
     void order_isNegativeOne() {
         assertThat(filter.getOrder()).isEqualTo(-1);
+    }
+
+    @Nested
+    class IssuerAudienceTests {
+
+        private String generateTokenWithIssAud(String issuer, String audience) {
+            SecretKey key = Keys.hmacShaKeyFor(Decoders.BASE64.decode(SECRET));
+            var builder = Jwts.builder()
+                    .subject("1")
+                    .claim("role", "CUSTOMER")
+                    .claim("email", "user@test.com")
+                    .issuedAt(new Date())
+                    .expiration(new Date(System.currentTimeMillis() + 3600_000));
+            if (issuer != null) builder.issuer(issuer);
+            if (audience != null) builder.audience().add(audience).and();
+            return builder.signWith(key).compact();
+        }
+
+        @Test
+        void wrongIssuer_returns401() {
+            String token = generateTokenWithIssAud("evil-issuer", "skbingegalaxy-web");
+            MockServerHttpRequest request = MockServerHttpRequest
+                    .get("/api/v1/bookings/my")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                    .build();
+            MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+            filter.filter(exchange, chain).block();
+
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            verify(chain, never()).filter(any());
+        }
+
+        @Test
+        void wrongAudience_returns401() {
+            String token = generateTokenWithIssAud("skbingegalaxy-auth", "different-app");
+            MockServerHttpRequest request = MockServerHttpRequest
+                    .get("/api/v1/bookings/my")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                    .build();
+            MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+            filter.filter(exchange, chain).block();
+
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            verify(chain, never()).filter(any());
+        }
+
+        @Test
+        void correctIssAud_allowed() {
+            String token = generateTokenWithIssAud("skbingegalaxy-auth", "skbingegalaxy-web");
+            MockServerHttpRequest request = MockServerHttpRequest
+                    .get("/api/v1/bookings/my")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                    .build();
+            MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+            filter.filter(exchange, chain).block();
+
+            verify(chain).filter(any());
+        }
     }
 }

@@ -49,6 +49,9 @@ class PaymentServiceTest {
     @Mock private com.skbingegalaxy.payment.client.RazorpayGatewayClient razorpayGatewayClient;
     @Mock private com.skbingegalaxy.payment.client.BookingAmountClient bookingAmountClient;
     @Mock private com.skbingegalaxy.payment.repository.PaymentStatusHistoryRepository statusHistoryRepository;
+    @Mock private WebhookDedupService webhookDedupService;
+    @Mock private AuditLogService auditLogService;
+    @Mock private PaymentMetrics metrics;
 
     @InjectMocks private PaymentService paymentService;
 

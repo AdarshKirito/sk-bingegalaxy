@@ -6,6 +6,7 @@ import { toast } from 'react-toastify';
 import DOMPurify from 'dompurify';
 import Pagination from '../components/ui/Pagination';
 import { exportBookingsCSV, exportBookingsPDF } from '../services/exportUtils';
+import { formatServerDateTime, formatRelativeTime, parseServerDate } from '../services/timeFormat';
 import { FiDownload } from 'react-icons/fi';
 import './AdminBookings.css';
 
@@ -1296,7 +1297,20 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
             {editing ? <input style={editInputStyle} value={editForm.adminNotes} onChange={e => setEditForm({ ...editForm, adminNotes: e.target.value })} />
               : <span>{DOMPurify.sanitize(b.adminNotes || 'N/A', { ALLOWED_TAGS: [] })}</span>}
           </div>
-          <div style={rowStyle}><span style={labelStyle}>Created</span><span>{b.createdAt ? new Date(b.createdAt).toLocaleString() : 'N/A'}</span></div>
+          <div style={rowStyle}>
+            <span style={labelStyle}>Created</span>
+            <span title={parseServerDate(b.createdAt)?.toISOString() || ''}>
+              {b.createdAt ? `${formatServerDateTime(b.createdAt)} · ${formatRelativeTime(b.createdAt)}` : 'N/A'}
+            </span>
+          </div>
+          {b.updatedAt && b.updatedAt !== b.createdAt && (
+            <div style={rowStyle}>
+              <span style={labelStyle}>Last updated</span>
+              <span title={parseServerDate(b.updatedAt)?.toISOString() || ''}>
+                {`${formatServerDateTime(b.updatedAt)} · ${formatRelativeTime(b.updatedAt)}`}
+              </span>
+            </div>
+          )}
 
           {/* Early checkout info */}
           {b.earlyCheckoutNote && (
@@ -1747,18 +1761,33 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                   return map[type] || type.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
                 })();
 
-                // Build clear "who did what" message
-                const actor = evt.triggeredBy || 'System';
-                const role = evt.triggeredByRole ? `(${evt.triggeredByRole.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase())})` : '';
-                const whoLine = `${actor} ${role}`.trim();
+                // Build clear "who did what" message.  Real-world audit
+                // trails (Stripe, Linear, GitHub) always show the actor's
+                // display name and fall back to the role when the system
+                // itself is acting — never a bare numeric id or the awkward
+                // "System(System)" pattern.
+                const roleRaw = (evt.triggeredByRole || '').toUpperCase();
+                const roleLabel = ({
+                  CUSTOMER: 'Customer',
+                  ADMIN: 'Admin',
+                  SUPER_ADMIN: 'Super Admin',
+                  SYSTEM: 'Automated',
+                }[roleRaw]) || (roleRaw ? roleRaw.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : '');
+                const actorName = (evt.triggeredByName && evt.triggeredByName.trim())
+                  || (roleRaw === 'CUSTOMER' && b.customerName) // fallback for legacy rows
+                  || (roleRaw && roleRaw !== 'SYSTEM' ? roleLabel : 'System');
+                const whoLine = (!roleLabel || actorName === roleLabel)
+                  ? actorName
+                  : `${actorName} (${roleLabel})`;
 
-                // Format timestamp in browser local time
-                const localTime = evt.createdAt
-                  ? new Date(evt.createdAt).toLocaleString(undefined, {
-                      year: 'numeric', month: 'short', day: 'numeric',
-                      hour: '2-digit', minute: '2-digit', second: '2-digit',
-                    })
-                  : '';
+                // Format timestamp using the UTC-aware helper so the
+                // naive LocalDateTime coming from the server renders in
+                // the admin dashboard's local wall-clock time.
+                const localTime = formatServerDateTime(evt.createdAt, {
+                  year: 'numeric', month: 'short', day: 'numeric',
+                  hour: '2-digit', minute: '2-digit', second: '2-digit',
+                });
+                const relativeTime = formatRelativeTime(evt.createdAt);
 
                 // Build change summary
                 const changeSummary = (() => {
@@ -1779,7 +1808,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                     <div className="ab-event-log-header">
                       <span className="ab-event-log-type">{eventAction}</span>
                       <span className="ab-event-log-time" title={evt.createdAt || ''}>
-                        {localTime}
+                        {localTime}{relativeTime ? ` · ${relativeTime}` : ''}
                       </span>
                     </div>
                     {changeSummary.length > 0 && (

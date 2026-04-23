@@ -1004,8 +1004,42 @@
 
 .customer-review-stars {
   display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
   gap: 0.35rem;
   margin: 0.35rem 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+ *  Review card — the generic `.customer-mini-card` lays its
+ *  children out horizontally with `space-between`, which squeezes
+ *  the text column to a single character width when the card has
+ *  lots of content (title + star row + textarea + action bar).
+ *  The reviews surface opts into a stacked column layout so the
+ *  heading, rating and comment read naturally on every viewport.
+ * ═══════════════════════════════════════════════════════════════ */
+.customer-review-card {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0.75rem;
+}
+
+.customer-review-card > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.customer-review-card .customer-review-input {
+  min-height: 72px;
+}
+
+.customer-review-card .customer-mini-card-actions {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 
 .customer-review-star {

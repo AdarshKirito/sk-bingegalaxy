@@ -15,6 +15,55 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD:payment_svc_dev}
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      enable-auto-commit: false
+      max-poll-records: 20
+      isolation-level: read_committed
+      auto-offset-reset: earliest
+    listener:
+      ack-mode: record
+      missing-topics-fatal: false
+      concurrency: 2
+
+# ── Feign: tight timeouts + circuit-breaker integration ──
+# A slow downstream must NEVER hold a Tomcat thread hostage. Feign's defaults
+# (60s read) cascade into thread-pool exhaustion under partial outages; these
+# overrides plus Resilience4j below cap the blast radius per call-site.
+spring.cloud.openfeign:
+  client:
+    config:
+      default:
+        connect-timeout: 3000
+        read-timeout: 5000
+        logger-level: basic
+  circuitbreaker:
+    enabled: true
+
+resilience4j.circuitbreaker:
+  configs:
+    default:
+      sliding-window-type: COUNT_BASED
+      sliding-window-size: 20
+      minimum-number-of-calls: 10
+      failure-rate-threshold: 50
+      slow-call-duration-threshold: 4000ms
+      slow-call-rate-threshold: 60
+      wait-duration-in-open-state: 30s
+      permitted-number-of-calls-in-half-open-state: 3
+      automatic-transition-from-open-to-half-open-enabled: true
+  instances:
+    BookingBingeClient:
+      base-config: default
+    RazorpayGatewayClient:
+      base-config: default
+      # Gateway outages are costlier to mis-diagnose; widen the window.
+      sliding-window-size: 40
+      wait-duration-in-open-state: 60s
+resilience4j.timelimiter:
+  configs:
+    default:
+      timeout-duration: 6s
+      cancel-running-future: true
 
 eureka:
   client:

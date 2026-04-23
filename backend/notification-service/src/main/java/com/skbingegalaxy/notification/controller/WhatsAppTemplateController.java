@@ -5,11 +5,13 @@ import com.skbingegalaxy.notification.model.WhatsAppTemplate;
 import com.skbingegalaxy.notification.repository.WhatsAppTemplateRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
-import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/notifications/admin/whatsapp-templates")
@@ -20,9 +22,15 @@ public class WhatsAppTemplateController {
     private final WhatsAppTemplateRepository repository;
 
     @GetMapping
-    public ResponseEntity<ApiResponse<List<WhatsAppTemplate>>> listAll() {
-        return ResponseEntity.ok(ApiResponse.ok(
-                "WhatsApp templates", repository.findAll()));
+    public ResponseEntity<ApiResponse<Page<WhatsAppTemplate>>> listAll(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        // Cap page size to prevent memory exhaustion (template table can grow unbounded)
+        if (size <= 0 || size > 100) size = 50;
+        if (page < 0) page = 0;
+        Page<WhatsAppTemplate> result = repository.findAll(
+                PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "templateName")));
+        return ResponseEntity.ok(ApiResponse.ok("WhatsApp templates", result));
     }
 
     @GetMapping("/{id}")

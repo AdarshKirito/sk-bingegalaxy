@@ -2,6 +2,7 @@ package com.skbingegalaxy.payment.controller;
 
 import com.skbingegalaxy.common.dto.ApiResponse;
 import com.skbingegalaxy.payment.service.PaymentBingeScopeService;
+import com.skbingegalaxy.payment.service.IdempotencyService;
 import com.skbingegalaxy.payment.dto.*;
 import com.skbingegalaxy.payment.service.PaymentService;
 import jakarta.validation.Valid;
@@ -22,6 +23,7 @@ public class PaymentController {
 
     private final PaymentBingeScopeService scopeService;
     private final PaymentService paymentService;
+    private final IdempotencyService idempotencyService;
 
     @ModelAttribute
     void validateBingeScope(
@@ -44,8 +46,11 @@ public class PaymentController {
             @Valid @RequestBody InitiatePaymentRequest request,
             @RequestHeader("X-User-Id") Long userId,
             @RequestHeader(value = "X-User-Email", required = false) String userEmail,
-            @RequestHeader(value = "X-User-Name", required = false) String userName) {
-        PaymentDto payment = paymentService.initiatePayment(request, userId, userEmail, userName);
+            @RequestHeader(value = "X-User-Name", required = false) String userName,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        PaymentDto payment = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/payments/initiate", userId, request, PaymentDto.class,
+            () -> paymentService.initiatePayment(request, userId, userEmail, userName));
         return ResponseEntity.ok(ApiResponse.ok("Payment initiated", payment));
     }
 
@@ -100,13 +105,17 @@ public class PaymentController {
     @PostMapping("/admin/refund")
     public ResponseEntity<ApiResponse<RefundDto>> initiateRefund(
             @Valid @RequestBody RefundRequest request,
+            @RequestHeader("X-User-Id") Long adminId,
             @RequestHeader("X-User-Email") String adminEmail,
-            @RequestHeader("X-User-Role") String userRole) {
+            @RequestHeader("X-User-Role") String userRole,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
         if (!"ADMIN".equalsIgnoreCase(userRole) && !"SUPER_ADMIN".equalsIgnoreCase(userRole)) {
             throw new com.skbingegalaxy.common.exception.BusinessException(
                 "Only admins can initiate refunds", org.springframework.http.HttpStatus.FORBIDDEN);
         }
-        RefundDto refund = paymentService.initiateRefund(request, adminEmail);
+        RefundDto refund = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/payments/admin/refund", adminId, request, RefundDto.class,
+            () -> paymentService.initiateRefund(request, adminEmail));
         return ResponseEntity.ok(ApiResponse.ok("Refund initiated", refund));
     }
 
@@ -124,8 +133,12 @@ public class PaymentController {
     @PostMapping("/cancel/{transactionId}")
     public ResponseEntity<ApiResponse<PaymentDto>> cancelPayment(
             @PathVariable String transactionId,
-            @RequestHeader("X-User-Id") Long userId) {
-        PaymentDto payment = paymentService.cancelPayment(transactionId, userId);
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        PaymentDto payment = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/payments/cancel/" + transactionId, userId,
+            Map.of("transactionId", transactionId), PaymentDto.class,
+            () -> paymentService.cancelPayment(transactionId, userId));
         return ResponseEntity.ok(ApiResponse.ok("Payment cancelled", payment));
     }
 
@@ -144,13 +157,17 @@ public class PaymentController {
     @PostMapping("/admin/record-cash")
     public ResponseEntity<ApiResponse<PaymentDto>> recordCashPayment(
             @Valid @RequestBody RecordCashPaymentRequest request,
+            @RequestHeader("X-User-Id") Long adminId,
             @RequestHeader("X-User-Email") String adminEmail,
-            @RequestHeader("X-User-Role") String userRole) {
+            @RequestHeader("X-User-Role") String userRole,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
         if (!"ADMIN".equalsIgnoreCase(userRole) && !"SUPER_ADMIN".equalsIgnoreCase(userRole)) {
             throw new com.skbingegalaxy.common.exception.BusinessException(
                 "Only admins can record cash payments", org.springframework.http.HttpStatus.FORBIDDEN);
         }
-        PaymentDto payment = paymentService.recordCashPayment(request, adminEmail);
+        PaymentDto payment = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/payments/admin/record-cash", adminId, request, PaymentDto.class,
+            () -> paymentService.recordCashPayment(request, adminEmail));
         return ResponseEntity.ok(ApiResponse.ok("Cash payment recorded", payment));
     }
 
@@ -161,13 +178,17 @@ public class PaymentController {
     @PostMapping("/admin/add-payment")
     public ResponseEntity<ApiResponse<PaymentDto>> addPayment(
             @Valid @RequestBody AddPaymentRequest request,
+            @RequestHeader("X-User-Id") Long adminId,
             @RequestHeader("X-User-Email") String adminEmail,
-            @RequestHeader("X-User-Role") String userRole) {
+            @RequestHeader("X-User-Role") String userRole,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
         if (!"ADMIN".equalsIgnoreCase(userRole) && !"SUPER_ADMIN".equalsIgnoreCase(userRole)) {
             throw new com.skbingegalaxy.common.exception.BusinessException(
                 "Only admins can add payments", org.springframework.http.HttpStatus.FORBIDDEN);
         }
-        PaymentDto payment = paymentService.addPayment(request, adminEmail);
+        PaymentDto payment = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/payments/admin/add-payment", adminId, request, PaymentDto.class,
+            () -> paymentService.addPayment(request, adminEmail));
         return ResponseEntity.ok(ApiResponse.ok("Payment recorded", payment));
     }
 }

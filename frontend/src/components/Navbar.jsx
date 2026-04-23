@@ -23,6 +23,7 @@ import {
   FiGrid,
   FiZap,
   FiList,
+  FiAward,
 } from 'react-icons/fi';
 import ThemeToggle from './ThemeToggle';
 
@@ -76,6 +77,7 @@ export default function Navbar() {
     { to: '/book', icon: <FiCalendar />, label: t('nav.book') },
     { to: '/my-bookings', icon: <FiCompass />, label: t('nav.my_bookings') },
     { to: '/payments', icon: <FiCreditCard />, label: t('nav.payments') },
+    { to: '/membership', icon: <FiAward />, label: t('nav.membership', 'Membership') },
     { to: '/about', icon: <FiInfo />, label: t('nav.about') },
   ];
 
@@ -125,6 +127,7 @@ export default function Navbar() {
                   <NavLink to="/admin/binges" className={navLinkClass}><FiMapPin /> {t('nav.binges')}</NavLink>
                   <NavLink to="/admin/account" className={navLinkClass}><FiUser /> {t('nav.account')}</NavLink>
                   {effectiveIsSuperAdmin && <NavLink to="/admin/all-users" className={navLinkClass}><FiUsers /> {t('nav.users')}</NavLink>}
+                  {effectiveIsSuperAdmin && <NavLink to="/admin/loyalty-center" className={navLinkClass}><FiAward /> {t('nav.loyalty_center', 'Loyalty Center')}</NavLink>}
                   {effectiveIsSuperAdmin && <NavLink to="/admin/register" className={navLinkClass}><FiShield /> {t('nav.add_admin', 'Add Admin')}</NavLink>}
                 </div>
               )}
@@ -176,6 +179,7 @@ export default function Navbar() {
                 <>
                   <NavLink to="/platform" className={navLinkClass}><FiHome /> {t('nav.dashboard')}</NavLink>
                   <NavLink to="/binges" className={navLinkClass}><FiMapPin /> {t('nav.venues', 'Venues')}</NavLink>
+                  <NavLink to="/membership" className={navLinkClass}><FiAward /> {t('nav.membership', 'Membership')}</NavLink>
                   <NavLink to={accountLink.to} className={navLinkClass}><FiUser /> {t('nav.account')}</NavLink>
                 </>
               )}

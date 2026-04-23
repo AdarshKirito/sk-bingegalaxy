@@ -19,4 +19,16 @@ public class LoyaltyProperties {
 
     /** Points value when redeemed: how many points = ₹1 discount. */
     private int redemptionRate = 100;
+
+    /**
+     * M12 cutover flag — when <code>true</code>, the legacy v1 earn /
+     * redeem / expire paths short-circuit and the v2 engines become the
+     * sole source of truth.  During the Phase-1 shadow period this stays
+     * <code>false</code> so both systems run in parallel and an ops
+     * comparison job can verify parity.
+     *
+     * <p>Flip via <code>APP_LOYALTY_V2_PRIMARY=true</code> or
+     * <code>app.loyalty.v2-primary=true</code>.
+     */
+    private boolean v2Primary = false;
 }

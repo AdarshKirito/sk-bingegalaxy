@@ -54,6 +54,7 @@ public class AuthService {
     private final JwtProvider jwtProvider;
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final GoogleIdTokenVerifier googleIdTokenVerifier;
+    private final TokenRevocationService tokenRevocationService;
 
     @Value("${app.otp.expiration-minutes:10}")
     private int otpExpirationMinutes;
@@ -108,7 +109,7 @@ public class AuthService {
                 if (!user.isActive()) {
                     throw new BusinessException("Account is deactivated. Contact support.", HttpStatus.FORBIDDEN);
                 }
-                log.info("Google login (existing user): {}", email);
+                log.info("Google login (existing user): {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(email));
                 return buildAuthResponse(user);
             }
 
@@ -124,7 +125,7 @@ public class AuthService {
                 .build();
 
             user = userRepository.save(user);
-            log.info("Google login (new user created): {}", email);
+            log.info("Google login (new user created): {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(email));
 
             sendNotification(user, "WELCOME", Map.of("name", user.getFirstName()));
 
@@ -159,7 +160,7 @@ public class AuthService {
             .build();
 
         user = userRepository.save(user);
-        log.info("Customer registered: {}", user.getEmail());
+        log.info("Customer registered: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
 
         // Fire notification event
         sendNotification(user, "WELCOME", Map.of(
@@ -211,13 +212,25 @@ public class AuthService {
         if (!jwtProvider.validateRefreshToken(refreshToken)) {
             throw new BusinessException("Invalid or expired refresh token", HttpStatus.UNAUTHORIZED);
         }
+        String jti;
+        try {
+            jti = jwtProvider.getJtiFromToken(refreshToken);
+        } catch (Exception ex) {
+            throw new BusinessException("Invalid or expired refresh token", HttpStatus.UNAUTHORIZED);
+        }
+        if (tokenRevocationService.isRevoked(jti)) {
+            log.warn("Refresh attempt with revoked jti={}", jti);
+            throw new BusinessException("Invalid or expired refresh token", HttpStatus.UNAUTHORIZED);
+        }
         Long userId = jwtProvider.getUserIdFromToken(refreshToken);
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new BusinessException("User not found", HttpStatus.UNAUTHORIZED));
         if (!user.isActive()) {
             throw new BusinessException("Account is deactivated", HttpStatus.FORBIDDEN);
         }
-        log.info("Token refreshed for: {}", user.getEmail());
+        // Rotate: revoke the presented refresh token so it can't be reused.
+        tokenRevocationService.revoke(refreshToken);
+        log.info("Token refreshed for: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
         return buildAuthResponse(user);
     }
 
@@ -263,7 +276,7 @@ public class AuthService {
         var optionalUser = userRepository.findByEmail(request.getEmail().toLowerCase());
         if (optionalUser.isEmpty()) {
             // Return silently to prevent email enumeration
-            log.debug("Forgot-password request for non-existent email: {}", request.getEmail());
+            log.debug("Forgot-password request for non-existent email: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(request.getEmail()));
             return;
         }
         User user = optionalUser.get();
@@ -282,7 +295,7 @@ public class AuthService {
             .build();
 
         resetTokenRepository.save(resetToken);
-        log.info("Password reset requested for: {}", user.getEmail());
+        log.info("Password reset requested for: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
 
         // Send OTP via email (and optionally SMS)
         sendNotification(user, "PASSWORD_RESET", Map.of(
@@ -311,7 +324,7 @@ public class AuthService {
         resetToken.setUsed(true);
         resetTokenRepository.save(resetToken);
 
-        log.info("Password reset completed for: {}", user.getEmail());
+        log.info("Password reset completed for: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
     }
 
     // ── Verify OTP (for phone-based recovery) ────────────────
@@ -425,7 +438,7 @@ public class AuthService {
         user.setConciergeSupport(request.getConciergeSupport() != null ? request.getConciergeSupport() : Boolean.TRUE);
 
         user = userRepository.save(user);
-        log.info("Customer account preferences updated for: {}", user.getEmail());
+        log.info("Customer account preferences updated for: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
         return toDto(user);
     }
 
@@ -439,7 +452,7 @@ public class AuthService {
         }
         user.setPhone(phone);
         user = userRepository.save(user);
-        log.info("Profile completed for: {}", user.getEmail());
+        log.info("Profile completed for: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
         // Return fresh tokens so the JWT includes the phone claim
         String token = jwtProvider.generateToken(user);
         String refreshToken = jwtProvider.generateRefreshToken(user);
@@ -464,8 +477,12 @@ public class AuthService {
 
     // ── Super Admin: list all admins ─────────────────────────
     @Transactional(readOnly = true)
-    public java.util.List<UserDto> getAllAdmins() {
-        return userRepository.findAllAdmins().stream().map(this::toDto).toList();
+    public org.springframework.data.domain.Page<UserDto> getAllAdmins(org.springframework.data.domain.Pageable pageable) {
+        // Hard cap page size so a caller cannot dump the entire admin table.
+        int size = Math.min(pageable.getPageSize(), 100);
+        org.springframework.data.domain.Pageable safe = org.springframework.data.domain.PageRequest.of(
+            pageable.getPageNumber(), size, pageable.getSort());
+        return userRepository.findAllAdmins(safe).map(this::toDto);
     }
 
     // ── Super Admin: delete user ─────────────────────────────
@@ -477,7 +494,7 @@ public class AuthService {
             throw new BusinessException("Cannot delete the super admin account", HttpStatus.FORBIDDEN);
         }
         userRepository.delete(user);
-        log.info("Super admin deleted user: {} (ID: {}, role: {})", user.getEmail(), id, user.getRole());
+        log.info("Super admin deleted user: {} (ID: {}, role: {})", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()), id, user.getRole());
 
         // Notify user about account deletion
         try {
@@ -491,7 +508,7 @@ public class AuthService {
                 .build();
             kafkaTemplate.send(KafkaTopics.NOTIFICATION_SEND, event);
         } catch (Exception e) {
-            log.warn("Failed to send account-deletion notification to {}: {}", user.getEmail(), e.getMessage());
+            log.warn("Failed to send account-deletion notification to {}: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()), e.getMessage());
         }
     }
 
@@ -516,7 +533,7 @@ public class AuthService {
                 .toList();
         for (User user : toUpdate) {
             user.setActive(active);
-            log.info("Bulk {} user: {} (ID: {})", active ? "unbanned" : "banned", user.getEmail(), user.getId());
+            log.info("Bulk {} user: {} (ID: {})", active ? "unbanned" : "banned", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()), user.getId());
         }
         userRepository.saveAll(toUpdate);
         return toUpdate.size();
@@ -534,7 +551,7 @@ public class AuthService {
                 .filter(u -> u.getRole() != UserRole.SUPER_ADMIN)
                 .toList();
         for (User user : toDelete) {
-            log.info("Bulk deleted user: {} (ID: {}, role: {})", user.getEmail(), user.getId(), user.getRole());
+            log.info("Bulk deleted user: {} (ID: {}, role: {})", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()), user.getId(), user.getRole());
         }
         userRepository.deleteAll(toDelete);
         return toDelete.size();
@@ -569,7 +586,7 @@ public class AuthService {
         }
 
         user = userRepository.save(user);
-        log.info("Admin updated customer: {} (ID: {})", user.getEmail(), id);
+        log.info("Admin updated customer: {} (ID: {})", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()), id);
         return toDto(user);
     }
 
@@ -603,7 +620,7 @@ public class AuthService {
         }
 
         user = userRepository.save(user);
-        log.info("Super-admin updated admin: {} (ID: {})", user.getEmail(), id);
+        log.info("Super-admin updated admin: {} (ID: {})", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()), id);
         return toDto(user);
     }
 
@@ -635,7 +652,7 @@ public class AuthService {
             .build();
 
         user = userRepository.save(user);
-        log.info("Admin created customer: {}", user.getEmail());
+        log.info("Admin created customer: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
         return toDto(user);
     }
 
@@ -661,7 +678,7 @@ public class AuthService {
             .build();
 
         user = userRepository.save(user);
-        log.info("Admin registered: {}", user.getEmail());
+        log.info("Admin registered: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
         return buildAuthResponse(user);
     }
 
@@ -825,7 +842,7 @@ public class AuthService {
                 .build();
             kafkaTemplate.send(KafkaTopics.NOTIFICATION_SEND, event);
         } catch (Exception e) {
-            log.warn("Failed to send notification event for {}: {}", user.getEmail(), e.getMessage());
+            log.warn("Failed to send notification event for {}: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()), e.getMessage());
         }
     }
 }

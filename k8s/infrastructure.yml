@@ -123,6 +123,18 @@ spec:
         app: config-server
     spec:
       serviceAccountName: spring-cloud-kubernetes
+      # Spread the two replicas across distinct nodes so a node failure
+      # can't take the config-server fleet offline and stall every
+      # bootstrap across every service.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: config-server
+                topologyKey: kubernetes.io/hostname
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000

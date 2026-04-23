@@ -3,6 +3,7 @@ package com.skbingegalaxy.booking.controller;
 import com.skbingegalaxy.booking.dto.*;
 import com.skbingegalaxy.booking.service.AdminBingeScopeService;
 import com.skbingegalaxy.booking.service.BookingService;
+import com.skbingegalaxy.booking.service.IdempotencyService;
 import com.skbingegalaxy.booking.service.PricingService;
 import com.skbingegalaxy.common.dto.ApiResponse;
 import jakarta.validation.Valid;
@@ -25,6 +26,7 @@ public class BookingController {
     private final AdminBingeScopeService adminBingeScopeService;
     private final BookingService bookingService;
     private final PricingService pricingService;
+    private final IdempotencyService idempotencyService;
 
     @ModelAttribute
     void validateSelectedBinge() {
@@ -37,8 +39,14 @@ public class BookingController {
             @RequestHeader("X-User-Id") Long userId,
             @RequestHeader("X-User-Email") String email,
             @RequestHeader(value = "X-User-Name", defaultValue = "Customer") String name,
-            @RequestHeader(value = "X-User-Phone", defaultValue = "") String phone) {
-        BookingDto booking = bookingService.createBooking(request, userId, name, email, phone);
+            @RequestHeader(value = "X-User-Phone", defaultValue = "") String phone,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        // Stripe-style idempotency: a client-supplied key turns retries/double-clicks
+        // into a no-op returning the originally-created booking. Missing/blank key
+        // keeps the legacy behaviour (useful for server-initiated calls and tests).
+        BookingDto booking = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/bookings", userId, request, BookingDto.class,
+            () -> bookingService.createBooking(request, userId, name, email, phone));
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(ApiResponse.ok("Booking created successfully", booking));
     }

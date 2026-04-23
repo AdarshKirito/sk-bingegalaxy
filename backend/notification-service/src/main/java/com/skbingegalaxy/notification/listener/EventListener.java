@@ -79,6 +79,8 @@ public class EventListener {
             scheduleReminders(event);
         } catch (Exception e) {
             log.error("Failed to process BOOKING_CREATED event for {}: {}", event.getBookingRef(), e.getMessage(), e);
+            // Rethrow so DefaultErrorHandler can retry and route to DLT after exhausted retries
+            throw new RuntimeException("Failed to process BOOKING_CREATED for " + event.getBookingRef(), e);
         }
     }
 
@@ -113,6 +115,7 @@ public class EventListener {
             cancelReminders(event.getBookingRef());
         } catch (Exception e) {
             log.error("Failed to process BOOKING_CANCELLED event for {}: {}", event.getBookingRef(), e.getMessage(), e);
+            throw new RuntimeException("Failed to process BOOKING_CANCELLED for " + event.getBookingRef(), e);
         }
     }
 
@@ -145,6 +148,7 @@ public class EventListener {
             );
         } catch (Exception e) {
             log.error("Failed to process PAYMENT_SUCCESS event for {}: {}", event.getBookingRef(), e.getMessage(), e);
+            throw new RuntimeException("Failed to process PAYMENT_SUCCESS for " + event.getBookingRef(), e);
         }
     }
 
@@ -175,6 +179,7 @@ public class EventListener {
             );
         } catch (Exception e) {
             log.error("Failed to process PAYMENT_FAILED event for {}: {}", event.getBookingRef(), e.getMessage(), e);
+            throw new RuntimeException("Failed to process PAYMENT_FAILED for " + event.getBookingRef(), e);
         }
     }
 
@@ -202,6 +207,7 @@ public class EventListener {
             );
         } catch (Exception e) {
             log.error("Failed to process NOTIFICATION_SEND event: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to process NOTIFICATION_SEND event", e);
         }
     }
 
@@ -232,6 +238,7 @@ public class EventListener {
             );
         } catch (Exception e) {
             log.error("Failed to process USER_REGISTERED event for {}: {}", event.getRecipientEmail(), e.getMessage(), e);
+            throw new RuntimeException("Failed to process USER_REGISTERED for " + event.getRecipientEmail(), e);
         }
     }
 
@@ -264,6 +271,7 @@ public class EventListener {
             );
         } catch (Exception e) {
             log.error("Failed to process PASSWORD_RESET event for {}: {}", event.getRecipientEmail(), e.getMessage(), e);
+            throw new RuntimeException("Failed to process PASSWORD_RESET for " + event.getRecipientEmail(), e);
         }
     }
 

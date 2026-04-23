@@ -53,6 +53,7 @@ class BookingServiceTest {
     @Mock private BookingEventLogService eventLogService;
     @Mock private SagaOrchestrator sagaOrchestrator;
         @Mock private LoyaltyService loyaltyService;
+        @Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     @InjectMocks private BookingService bookingService;
 

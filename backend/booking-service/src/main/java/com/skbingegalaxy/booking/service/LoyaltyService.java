@@ -87,6 +87,13 @@ public class LoyaltyService {
         if (!loyaltyProps.isEnabled() || loyaltyProps.getPointsPerRupee() <= 0) {
             return 0;
         }
+        // M12 cutover — v2 EarnEngine is now the single source of truth.
+        // The BookingService also publishes BookingCompletedEvent which the
+        // v2 listener handles; v1 earning is a no-op in v2-primary mode.
+        if (loyaltyProps.isV2Primary()) {
+            log.debug("[loyalty-v1] earn skipped — v2Primary is ON (booking={})", bookingRef);
+            return 0;
+        }
 
         LoyaltyAccount account = getOrCreateAccount(customerId);
 
@@ -248,6 +255,10 @@ public class LoyaltyService {
     @SchedulerLock(name = "loyalty-expire-points", lockAtMostFor = "PT10M", lockAtLeastFor = "PT1M")
     @Transactional
     public void expirePoints() {
+        if (loyaltyProps.isV2Primary()) {
+            log.debug("[loyalty-v1] expirePoints skipped — v2Primary is ON");
+            return;
+        }
         List<LoyaltyTransaction> expired = transactionRepository.findExpiredEarnTransactions(LocalDateTime.now());
         int count = 0;
         for (LoyaltyTransaction earn : expired) {

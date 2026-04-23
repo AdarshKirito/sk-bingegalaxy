@@ -30,8 +30,10 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     @EntityGraph(attributePaths = {"eventType"})
     List<Booking> findByCustomerIdOrderByCreatedAtDesc(Long customerId);
 
+    @EntityGraph(attributePaths = {"eventType"})
     Page<Booking> findByCustomerId(Long customerId, Pageable pageable);
 
+    @EntityGraph(attributePaths = {"eventType"})
     List<Booking> findByCustomerIdAndStatus(Long customerId, BookingStatus status);
 
     List<Booking> findByBookingDateAndStatusNot(LocalDate date, BookingStatus excludeStatus);

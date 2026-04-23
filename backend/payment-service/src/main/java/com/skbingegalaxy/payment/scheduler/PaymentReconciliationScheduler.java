@@ -32,7 +32,7 @@ public class PaymentReconciliationScheduler {
 
     @Scheduled(fixedDelay = 300_000) // 5 minutes
     @SchedulerLock(name = "paymentReconciliation", lockAtLeastFor = "30s", lockAtMostFor = "5m")
-    @Transactional
+    @Transactional(timeout = 240) // 4 min — bound DB connection hold time even if Razorpay is slow
     public void reconcileStalePayments() {
         LocalDateTime cutoff = LocalDateTime.now().minusMinutes(30);
         List<Payment> stalePayments = paymentRepository.findStaleInitiatedPayments(cutoff);

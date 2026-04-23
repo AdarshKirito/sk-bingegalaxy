@@ -1,5 +1,10 @@
 server:
   port: 8083
+  # ── DoS / resource-exhaustion hardening ──────────────────────────────
+  max-http-request-header-size: 16KB
+  tomcat:
+    max-http-form-post-size: 512KB
+    max-swallow-size: 2MB
 
 internal:
   api:
@@ -119,6 +124,7 @@ resilience4j:
 
 logging:
   level:
+    root: INFO
     com.skbingegalaxy.booking: WARN
 
 eureka:

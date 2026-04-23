@@ -7,5 +7,10 @@ import java.util.List;
 
 public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> {
 
-    List<OutboxEvent> findTop100BySentFalseOrderByCreatedAtAsc();
+    /**
+     * Pending batch: unsent events that haven't been marked as permanent failures.
+     * Poisoned events (failedPermanent=true) are excluded so they don't head-of-line
+     * block subsequent events on every tick.
+     */
+    List<OutboxEvent> findTop100BySentFalseAndFailedPermanentFalseOrderByCreatedAtAsc();
 }

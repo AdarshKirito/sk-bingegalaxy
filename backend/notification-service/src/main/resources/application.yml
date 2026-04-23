@@ -15,6 +15,21 @@ spring:
       database: ${SPRING_DATA_MONGODB_DATABASE:notification_db}
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    # Reliable at-least-once semantics:
+    #   • commit offsets only after the listener method returns successfully
+    #     (RECORD ack-mode), so an exception re-delivers the message on retry.
+    #   • cap in-flight records per poll to bound memory + recovery time.
+    #   • isolation=read_committed so transactional outbox messages aren't
+    #     consumed before their producing transaction commits.
+    consumer:
+      enable-auto-commit: false
+      max-poll-records: 20
+      isolation-level: read_committed
+      auto-offset-reset: earliest
+    listener:
+      ack-mode: record
+      missing-topics-fatal: false
+      concurrency: 2
 
 eureka:
   client:

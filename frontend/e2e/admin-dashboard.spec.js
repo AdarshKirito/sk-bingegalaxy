@@ -33,7 +33,9 @@ test.describe('Admin dashboard and management', () => {
       }
     });
     await page.goto('/admin/dashboard');
-    await page.waitForTimeout(3000); // Allow SSE handshake
+    // Wait for the network to settle so any SSE / polling handshake has been issued.
+    // This is deterministic in CI vs. a fixed sleep which is flaky under load.
+    await page.waitForLoadState('networkidle');
     // The dashboard should attempt an SSE connection for real-time updates
     expect(sseRequests.length).toBeGreaterThanOrEqual(0); // Soft check — no crash on SSE init
   });

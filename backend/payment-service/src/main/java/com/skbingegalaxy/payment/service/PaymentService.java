@@ -48,6 +48,9 @@ public class PaymentService {
     private final RazorpayGatewayClient razorpayGatewayClient;
     private final com.skbingegalaxy.payment.client.BookingAmountClient bookingAmountClient;
     private final com.skbingegalaxy.payment.repository.PaymentStatusHistoryRepository statusHistoryRepository;
+    private final WebhookDedupService webhookDedupService;
+    private final AuditLogService auditLogService;
+    private final PaymentMetrics metrics;
 
     /** Self-reference for calling @Transactional methods from within the same bean. */
     @org.springframework.context.annotation.Lazy
@@ -113,6 +116,7 @@ public class PaymentService {
 
         // Guard 1: payment already succeeded for this booking — reject duplicate attempt
         if (!findSuccessfulPaymentsForCurrentBinge(request.getBookingRef()).isEmpty()) {
+            metrics.duplicateSuccessful();
             throw new BusinessException("Payment already completed for booking " + request.getBookingRef(), HttpStatus.CONFLICT);
         }
 
@@ -120,6 +124,7 @@ public class PaymentService {
         // instead of creating a duplicate (handles network-retry / double-click scenarios)
         var existing = findExistingInitiatedPaymentForCurrentBinge(request.getBookingRef());
         if (existing.isPresent()) {
+            metrics.duplicateInitiated();
             log.info("Returning existing INITIATED payment {} for booking {}",
                     existing.get().getTransactionId(), request.getBookingRef());
             return toPaymentDtoWithRefunds(existing.get());
@@ -163,6 +168,20 @@ public class PaymentService {
     @Transactional
     public PaymentDto handleCallback(PaymentCallbackRequest request) {
         log.info("Handling payment callback for gatewayOrderId: {}", request.getGatewayOrderId());
+
+        // Stable, gateway-assigned dedup key. Duplicate or replayed callbacks
+        // with the same (orderId, paymentId, status) tuple short-circuit here
+        // before any side effects — the explicit Razorpay/Adyen guidance.
+        String eventId = webhookDedupService.razorpayEventId(
+            request.getGatewayOrderId(), request.getGatewayPaymentId(), request.getStatus());
+        if (webhookDedupService.isDuplicate(eventId)) {
+            metrics.webhookDuplicate();
+            log.info("Duplicate webhook delivery {} — returning cached state", eventId);
+            return paymentRepository.findByGatewayOrderIdForUpdate(request.getGatewayOrderId())
+                .map(this::toPaymentDtoWithRefunds)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                    "Payment", "gatewayOrderId", request.getGatewayOrderId()));
+        }
 
         Payment payment = paymentRepository.findByGatewayOrderIdForUpdate(request.getGatewayOrderId())
             .orElseThrow(() -> new ResourceNotFoundException("Payment", "gatewayOrderId", request.getGatewayOrderId()));
@@ -210,6 +229,15 @@ public class PaymentService {
                 recordStatusChange(payment, PaymentStatus.SUCCESS, PaymentStatus.REFUNDED,
                     "Auto-refund: late capture after booking cancellation");
                 publishRefundEvent(payment, autoRefund);
+                metrics.refundAutoLate();
+                auditLogService.record(
+                    "SYSTEM", AuditLogService.ACTION_REFUND_AUTO, "PAYMENT", payment.getTransactionId(),
+                    payment.getAmount(), payment.getCurrency(), payment.getBingeId(),
+                    java.util.Map.of(
+                        "refundId", gatewayRefundId,
+                        "bookingRef", payment.getBookingRef(),
+                        "trigger", "late_capture_after_cancellation"));
+                recordWebhookProcessed(eventId, request);
                 return toPaymentDtoWithRefunds(payment);
             }
             // Non-success callback for cancelled booking — ignore silently
@@ -219,6 +247,7 @@ public class PaymentService {
 
         // Reject stale callbacks — payment must have been initiated within the last 24 hours
         if (payment.getCreatedAt() != null && payment.getCreatedAt().isBefore(LocalDateTime.now().minusHours(24))) {
+            metrics.webhookStale();
             log.warn("Rejected stale payment callback for gatewayOrderId: {} (created: {})", request.getGatewayOrderId(), payment.getCreatedAt());
             throw new BusinessException("Payment callback expired — payment was initiated more than 24 hours ago", HttpStatus.BAD_REQUEST);
         }
@@ -227,6 +256,7 @@ public class PaymentService {
         // Unsigned callbacks are rejected entirely — an attacker could otherwise forge failure
         // notifications to cancel legitimate INITIATED payments.
         if (request.getGatewaySignature() == null || request.getGatewaySignature().isBlank()) {
+            metrics.webhookUnsigned();
             log.warn("Rejected unsigned payment callback for gatewayOrderId: {}", request.getGatewayOrderId());
             throw new BusinessException("Payment callback signature is required", HttpStatus.FORBIDDEN);
         }
@@ -234,9 +264,13 @@ public class PaymentService {
         String paymentId = request.getGatewayPaymentId() != null ? request.getGatewayPaymentId() : "";
         String payload = request.getGatewayOrderId() + "|" + paymentId;
         if (!verifySignature(payload, request.getGatewaySignature())) {
+            metrics.webhookInvalidSignature();
+            metrics.signatureFailure();
             log.warn("Invalid payment callback signature for gatewayOrderId: {}", request.getGatewayOrderId());
             throw new BusinessException("Invalid payment signature", HttpStatus.FORBIDDEN);
         }
+
+        metrics.webhookFresh();
 
         if ("success".equalsIgnoreCase(request.getStatus()) || "captured".equalsIgnoreCase(request.getStatus()) || "authorized".equalsIgnoreCase(request.getStatus())) {
             PaymentStatus oldStatus = payment.getStatus();
@@ -261,8 +295,32 @@ public class PaymentService {
             publishPaymentEvent(payment, KafkaTopics.PAYMENT_FAILED);
         }
 
+        // Record the dedup marker AFTER business side effects so retries of a
+        // crash between business commit and this call remain safe (we'll simply
+        // process the same verified, state-idempotent event again).
+        recordWebhookProcessed(eventId, request);
 
         return toPaymentDtoWithRefunds(payment);
+    }
+
+    /**
+     * Record the webhook dedup marker in its own transaction. Safe to call
+     * even if the outer transaction later rolls back — the worst case is a
+     * duplicate being deduped away, which is strictly better than a
+     * duplicate firing side effects twice.
+     */
+    private void recordWebhookProcessed(String eventId, PaymentCallbackRequest request) {
+        try {
+            String payload = request.getGatewayOrderId() + "|"
+                + (request.getGatewayPaymentId() == null ? "" : request.getGatewayPaymentId()) + "|"
+                + (request.getStatus() == null ? "" : request.getStatus());
+            webhookDedupService.recordNew(eventId, payload);
+        } catch (org.springframework.dao.DataIntegrityViolationException race) {
+            // Concurrent delivery won the race — safe to ignore.
+            log.debug("Webhook dedup record already present for {}", eventId);
+        } catch (Exception e) {
+            log.warn("Failed to record webhook dedup marker for {}: {}", eventId, e.getMessage());
+        }
     }
 
     /**
@@ -328,6 +386,12 @@ public class PaymentService {
         payment.setStatus(PaymentStatus.FAILED);
         payment.setFailureReason("Cancelled by customer");
         payment = paymentRepository.save(payment);
+
+        auditLogService.record(
+            String.valueOf(requesterId), AuditLogService.ACTION_PAYMENT_CANCEL, "PAYMENT",
+            payment.getTransactionId(), payment.getAmount(), payment.getCurrency(),
+            payment.getBingeId(),
+            java.util.Map.of("bookingRef", payment.getBookingRef()));
 
         log.info("Payment {} cancelled by customer {}", transactionId, requesterId);
         return toPaymentDtoWithRefunds(payment);
@@ -454,6 +518,15 @@ public class PaymentService {
         // Notify downstream (e.g. notification service sends refund email)
         publishRefundEvent(payment, refund);
 
+        metrics.refundIssued();
+        auditLogService.record(
+            initiatedBy, AuditLogService.ACTION_REFUND_ISSUED, "PAYMENT", payment.getTransactionId(),
+            request.getAmount(), payment.getCurrency(), payment.getBingeId(),
+            java.util.Map.of(
+                "refundId", gatewayRefundId,
+                "reason", request.getReason() == null ? "" : request.getReason(),
+                "bookingRef", payment.getBookingRef()));
+
         log.info("Refund {} of â‚¹{} by {} for payment {} (booking: {})",
             gatewayRefundId, request.getAmount(), initiatedBy,
             payment.getTransactionId(), payment.getBookingRef());
@@ -498,6 +571,12 @@ public class PaymentService {
 
         payment = paymentRepository.save(payment);
         publishPaymentEvent(payment, KafkaTopics.PAYMENT_SUCCESS);
+        auditLogService.record(
+            adminEmail, AuditLogService.ACTION_CASH_RECORDED, "PAYMENT", transactionId,
+            request.getAmount(), "INR", payment.getBingeId(),
+            java.util.Map.of(
+                "bookingRef", request.getBookingRef(),
+                "notes", request.getNotes() == null ? "" : request.getNotes()));
         log.info("Cash payment {} recorded for booking {} by admin {}",
             transactionId, request.getBookingRef(), adminEmail);
 
@@ -562,6 +641,13 @@ public class PaymentService {
 
         payment = paymentRepository.save(payment);
         publishPaymentEvent(payment, KafkaTopics.PAYMENT_SUCCESS);
+        auditLogService.record(
+            adminEmail, AuditLogService.ACTION_PAYMENT_ADDED, "PAYMENT", transactionId,
+            request.getAmount(), "INR", payment.getBingeId(),
+            java.util.Map.of(
+                "bookingRef", request.getBookingRef(),
+                "method", request.getPaymentMethod().name(),
+                "notes", request.getNotes() == null ? "" : request.getNotes()));
         log.info("Additional payment {} recorded for booking {} by admin {}",
             transactionId, request.getBookingRef(), adminEmail);
 

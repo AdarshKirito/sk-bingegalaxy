@@ -7,5 +7,9 @@ import java.util.List;
 
 public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> {
 
-    List<OutboxEvent> findTop100BySentFalseOrderByCreatedAtAsc();
+    /**
+     * Fetch the next batch of events to publish, skipping ones that have failed permanently
+     * (attempts exceeded MAX_ATTEMPTS). Ordered by insertion time to preserve per-aggregate ordering.
+     */
+    List<OutboxEvent> findTop100BySentFalseAndFailedPermanentFalseOrderByCreatedAtAsc();
 }

@@ -331,6 +331,32 @@ spec:
             severity: warning
           annotations:
             summary: "Kafka consumer group {{ $labels.group }} lag exceeds 1000"
+        - alert: KafkaDltTrafficDetected
+          expr: |
+            sum by (topic) (
+              rate(kafka_producer_record_send_total{namespace="sk-binge-galaxy", topic=~".+\\.DLT"}[10m])
+            ) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Dead-letter topic {{ $labels.topic }} is receiving traffic"
+            description: |
+              A poison message was routed to the dead-letter topic. Every DLT
+              entry is an unresolved consumer bug or data-quality issue and
+              must be triaged. Inspect recent records via
+              `kafka-console-consumer --topic {{ $labels.topic }}`.
+        - alert: KafkaConsumerRetryStorm
+          expr: |
+            sum by (name) (
+              rate(spring_kafka_listener_seconds_count{namespace="sk-binge-galaxy", result="failure"}[5m])
+            ) > 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kafka listener {{ $labels.name }} failing >1 msg/s"
+            description: "Sustained listener failures — check downstream service health; messages are being retried and may spill to DLT."
     - name: circuit-breaker
       rules:
         - alert: CircuitBreakerOpen
@@ -366,6 +392,117 @@ spec:
           annotations:
             summary: "More than 10 stale INITIATED payments detected"
             description: "Reconciliation may be delayed or payment gateway may be unresponsive."
+    - name: payment-security
+      # These alerts are fed by the counters exposed in
+      # PaymentMetrics.java (skbg_payment_*). Tune thresholds to your traffic —
+      # the numbers below are safe starting points for production.
+      rules:
+        - alert: WebhookSignatureFailureSpike
+          # >10 invalid-signature callbacks in 5m is almost never benign;
+          # it's either a forged-webhook attack or a misconfigured secret.
+          expr: |
+            sum(increase(skbg_payment_signature_failures_total{namespace="sk-binge-galaxy"}[5m])) > 10
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Razorpay signature failures spiking"
+            description: "{{ $value }} invalid-signature callbacks in 5m. Check for a rotated secret or an attempted forgery."
+        - alert: WebhookDuplicateDeliverySpike
+          # Some duplicate deliveries are normal (Razorpay retries). A huge
+          # spike means the provider thinks we didn't 2xx in time — investigate
+          # latency on the callback endpoint.
+          expr: |
+            sum(rate(skbg_payment_webhook_total{namespace="sk-binge-galaxy", outcome="duplicate"}[10m])) > 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High rate of duplicate webhook deliveries"
+            description: "Gateway is redelivering callbacks — check /callback latency and 5xx rate."
+        - alert: IdempotencyKeyMismatchSpike
+          # Mismatch = client bug reusing a key with a different body, OR
+          # someone probing. Either way should be rare.
+          expr: |
+            sum(increase(skbg_payment_idempotency_hits_total{namespace="sk-binge-galaxy", result="mismatch"}[15m])) > 5
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Idempotency-Key payload mismatches rising"
+            description: "{{ $value }} mismatches in 15m. A client is reusing keys incorrectly or someone is probing the replay protection."
+        - alert: DuplicatePaymentAttemptSpike
+          # Normal level: near-zero. A spike indicates client retry storm,
+          # failing success page, or card testing.
+          expr: |
+            sum(rate(skbg_payment_duplicate_attempts_total{namespace="sk-binge-galaxy"}[5m])) > 0.5
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Duplicate payment attempts rising"
+            description: "{{ $value }}/s duplicate POSTs to /initiate. Likely client retry storm; check gateway 5xx and frontend spinner behaviour."
+        - alert: CardTestingSuspected
+          # Classic card-testing signal: burst of failures in a short window
+          # from a concentrated set of users. The service-side counter is
+          # incremented by PaymentReconciliationScheduler / anomaly detectors
+          # when configured — left at zero today, fires only when tripped.
+          expr: |
+            sum(increase(skbg_card_testing_suspected_total{namespace="sk-binge-galaxy"}[5m])) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Card-testing attack pattern suspected"
+            description: "The fraud heuristic fired. Check payment-service logs for the offending user/IP and block at the gateway if confirmed."
+        - alert: SagaCompensationSpike
+          # Compensations should be rare. A spike means payment-booking
+          # consistency is breaking — worth a human eye.
+          expr: |
+            sum(increase(skbg_saga_compensation_total{namespace="sk-binge-galaxy"}[30m])) > 5
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Unusual rate of saga compensations"
+            description: "{{ $value }} bookings compensated in 30m — check PaymentReconciliationScheduler and booking logs."
+    - name: backup-health
+      rules:
+        # Fire if a backup CronJob's most-recent Job failed. Relies on kube-state-metrics.
+        - alert: BackupJobFailed
+          expr: |
+            max by (job_name, namespace) (
+              kube_job_status_failed{namespace="sk-binge-galaxy", job_name=~"(postgres|mongodb)-backup-.*"}
+            ) > 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Backup job {{ $labels.job_name }} failed"
+            description: "The latest run of {{ $labels.job_name }} failed. Investigate the CronJob logs immediately — data loss risk grows with every missed day."
+        # Fire if no successful backup Job completed in the last 26h (CronJob runs daily @ 02:00).
+        - alert: NoRecentBackup
+          expr: |
+            (time() - max by (namespace) (
+              kube_job_status_completion_time{namespace="sk-binge-galaxy", job_name=~"postgres-backup-.*"}
+            )) > 26 * 3600
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: "No successful postgres backup in over 26 hours"
+            description: "Latest successful postgres backup completed over 26h ago. Check CronJob history, PVC space, and S3 connectivity."
+        - alert: NoRecentMongoBackup
+          expr: |
+            (time() - max by (namespace) (
+              kube_job_status_completion_time{namespace="sk-binge-galaxy", job_name=~"mongodb-backup-.*"}
+            )) > 26 * 3600
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: "No successful mongodb backup in over 26 hours"
+            description: "Latest successful mongodb backup completed over 26h ago. Check CronJob history, PVC space, and S3 connectivity."
 ---
 # Alertmanager configuration for notification routing
 apiVersion: v1

@@ -15,6 +15,7 @@ import com.skbingegalaxy.common.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -60,6 +61,8 @@ public class BookingService {
     private final SagaOrchestrator sagaOrchestrator;
     private final VenueRoomRepository venueRoomRepository;
     private final LoyaltyService loyaltyService;
+    private final com.skbingegalaxy.booking.repository.LoyaltyAccountRepository loyaltyAccountRepository;
+    private final ApplicationEventPublisher eventPublisher;                 // Loyalty v2 (M6) — in-process events
 
     @Value("${internal.api.secret}")
     private String internalApiSecret;
@@ -83,7 +86,11 @@ public class BookingService {
     private int transferCutoffHours;
 
     // ── Create booking ───────────────────────────────────────
-    @Transactional
+    // Timeout (15s) bounds the transaction in case the synchronous
+    // availability/pricing Feign call stalls - circuit breaker will trip
+    // around 4s slow-call, but this caps worst-case DB lock retention
+    // during a network partition.
+    @Transactional(timeout = 15)
     public BookingDto createBooking(CreateBookingRequest request,
                                     Long customerId, String customerName,
                                     String customerEmail, String customerPhone) {
@@ -670,6 +677,18 @@ public class BookingService {
                 && updated.getStatus() == BookingStatus.COMPLETED
                 && updated.getLoyaltyPointsEarned() == 0) {
             awardLoyaltyPoints(updated);
+            // Loyalty v2 (M6) — shadow event for the new system.  Listener
+            // is @Async + @TransactionalEventListener(AFTER_COMMIT), so
+            // this is zero-risk: if v2 fails the booking is unaffected.
+            eventPublisher.publishEvent(new com.skbingegalaxy.booking.event.BookingCompletedEvent(
+                    updated.getId(),
+                    updated.getBookingRef(),
+                    updated.getCustomerId(),
+                    updated.getBingeId(),
+                    null,                                                   // tenantId — multi-tenant is future
+                    updated.getTotalAmount(),
+                    LocalDateTime.now()
+            ));
         }
 
         BookingEventType eventType = booking.getStatus().name().equals(previousStatus)
@@ -1286,10 +1305,67 @@ public class BookingService {
     }
 
     // ── Public: binge review summary (overall rating + distribution) ──
+    //
+    //  Produces two averages:
+    //   • averageRating → classic arithmetic mean (kept for analytics
+    //     dashboards and old API consumers).
+    //   • weightedAverageRating → each review's contribution is scaled
+    //     by the reviewer's influence weight.  The weight combines:
+    //       1. loyalty tier (Bronze 1.00 … Platinum 1.15) so highly
+    //          engaged repeat customers carry marginally more signal.
+    //       2. admin-community trust in the reviewer — admins' private
+    //          star ratings on that customer drive a trust multiplier.
+    //          A customer habitually rated poorly by admins has their
+    //          public-review influence reduced (min 0.60×).  A brand-
+    //          new customer with no admin reviews sits slightly below
+    //          neutral (0.90×) so spike reviews from fresh accounts
+    //          don't dominate the rating.
+    //   Weights are bounded to [0.5, 1.25] — they smooth outliers but
+    //   never erase a legitimate reviewer.
     @Transactional(readOnly = true, timeout = 10)
     public BingeReviewSummaryDto getBingeReviewSummary(Long bingeId) {
         long count = bookingReviewRepository.countBingeCustomerReviews(bingeId);
         double avg = count > 0 ? bookingReviewRepository.averageBingeRating(bingeId) : 0;
+
+        // Weighted calc — skipped when we have zero reviews.
+        double weightedAvg = avg;
+        if (count > 0) {
+            java.util.List<Object[]> ratings = bookingReviewRepository.ratingAndCustomerIdForBinge(bingeId);
+            java.util.Set<Long> customerIds = new java.util.HashSet<>();
+            for (Object[] row : ratings) customerIds.add((Long) row[1]);
+
+            // Per-customer loyalty tiers + admin-rating stats (both
+            // streamed in bulk to keep this O(1) on review volume).
+            java.util.Map<Long, String> tierByCustomer = new java.util.HashMap<>();
+            if (!customerIds.isEmpty()) {
+                loyaltyAccountRepository.findByCustomerIdIn(customerIds).forEach(acc ->
+                    tierByCustomer.put(acc.getCustomerId(), acc.getTierLevel())
+                );
+            }
+            java.util.Map<Long, double[]> adminStatsByCustomer = new java.util.HashMap<>();
+            if (!customerIds.isEmpty()) {
+                for (Object[] row : bookingReviewRepository.adminRatingStatsForCustomers(customerIds)) {
+                    Long cid = (Long) row[0];
+                    double a = row[1] != null ? ((Number) row[1]).doubleValue() : 0;
+                    long c = row[2] != null ? ((Number) row[2]).longValue() : 0;
+                    adminStatsByCustomer.put(cid, new double[] { a, c });
+                }
+            }
+
+            double weightedSum = 0;
+            double totalWeight = 0;
+            for (Object[] row : ratings) {
+                int rating = ((Number) row[0]).intValue();
+                Long cid = (Long) row[1];
+                String tier = tierByCustomer.getOrDefault(cid, "BRONZE");
+                double[] adminStats = adminStatsByCustomer.getOrDefault(cid, new double[] { 0, 0 });
+                double w = weightForReviewer(tier, adminStats[0], (long) adminStats[1]);
+                weightedSum += rating * w;
+                totalWeight += w;
+            }
+            if (totalWeight > 0) weightedAvg = weightedSum / totalWeight;
+        }
+
         List<Object[]> dist = bookingReviewRepository.ratingDistribution(bingeId);
         java.util.Map<Integer, Long> distribution = new java.util.LinkedHashMap<>();
         for (int star = 5; star >= 1; star--) distribution.put(star, 0L);
@@ -1299,9 +1375,27 @@ public class BookingService {
         return BingeReviewSummaryDto.builder()
             .bingeId(bingeId)
             .averageRating(Math.round(avg * 10.0) / 10.0)
+            .weightedAverageRating(Math.round(weightedAvg * 10.0) / 10.0)
             .totalReviews(count)
             .ratingDistribution(distribution)
             .build();
+    }
+
+    /** See {@link #getBingeReviewSummary(Long)} for the weighting rationale. */
+    private static double weightForReviewer(String tier, double avgAdminRating, long adminReviewCount) {
+        double tierMultiplier = switch (tier == null ? "BRONZE" : tier.toUpperCase()) {
+            case "PLATINUM" -> 1.15;
+            case "GOLD"     -> 1.10;
+            case "SILVER"   -> 1.05;
+            default         -> 1.00;
+        };
+        double trust;
+        if (adminReviewCount <= 0)      trust = 0.90;
+        else if (avgAdminRating >= 4.5) trust = 1.00;
+        else if (avgAdminRating >= 3.5) trust = 0.95;
+        else if (avgAdminRating >= 2.5) trust = 0.85;
+        else                            trust = 0.60;
+        return Math.max(0.5, Math.min(1.25, tierMultiplier * trust));
     }
 
     // ── Public: paginated customer reviews for a binge ──
@@ -1354,6 +1448,27 @@ public class BookingService {
         String prevStatus = booking.getStatus().name();
         booking.setStatus(BookingStatus.CANCELLED);
         Booking saved = bookingRepository.save(booking);
+
+        // Loyalty v2 (M6) — shadow event for the v2 cancellation listener.
+        // Refund amount is approximated as (totalAmount × refundPercentage / 100);
+        // the v2 listener uses this ratio to reverse earned points
+        // proportionally.  Zero-risk: listener is @Async + AFTER_COMMIT.
+        BigDecimal refundAmt = saved.getTotalAmount() == null
+                ? BigDecimal.ZERO
+                : saved.getTotalAmount()
+                        .multiply(BigDecimal.valueOf(refundPercentage))
+                        .divide(BigDecimal.valueOf(100), 2, RoundingMode.FLOOR);
+        eventPublisher.publishEvent(new com.skbingegalaxy.booking.event.BookingCancelledEvent(
+                saved.getId(),
+                saved.getBookingRef(),
+                saved.getCustomerId(),
+                saved.getBingeId(),
+                null,                                                       // tenantId — multi-tenant is future
+                saved.getTotalAmount(),
+                refundAmt,
+                description,
+                LocalDateTime.now()
+        ));
 
         // Reverse collectedAmount for cancellations where money was already collected
         if (saved.getCollectedAmount() != null
@@ -2455,6 +2570,15 @@ public class BookingService {
         // Upper 32 bits: bingeId, lower 32 bits: date epoch-day hash
         long binge = bingeId != null ? bingeId : 0L;
         return (binge << 32) | (date.toEpochDay() & 0xFFFFFFFFL);
+    }
+
+    /**
+     * Package-scoped accessor so the waitlist promoter can serialise against
+     * concurrent booking creation on the same venue + day. Avoids the
+     * two-cancellations-promote-position-1 race.
+     */
+    static long slotLockKeyFor(Long bingeId, LocalDate date) {
+        return slotLockKey(bingeId, date);
     }
 
     private String generateBookingRef() {

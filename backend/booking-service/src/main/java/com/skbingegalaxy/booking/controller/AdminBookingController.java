@@ -471,6 +471,7 @@ public class AdminBookingController {
                 .newStatus(e.getNewStatus())
                 .triggeredBy(e.getTriggeredBy())
                 .triggeredByRole(e.getTriggeredByRole())
+                .triggeredByName(e.getTriggeredByName())
                 .description(e.getDescription())
                 .snapshot(e.getSnapshot())
                 .eventVersion(e.getEventVersion())

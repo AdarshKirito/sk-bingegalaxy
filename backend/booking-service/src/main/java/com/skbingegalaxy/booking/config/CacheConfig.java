@@ -16,7 +16,13 @@ public class CacheConfig {
     @Bean
     public CacheManager cacheManager() {
         CaffeineCacheManager manager = new CaffeineCacheManager(
-            "eventTypes", "addOns", "activeBinges", "surgeRules");
+            "eventTypes", "addOns", "activeBinges", "surgeRules",
+            // ── Loyalty v2 caches (M5) ────────────────────────────────
+            // Evicted atomically by LoyaltyAdminService on any config
+            // write.  TTL is short (matches the rest of this manager)
+            // so a missed-eviction bug is self-healing within 5 min.
+            "loyaltyV2.programs", "loyaltyV2.tiers",
+            "loyaltyV2.perks",    "loyaltyV2.bindings");
         manager.setCaffeine(Caffeine.newBuilder()
             .maximumSize(500)
             .expireAfterWrite(5, TimeUnit.MINUTES));

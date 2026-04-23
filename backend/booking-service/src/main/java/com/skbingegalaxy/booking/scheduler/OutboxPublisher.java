@@ -22,11 +22,13 @@ import java.util.concurrent.TimeUnit;
  * Polls the outbox_event table and publishes unsent events to Kafka.
  * <p>
  * Runs every 2 seconds with distributed locking (ShedLock) to prevent
- * duplicate publishing across replicas. On first Kafka send failure the
- * loop breaks immediately to preserve event ordering — already-sent events
- * in the batch are persisted via {@code saveAll} while the failed event
- * retries on the next poll. SSE events are pushed to the admin dashboard
- * after each successful publish.
+ * duplicate publishing across replicas. On a Kafka send failure we
+ * <em>continue</em> past the offending event (tracking attempts and
+ * last error on the row); once {@link #MAX_ATTEMPTS} is exhausted the
+ * event is marked {@code failedPermanent=true} and excluded from future
+ * batches. Per-aggregate ordering is preserved by Kafka keying on
+ * {@code aggregateKey} (same key → same partition). SSE events are
+ * pushed to the admin dashboard after each successful publish.
  */
 @Component
 @RequiredArgsConstructor
@@ -34,6 +36,8 @@ import java.util.concurrent.TimeUnit;
 public class OutboxPublisher {
 
     private static final long KAFKA_SEND_TIMEOUT_SECONDS = 10;
+    private static final int MAX_ATTEMPTS = 10;
+    private static final int MAX_ERROR_LEN = 1000;
 
     private final OutboxEventRepository outboxRepo;
     private final KafkaTemplate<String, Object> kafkaTemplate;
@@ -44,10 +48,11 @@ public class OutboxPublisher {
     @SchedulerLock(name = "outboxPublisher", lockAtLeastFor = "1s", lockAtMostFor = "30s")
     @Transactional
     public void publishPendingEvents() {
-        List<OutboxEvent> pending = outboxRepo.findTop100BySentFalseOrderByCreatedAtAsc();
+        List<OutboxEvent> pending = outboxRepo.findTop100BySentFalseAndFailedPermanentFalseOrderByCreatedAtAsc();
         if (pending.isEmpty()) return;
 
         int published = 0;
+        int failed = 0;
         for (OutboxEvent event : pending) {
             try {
                 Object payload = toKafkaPayload(event);
@@ -55,6 +60,7 @@ public class OutboxPublisher {
                     .get(KAFKA_SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 event.setSent(true);
                 event.setSentAt(LocalDateTime.now());
+                event.setLastError(null);
                 // Persist immediately after successful Kafka send to prevent
                 // re-publishing this event if a later event in the batch fails.
                 outboxRepo.save(event);
@@ -70,14 +76,31 @@ public class OutboxPublisher {
                     ));
                 }
             } catch (Exception e) {
-                log.error("Outbox: failed to publish event {} to {}: {}",
-                    event.getId(), event.getTopic(), e.getMessage());
-                break; // Stop on first failure to preserve ordering
+                failed++;
+                event.setAttempts(event.getAttempts() + 1);
+                event.setLastAttemptAt(LocalDateTime.now());
+                event.setLastError(truncate(e.getMessage()));
+                if (event.getAttempts() >= MAX_ATTEMPTS) {
+                    event.setFailedPermanent(true);
+                    log.error("Outbox: event {} to {} marked failedPermanent after {} attempts: {}",
+                        event.getId(), event.getTopic(), event.getAttempts(), event.getLastError());
+                } else {
+                    log.warn("Outbox: event {} to {} failed attempt {}/{}: {}",
+                        event.getId(), event.getTopic(), event.getAttempts(), MAX_ATTEMPTS,
+                        event.getLastError());
+                }
+                outboxRepo.save(event);
+                // Continue to the next event — same-key ordering is preserved by Kafka partitioning.
             }
         }
-        if (published > 0) {
-            log.debug("Outbox: published {} events", published);
+        if (published > 0 || failed > 0) {
+            log.debug("Outbox: published={} failed={}", published, failed);
         }
+    }
+
+    private String truncate(String s) {
+        if (s == null) return null;
+        return s.length() > MAX_ERROR_LEN ? s.substring(0, MAX_ERROR_LEN) : s;
     }
 
     private Object toKafkaPayload(OutboxEvent event) throws Exception {

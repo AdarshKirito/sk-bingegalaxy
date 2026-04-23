@@ -14,7 +14,7 @@ import java.time.LocalDateTime;
  */
 @Entity
 @Table(name = "outbox_event", indexes = {
-    @Index(name = "idx_outbox_sent", columnList = "sent, createdAt")
+    @Index(name = "idx_outbox_pending", columnList = "sent, failedPermanent, createdAt")
 })
 @Getter @Setter
 @NoArgsConstructor @AllArgsConstructor
@@ -43,4 +43,21 @@ public class OutboxEvent {
     private LocalDateTime createdAt;
 
     private LocalDateTime sentAt;
+
+    // ── Retry tracking (V18) ─────────────────────────────────
+    // Lets the poller skip poison events after MAX_ATTEMPTS instead of
+    // head-of-line blocking the entire outbox forever.
+
+    @Builder.Default
+    @Column(nullable = false)
+    private int attempts = 0;
+
+    private LocalDateTime lastAttemptAt;
+
+    @Column(length = 1000)
+    private String lastError;
+
+    @Builder.Default
+    @Column(nullable = false)
+    private boolean failedPermanent = false;
 }

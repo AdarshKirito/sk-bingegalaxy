@@ -283,4 +283,146 @@ class EventListenerTest {
                 isNull(),
                 any());
     }
+
+    // ── Regression tests for DLT/retry behaviour ──────────────────────────────
+    // These verify that unexpected downstream failures are re-thrown so Spring's
+    // DefaultErrorHandler can retry and eventually route the record to the DLT.
+    // Swallowing exceptions (the previous behaviour) silently lost notifications.
+
+    @Test
+    @DisplayName("BOOKING_CREATED: rethrows when sendNotification fails so DLT receives the record")
+    void handleBookingCreated_downstreamFailure_rethrows() {
+        BookingEvent event = BookingEvent.builder()
+                .bookingRef("SKBG-DLT-1")
+                .customerName("X")
+                .customerEmail("x@example.com")
+                .eventTypeName("E")
+                .bookingDate(LocalDate.now().plusDays(1))
+                .startTime(LocalTime.of(10, 0))
+                .durationHours(1)
+                .totalAmount(BigDecimal.ONE)
+                .build();
+
+        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("SMTP boom"));
+
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
+                () -> eventListener.handleBookingCreated(event));
+    }
+
+    @Test
+    @DisplayName("BOOKING_CANCELLED: rethrows when sendNotification fails")
+    void handleBookingCancelled_downstreamFailure_rethrows() {
+        BookingEvent event = BookingEvent.builder()
+                .bookingRef("SKBG-DLT-2")
+                .customerName("X")
+                .customerEmail("x@example.com")
+                .eventTypeName("E")
+                .build();
+
+        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("SMTP boom"));
+
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
+                () -> eventListener.handleBookingCancelled(event));
+    }
+
+    @Test
+    @DisplayName("PAYMENT_SUCCESS: rethrows when sendNotification fails")
+    void handlePaymentSuccess_downstreamFailure_rethrows() {
+        PaymentEvent event = PaymentEvent.builder()
+                .bookingRef("SKBG-DLT-3")
+                .customerEmail("x@example.com")
+                .customerName("X")
+                .transactionId("T")
+                .amount(BigDecimal.ONE)
+                .paymentMethod("UPI")
+                .build();
+
+        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("SMTP boom"));
+
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
+                () -> eventListener.handlePaymentSuccess(event));
+    }
+
+    @Test
+    @DisplayName("PAYMENT_FAILED: rethrows when sendNotification fails")
+    void handlePaymentFailed_downstreamFailure_rethrows() {
+        PaymentEvent event = PaymentEvent.builder()
+                .bookingRef("SKBG-DLT-4")
+                .customerEmail("x@example.com")
+                .customerName("X")
+                .transactionId("T")
+                .build();
+
+        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("SMTP boom"));
+
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
+                () -> eventListener.handlePaymentFailed(event));
+    }
+
+    @Test
+    @DisplayName("NOTIFICATION_SEND: rethrows when sendNotification fails")
+    void handleDirectNotification_downstreamFailure_rethrows() {
+        NotificationEvent event = NotificationEvent.builder()
+                .type("CUSTOM")
+                .channel(NotificationChannel.EMAIL)
+                .recipientEmail("x@example.com")
+                .subject("S")
+                .body("B")
+                .build();
+
+        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("SMTP boom"));
+
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
+                () -> eventListener.handleDirectNotification(event));
+    }
+
+    @Test
+    @DisplayName("USER_REGISTERED: rethrows when sendNotification fails")
+    void handleUserRegistered_downstreamFailure_rethrows() {
+        NotificationEvent event = NotificationEvent.builder()
+                .recipientEmail("x@example.com")
+                .recipientName("X")
+                .build();
+
+        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("SMTP boom"));
+
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
+                () -> eventListener.handleUserRegistered(event));
+    }
+
+    @Test
+    @DisplayName("PASSWORD_RESET: rethrows when sendNotification fails")
+    void handlePasswordReset_downstreamFailure_rethrows() {
+        NotificationEvent event = NotificationEvent.builder()
+                .recipientEmail("x@example.com")
+                .recipientName("X")
+                .body("OTP")
+                .build();
+
+        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("SMTP boom"));
+
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
+                () -> eventListener.handlePasswordReset(event));
+    }
+
+    @Test
+    @DisplayName("Business skip (missing email) still returns normally without throwing")
+    void handleBookingCreated_missingEmail_doesNotThrow() {
+        BookingEvent event = BookingEvent.builder()
+                .bookingRef("SKBG-SKIP-1")
+                .customerEmail(null)   // missing — should be skipped silently, not rethrown
+                .build();
+
+        eventListener.handleBookingCreated(event);
+
+        verify(notificationService, never()).sendNotification(
+                anyString(), any(), any(), any(), any(), any(), any(), any(), any());
+    }
 }

@@ -1,10 +1,14 @@
 package com.skbingegalaxy.booking.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.skbingegalaxy.booking.dto.*;
 import com.skbingegalaxy.booking.entity.EventType;
+import com.skbingegalaxy.booking.entity.OutboxEvent;
 import com.skbingegalaxy.booking.entity.WaitlistEntry;
 import com.skbingegalaxy.booking.entity.WaitlistEntry.WaitlistStatus;
 import com.skbingegalaxy.booking.repository.EventTypeRepository;
+import com.skbingegalaxy.booking.repository.OutboxEventRepository;
 import com.skbingegalaxy.booking.repository.WaitlistRepository;
 import com.skbingegalaxy.common.constants.KafkaTopics;
 import com.skbingegalaxy.common.context.BingeContext;
@@ -15,7 +19,6 @@ import com.skbingegalaxy.common.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,7 +35,17 @@ public class WaitlistService {
     private final WaitlistRepository waitlistRepository;
     private final EventTypeRepository eventTypeRepository;
     private final BookingService bookingService;
-    private final KafkaTemplate<String, Object> kafkaTemplate;
+    // BookingRepository is injected solely for its advisory-lock helper so that
+    // {@link #promoteWaitlistOnCancellation} serialises with concurrent
+    // booking-creation attempts on the same (bingeId, date). Without this lock
+    // two cancellations could both promote position 1 → double slot offer.
+    private final com.skbingegalaxy.booking.repository.BookingRepository bookingRepository;
+    // Use transactional outbox (not direct KafkaTemplate) to avoid the dual-write problem:
+    // if the surrounding DB transaction rolls back we don't want a customer to be notified
+    // of a slot they weren't actually offered, and if Kafka is down we still want the
+    // notification to eventually fire once the broker comes back.
+    private final OutboxEventRepository outboxEventRepository;
+    private final ObjectMapper objectMapper;
 
     @Value("${app.waitlist.offer-expiry-minutes:30}")
     private int offerExpiryMinutes;
@@ -138,6 +151,13 @@ public class WaitlistService {
     // ── Promote: called when a booking is cancelled, check if waitlisted customers can be notified ──
     @Transactional
     public void promoteWaitlistOnCancellation(Long bingeId, LocalDate date) {
+        // Serialise with concurrent booking-creation AND concurrent waitlist
+        // promotions on the same (bingeId, date). Without this lock two
+        // cancellations arriving in parallel could both read "position 1 is
+        // waiting, slot has capacity" and both promote, resulting in two
+        // OFFERED entries racing for the same slot.
+        bookingRepository.acquireSlotLock(BookingService.slotLockKeyFor(bingeId, date));
+
         List<WaitlistEntry> waiting = waitlistRepository
             .findByBingeIdAndPreferredDateAndStatusOrderByPositionAsc(bingeId, date, WaitlistStatus.WAITING);
 
@@ -217,9 +237,22 @@ public class WaitlistService {
                     "startTime", entry.getPreferredStartTime().toString()
                 ))
                 .build();
-            kafkaTemplate.send(KafkaTopics.NOTIFICATION_SEND, event);
+            String payload = objectMapper.writeValueAsString(event);
+            OutboxEvent outbox = OutboxEvent.builder()
+                .topic(KafkaTopics.NOTIFICATION_SEND)
+                // Key by waitlist entry id so repeated offers for the same entry land on
+                // the same partition and stay in order.
+                .aggregateKey("WL-" + entry.getId())
+                .payload(payload)
+                .build();
+            outboxEventRepository.save(outbox);
+        } catch (JsonProcessingException e) {
+            // Serialization failure is a developer error (bad event shape) — never retryable.
+            // Log and swallow so the waitlist offer itself isn't rolled back.
+            log.error("Failed to serialize waitlist notification for entry {}", entry.getId(), e);
         } catch (Exception e) {
-            log.error("Failed to send waitlist notification for entry {}", entry.getId(), e);
+            log.error("Failed to enqueue waitlist notification outbox row for entry {}",
+                entry.getId(), e);
         }
     }
 

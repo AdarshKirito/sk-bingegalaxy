@@ -7,7 +7,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication(scanBasePackages = {
     "com.skbingegalaxy.notification",
-    "com.skbingegalaxy.common.exception"
+    "com.skbingegalaxy.common.exception",
+    "com.skbingegalaxy.common.config"
 })
 @EnableDiscoveryClient
 @EnableScheduling

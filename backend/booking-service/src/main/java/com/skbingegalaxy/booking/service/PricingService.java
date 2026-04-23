@@ -29,6 +29,8 @@ public class PricingService {
     private final RateCodeChangeLogRepository rateCodeChangeLogRepository;
     private final BookingRepository bookingRepository;
     private final SurgePricingRuleRepository surgePricingRuleRepository;
+    private final LoyaltyService loyaltyService;
+    private final BookingReviewRepository bookingReviewRepository;
 
     /** Thread-local admin ID for audit logging (set by controllers). */
     private static final ThreadLocal<Long> currentAdminId = new ThreadLocal<>();
@@ -814,6 +816,77 @@ public class PricingService {
                 .build()
         ).toList();
 
+        // ── Spend roll-up (lifetime collected vs outstanding balance) ──
+        BigDecimal lifetimeSpend = bookings.stream()
+            .map(b -> b.getCollectedAmount() != null ? b.getCollectedAmount() : BigDecimal.ZERO)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal pendingBalance = bookings.stream()
+            .filter(b -> b.getStatus() != com.skbingegalaxy.common.enums.BookingStatus.CANCELLED
+                      && b.getStatus() != com.skbingegalaxy.common.enums.BookingStatus.NO_SHOW)
+            .map(b -> {
+                BigDecimal tot = b.getTotalAmount() != null ? b.getTotalAmount() : BigDecimal.ZERO;
+                BigDecimal col = b.getCollectedAmount() != null ? b.getCollectedAmount() : BigDecimal.ZERO;
+                BigDecimal diff = tot.subtract(col);
+                return diff.signum() > 0 ? diff : BigDecimal.ZERO;
+            })
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        // ── Loyalty / membership snapshot ──
+        LoyaltyAccountDto loyalty = null;
+        try {
+            loyalty = loyaltyService.getAccount(customerId);
+        } catch (Exception ex) {
+            log.warn("Loyalty lookup failed for customer {}: {}", customerId, ex.getMessage());
+        }
+
+        // ── Review signals ──
+        double avgAdminRatingRaw = bookingReviewRepository.averageAdminRatingForCustomer(customerId);
+        long adminReviewCount = bookingReviewRepository.countAdminReviewsForCustomer(customerId);
+        long customerReviewCount = bookingReviewRepository
+            .findByCustomerIdAndReviewerRoleOrderByCreatedAtDesc(customerId, "CUSTOMER").size();
+
+        // Weighted admin average — each admin's rating is scaled by the
+        // reputation of the binge they represent (admins from well-liked
+        // binges carry more weight, admins from poorly-liked binges carry
+        // less).  Mirrors the trust model applied to customer reviews
+        // in BookingService.getBingeReviewSummary.
+        double weightedAdminAvg = avgAdminRatingRaw;
+        if (adminReviewCount > 0) {
+            java.util.List<Object[]> adminRows =
+                bookingReviewRepository.adminRatingAndBingeForCustomer(customerId);
+            java.util.Set<Long> bingeIds = new java.util.HashSet<>();
+            for (Object[] row : adminRows) {
+                if (row[1] != null) bingeIds.add((Long) row[1]);
+            }
+            // Cache each binge's customer average so we only hit the DB once per binge.
+            java.util.Map<Long, Double> bingeAvgCache = new java.util.HashMap<>();
+            for (Long bid2 : bingeIds) {
+                try {
+                    bingeAvgCache.put(bid2, bookingReviewRepository.averageBingeRating(bid2));
+                } catch (Exception ex) {
+                    bingeAvgCache.put(bid2, 0.0);
+                }
+            }
+            double sum = 0, totalWeight = 0;
+            for (Object[] row : adminRows) {
+                int rating = ((Number) row[0]).intValue();
+                Long bid2 = (Long) row[1];
+                double bingeAvg = bid2 != null ? bingeAvgCache.getOrDefault(bid2, 0.0) : 0.0;
+                double weight = weightForAdminReviewer(bingeAvg);
+                sum += rating * weight;
+                totalWeight += weight;
+            }
+            if (totalWeight > 0) weightedAdminAvg = sum / totalWeight;
+        }
+
+        Double avgAdminRating = adminReviewCount > 0
+            ? Math.round(weightedAdminAvg * 10.0) / 10.0
+            : null;
+        double reviewWeight = computeReviewWeight(
+            loyalty != null ? loyalty.getTierLevel() : "BRONZE",
+            weightedAdminAvg,
+            adminReviewCount);
+
         return CustomerDetailDto.builder()
             .customerId(customerId)
             .currentRateCodeId(currentRateCodeId)
@@ -822,6 +895,72 @@ public class PricingService {
             .rateCodeChanges(changeList)
             .totalReservations(bookings.size())
             .reservations(reservations)
+            .memberTier(loyalty != null ? loyalty.getTierLevel() : null)
+            .loyaltyPoints(loyalty != null ? loyalty.getCurrentBalance() : null)
+            .lifetimePointsEarned(loyalty != null ? loyalty.getTotalPointsEarned() : null)
+            .pointsToNextTier(loyalty != null ? loyalty.getPointsToNextTier() : null)
+            .nextTierLevel(loyalty != null ? loyalty.getNextTierLevel() : null)
+            .memberSince(loyalty != null ? loyalty.getCreatedAt() : null)
+            .avgAdminRating(avgAdminRating)
+            .adminReviewCount(adminReviewCount)
+            .customerReviewCount(customerReviewCount)
+            .reviewWeight(reviewWeight)
+            .lifetimeSpend(lifetimeSpend)
+            .pendingBalance(pendingBalance)
             .build();
+    }
+
+    /**
+     * Weight a customer's review influence.  Inputs:
+     *   • tier → higher tiers get a small bump (capped at +25%).
+     *   • avgAdminRating on this customer → acts as a trust signal; low
+     *     ratings reduce influence so repeat offenders can't skew a
+     *     binge's public rating.  No admin reviews yet → neutral-ish
+     *     (0.9 — a touch below 1.0 so brand-new customers can still
+     *     show up but don't dominate).
+     * Result is bounded to [0.5, 1.25].
+     */
+    private static double computeReviewWeight(String tier, double avgAdminRating, long adminReviewCount) {
+        double tierMultiplier = switch (tier == null ? "BRONZE" : tier.toUpperCase()) {
+            case "PLATINUM" -> 1.15;
+            case "GOLD" -> 1.10;
+            case "SILVER" -> 1.05;
+            default -> 1.00;
+        };
+        double trustMultiplier;
+        if (adminReviewCount <= 0) {
+            trustMultiplier = 0.90; // new / unrated customer
+        } else if (avgAdminRating >= 4.5) {
+            trustMultiplier = 1.00;
+        } else if (avgAdminRating >= 3.5) {
+            trustMultiplier = 0.95;
+        } else if (avgAdminRating >= 2.5) {
+            trustMultiplier = 0.85;
+        } else {
+            trustMultiplier = 0.60; // chronically poor behaviour
+        }
+        double w = tierMultiplier * trustMultiplier;
+        return Math.max(0.5, Math.min(1.25, w));
+    }
+
+    /**
+     * Weight applied to a single admin's private review of a customer,
+     * derived from how well-rated the admin's binge is by its paying
+     * customers.  Admins from popular, well-run binges carry slightly
+     * more signal (up to 1.15×); admins from struggling binges carry
+     * less (down to 0.80×).  Bounded to [0.5, 1.25] to match the
+     * reviewer-weight envelope and prevent a single signal from
+     * dominating.
+     */
+    private static double weightForAdminReviewer(double bingeCustomerAvg) {
+        // No customer reviews yet on the binge → neutral 1.00.
+        if (bingeCustomerAvg <= 0) return 1.00;
+        double w;
+        if (bingeCustomerAvg >= 4.5) w = 1.15;
+        else if (bingeCustomerAvg >= 3.5) w = 1.05;
+        else if (bingeCustomerAvg >= 2.5) w = 1.00;
+        else if (bingeCustomerAvg >= 1.5) w = 0.85;
+        else w = 0.70;
+        return Math.max(0.5, Math.min(1.25, w));
     }
 }

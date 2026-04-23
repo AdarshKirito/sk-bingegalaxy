@@ -19,25 +19,32 @@ export default function CustomerPayments() {
   const [toDate, setToDate] = useState('');
   const searchInputRef = useRef(null);
 
+  // ── Search semantics ──────────────────────────────────────────
+  //  Real-world admin/customer dashboards (Stripe, Amazon, Notion)
+  //  never silently redirect on an exact match — they filter in place
+  //  and, if desired, expose a *separate* "Open booking →" chip for
+  //  direct navigation.  This keeps the back button predictable and
+  //  prevents the "I clicked search and the page teleported" feel.
   const applySearch = () => {
-    const trimmed = query.trim();
-    // Exact match on booking ref or transaction ID → navigate directly
-    const upper = trimmed.toUpperCase();
-    const matchedBooking = bookings.find(b => b.bookingRef?.toUpperCase() === upper);
-    const matchedPayment = payments.find(p =>
-      p.bookingRef?.toUpperCase() === upper || p.transactionId?.toUpperCase() === upper
-    );
-    if (trimmed && (matchedBooking || matchedPayment)) {
-      const ref = matchedBooking?.bookingRef || matchedPayment?.bookingRef;
-      navigate(`/payment/${ref}`);
-      return;
-    }
-    setAppliedQuery(trimmed);
+    setAppliedQuery(query.trim());
   };
 
   const handleSearchKey = (event) => {
     if (event.key === 'Enter') applySearch();
   };
+
+  // Case-insensitive exact match on booking ref / transaction id — used
+  // only to render a "Jump to booking" chip, never to redirect automatically.
+  const exactMatchRef = (() => {
+    const trimmed = query.trim();
+    if (!trimmed) return '';
+    const upper = trimmed.toUpperCase();
+    const matchedBooking = bookings.find(b => b.bookingRef?.toUpperCase() === upper);
+    const matchedPayment = payments.find(p =>
+      p.bookingRef?.toUpperCase() === upper || p.transactionId?.toUpperCase() === upper
+    );
+    return matchedBooking?.bookingRef || matchedPayment?.bookingRef || '';
+  })();
 
 
   useEffect(() => {
@@ -53,6 +60,36 @@ export default function CustomerPayments() {
       const pastBookings = pastRes.status === 'fulfilled' ? toArray(pastRes.value?.data?.data) : [];
       setBookings([...currentBookings, ...pastBookings]);
     }).finally(() => setLoading(false));
+  }, []);
+
+  // ── Live sync: refetch payments + reservations whenever the user
+  //    returns to the tab, so an admin-recorded charge / refund shows
+  //    up without a manual refresh.  Matches how mainstream SaaS
+  //    dashboards keep cached lists fresh.
+  useEffect(() => {
+    const toArray = (val) => Array.isArray(val) ? val : [];
+    const refresh = () => {
+      Promise.allSettled([
+        paymentService.getMyPayments(),
+        bookingService.getCurrentBookings(),
+        bookingService.getPastBookings(),
+      ]).then(([paymentRes, currentRes, pastRes]) => {
+        if (paymentRes.status === 'fulfilled') setPayments(toArray(paymentRes.value?.data?.data));
+        const cur = currentRes.status === 'fulfilled' ? toArray(currentRes.value?.data?.data) : [];
+        const past = pastRes.status === 'fulfilled' ? toArray(pastRes.value?.data?.data) : [];
+        if (currentRes.status === 'fulfilled' || pastRes.status === 'fulfilled') {
+          setBookings([...cur, ...past]);
+        }
+      });
+    };
+    const onFocus = () => refresh();
+    const onVisibility = () => { if (!document.hidden) refresh(); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
   const bookingByRef = bookings.reduce((lookup, booking) => {
@@ -119,6 +156,26 @@ export default function CustomerPayments() {
     !['SUCCESS', 'REFUNDED'].includes(booking.paymentStatus)
   );
 
+  // Reservations panel must react to the same search + date filters as
+  // payments — otherwise typing a booking ref that has no payment row yet
+  // makes the card disappear, which reads like the reservations "didn't
+  // fetch".  Mirrors how Stripe's Dashboard filters Customers + Payments
+  // from the same top-of-page search box.
+  const filteredUnpaidBookings = unpaidBookings.filter(booking => {
+    const searchTarget = [
+      booking.bookingRef,
+      booking.eventType?.name || booking.eventType,
+      booking.status,
+      booking.paymentStatus,
+      booking.customerName,
+    ].filter(Boolean).join(' ').toLowerCase();
+    const matchesQuery = !appliedQuery || searchTarget.includes(appliedQuery.toLowerCase());
+    const bookingTs = booking.bookingDate ? new Date(booking.bookingDate) : null;
+    const matchesFrom = !fromDate || !bookingTs || bookingTs >= new Date(fromDate);
+    const matchesTo = !toDate || !bookingTs || bookingTs <= new Date(toDate + 'T23:59:59');
+    return matchesQuery && matchesFrom && matchesTo;
+  });
+
   return (
     <div className="container customer-hub">
       <SEO title="Payments" description="Track payment history, in-progress transactions, and unpaid bookings in one customer payments hub." />
@@ -177,18 +234,22 @@ export default function CustomerPayments() {
         </article>
       </section>
 
-      {unpaidBookings.length > 0 && !loading && (
+      {!loading && filteredUnpaidBookings.length > 0 && (
         <section className="customer-hub-panel card">
           <div className="customer-hub-panel-head">
             <div>
-              <span className="customer-hub-panel-label">Unpaid bookings</span>
-              <h2>Reservations still waiting on payment</h2>
+              <span className="customer-hub-panel-label">Unpaid reservations</span>
+              <h2>
+                {appliedQuery
+                  ? `Matching unpaid reservations (${filteredUnpaidBookings.length})`
+                  : 'Reservations still waiting on payment'}
+              </h2>
             </div>
             <Link to="/my-bookings" className="customer-hub-inline-link">Open full timeline</Link>
           </div>
 
           <div className="customer-mini-grid">
-            {unpaidBookings.slice(0, 4).map(booking => (
+            {(appliedQuery ? filteredUnpaidBookings : filteredUnpaidBookings.slice(0, 4)).map(booking => (
               <article key={booking.bookingRef} className="customer-mini-card">
                 <div>
                   <span className="customer-booking-ref">{booking.bookingRef}</span>
@@ -265,6 +326,18 @@ export default function CustomerPayments() {
         {appliedQuery && (
           <p style={{ marginTop: '0.55rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
             Showing results for <strong style={{ color: 'var(--text)' }}>"{appliedQuery}"</strong>
+            {exactMatchRef && (
+              <>
+                {' '}&mdash;{' '}
+                <button
+                  type="button"
+                  style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: 0, fontSize: 'inherit', textDecoration: 'underline' }}
+                  onClick={() => navigate(`/payment/${exactMatchRef}`)}
+                >
+                  Open {exactMatchRef} →
+                </button>
+              </>
+            )}
             {' '}&mdash; <button style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: 0, fontSize: 'inherit' }} onClick={() => { setQuery(''); setAppliedQuery(''); }}>Clear</button>
           </p>
         )}

@@ -38,6 +38,9 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
     private static final int MAX_BUCKETS = 10_000;
     private static final int STANDARD_RATE_LIMIT = 100;
     private static final int AUTH_RATE_LIMIT = 30;
+    // Tighter cap for unauthenticated credential-recovery endpoints to
+    // curb account-enumeration / token-reset spam. 5 attempts/min/IP.
+    private static final int SENSITIVE_AUTH_RATE_LIMIT = 5;
     private static final Duration RATE_LIMIT_WINDOW = Duration.ofMinutes(1);
     private static final Duration REDIS_COUNTER_TTL = RATE_LIMIT_WINDOW.plusSeconds(5);
     private static final long REDIS_FALLBACK_LOG_WINDOW_MS = 60_000;
@@ -70,8 +73,23 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
         String clientIp = resolveClientIp(exchange);
         String path = exchange.getRequest().getURI().getPath();
         boolean isAuthPath = path.startsWith("/api/v1/auth/");
-        String bucketKey = isAuthPath ? clientIp + ":auth" : clientIp;
-        int limit = isAuthPath ? AUTH_RATE_LIMIT : STANDARD_RATE_LIMIT;
+        boolean isSensitiveAuth = isAuthPath && (
+            path.contains("/forgot-password") ||
+            path.contains("/reset-password") ||
+            path.contains("/verify-email")
+        );
+        String bucketKey;
+        int limit;
+        if (isSensitiveAuth) {
+            bucketKey = clientIp + ":auth-sensitive";
+            limit = SENSITIVE_AUTH_RATE_LIMIT;
+        } else if (isAuthPath) {
+            bucketKey = clientIp + ":auth";
+            limit = AUTH_RATE_LIMIT;
+        } else {
+            bucketKey = clientIp;
+            limit = STANDARD_RATE_LIMIT;
+        }
 
         if (redisTemplate != null) {
             return applyRedisRateLimit(exchange, chain, bucketKey, limit, path)

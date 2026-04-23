@@ -12,12 +12,28 @@ import javax.crypto.SecretKey;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 @Component
 public class JwtProvider {
 
     @Value("${app.jwt.secret}")
     private String jwtSecret;
+
+    /**
+     * Expected issuer ({@code iss}) claim. Stamped on every new token and verified when
+     * present to prevent tokens signed by a different trust domain (or an attacker replaying
+     * a token from another environment with a shared secret) from being accepted.
+     */
+    @Value("${app.jwt.issuer:skbingegalaxy-auth}")
+    private String jwtIssuer;
+
+    /**
+     * Expected audience ({@code aud}) claim. Stamped on every new token and verified when
+     * present to prevent a token issued for another relying party from being used here.
+     */
+    @Value("${app.jwt.audience:skbingegalaxy-web}")
+    private String jwtAudience;
 
     @PostConstruct
     void validateJwtSecret() {
@@ -54,19 +70,38 @@ public class JwtProvider {
 
         return Jwts.builder()
             .claims(claims)
+            .id(UUID.randomUUID().toString())
             .subject(String.valueOf(user.getId()))
+            .issuer(jwtIssuer)
+            .audience().add(jwtAudience).and()
             .issuedAt(new Date())
             .expiration(new Date(System.currentTimeMillis() + expirationMs))
             .signWith(getSigningKey())
             .compact();
     }
 
+    /**
+     * Parse and validate a token's signature, expiration, and (when present) issuer/audience.
+     * <p>
+     * Issuer/audience checks are applied only if those claims are present in the token,
+     * so tokens minted by a previous build (before iss/aud rollout) continue to validate
+     * until they expire. Newly minted tokens always carry both claims.
+     */
     public Claims parseToken(String token) {
-        return Jwts.parser()
+        Claims claims = Jwts.parser()
             .verifyWith(getSigningKey())
             .build()
             .parseSignedClaims(token)
             .getPayload();
+        String iss = claims.getIssuer();
+        if (iss != null && !jwtIssuer.equals(iss)) {
+            throw new JwtException("Unexpected token issuer");
+        }
+        java.util.Set<String> aud = claims.getAudience();
+        if (aud != null && !aud.isEmpty() && !aud.contains(jwtAudience)) {
+            throw new JwtException("Unexpected token audience");
+        }
+        return claims;
     }
 
     public boolean validateToken(String token) {
@@ -93,6 +128,20 @@ public class JwtProvider {
 
     public Long getUserIdFromToken(String token) {
         return Long.parseLong(parseToken(token).getSubject());
+    }
+
+    public String getJtiFromToken(String token) {
+        return parseToken(token).getId();
+    }
+
+    public java.time.LocalDateTime getExpiryFromToken(String token) {
+        Date exp = parseToken(token).getExpiration();
+        return exp == null ? null
+            : java.time.LocalDateTime.ofInstant(exp.toInstant(), java.time.ZoneId.systemDefault());
+    }
+
+    public String getTokenType(String token) {
+        return parseToken(token).get("token_type", String.class);
     }
 
     private SecretKey getSigningKey() {

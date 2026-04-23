@@ -15,6 +15,7 @@ public class BookingEventLogDto {
     private String newStatus;
     private Long triggeredBy;
     private String triggeredByRole;
+    private String triggeredByName;
     private String description;
     private String snapshot;
     private int eventVersion;

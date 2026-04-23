@@ -1,7 +1,16 @@
 server:
   port: 8085
+  # ── DoS / resource-exhaustion hardening ──────────────────────────────
+  max-http-request-header-size: 16KB
+  tomcat:
+    max-http-form-post-size: 256KB
+    max-swallow-size: 2MB
 
 spring:
+  servlet:
+    multipart:
+      max-file-size: 1MB
+      max-request-size: 2MB
   application:
     name: notification-service
   data:
@@ -57,6 +66,7 @@ app:
 
 logging:
   level:
+    root: INFO
     com.skbingegalaxy.notification: WARN
 
 # ── Resilience4j Circuit Breaker ─────────────────────────

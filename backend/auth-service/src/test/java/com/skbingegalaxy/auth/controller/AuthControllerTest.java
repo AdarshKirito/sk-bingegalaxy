@@ -38,6 +38,7 @@ class AuthControllerTest {
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
     @MockBean private AuthService authService;
+    @MockBean private com.skbingegalaxy.auth.service.TokenRevocationService tokenRevocationService;
 
     private AuthResponse successResponse;
 

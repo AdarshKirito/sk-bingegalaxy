@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
  */
 @Entity
 @Table(name = "outbox_event", indexes = {
-    @Index(name = "idx_outbox_sent", columnList = "sent, createdAt")
+    @Index(name = "idx_outbox_pending", columnList = "sent, failedPermanent, createdAt")
 })
 @Getter @Setter
 @NoArgsConstructor @AllArgsConstructor
@@ -42,4 +42,21 @@ public class OutboxEvent {
     private LocalDateTime createdAt;
 
     private LocalDateTime sentAt;
+
+    /** Number of publish attempts. Incremented on each failure. */
+    @Builder.Default
+    @Column(nullable = false)
+    private int attempts = 0;
+
+    /** Timestamp of the most recent attempt (success or failure). */
+    private LocalDateTime lastAttemptAt;
+
+    /** Truncated error message from the last failed attempt. */
+    @Column(length = 1000)
+    private String lastError;
+
+    /** True when attempts exceed the configured maximum — event is skipped by the publisher. */
+    @Builder.Default
+    @Column(nullable = false)
+    private boolean failedPermanent = false;
 }

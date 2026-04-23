@@ -1,5 +1,10 @@
 server:
   port: 8082
+  # ── DoS / resource-exhaustion hardening ──────────────────────────────
+  max-http-request-header-size: 16KB
+  tomcat:
+    max-http-form-post-size: 256KB
+    max-swallow-size: 2MB
 
 internal:
   api:
@@ -61,6 +66,7 @@ springdoc:
 
 logging:
   level:
+    root: INFO
     com.skbingegalaxy.availability: WARN
 
 # ── Resilience4j Circuit Breaker ─────────────────────────

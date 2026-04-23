@@ -35,7 +35,20 @@ public class BookingEventLogService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void logEvent(Booking booking, BookingEventType eventType, String previousStatus,
                          Long triggeredBy, String triggeredByRole, String description) {
+        logEvent(booking, eventType, previousStatus, triggeredBy, triggeredByRole, null, description);
+    }
+
+    /**
+     * Extended logger that captures a human-readable actor name so the audit
+     * trail can render "Aarav Menon (Customer)" instead of a bare user id.
+     * The name is snapshotted for historical stability.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void logEvent(Booking booking, BookingEventType eventType, String previousStatus,
+                         Long triggeredBy, String triggeredByRole,
+                         String triggeredByName, String description) {
         try {
+            String resolvedName = resolveActorName(booking, triggeredByRole, triggeredByName);
             BookingEventLog event = BookingEventLog.builder()
                 .bookingRef(booking.getBookingRef())
                 .eventType(eventType)
@@ -43,6 +56,7 @@ public class BookingEventLogService {
                 .newStatus(booking.getStatus().name())
                 .triggeredBy(triggeredBy)
                 .triggeredByRole(triggeredByRole)
+                .triggeredByName(resolvedName)
                 .description(description)
                 .snapshot(buildSnapshot(booking))
                 .build();
@@ -55,6 +69,28 @@ public class BookingEventLogService {
             log.warn("Failed to log booking event {} for {}: {}",
                      eventType, booking.getBookingRef(), e.getMessage());
         }
+    }
+
+    /**
+     * Resolve a best-effort display name for the actor.
+     *  • CUSTOMER → falls back to the name stored on the booking.
+     *  • ADMIN / SUPER_ADMIN → uses supplied name, else the role label.
+     *  • SYSTEM / null → "System" (automated workflows / schedulers).
+     */
+    private String resolveActorName(Booking booking, String role, String explicitName) {
+        if (explicitName != null && !explicitName.isBlank()) {
+            return explicitName.trim();
+        }
+        if (role == null || role.isBlank() || "SYSTEM".equalsIgnoreCase(role)) {
+            return "System";
+        }
+        if ("CUSTOMER".equalsIgnoreCase(role) && booking.getCustomerName() != null
+                && !booking.getCustomerName().isBlank()) {
+            return booking.getCustomerName().trim();
+        }
+        if ("SUPER_ADMIN".equalsIgnoreCase(role)) return "Super Admin";
+        if ("ADMIN".equalsIgnoreCase(role)) return "Admin";
+        return null;
     }
 
     public List<BookingEventLog> getEventHistory(String bookingRef) {

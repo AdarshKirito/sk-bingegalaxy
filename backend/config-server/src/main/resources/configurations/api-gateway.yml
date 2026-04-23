@@ -1,7 +1,13 @@
 server:
   port: 8080
+  # ── DoS / resource-exhaustion hardening ──────────────────────────────
+  max-http-request-header-size: 16KB
 
 spring:
+  # Cap in-memory buffering for the reactive gateway so a rogue upstream
+  # cannot balloon Netty direct memory with a multi-MB body.
+  codec:
+    max-in-memory-size: 2MB
   application:
     name: api-gateway
   data:
@@ -14,6 +20,9 @@ spring:
   security:
     jwt:
       secret: ${JWT_SECRET}
+      # Must match app.jwt.issuer / app.jwt.audience in auth-service.
+      issuer: ${JWT_ISSUER:skbingegalaxy-auth}
+      audience: ${JWT_AUDIENCE:skbingegalaxy-web}
   cloud:
     gateway:
       discovery:
@@ -115,6 +124,7 @@ app:
 
 logging:
   level:
+    root: INFO
     org.springframework.cloud.gateway: INFO
 
 eureka:
