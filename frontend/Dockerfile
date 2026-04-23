@@ -1,11 +1,10 @@
 FROM node:20-alpine AS build
 WORKDIR /app
-# Copy only the package manifest first.
-# We run `npm install` (not `npm ci`) so Docker always resolves packages
-# with its own npm/platform, avoiding lockfile-version mismatches caused
-# by developers running a different npm version locally (e.g. npm v11 on
-# Windows vs npm v10 inside this Alpine image).
-COPY package.json ./
+# Use `npm ci` for reproducible, lockfile-enforced installs (supply-chain hardening).
+# Requires package-lock.json to be committed (lockfileVersion 3, compatible with npm 10+
+# shipped in node:20-alpine). If you hit "lockfile mismatch" errors locally, regenerate
+# the lockfile with the same Node/npm version used by this Dockerfile.
+COPY package.json package-lock.json ./
 RUN npm install --no-audit --no-fund
 COPY . .
 ARG VITE_GOOGLE_CLIENT_ID

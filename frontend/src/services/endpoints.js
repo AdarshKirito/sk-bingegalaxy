@@ -43,6 +43,24 @@ export const authService = {
   bulkBan: (userIds) => api.post('/auth/admin/bulk-ban', userIds),
   bulkUnban: (userIds) => api.post('/auth/admin/bulk-unban', userIds),
   bulkDelete: (userIds) => api.post('/auth/admin/bulk-delete', userIds),
+  // ── MFA (TOTP) ─────────────────────────────────────────────
+  enrollMfa: () => api.post('/auth/mfa/enroll'),
+  confirmMfa: (data) => api.post('/auth/mfa/confirm', data),
+  disableMfa: (data) => api.post('/auth/mfa/disable', data),
+  // ── Email verification ─────────────────────────────────────
+  verifyEmail: (data) => api.post('/auth/verify-email', data),
+  resendVerification: () => api.post('/auth/resend-verification'),
+  // ── Sessions (self) ────────────────────────────────────────
+  getMySessions: () => api.get('/auth/sessions'),
+  revokeMySession: (id) => api.delete(`/auth/sessions/${id}`),
+  // ── Super-admin ────────────────────────────────────────────
+  getAllActiveSessions: (params = {}) => api.get('/auth/admin/sessions', { params }),
+  revokeAnySession: (id) => api.delete(`/auth/admin/sessions/${id}`),
+  revokeAllSessionsForUser: (userId) => api.delete(`/auth/admin/users/${userId}/sessions`),
+  getAuditLog: (params = {}) => api.get('/auth/admin/audit-log', { params }),
+  promoteAdmin: (id) => api.post(`/auth/admin/admins/${id}/promote`),
+  demoteAdmin: (id) => api.post(`/auth/admin/admins/${id}/demote`),
+  getSuperAdminStats: () => api.get('/auth/admin/super-admin/stats'),
 };
 
 export const bookingService = {
@@ -176,7 +194,13 @@ export const adminService = {
   deleteCustomerPricing: (customerId) => api.delete(`/bookings/admin/pricing/customer/${customerId}`),
   bulkAssignRateCode: (data) => api.post('/bookings/admin/pricing/bulk-assign-rate-code', data),
   updateMemberLabel: (customerId, memberLabel) => api.patch(`/bookings/admin/pricing/customer/${customerId}/member-label`, { memberLabel }),
-  resolveCustomerPricing: (customerId) => api.get(`/bookings/admin/pricing/resolve/${customerId}`),
+  resolveCustomerPricing: (customerId, overrideRateCodeId) => {
+    // When an override rate code is supplied, the server mirrors the actual
+    // booking-time precedence (customer-specific > override > profile rate code > default)
+    // so the admin preview matches what will be charged.
+    const params = overrideRateCodeId ? { overrideRateCodeId } : {};
+    return api.get(`/bookings/admin/pricing/resolve/${customerId}`, { params });
+  },
   resolveRateCodePricing: (rateCodeId) => api.get(`/bookings/admin/pricing/resolve-rate-code/${rateCodeId}`),
   getCustomerDetail: (customerId) => api.get(`/bookings/admin/pricing/customer-detail/${customerId}`),
   // Binge management (admin)

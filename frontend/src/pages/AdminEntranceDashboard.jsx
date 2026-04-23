@@ -269,6 +269,20 @@ export default function AdminEntranceDashboard() {
               <p>Register a new admin account</p>
             </Link>
           )}
+          {isSuperAdmin && (
+            <Link to="/admin/super" className="entrance-nav-card">
+              <h3><FiShield /> Super Admin Console</h3>
+              <p>Audit log, sessions, promote / demote admins</p>
+            </Link>
+          )}
+          <Link to="/admin/security/mfa" className="entrance-nav-card">
+            <h3><FiShield /> Two-factor auth</h3>
+            <p>Enable or manage your authenticator app</p>
+          </Link>
+          <Link to="/admin/sessions" className="entrance-nav-card">
+            <h3><FiShield /> My sessions</h3>
+            <p>Review and sign out other devices</p>
+          </Link>
         </div>
       </section>
     </div>

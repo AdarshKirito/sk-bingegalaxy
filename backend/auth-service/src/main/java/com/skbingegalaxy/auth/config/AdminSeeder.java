@@ -35,8 +35,13 @@ public class AdminSeeder implements CommandLineRunner {
         if (adminEmail == null || adminEmail.isBlank() || adminPassword == null || adminPassword.isBlank()) {
             log.error("Admin seed skipped — app.admin.email and app.admin.password must be configured");
             return;
-        }
-        var existing = userRepository.findByEmail(adminEmail);
+        }        // Enforce minimum strength on the seeded super-admin password so a
+        // weak ADMIN_PASSWORD env value can't quietly create a trivially
+        // brute-forceable god account. Same policy applied to user signups.
+        if (!isStrongPassword(adminPassword)) {
+            log.error("Admin seed aborted \u2014 ADMIN_PASSWORD must be \u226512 chars and include upper, lower, digit, and special character");
+            return;
+        }        var existing = userRepository.findByEmail(adminEmail);
         if (existing.isPresent()) {
             User admin = existing.get();
             if (admin.getRole() != UserRole.SUPER_ADMIN) {
@@ -60,5 +65,18 @@ public class AdminSeeder implements CommandLineRunner {
             userRepository.save(admin);
             log.info("Super admin seeded: {}", adminEmail);
         }
+    }
+
+    private static boolean isStrongPassword(String pw) {
+        if (pw == null || pw.length() < 12) return false;
+        boolean upper = false, lower = false, digit = false, special = false;
+        for (int i = 0; i < pw.length(); i++) {
+            char c = pw.charAt(i);
+            if (Character.isUpperCase(c)) upper = true;
+            else if (Character.isLowerCase(c)) lower = true;
+            else if (Character.isDigit(c)) digit = true;
+            else if (!Character.isWhitespace(c)) special = true;
+        }
+        return upper && lower && digit && special;
     }
 }

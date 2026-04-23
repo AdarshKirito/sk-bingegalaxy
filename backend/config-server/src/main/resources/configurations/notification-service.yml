@@ -29,6 +29,14 @@ spring:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
       observation-enabled: true
+      # ── Durability hardening ─────────────────────────────
+      acks: all
+      retries: 5
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        delivery.timeout.ms: 120000
+        linger.ms: 5
     listener:
       observation-enabled: true
       concurrency: ${KAFKA_LISTENER_CONCURRENCY:3}

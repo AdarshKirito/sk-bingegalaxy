@@ -29,4 +29,9 @@ public class UserDto {
     private UserRole role;
     private boolean active;
     private LocalDateTime createdAt;
+
+    // ── Security posture (V7) ────────────────────────────────
+    private boolean emailVerified;
+    private boolean mfaEnabled;
+    private LocalDateTime lastPasswordChangeAt;
 }

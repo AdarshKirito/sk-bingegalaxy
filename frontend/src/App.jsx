@@ -28,6 +28,10 @@ const AccountCenter = lazy(() => import('./pages/AccountCenter'));
 const PaymentPage = lazy(() => import('./pages/PaymentPage'));
 const AboutBinge = lazy(() => import('./pages/AboutBinge'));
 const AdminLogin = lazy(() => import('./pages/AdminLogin'));
+const SuperAdminDashboard = lazy(() => import('./pages/SuperAdminDashboard'));
+const MySessions = lazy(() => import('./pages/MySessions'));
+const MfaSetup = lazy(() => import('./pages/MfaSetup'));
+const VerifyEmail = lazy(() => import('./pages/VerifyEmail'));
 const AdminRegister = lazy(() => import('./pages/AdminRegister'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const AdminBookings = lazy(() => import('./pages/AdminBookings'));
@@ -154,6 +158,7 @@ function AppFrame() {
           <Route path="/register" element={<PublicOnlyRoute><Register /></PublicOnlyRoute>} />
           <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPassword /></PublicOnlyRoute>} />
           <Route path="/reset-password" element={<PublicOnlyRoute><ResetPassword /></PublicOnlyRoute>} />
+          <Route path="/verify-email" element={<VerifyEmail />} />
           <Route path="/complete-profile" element={<CompleteProfileRoute><CompleteProfile /></CompleteProfileRoute>} />
           <Route path="/platform" element={<ProtectedRoute><PlatformDashboard /></ProtectedRoute>} />
           <Route path="/binges" element={<ProtectedRoute><BingeSelector /></ProtectedRoute>} />
@@ -166,6 +171,8 @@ function AppFrame() {
           <Route path="/payments" element={<BingeRequired><CustomerPayments /></BingeRequired>} />
           <Route path="/about" element={<BingeRequired><AboutBinge /></BingeRequired>} />
           <Route path="/account" element={<ProtectedRoute><AccountCenter /></ProtectedRoute>} />
+          <Route path="/account/sessions" element={<ProtectedRoute><MySessions /></ProtectedRoute>} />
+          <Route path="/account/security/mfa" element={<ProtectedRoute><MfaSetup /></ProtectedRoute>} />
           <Route path="/payment/:ref" element={<BingeRequired><PaymentPage /></BingeRequired>} />
 
           <Route path="/admin/login" element={<AdminLogin />} />
@@ -173,6 +180,9 @@ function AppFrame() {
           <Route path="/admin/platform" element={<AdminRoute><AdminEntranceDashboard /></AdminRoute>} />
           <Route path="/admin/account" element={<AdminRoute><AdminAccount /></AdminRoute>} />
           <Route path="/admin/all-users" element={<SuperAdminRoute><AdminAllUsers /></SuperAdminRoute>} />
+          <Route path="/admin/super" element={<SuperAdminRoute><SuperAdminDashboard /></SuperAdminRoute>} />
+          <Route path="/admin/sessions" element={<AdminRoute><MySessions /></AdminRoute>} />
+          <Route path="/admin/security/mfa" element={<AdminRoute><MfaSetup /></AdminRoute>} />
           <Route path="/admin/binges" element={<AdminRoute><BingeManagement /></AdminRoute>} />
           <Route path="/admin/dashboard" element={<AdminBingeRequired><AdminDashboard /></AdminBingeRequired>} />
           <Route path="/admin/bookings" element={<AdminBingeRequired><AdminBookings /></AdminBingeRequired>} />

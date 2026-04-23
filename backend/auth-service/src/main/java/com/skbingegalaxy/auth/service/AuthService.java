@@ -23,6 +23,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.annotation.PostConstruct;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Month;
 import java.time.LocalDateTime;
@@ -30,6 +33,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.time.format.TextStyle;
 import java.time.temporal.ChronoField;
+import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -55,6 +59,11 @@ public class AuthService {
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final GoogleIdTokenVerifier googleIdTokenVerifier;
     private final TokenRevocationService tokenRevocationService;
+    private final AuthAuditService auditService;
+    private final UserSessionService sessionService;
+    private final PasswordHistoryService passwordHistoryService;
+    private final EmailVerificationService emailVerificationService;
+    private final TotpService totpService;
 
     @Value("${app.otp.expiration-minutes:10}")
     private int otpExpirationMinutes;
@@ -162,11 +171,24 @@ public class AuthService {
         user = userRepository.save(user);
         log.info("Customer registered: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
 
+        // Record initial password so future change-password attempts can check history.
+        passwordHistoryService.record(user.getId(), user.getPassword());
+        user.setLastPasswordChangeAt(java.time.LocalDateTime.now());
+        userRepository.save(user);
+
+        // Fire email verification (best-effort — welcome email is sent separately by the
+        // notification service's WELCOME template if configured).
+        try { emailVerificationService.issue(user); } catch (Exception ex) {
+            log.warn("Failed to issue email verification for userId={}: {}", user.getId(), ex.getMessage());
+        }
+
         // Fire notification event
         sendNotification(user, "WELCOME", Map.of(
             "name", user.getFirstName()
         ));
 
+        auditService.success(AuthAuditService.EventType.REGISTER, user.getId(), user.getRole(),
+            user.getId(), user.getEmail(), null);
         return buildAuthResponse(user);
     }
 
@@ -180,12 +202,15 @@ public class AuthService {
         boolean passwordMatches = passwordEncoder.matches(request.getPassword(), storedHash);
 
         if (user == null) {
+            auditService.failure(AuthAuditService.EventType.LOGIN_FAILED, null, null, null, request.getEmail(), "UNKNOWN_EMAIL");
             throw new BusinessException("Invalid email or password", HttpStatus.UNAUTHORIZED);
         }
         if (!user.isActive()) {
+            auditService.failure(AuthAuditService.EventType.LOGIN_FAILED, user.getId(), user.getRole(), user.getId(), user.getEmail(), "ACCOUNT_DEACTIVATED");
             throw new BusinessException("Account is deactivated. Contact support.", HttpStatus.FORBIDDEN);
         }
         if (user.isAccountLocked()) {
+            auditService.failure(AuthAuditService.EventType.LOGIN_LOCKED, user.getId(), user.getRole(), user.getId(), user.getEmail(), "ACCOUNT_LOCKED");
             throw new BusinessException("Account is temporarily locked due to too many failed attempts. Try again later.", HttpStatus.TOO_MANY_REQUESTS);
         }
         if (!passwordMatches) {
@@ -198,16 +223,31 @@ public class AuthService {
                 log.warn("Account locked for user {} after {} failed attempts", user.getId(), MAX_LOGIN_ATTEMPTS);
                 userRepository.save(user);
             }
+            auditService.failure(AuthAuditService.EventType.LOGIN_FAILED, user.getId(), user.getRole(), user.getId(), user.getEmail(), "BAD_PASSWORD");
             throw new BusinessException("Invalid email or password", HttpStatus.UNAUTHORIZED);
+        }
+
+        // MFA gate (opt-in per user)
+        if (user.isMfaEnabled()) {
+            if (request.getMfaCode() == null || request.getMfaCode().isBlank()) {
+                auditService.success(AuthAuditService.EventType.LOGIN_MFA_CHALLENGED, user.getId(), user.getRole(), user.getId(), user.getEmail(), null);
+                return buildMfaChallenge(user);
+            }
+            if (!totpService.verifyCodeOrRecovery(user, request.getMfaCode())) {
+                auditService.failure(AuthAuditService.EventType.LOGIN_MFA_FAILED, user.getId(), user.getRole(), user.getId(), user.getEmail(), "BAD_TOTP_CODE");
+                throw new BusinessException("Invalid verification code", HttpStatus.UNAUTHORIZED);
+            }
         }
 
         user.resetFailedAttempts();
         userRepository.save(user);
         log.info("Customer login: userId={}", user.getId());
+        auditService.success(AuthAuditService.EventType.LOGIN_SUCCESS, user.getId(), user.getRole(), user.getId(), user.getEmail(), null);
         return buildAuthResponse(user);
     }
 
     // ── Refresh token ───────────────────────────────────────
+    @Transactional
     public AuthResponse refreshToken(String refreshToken) {
         if (!jwtProvider.validateRefreshToken(refreshToken)) {
             throw new BusinessException("Invalid or expired refresh token", HttpStatus.UNAUTHORIZED);
@@ -222,6 +262,12 @@ public class AuthService {
             log.warn("Refresh attempt with revoked jti={}", jti);
             throw new BusinessException("Invalid or expired refresh token", HttpStatus.UNAUTHORIZED);
         }
+        // Reject refresh if the session behind this JTI was force-revoked (but not yet purged)
+        var existingSession = sessionService.findByJti(jti);
+        if (existingSession.isPresent() && existingSession.get().getRevokedAt() != null) {
+            log.warn("Refresh attempt with revoked session jti={}", jti);
+            throw new BusinessException("Session revoked. Please sign in again.", HttpStatus.UNAUTHORIZED);
+        }
         Long userId = jwtProvider.getUserIdFromToken(refreshToken);
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new BusinessException("User not found", HttpStatus.UNAUTHORIZED));
@@ -230,8 +276,30 @@ public class AuthService {
         }
         // Rotate: revoke the presented refresh token so it can't be reused.
         tokenRevocationService.revoke(refreshToken);
+
+        // Mint fresh tokens and rotate the existing session row (so each device keeps a
+        // stable session id across refreshes). Fall back to creating a new session if
+        // no existing row was found (e.g. legacy token from before sessions shipped).
+        String newAccess = jwtProvider.generateToken(user);
+        String newRefresh = jwtProvider.generateRefreshToken(user);
+        try {
+            String newJti = jwtProvider.getJtiFromToken(newRefresh);
+            java.time.LocalDateTime newExp = jwtProvider.getExpiryFromToken(newRefresh);
+            if (newJti != null && newExp != null) {
+                if (sessionService.rotate(jti, newJti, newExp).isEmpty()) {
+                    sessionService.recordLogin(user.getId(), newJti, newExp);
+                }
+            }
+        } catch (Exception ex) {
+            log.warn("Session rotate failed for userId={}: {}", user.getId(), ex.getMessage());
+        }
         log.info("Token refreshed for: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
-        return buildAuthResponse(user);
+        auditService.success(AuthAuditService.EventType.TOKEN_REFRESHED, user.getId(), user.getRole(), user.getId(), user.getEmail(), null);
+        return AuthResponse.builder()
+            .token(newAccess)
+            .refreshToken(newRefresh)
+            .user(toDto(user))
+            .build();
     }
 
     // ── Admin login ──────────────────────────────────────────
@@ -244,13 +312,18 @@ public class AuthService {
         boolean passwordMatches = passwordEncoder.matches(request.getPassword(), storedHash);
 
         if (user == null || (user.getRole() != UserRole.ADMIN && user.getRole() != UserRole.SUPER_ADMIN)) {
+            auditService.failure(AuthAuditService.EventType.LOGIN_FAILED,
+                user == null ? null : user.getId(), user == null ? null : user.getRole(),
+                user == null ? null : user.getId(), request.getEmail(), "NOT_AN_ADMIN");
             throw new BusinessException("Invalid admin credentials", HttpStatus.UNAUTHORIZED);
         }
 
         if (!user.isActive()) {
+            auditService.failure(AuthAuditService.EventType.LOGIN_FAILED, user.getId(), user.getRole(), user.getId(), user.getEmail(), "ACCOUNT_DEACTIVATED");
             throw new BusinessException("Account is deactivated", HttpStatus.FORBIDDEN);
         }
         if (user.isAccountLocked()) {
+            auditService.failure(AuthAuditService.EventType.LOGIN_LOCKED, user.getId(), user.getRole(), user.getId(), user.getEmail(), "ACCOUNT_LOCKED");
             throw new BusinessException("Account is temporarily locked due to too many failed attempts. Try again later.", HttpStatus.TOO_MANY_REQUESTS);
         }
         if (!passwordMatches) {
@@ -261,12 +334,26 @@ public class AuthService {
                 log.warn("Admin account locked for user {} after {} failed attempts", user.getId(), MAX_LOGIN_ATTEMPTS);
                 userRepository.save(user);
             }
+            auditService.failure(AuthAuditService.EventType.LOGIN_FAILED, user.getId(), user.getRole(), user.getId(), user.getEmail(), "BAD_PASSWORD");
             throw new BusinessException("Invalid admin credentials", HttpStatus.UNAUTHORIZED);
+        }
+
+        // MFA is strongly recommended for admins; enforced when enabled
+        if (user.isMfaEnabled()) {
+            if (request.getMfaCode() == null || request.getMfaCode().isBlank()) {
+                auditService.success(AuthAuditService.EventType.LOGIN_MFA_CHALLENGED, user.getId(), user.getRole(), user.getId(), user.getEmail(), null);
+                return buildMfaChallenge(user);
+            }
+            if (!totpService.verifyCodeOrRecovery(user, request.getMfaCode())) {
+                auditService.failure(AuthAuditService.EventType.LOGIN_MFA_FAILED, user.getId(), user.getRole(), user.getId(), user.getEmail(), "BAD_TOTP_CODE");
+                throw new BusinessException("Invalid verification code", HttpStatus.UNAUTHORIZED);
+            }
         }
 
         user.resetFailedAttempts();
         userRepository.save(user);
         log.info("Admin login: userId={}", user.getId());
+        auditService.success(AuthAuditService.EventType.LOGIN_SUCCESS, user.getId(), user.getRole(), user.getId(), user.getEmail(), null);
         return buildAuthResponse(user);
     }
 
@@ -281,14 +368,17 @@ public class AuthService {
         }
         User user = optionalUser.get();
 
-        String token = UUID.randomUUID().toString();
+        // The plaintext token is sent to the user; only its SHA-256 hash is
+        // persisted, so a DB breach does NOT expose unredeemed reset links.
+        String plaintextToken = UUID.randomUUID().toString();
+        String tokenHash = sha256Hex(plaintextToken);
         String otp = generateOtp();
 
         // Invalidate any existing unused tokens for this user
         resetTokenRepository.markAllUnusedAsUsedForUser(user.getId());
 
         PasswordResetToken resetToken = PasswordResetToken.builder()
-            .token(token)
+            .token(tokenHash)
             .otp(otp)
             .user(user)
             .expiresAt(LocalDateTime.now().plusMinutes(otpExpirationMinutes))
@@ -297,11 +387,12 @@ public class AuthService {
         resetTokenRepository.save(resetToken);
         log.info("Password reset requested for: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
 
-        // Send OTP via email (and optionally SMS)
+        // Send OTP via email (and optionally SMS) — `token` is the plaintext
+        // value; the DB only ever holds its hash.
         sendNotification(user, "PASSWORD_RESET", Map.of(
             "name", user.getFirstName(),
             "otp", otp,
-            "token", token,
+            "token", plaintextToken,
             "expiryMinutes", String.valueOf(otpExpirationMinutes)
         ));
     }
@@ -310,7 +401,7 @@ public class AuthService {
     @Transactional
     public void resetPassword(ResetPasswordRequest request) {
         PasswordResetToken resetToken = resetTokenRepository
-            .findByTokenAndUsedFalse(request.getToken())
+            .findByTokenAndUsedFalse(sha256Hex(request.getToken()))
             .orElseThrow(() -> new BusinessException("Invalid or expired reset token"));
 
         if (resetToken.isExpired()) {
@@ -318,12 +409,20 @@ public class AuthService {
         }
 
         User user = resetToken.getUser();
-        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        if (passwordHistoryService.isRecentlyUsed(user.getId(), request.getNewPassword())) {
+            throw new BusinessException("You cannot reuse a recently used password. Please choose a different one.");
+        }
+        String newHash = passwordEncoder.encode(request.getNewPassword());
+        user.setPassword(newHash);
+        user.setLastPasswordChangeAt(java.time.LocalDateTime.now());
         userRepository.save(user);
+        passwordHistoryService.record(user.getId(), newHash);
 
         resetToken.setUsed(true);
         resetTokenRepository.save(resetToken);
 
+        try { sessionService.revokeAllForUser(user.getId(), user.getId(), "PASSWORD_RESET"); } catch (Exception ignored) {}
+        auditService.success(AuthAuditService.EventType.PASSWORD_RESET_COMPLETED, user.getId(), user.getRole(), user.getId(), user.getEmail(), null);
         log.info("Password reset completed for: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
     }
 
@@ -337,7 +436,7 @@ public class AuthService {
 
         // Look up by token first (not by OTP) to enforce per-token attempt counting
         PasswordResetToken resetToken = resetTokenRepository
-            .findByTokenAndUsedFalse(request.getToken())
+            .findByTokenAndUsedFalse(sha256Hex(request.getToken()))
             .orElseThrow(() -> new BusinessException("Invalid or expired reset token"));
 
         if (resetToken.isExpired()) {
@@ -358,12 +457,20 @@ public class AuthService {
         }
 
         User user = resetToken.getUser();
-        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        if (passwordHistoryService.isRecentlyUsed(user.getId(), request.getNewPassword())) {
+            throw new BusinessException("You cannot reuse a recently used password. Please choose a different one.");
+        }
+        String newHash = passwordEncoder.encode(request.getNewPassword());
+        user.setPassword(newHash);
+        user.setLastPasswordChangeAt(java.time.LocalDateTime.now());
         userRepository.save(user);
+        passwordHistoryService.record(user.getId(), newHash);
 
         // Invalidate ALL unused tokens for this user (not just the current one)
         resetTokenRepository.markAllUnusedAsUsedForUser(user.getId());
 
+        try { sessionService.revokeAllForUser(user.getId(), user.getId(), "PASSWORD_RESET"); } catch (Exception ignored) {}
+        auditService.success(AuthAuditService.EventType.PASSWORD_RESET_COMPLETED, user.getId(), user.getRole(), user.getId(), user.getEmail(), "via OTP");
         log.info("OTP-based password reset completed for userId: {}", user.getId());
     }
 
@@ -381,6 +488,7 @@ public class AuthService {
             .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
 
         if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
+            auditService.failure(AuthAuditService.EventType.PASSWORD_CHANGED, userId, user.getRole(), userId, user.getEmail(), "BAD_CURRENT_PASSWORD");
             throw new BusinessException("Current password is incorrect", HttpStatus.BAD_REQUEST);
         }
 
@@ -388,8 +496,26 @@ public class AuthService {
             throw new BusinessException("New password must be different from the current password", HttpStatus.BAD_REQUEST);
         }
 
-        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        // Reject reuse of recent passwords (history depth configured in PasswordHistoryService)
+        if (passwordHistoryService.isRecentlyUsed(userId, request.getNewPassword())) {
+            auditService.failure(AuthAuditService.EventType.PASSWORD_CHANGED, userId, user.getRole(), userId, user.getEmail(), "PASSWORD_REUSED");
+            throw new BusinessException("You cannot reuse a recently used password. Please choose a different one.", HttpStatus.BAD_REQUEST);
+        }
+
+        String newHash = passwordEncoder.encode(request.getNewPassword());
+        user.setPassword(newHash);
+        user.setLastPasswordChangeAt(java.time.LocalDateTime.now());
         userRepository.save(user);
+        passwordHistoryService.record(userId, newHash);
+
+        // Force-logout other sessions for safety (user keeps the caller's JWT until natural expiry)
+        try {
+            sessionService.revokeAllForUser(userId, userId, "PASSWORD_CHANGED");
+        } catch (Exception ex) {
+            log.warn("Failed to revoke sibling sessions after password change for userId={}: {}", userId, ex.getMessage());
+        }
+
+        auditService.success(AuthAuditService.EventType.PASSWORD_CHANGED, userId, user.getRole(), userId, user.getEmail(), null);
         log.info("Password changed for userId: {}", userId);
     }
 
@@ -493,7 +619,11 @@ public class AuthService {
         if (user.getRole() == UserRole.SUPER_ADMIN) {
             throw new BusinessException("Cannot delete the super admin account", HttpStatus.FORBIDDEN);
         }
+        Long actor = currentActorId();
+        UserRole actorRole = currentActorRole();
+        try { sessionService.revokeAllForUser(user.getId(), actor, "USER_DELETED"); } catch (Exception ignored) {}
         userRepository.delete(user);
+        auditService.success(AuthAuditService.EventType.USER_DELETED, actor, actorRole, user.getId(), user.getEmail(), "role=" + user.getRole());
         log.info("Super admin deleted user: {} (ID: {}, role: {})", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()), id, user.getRole());
 
         // Notify user about account deletion
@@ -534,6 +664,12 @@ public class AuthService {
         for (User user : toUpdate) {
             user.setActive(active);
             log.info("Bulk {} user: {} (ID: {})", active ? "unbanned" : "banned", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()), user.getId());
+            auditService.success(
+                active ? AuthAuditService.EventType.USER_UNBANNED : AuthAuditService.EventType.USER_BANNED,
+                currentActorId(), currentActorRole(), user.getId(), user.getEmail(), null);
+            if (!active) {
+                try { sessionService.revokeAllForUser(user.getId(), currentActorId(), "USER_BANNED"); } catch (Exception ignored) {}
+            }
         }
         userRepository.saveAll(toUpdate);
         return toUpdate.size();
@@ -552,6 +688,8 @@ public class AuthService {
                 .toList();
         for (User user : toDelete) {
             log.info("Bulk deleted user: {} (ID: {}, role: {})", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()), user.getId(), user.getRole());
+            try { sessionService.revokeAllForUser(user.getId(), currentActorId(), "BULK_DELETE"); } catch (Exception ignored) {}
+            auditService.success(AuthAuditService.EventType.USER_BULK_DELETED, currentActorId(), currentActorRole(), user.getId(), user.getEmail(), "role=" + user.getRole());
         }
         userRepository.deleteAll(toDelete);
         return toDelete.size();
@@ -679,19 +817,61 @@ public class AuthService {
 
         user = userRepository.save(user);
         log.info("Admin registered: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
+        passwordHistoryService.record(user.getId(), user.getPassword());
+        user.setLastPasswordChangeAt(java.time.LocalDateTime.now());
+        userRepository.save(user);
+        auditService.success(AuthAuditService.EventType.ADMIN_CREATED,
+            currentActorId(), currentActorRole(),
+            user.getId(), user.getEmail(),
+            "role=" + user.getRole());
         return buildAuthResponse(user);
     }
 
     // ── Helpers ──────────────────────────────────────────────
+    /**
+     * Issue a fresh access + refresh token pair AND persist a {@link com.skbingegalaxy.auth.entity.UserSession}
+     * keyed by the refresh-token JTI so the login is visible in the super-admin session view
+     * and can be force-revoked. The refresh-token JTI also backs the rotation check in
+     * {@link #refreshToken(String)}.
+     */
     private AuthResponse buildAuthResponse(User user) {
+        String accessToken = jwtProvider.generateToken(user);
+        String refreshToken = jwtProvider.generateRefreshToken(user);
+        try {
+            String jti = jwtProvider.getJtiFromToken(refreshToken);
+            java.time.LocalDateTime exp = jwtProvider.getExpiryFromToken(refreshToken);
+            if (jti != null && exp != null) {
+                sessionService.recordLogin(user.getId(), jti, exp);
+            }
+        } catch (Exception ex) {
+            // Session tracking must not break login
+            log.warn("Failed to record user session for userId={}: {}", user.getId(), ex.getMessage());
+        }
         return AuthResponse.builder()
-            .token(jwtProvider.generateToken(user))
-            .refreshToken(jwtProvider.generateRefreshToken(user))
+            .token(accessToken)
+            .refreshToken(refreshToken)
             .user(toDto(user))
             .build();
     }
 
-    private UserDto toDto(User user) {
+    /** Build an MFA challenge response (no tokens issued; caller must resubmit with code). */
+    private AuthResponse buildMfaChallenge(User user) {
+        return AuthResponse.builder()
+            .mfaRequired(true)
+            .challengeType("TOTP")
+            .user(UserDto.builder()
+                .id(user.getId())
+                .firstName(user.getFirstName())
+                .email(user.getEmail())
+                .role(user.getRole())
+                .mfaEnabled(true)
+                .emailVerified(user.isEmailVerified())
+                .active(user.isActive())
+                .build())
+            .build();
+    }
+
+    UserDto toDto(User user) {
         return UserDto.builder()
             .id(user.getId())
             .firstName(user.getFirstName())
@@ -712,7 +892,40 @@ public class AuthService {
             .role(user.getRole())
             .active(user.isActive())
             .createdAt(user.getCreatedAt())
+            .emailVerified(user.isEmailVerified())
+            .mfaEnabled(user.isMfaEnabled())
+            .lastPasswordChangeAt(user.getLastPasswordChangeAt())
             .build();
+    }
+
+    // ── Actor introspection (for audit rows) ─────────────────
+    /** Current authenticated user id from Spring Security, or null if anonymous. */
+    Long currentActorId() {
+        try {
+            var auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            if (auth == null || !auth.isAuthenticated()) return null;
+            Object principal = auth.getPrincipal();
+            if (principal == null || "anonymousUser".equals(principal)) return null;
+            String name = auth.getName();
+            if (name == null || name.isBlank()) return null;
+            try { return Long.parseLong(name); } catch (NumberFormatException ex) { return null; }
+        } catch (Exception ex) { return null; }
+    }
+
+    /** Current authenticated user's role, or null. */
+    UserRole currentActorRole() {
+        try {
+            var auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            if (auth == null || auth.getAuthorities() == null) return null;
+            for (var ga : auth.getAuthorities()) {
+                String a = ga.getAuthority();
+                if (a == null) continue;
+                if (a.equals("ROLE_SUPER_ADMIN")) return UserRole.SUPER_ADMIN;
+                if (a.equals("ROLE_ADMIN")) return UserRole.ADMIN;
+                if (a.equals("ROLE_CUSTOMER")) return UserRole.CUSTOMER;
+            }
+            return null;
+        } catch (Exception ex) { return null; }
     }
 
     private String trimToNull(String value) {
@@ -805,6 +1018,23 @@ public class AuthService {
         return String.format("%0" + otpLength + "d", random.nextInt(bound));
     }
 
+    /**
+     * SHA-256 hex digest of {@code input}, used to hash high-entropy
+     * password-reset tokens before persistence. Plain SHA-256 (no salt) is
+     * sufficient because the input is a fresh random UUID; the goal is to
+     * prevent direct token replay if the DB is breached, not to defend
+     * against precomputed attacks on low-entropy secrets.
+     */
+    static String sha256Hex(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(md.digest(input.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256 is mandatory in every JRE; this branch is unreachable.
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
     private String generateSecurePassword() {
         String upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
         String lower = "abcdefghijklmnopqrstuvwxyz";
@@ -844,5 +1074,193 @@ public class AuthService {
         } catch (Exception e) {
             log.warn("Failed to send notification event for {}: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()), e.getMessage());
         }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Super-admin: role management (promote/demote ADMIN ↔ SUPER_ADMIN)
+    // ════════════════════════════════════════════════════════════════════════
+
+    /** Promote an ADMIN to SUPER_ADMIN. Caller must already be SUPER_ADMIN. */
+    @Transactional
+    public UserDto promoteToSuperAdmin(Long targetId) {
+        User user = userRepository.findById(targetId)
+            .orElseThrow(() -> new ResourceNotFoundException("User", "id", targetId));
+        if (user.getRole() != UserRole.ADMIN) {
+            throw new BusinessException("Only ADMIN users can be promoted to SUPER_ADMIN", HttpStatus.BAD_REQUEST);
+        }
+        user.setRole(UserRole.SUPER_ADMIN);
+        user = userRepository.save(user);
+        // Role change invalidates cached JWT claims → force re-login everywhere.
+        try { sessionService.revokeAllForUser(user.getId(), currentActorId(), "ROLE_PROMOTED"); } catch (Exception ignored) {}
+        auditService.success(AuthAuditService.EventType.ROLE_PROMOTED, currentActorId(), currentActorRole(),
+            user.getId(), user.getEmail(), "ADMIN → SUPER_ADMIN");
+        log.info("User {} promoted to SUPER_ADMIN", user.getId());
+        return toDto(user);
+    }
+
+    /** Demote a SUPER_ADMIN back to ADMIN. Cannot demote yourself or the last super admin. */
+    @Transactional
+    public UserDto demoteFromSuperAdmin(Long targetId) {
+        Long actor = currentActorId();
+        if (actor != null && actor.equals(targetId)) {
+            throw new BusinessException("You cannot demote yourself", HttpStatus.FORBIDDEN);
+        }
+        User user = userRepository.findById(targetId)
+            .orElseThrow(() -> new ResourceNotFoundException("User", "id", targetId));
+        if (user.getRole() != UserRole.SUPER_ADMIN) {
+            throw new BusinessException("User is not a SUPER_ADMIN", HttpStatus.BAD_REQUEST);
+        }
+        long remaining = userRepository.countByRoleAndActiveTrue(UserRole.SUPER_ADMIN);
+        if (remaining <= 1) {
+            throw new BusinessException("At least one active SUPER_ADMIN must remain", HttpStatus.CONFLICT);
+        }
+        user.setRole(UserRole.ADMIN);
+        user = userRepository.save(user);
+        try { sessionService.revokeAllForUser(user.getId(), actor, "ROLE_DEMOTED"); } catch (Exception ignored) {}
+        auditService.success(AuthAuditService.EventType.ROLE_DEMOTED, actor, currentActorRole(),
+            user.getId(), user.getEmail(), "SUPER_ADMIN → ADMIN");
+        log.info("User {} demoted to ADMIN", user.getId());
+        return toDto(user);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // MFA (TOTP) management
+    // ════════════════════════════════════════════════════════════════════════
+
+    /** Begin MFA enrollment for the current user. Returns secret + otpauth:// uri + recovery codes. */
+    @Transactional
+    public MfaEnrollmentResponse beginMfaEnrollment(Long userId) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+        if (user.isMfaEnabled()) {
+            throw new BusinessException("MFA is already enabled. Disable it first to re-enroll.", HttpStatus.CONFLICT);
+        }
+        TotpService.EnrollmentPayload payload = totpService.beginEnrollment(user.getId());
+        return new MfaEnrollmentResponse(
+            payload.getSecret(),
+            payload.getOtpauthUri(),
+            payload.getRecoveryCodes()
+        );
+    }
+
+    /** Confirm MFA enrollment by providing a valid code from the authenticator app. */
+    @Transactional
+    public void confirmMfaEnrollment(Long userId, String code, java.util.List<String> recoveryCodes) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+        if (recoveryCodes == null || recoveryCodes.isEmpty()) {
+            throw new BusinessException("Recovery codes must be echoed back on MFA confirmation", HttpStatus.BAD_REQUEST);
+        }
+        totpService.confirmEnrollment(userId, code, recoveryCodes);
+        auditService.success(AuthAuditService.EventType.MFA_ENROLLED, userId, user.getRole(), userId, user.getEmail(), null);
+        log.info("MFA enrolled for userId={}", userId);
+    }
+
+    /** Disable MFA for the current user. Requires a valid code (or recovery code). */
+    @Transactional
+    public void disableMfa(Long userId, String code) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+        if (!user.isMfaEnabled()) {
+            return; // idempotent
+        }
+        totpService.disable(userId, code);
+        auditService.success(AuthAuditService.EventType.MFA_DISABLED, userId, user.getRole(), userId, user.getEmail(), null);
+        log.info("MFA disabled for userId={}", userId);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Email verification
+    // ════════════════════════════════════════════════════════════════════════
+
+    @Transactional
+    public void verifyEmail(String email, String otp) {
+        User verified = emailVerificationService.verifyWithOtp(email == null ? "" : email.toLowerCase(), otp);
+        auditService.success(AuthAuditService.EventType.EMAIL_VERIFIED, verified.getId(), verified.getRole(), verified.getId(), verified.getEmail(), null);
+    }
+
+    @Transactional
+    public void verifyEmailByToken(String token) {
+        User verified = emailVerificationService.verifyWithToken(token);
+        auditService.success(AuthAuditService.EventType.EMAIL_VERIFIED, verified.getId(), verified.getRole(), verified.getId(), verified.getEmail(), null);
+    }
+
+    @Transactional
+    public void resendVerificationEmail(Long userId) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+        if (user.isEmailVerified()) return;
+        emailVerificationService.issue(user);
+        auditService.success(AuthAuditService.EventType.EMAIL_VERIFICATION_SENT, userId, user.getRole(), userId, user.getEmail(), null);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Session read / revoke (exposes UserSessionService via the service boundary)
+    // ════════════════════════════════════════════════════════════════════════
+
+    @Transactional(readOnly = true)
+    public java.util.List<UserSessionDto> listMySessions(Long userId, String currentRefreshJti) {
+        return sessionService.listActiveForUser(userId).stream()
+            .map(s -> UserSessionDto.from(s, s.getRefreshJti() != null && s.getRefreshJti().equals(currentRefreshJti)))
+            .toList();
+    }
+
+    @Transactional
+    public void revokeMySession(Long userId, Long sessionId) {
+        var opt = sessionService.findById(sessionId);
+        if (opt.isEmpty() || !opt.get().getUserId().equals(userId)) {
+            throw new ResourceNotFoundException("Session", "id", sessionId);
+        }
+        if (sessionService.revoke(sessionId, userId, "USER_REVOKED")) {
+            auditService.success(AuthAuditService.EventType.SESSION_REVOKED, userId, UserRole.CUSTOMER, userId, null, "sessionId=" + sessionId);
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<UserSessionDto> listAllActiveSessions(org.springframework.data.domain.Pageable pageable) {
+        return sessionService.listAllActive(pageable).map(s -> UserSessionDto.from(s, false));
+    }
+
+    @Transactional
+    public void revokeAnySession(Long sessionId) {
+        var opt = sessionService.findById(sessionId);
+        if (opt.isEmpty()) throw new ResourceNotFoundException("Session", "id", sessionId);
+        Long actor = currentActorId();
+        if (sessionService.revoke(sessionId, actor, "ADMIN_REVOKED")) {
+            auditService.success(AuthAuditService.EventType.SESSION_REVOKED, actor, currentActorRole(),
+                opt.get().getUserId(), null, "sessionId=" + sessionId);
+        }
+    }
+
+    @Transactional
+    public int revokeAllSessionsForUser(Long userId) {
+        int n = sessionService.revokeAllForUser(userId, currentActorId(), "ADMIN_REVOKED_ALL");
+        auditService.success(AuthAuditService.EventType.SESSION_REVOKED_ALL, currentActorId(), currentActorRole(),
+            userId, null, "count=" + n);
+        return n;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Super-admin: audit log search + platform stats
+    // ════════════════════════════════════════════════════════════════════════
+
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<AuthAuditLogDto> searchAuditLog(String eventType, Long actorId, Long targetId,
+                                                                               org.springframework.data.domain.Pageable pageable) {
+        return auditService.search(eventType, actorId, targetId, pageable).map(AuthAuditLogDto::from);
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> getSuperAdminStats() {
+        long customers = userRepository.countByRole(UserRole.CUSTOMER);
+        long admins = userRepository.countByRole(UserRole.ADMIN);
+        long superAdmins = userRepository.countByRole(UserRole.SUPER_ADMIN);
+        long activeSessions = sessionService.listAllActive(org.springframework.data.domain.PageRequest.of(0, 1)).getTotalElements();
+        java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("customers", customers);
+        out.put("admins", admins);
+        out.put("superAdmins", superAdmins);
+        out.put("activeSessions", activeSessions);
+        return out;
     }
 }

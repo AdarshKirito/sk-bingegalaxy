@@ -1,0 +1,374 @@
+/* ================================================================
+   Membership — premium customer loyalty UI
+   ================================================================ */
+
+.membership-page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: clamp(16px, 3vw, 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ── Hero card (tier ribbon, balance, progress) ───────────────── */
+.membership-hero {
+  position: relative;
+  border-radius: 20px;
+  padding: clamp(24px, 4vw, 40px);
+  color: #fff;
+  overflow: hidden;
+  box-shadow: 0 20px 50px -20px rgba(0, 0, 0, 0.35);
+  isolation: isolate;
+}
+.membership-hero::before {
+  content: '';
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(circle at 20% 10%, rgba(255, 255, 255, 0.18), transparent 50%),
+    radial-gradient(circle at 85% 90%, rgba(0, 0, 0, 0.25), transparent 55%);
+  z-index: -1;
+}
+.membership-hero.tier-bronze    { background: linear-gradient(135deg, #7b4b2a 0%, #c58351 60%, #e9b48a 100%); }
+.membership-hero.tier-silver    { background: linear-gradient(135deg, #4b5563 0%, #9ca3af 60%, #d1d5db 100%); }
+.membership-hero.tier-gold      { background: linear-gradient(135deg, #7a5c10 0%, #d4a017 55%, #f5d06b 100%); }
+.membership-hero.tier-platinum  { background: linear-gradient(135deg, #1e293b 0%, #475569 55%, #94a3b8 100%); }
+.membership-hero.tier-diamond   { background: linear-gradient(135deg, #0c4a6e 0%, #0ea5e9 55%, #7dd3fc 100%); }
+
+.membership-hero-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 28px;
+}
+.membership-hero-kicker {
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.85;
+  margin-bottom: 8px;
+}
+.membership-hero h1 {
+  font-size: clamp(28px, 4vw, 44px);
+  margin: 0 0 6px 0;
+  letter-spacing: -0.02em;
+  font-weight: 800;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+}
+.membership-hero-member {
+  font-size: 14px;
+  opacity: 0.9;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+}
+
+.membership-hero-balance {
+  text-align: right;
+  min-width: 180px;
+}
+.membership-hero-balance .points {
+  display: block;
+  font-size: clamp(32px, 5vw, 52px);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+}
+.membership-hero-balance .label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  opacity: 0.85;
+  margin-top: 6px;
+  display: inline-block;
+}
+
+.membership-progress {
+  margin-top: 8px;
+}
+.membership-progress-track {
+  height: 10px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+.membership-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #fff 0%, #fde68a 100%);
+  border-radius: 999px;
+  transition: width 600ms cubic-bezier(.2,.8,.2,1);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.6);
+}
+.membership-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  margin-top: 10px;
+  opacity: 0.95;
+}
+.membership-progress-meta strong { font-weight: 700; }
+
+.membership-hero-validity {
+  margin-top: 18px;
+  font-size: 13px;
+  opacity: 0.92;
+}
+
+/* ── Stat tiles ──────────────────────────────────────────────── */
+.membership-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+}
+.membership-stat {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 20px;
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+.membership-stat:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px -12px rgba(0, 0, 0, 0.15);
+  border-color: var(--border-hover);
+}
+.membership-stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+.membership-stat-value {
+  font-size: 26px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--text, #111);
+}
+.membership-stat-sub {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ── Section card ────────────────────────────────────────────── */
+.membership-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: clamp(18px, 2.5vw, 28px);
+}
+.membership-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 18px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.membership-section-head h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.membership-section-head p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* ── Benefits grid ──────────────────────────────────────────── */
+.membership-benefits {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+.benefit-card {
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--primary-bg);
+  border: 1px solid var(--border);
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.benefit-card .benefit-icon {
+  width: 36px; height: 36px;
+  flex: 0 0 36px;
+  border-radius: 10px;
+  background: var(--primary);
+  color: #fff;
+  display: grid; place-items: center;
+  font-size: 18px;
+}
+.benefit-card h4 { margin: 0 0 4px 0; font-size: 14px; font-weight: 700; }
+.benefit-card p  { margin: 0; font-size: 13px; color: var(--text-muted); line-height: 1.4; }
+
+/* ── Ledger list (timeline style) ────────────────────────────── */
+.ledger-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ledger-item {
+  display: grid;
+  grid-template-columns: 40px 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.ledger-item:last-child { border-bottom: none; }
+.ledger-icon {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  display: grid; place-items: center;
+  font-size: 18px; font-weight: 700;
+}
+.ledger-icon.credit { background: rgba(34, 197, 94, 0.12); color: #16a34a; }
+.ledger-icon.debit  { background: rgba(239, 68, 68, 0.12); color: #dc2626; }
+.ledger-icon.neutral{ background: rgba(100, 116, 139, 0.12); color: #475569; }
+.ledger-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+.ledger-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+.ledger-points {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 16px;
+}
+.ledger-points.credit { color: #16a34a; }
+.ledger-points.debit  { color: #dc2626; }
+
+.ledger-pager {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 16px;
+  gap: 12px;
+}
+
+/* ── Empty state ─────────────────────────────────────────────── */
+.membership-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-muted);
+}
+.membership-empty h3 { color: var(--text, #111); margin-bottom: 6px; }
+
+/* ── Status match form ──────────────────────────────────────── */
+.sm-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.sm-form label {
+  display: flex; flex-direction: column;
+  gap: 6px;
+  font-size: 13px; font-weight: 600;
+  color: var(--text-muted);
+}
+.sm-form input,
+.sm-form select {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-card);
+  color: var(--text, #111);
+  font-size: 14px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.sm-form input:focus,
+.sm-form select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-bg);
+}
+.sm-form .sm-submit {
+  grid-column: 1 / -1;
+  display: flex; justify-content: flex-end;
+}
+.sm-form .sm-hint {
+  grid-column: 1 / -1;
+  font-size: 13px;
+  color: var(--text-muted);
+  background: var(--primary-bg);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+@media (max-width: 640px) {
+  .sm-form { grid-template-columns: 1fr; }
+  .membership-hero-top { flex-direction: column; }
+  .membership-hero-balance { text-align: left; }
+  .ledger-item { grid-template-columns: 36px 1fr; }
+  .ledger-item .ledger-points { grid-column: 2; text-align: left; }
+}
+
+/* ── Status match history ───────────────────────────────────── */
+.sm-history {
+  list-style: none; padding: 0; margin: 20px 0 0 0;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.sm-history li {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 14px;
+  background: var(--primary-bg);
+  border-radius: 10px;
+  font-size: 14px;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.sm-history .sm-prog { font-weight: 600; }
+.sm-history .sm-date { color: var(--text-muted); font-size: 12px; }
+.sm-history .sm-status {
+  font-size: 11px; font-weight: 700;
+  padding: 3px 10px; border-radius: 999px;
+  text-transform: uppercase; letter-spacing: 0.1em;
+}
+.sm-status.pending  { background: rgba(234, 179, 8, 0.18);  color: #a16207; }
+.sm-status.approved { background: rgba(34, 197, 94, 0.18);  color: #15803d; }
+.sm-status.rejected { background: rgba(239, 68, 68, 0.18);  color: #b91c1c; }
+.sm-status.expired  { background: rgba(100, 116, 139, 0.18); color: #475569; }
+
+/* ── Not-enrolled state (value prop panel) ──────────────────── */
+.join-panel {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+  color: #fff;
+  border-radius: 20px;
+  padding: clamp(24px, 4vw, 40px);
+  text-align: center;
+  box-shadow: 0 20px 40px -20px rgba(99, 102, 241, 0.5);
+}
+.join-panel h2 { font-size: clamp(24px, 3vw, 32px); margin: 0 0 8px 0; }
+.join-panel p  { opacity: 0.92; max-width: 620px; margin: 0 auto 20px; }
+.join-perks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin-top: 22px;
+}
+.join-perk {
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(6px);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: left;
+}
+.join-perk strong { display: block; margin-bottom: 4px; font-size: 14px; }
+.join-perk span   { font-size: 12px; opacity: 0.85; }

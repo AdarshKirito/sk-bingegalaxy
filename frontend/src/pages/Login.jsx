@@ -34,6 +34,8 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPw, setShowPw] = useState(false);
+  const [mfaRequired, setMfaRequired] = useState(false);
+  const [mfaCode, setMfaCode] = useState('');
   const [googleStatus, setGoogleStatus] = useState(GOOGLE_CLIENT_ID ? 'loading' : 'unavailable');
   const [googleHint, setGoogleHint] = useState(
     GOOGLE_CLIENT_ID
@@ -174,7 +176,17 @@ export default function Login() {
     if (!form.password) { setError('Password is required'); toast.error('Password is required'); return; }
     setLoading(true);
     try {
-      await login({ email: trimmedEmail, password: form.password });
+      const payload = { email: trimmedEmail, password: form.password };
+      if (mfaRequired) {
+        if (!mfaCode.trim()) { setError('Verification code is required'); toast.error('Verification code is required'); setLoading(false); return; }
+        payload.mfaCode = mfaCode.trim();
+      }
+      const result = await login(payload);
+      if (result?.mfaRequired) {
+        setMfaRequired(true);
+        toast.info('Enter the 6-digit code from your authenticator app');
+        return;
+      }
       trackLogin('email');
       const u = JSON.parse(localStorage.getItem('user') || '{}');
       if (u.id) identifyUser(String(u.id), { role: u.role });
@@ -248,8 +260,24 @@ export default function Login() {
                   </button>
                 </div>
               </div>
+              {mfaRequired && (
+                <div className="input-group">
+                  <label>Authenticator code</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={8}
+                    value={mfaCode}
+                    onChange={(e) => setMfaCode(e.target.value)}
+                    placeholder="6-digit code"
+                    autoFocus
+                  />
+                  <small style={{ color: '#888' }}>Enter the code from your authenticator app or a recovery code.</small>
+                </div>
+              )}
               <button type="submit" className="btn btn-primary auth-btn" disabled={loading}>
-                {loading ? <><span className="btn-spinner" /> Signing in...</> : 'Sign In'}
+                {loading ? <><span className="btn-spinner" /> Signing in...</> : (mfaRequired ? 'Verify & Sign In' : 'Sign In')}
               </button>
             </form>
 

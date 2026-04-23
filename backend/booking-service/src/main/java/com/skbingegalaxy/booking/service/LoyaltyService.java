@@ -156,8 +156,12 @@ public class LoyaltyService {
         // Cap discount at the booking total
         if (discount.compareTo(maxDiscount) > 0) {
             discount = maxDiscount;
+            // FLOOR, not CEILING: after capping we must never debit MORE
+            // points than the (now-reduced) discount is worth. Using CEILING
+            // can shave off a fractional point of value per redemption
+            // — always in the house's favour and against the customer.
             actualPoints = discount.multiply(BigDecimal.valueOf(loyaltyProps.getRedemptionRate()))
-                .setScale(0, RoundingMode.CEILING).longValue();
+                .setScale(0, RoundingMode.FLOOR).longValue();
         }
 
         if (actualPoints <= 0 || discount.compareTo(BigDecimal.ZERO) <= 0) {
@@ -264,7 +268,10 @@ public class LoyaltyService {
         for (LoyaltyTransaction earn : expired) {
             if (earn.getPoints() <= 0) continue;
 
-            LoyaltyAccount account = accountRepository.findById(earn.getAccountId()).orElse(null);
+            // PESSIMISTIC_WRITE — the expiry scheduler and a user-initiated
+            // redeem/reverse can both target the same account; without this
+            // lock their read-modify-write cycles can lose updates.
+            LoyaltyAccount account = accountRepository.findByIdForUpdate(earn.getAccountId()).orElse(null);
             if (account == null) continue;
 
             long pointsToExpire = Math.min(earn.getPoints(), account.getCurrentBalance());

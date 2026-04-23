@@ -10,6 +10,8 @@ export default function AdminLogin() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPw, setShowPw] = useState(false);
+  const [mfaRequired, setMfaRequired] = useState(false);
+  const [mfaCode, setMfaCode] = useState('');
   const { adminLogin } = useAuth();
   const navigate = useNavigate();
 
@@ -20,9 +22,17 @@ export default function AdminLogin() {
     if (!trimmedEmail) { setError('Email is required'); toast.error('Email is required'); return; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) { setError('Please enter a valid email address'); toast.error('Please enter a valid email address'); return; }
     if (!form.password) { setError('Password is required'); toast.error('Password is required'); return; }
+    if (mfaRequired && !mfaCode.trim()) { setError('Verification code is required'); toast.error('Verification code is required'); return; }
     setLoading(true);
     try {
-      await adminLogin({ email: trimmedEmail, password: form.password });
+      const payload = { email: trimmedEmail, password: form.password };
+      if (mfaRequired) payload.mfaCode = mfaCode.trim();
+      const result = await adminLogin(payload);
+      if (result?.mfaRequired) {
+        setMfaRequired(true);
+        toast.info('Enter the 6-digit code from your authenticator app');
+        return;
+      }
       toast.success('Welcome, Admin!');
       navigate('/admin/platform');
     } catch (err) {
@@ -91,8 +101,24 @@ export default function AdminLogin() {
                   </button>
                 </div>
               </div>
+              {mfaRequired && (
+                <div className="input-group">
+                  <label>Authenticator code</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={8}
+                    value={mfaCode}
+                    onChange={(e) => setMfaCode(e.target.value)}
+                    placeholder="6-digit code"
+                    autoFocus
+                  />
+                  <small style={{ color: '#888' }}>Enter the code from your authenticator app or a recovery code.</small>
+                </div>
+              )}
               <button type="submit" className="btn btn-primary auth-btn" disabled={loading}>
-                {loading ? <><span className="btn-spinner" /> Signing in...</> : 'Sign In as Admin'}
+                {loading ? <><span className="btn-spinner" /> Signing in...</> : (mfaRequired ? 'Verify & Sign In' : 'Sign In as Admin')}
               </button>
             </form>
 

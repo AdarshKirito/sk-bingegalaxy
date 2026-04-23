@@ -76,6 +76,25 @@ public class TokenRevocationService {
         return jti != null && !jti.isBlank() && revokedTokenRepository.existsByJti(jti);
     }
 
+    /**
+     * Force-revoke a known JTI directly (used when a super admin revokes a session or
+     * when password/role changes invalidate all active sessions for a user). Safe to call
+     * even if the JTI was already persisted — the upsert is idempotent.
+     */
+    @Transactional
+    public void revokeByJti(String jti, Long userId, String tokenType, LocalDateTime expiresAt) {
+        if (jti == null || jti.isBlank() || expiresAt == null || expiresAt.isBefore(LocalDateTime.now())) {
+            return;
+        }
+        if (revokedTokenRepository.existsByJti(jti)) return;
+        revokedTokenRepository.save(RevokedToken.builder()
+            .jti(jti)
+            .userId(userId)
+            .tokenType(tokenType == null ? "unknown" : tokenType)
+            .expiresAt(expiresAt)
+            .build());
+    }
+
     private String safeTokenType(String token) {
         try {
             String t = jwtProvider.getTokenType(token);

@@ -2062,35 +2062,28 @@ public class BookingService {
 
         // Calculate pricing using resolved customer pricing (if customer is known)
         Long custId = request.getCustomerId() != null ? request.getCustomerId() : 0L;
-        String pricingSource = "DEFAULT";
-        String rateCodeName = null;
+        String pricingSource;
+        String rateCodeName;
 
-        // If admin specified a rate code override, resolve all pricing from that rate code
-        ResolvedPricingDto rateCodePricingOverride = null;
-        if (request.getRateCodeId() != null) {
-            rateCodePricingOverride = pricingService.resolveRateCodePricing(request.getRateCodeId());
-            pricingSource = "RATE_CODE";
-            rateCodeName = rateCodePricingOverride.getRateCodeName();
-        }
+        // Precedence (per-event / per-addon):
+        //   customer-specific custom  >  admin override rate code  >  profile rate code  >  default
+        // If the admin picks a rate code at booking time but the customer has their own
+        // custom price for this event or addon, the customer's personal deal wins. This
+        // matches PricingService.resolveEventPrice(customerId, eventTypeId, overrideRateCodeId).
+        Long overrideRateCodeId = request.getRateCodeId();
 
         PricingService.ResolvedEventPrice eventPrice;
-        if (rateCodePricingOverride != null) {
-            final String rcName = rateCodeName;
-            eventPrice = rateCodePricingOverride.getEventPricings().stream()
-                .filter(ep -> ep.getEventTypeId().equals(request.getEventTypeId()))
-                .findFirst()
-                .map(ep -> new PricingService.ResolvedEventPrice(
-                    ep.getBasePrice(), ep.getHourlyRate(), ep.getPricePerGuest(), "RATE_CODE", rcName))
-                .orElse(new PricingService.ResolvedEventPrice(
-                    eventType.getBasePrice(), eventType.getHourlyRate(), eventType.getPricePerGuest(), "RATE_CODE", rcName));
-        } else if (custId > 0) {
-            eventPrice = pricingService.resolveEventPrice(custId, request.getEventTypeId());
-            pricingSource = eventPrice.source();
-            rateCodeName = eventPrice.rateCodeName();
+        if (custId > 0) {
+            eventPrice = pricingService.resolveEventPrice(custId, request.getEventTypeId(), overrideRateCodeId);
+        } else if (overrideRateCodeId != null) {
+            // Walk-in booking with no known customer &mdash; admin's rate code drives pricing.
+            eventPrice = pricingService.resolveEventPrice(0L, request.getEventTypeId(), overrideRateCodeId);
         } else {
             eventPrice = new PricingService.ResolvedEventPrice(
                 eventType.getBasePrice(), eventType.getHourlyRate(), eventType.getPricePerGuest(), "DEFAULT", null);
         }
+        pricingSource = eventPrice.source();
+        rateCodeName = eventPrice.rateCodeName();
 
         BigDecimal durationDecimalHours = BigDecimal.valueOf(durMin)
             .divide(BigDecimal.valueOf(60), 4, RoundingMode.HALF_UP);
@@ -2104,21 +2097,17 @@ public class BookingService {
             for (AddOnSelection sel : request.getAddOns()) {
                 AddOn addOn = findBookableAddOn(sel.getAddOnId());
                 int qty = Math.max(sel.getQuantity(), 1);
-                BigDecimal resolvedPrice;
-                if (rateCodePricingOverride != null) {
-                    resolvedPrice = rateCodePricingOverride.getAddonPricings().stream()
-                        .filter(ap -> ap.getAddOnId().equals(sel.getAddOnId()))
-                        .findFirst()
-                        .map(ResolvedPricingDto.AddonPricing::getPrice)
-                        .orElse(addOn.getPrice());
-                } else if (custId > 0) {
-                    PricingService.ResolvedAddonPrice ap = pricingService.resolveAddonPrice(custId, sel.getAddOnId());
-                    resolvedPrice = ap.price();
-                } else {
-                    resolvedPrice = addOn.getPrice();
-                }
-                BigDecimal linePrice = resolvedPrice.multiply(BigDecimal.valueOf(qty));
+                PricingService.ResolvedAddonPrice ap = pricingService.resolveAddonPrice(
+                    custId > 0 ? custId : 0L, sel.getAddOnId(), overrideRateCodeId);
+                BigDecimal linePrice = ap.price().multiply(BigDecimal.valueOf(qty));
                 addOnTotal = addOnTotal.add(linePrice);
+                // If ANY addon resolves to CUSTOMER, promote overall source so admins see the strongest tag.
+                if ("CUSTOMER".equals(ap.source())) {
+                    pricingSource = "CUSTOMER";
+                } else if ("RATE_CODE".equals(ap.source()) && "DEFAULT".equals(pricingSource)) {
+                    pricingSource = "RATE_CODE";
+                    if (rateCodeName == null) rateCodeName = ap.rateCodeName();
+                }
                 bookingAddOns.add(BookingAddOn.builder()
                     .addOn(addOn).quantity(qty).price(linePrice).build());
             }

@@ -23,4 +23,15 @@ public interface LoyaltyAccountRepository extends JpaRepository<LoyaltyAccount, 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT a FROM LoyaltyAccount a WHERE a.customerId = :customerId")
     Optional<LoyaltyAccount> findByCustomerIdForUpdate(Long customerId);
+
+    /**
+     * Pessimistic-lock variant for {@link #findById} — required by the
+     * scheduled points-expiry job so it can't race with a concurrent
+     * redeem operation (which holds a write lock via
+     * {@link #findByCustomerIdForUpdate}) and clobber the wallet balance
+     * with a stale read-modify-write.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT a FROM LoyaltyAccount a WHERE a.id = :id")
+    Optional<LoyaltyAccount> findByIdForUpdate(Long id);
 }

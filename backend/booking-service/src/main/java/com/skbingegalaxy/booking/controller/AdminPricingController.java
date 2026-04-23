@@ -157,9 +157,18 @@ public class AdminPricingController {
     @GetMapping("/resolve/{customerId}")
     public ResponseEntity<ApiResponse<ResolvedPricingDto>> resolveCustomerPricing(
             @PathVariable Long customerId,
+            @RequestParam(value = "overrideRateCodeId", required = false) Long overrideRateCodeId,
             @RequestHeader("X-User-Id") Long adminId,
             @RequestHeader("X-User-Role") String role) {
         validatePricingScope(adminId, role);
+        // With overrideRateCodeId, the response mirrors the precedence used at booking
+        // creation (customer-specific > override > profile rate code > default), so the
+        // wizard preview matches the actual charge. Without it, falls back to the plain
+        // customer pricing resolver.
+        if (overrideRateCodeId != null) {
+            return ResponseEntity.ok(ApiResponse.ok(
+                pricingService.resolveCustomerPricingWithOverride(customerId, overrideRateCodeId)));
+        }
         return ResponseEntity.ok(ApiResponse.ok(pricingService.resolveCustomerPricing(customerId)));
     }
 

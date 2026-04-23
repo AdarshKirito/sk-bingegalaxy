@@ -10,8 +10,8 @@ interface AuthState {
   isAdmin: boolean;
   isSuperAdmin: boolean;
   _setAuth: (userData: User, token?: string) => void;
-  login: (credentials: { email: string; password: string }) => Promise<User>;
-  adminLogin: (credentials: { email: string; password: string }) => Promise<User>;
+  login: (credentials: { email: string; password: string; mfaCode?: string }) => Promise<{ user: User; mfaRequired?: boolean }>;
+  adminLogin: (credentials: { email: string; password: string; mfaCode?: string }) => Promise<{ user: User; mfaRequired?: boolean }>;
   register: (data: Record<string, unknown>) => Promise<User>;
   googleLogin: (credential: string) => Promise<User>;
   adminRegister: (data: Record<string, unknown>) => Promise<User>;
@@ -77,16 +77,24 @@ const useAuthStore = create<AuthState>((set, get) => {
 
   login: async (credentials) => {
     const res = await authService.login(credentials);
-    const { user: userData, token } = res.data.data;
+    const data = res.data.data;
+    if (data?.mfaRequired) {
+      return { user: data.user, mfaRequired: true };
+    }
+    const { user: userData, token } = data;
     get()._setAuth(userData, token);
-    return userData;
+    return { user: userData };
   },
 
   adminLogin: async (credentials) => {
     const res = await authService.adminLogin(credentials);
-    const { user: userData, token } = res.data.data;
+    const data = res.data.data;
+    if (data?.mfaRequired) {
+      return { user: data.user, mfaRequired: true };
+    }
+    const { user: userData, token } = data;
     get()._setAuth(userData, token);
-    return userData;
+    return { user: userData };
   },
 
   register: async (data) => {

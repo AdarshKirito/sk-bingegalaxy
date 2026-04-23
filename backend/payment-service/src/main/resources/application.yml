@@ -12,7 +12,7 @@ spring:
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/payment_db}
     username: ${SPRING_DATASOURCE_USERNAME:payment_svc}
-    password: ${SPRING_DATASOURCE_PASSWORD:payment_svc_dev}
+    password: ${SPRING_DATASOURCE_PASSWORD:?SPRING_DATASOURCE_PASSWORD must be set}
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:

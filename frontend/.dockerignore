@@ -13,4 +13,4 @@ coverage
 # directly inside the Alpine container so it always resolves packages with
 # Docker's own npm/platform, avoiding version-mismatch failures that occur
 # when developers run npm install on Windows (npm v11) vs the container (npm v10).
-package-lock.json
+# package-lock.json

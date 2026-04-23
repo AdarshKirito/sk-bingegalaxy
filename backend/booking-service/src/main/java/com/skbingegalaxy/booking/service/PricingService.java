@@ -372,26 +372,68 @@ public class PricingService {
     /**
      * Resolves the effective price for a SINGLE event type for a given customer.
      * Returns {basePrice, hourlyRate, pricePerGuest, source, rateCodeName}.
+     *
+     * <p>Precedence (highest first):
+     * <ol>
+     *   <li>Customer-specific custom pricing (their personal deal, always wins).</li>
+     *   <li>Customer profile's attached rate code.</li>
+     *   <li>Event type default price.</li>
+     * </ol>
      */
     public ResolvedEventPrice resolveEventPrice(Long customerId, Long eventTypeId) {
+        return resolveEventPrice(customerId, eventTypeId, null);
+    }
+
+    /**
+     * Resolves the effective price with an optional admin-supplied rate code override
+     * (used during admin booking creation when admin picks a rate plan at booking time).
+     *
+     * <p>Precedence (highest first):
+     * <ol>
+     *   <li>Customer-specific custom pricing (their personal deal, always wins).</li>
+     *   <li>{@code overrideRateCodeId} rate code pricing (admin's explicit pick for this booking).</li>
+     *   <li>Customer profile's attached rate code.</li>
+     *   <li>Event type default price.</li>
+     * </ol>
+     * An override rate code that has no entry for this event falls through to the
+     * next step (profile rate code or default) rather than zeroing out the price.
+     */
+    public ResolvedEventPrice resolveEventPrice(Long customerId, Long eventTypeId, Long overrideRateCodeId) {
         EventType et = findAccessibleEventType(eventTypeId);
 
         Long bid = BingeContext.getBingeId();
-        Optional<CustomerPricingProfile> profileOpt = findReadableCustomerProfile(customerId, bid);
+        Optional<CustomerPricingProfile> profileOpt = (customerId != null && customerId > 0)
+            ? findReadableCustomerProfile(customerId, bid)
+            : Optional.empty();
 
         if (profileOpt.isPresent()) {
             CustomerPricingProfile profile = profileOpt.get();
 
-            // Check customer-specific first
+            // 1. Customer-specific always wins.
             Optional<CustomerEventPricing> custPrice = profile.getEventPricings().stream()
                 .filter(ep -> ep.getEventType().getId().equals(eventTypeId)).findFirst();
             if (custPrice.isPresent()) {
                 CustomerEventPricing cep = custPrice.get();
                 return new ResolvedEventPrice(cep.getBasePrice(), cep.getHourlyRate(), cep.getPricePerGuest(), "CUSTOMER", null);
             }
+        }
 
-            // Check rate code
-            RateCode rc = profile.getRateCode();
+        // 2. Admin-supplied override rate code (booking-time pick).
+        if (overrideRateCodeId != null) {
+            RateCode override = findScopedRateCode(overrideRateCodeId);
+            if (override.isActive()) {
+                Optional<RateCodeEventPricing> rcPrice = override.getEventPricings().stream()
+                    .filter(ep -> ep.getEventType().getId().equals(eventTypeId)).findFirst();
+                if (rcPrice.isPresent()) {
+                    RateCodeEventPricing rcp = rcPrice.get();
+                    return new ResolvedEventPrice(rcp.getBasePrice(), rcp.getHourlyRate(), rcp.getPricePerGuest(), "RATE_CODE", override.getName());
+                }
+            }
+        }
+
+        // 3. Customer profile's attached rate code.
+        if (profileOpt.isPresent()) {
+            RateCode rc = profileOpt.get().getRateCode();
             if (rc != null && rc.isActive()) {
                 Optional<RateCodeEventPricing> rcPrice = rc.getEventPricings().stream()
                     .filter(ep -> ep.getEventType().getId().equals(eventTypeId)).findFirst();
@@ -402,29 +444,56 @@ public class PricingService {
             }
         }
 
-        // Default
+        // 4. Default.
         return new ResolvedEventPrice(et.getBasePrice(), et.getHourlyRate(), et.getPricePerGuest(), "DEFAULT", null);
     }
 
     /**
      * Resolves the effective price for a SINGLE add-on for a given customer.
+     * Precedence matches {@link #resolveEventPrice(Long, Long)}.
      */
     public ResolvedAddonPrice resolveAddonPrice(Long customerId, Long addOnId) {
+        return resolveAddonPrice(customerId, addOnId, null);
+    }
+
+    /**
+     * Add-on variant of {@link #resolveEventPrice(Long, Long, Long)}: customer-specific
+     * always wins over admin's override rate code and over the profile's attached rate code.
+     */
+    public ResolvedAddonPrice resolveAddonPrice(Long customerId, Long addOnId, Long overrideRateCodeId) {
         AddOn addon = findAccessibleAddOn(addOnId);
 
         Long bid = BingeContext.getBingeId();
-        Optional<CustomerPricingProfile> profileOpt = findReadableCustomerProfile(customerId, bid);
+        Optional<CustomerPricingProfile> profileOpt = (customerId != null && customerId > 0)
+            ? findReadableCustomerProfile(customerId, bid)
+            : Optional.empty();
 
         if (profileOpt.isPresent()) {
             CustomerPricingProfile profile = profileOpt.get();
 
+            // 1. Customer-specific always wins.
             Optional<CustomerAddonPricing> custPrice = profile.getAddonPricings().stream()
                 .filter(ap -> ap.getAddOn().getId().equals(addOnId)).findFirst();
             if (custPrice.isPresent()) {
                 return new ResolvedAddonPrice(custPrice.get().getPrice(), "CUSTOMER", null);
             }
+        }
 
-            RateCode rc = profile.getRateCode();
+        // 2. Admin override rate code.
+        if (overrideRateCodeId != null) {
+            RateCode override = findScopedRateCode(overrideRateCodeId);
+            if (override.isActive()) {
+                Optional<RateCodeAddonPricing> rcPrice = override.getAddonPricings().stream()
+                    .filter(ap -> ap.getAddOn().getId().equals(addOnId)).findFirst();
+                if (rcPrice.isPresent()) {
+                    return new ResolvedAddonPrice(rcPrice.get().getPrice(), "RATE_CODE", override.getName());
+                }
+            }
+        }
+
+        // 3. Profile rate code.
+        if (profileOpt.isPresent()) {
+            RateCode rc = profileOpt.get().getRateCode();
             if (rc != null && rc.isActive()) {
                 Optional<RateCodeAddonPricing> rcPrice = rc.getAddonPricings().stream()
                     .filter(ap -> ap.getAddOn().getId().equals(addOnId)).findFirst();
@@ -581,7 +650,11 @@ public class PricingService {
 
     /**
      * Resolves pricing based purely on a rate code (no customer context).
-     * Used by the admin booking wizard when overriding a customer's pricing with a specific rate code.
+     * Used by the admin booking wizard to preview a rate code's raw pricing. Note that
+     * this does NOT apply customer-specific overrides &mdash; at booking creation time
+     * the engine correctly falls back to the customer's personal pricing first. See
+     * {@link #resolveCustomerPricingWithOverride(Long, Long)} for a preview that
+     * reflects the booking-time precedence.
      */
     public ResolvedPricingDto resolveRateCodePricing(Long rateCodeId) {
         RateCode rateCode = findScopedRateCode(rateCodeId);
@@ -631,6 +704,114 @@ public class PricingService {
         return ResolvedPricingDto.builder()
             .pricingSource("RATE_CODE")
             .rateCodeName(rateCode.getName())
+            .eventPricings(eventPricings)
+            .addonPricings(addonPricings)
+            .build();
+    }
+
+    /**
+     * Resolves the full pricing grid for a customer with an admin-supplied rate code
+     * override applied at booking time. Mirrors the precedence used in
+     * {@link #resolveEventPrice(Long, Long, Long)} so the admin booking wizard can
+     * show exactly what the server will charge:
+     *
+     * <pre>
+     *   per event/addon:
+     *     customer-specific &gt; override rate code &gt; profile rate code &gt; default
+     * </pre>
+     */
+    public ResolvedPricingDto resolveCustomerPricingWithOverride(Long customerId, Long overrideRateCodeId) {
+        if (overrideRateCodeId == null) {
+            return resolveCustomerPricing(customerId);
+        }
+        Long bid = requireSelectedBinge("resolving customer pricing with override");
+        List<EventType> allEvents = eventTypeRepository.findByBingeIdAndActiveTrue(bid);
+        List<AddOn> allAddOns = addOnRepository.findByBingeIdAndActiveTrue(bid);
+
+        Optional<CustomerPricingProfile> profileOpt = findReadableCustomerProfile(customerId, bid);
+        RateCode override = findScopedRateCode(overrideRateCodeId);
+        if (!override.isActive()) {
+            throw new BusinessException("Rate code '" + override.getName() + "' is not active");
+        }
+
+        Map<Long, CustomerEventPricing> custEventMap = new HashMap<>();
+        Map<Long, CustomerAddonPricing> custAddonMap = new HashMap<>();
+        RateCode profileRateCode = null;
+        String memberLabel = null;
+        if (profileOpt.isPresent()) {
+            CustomerPricingProfile profile = profileOpt.get();
+            profile.getEventPricings().forEach(ep -> custEventMap.put(ep.getEventType().getId(), ep));
+            profile.getAddonPricings().forEach(ap -> custAddonMap.put(ap.getAddOn().getId(), ap));
+            profileRateCode = profile.getRateCode();
+            memberLabel = profile.getMemberLabel();
+        }
+
+        Map<Long, RateCodeEventPricing> ovEventMap = new HashMap<>();
+        Map<Long, RateCodeAddonPricing> ovAddonMap = new HashMap<>();
+        override.getEventPricings().forEach(ep -> ovEventMap.put(ep.getEventType().getId(), ep));
+        override.getAddonPricings().forEach(ap -> ovAddonMap.put(ap.getAddOn().getId(), ap));
+
+        Map<Long, RateCodeEventPricing> profEventMap = new HashMap<>();
+        Map<Long, RateCodeAddonPricing> profAddonMap = new HashMap<>();
+        if (profileRateCode != null && profileRateCode.isActive()) {
+            profileRateCode.getEventPricings().forEach(ep -> profEventMap.put(ep.getEventType().getId(), ep));
+            profileRateCode.getAddonPricings().forEach(ap -> profAddonMap.put(ap.getAddOn().getId(), ap));
+        }
+
+        String overallSource = "DEFAULT";
+        String displayedRateCode = null;
+        List<ResolvedPricingDto.EventPricing> eventPricings = new ArrayList<>();
+        for (EventType et : allEvents) {
+            ResolvedPricingDto.EventPricing.EventPricingBuilder b = ResolvedPricingDto.EventPricing.builder()
+                .eventTypeId(et.getId()).eventTypeName(et.getName());
+            if (custEventMap.containsKey(et.getId())) {
+                CustomerEventPricing c = custEventMap.get(et.getId());
+                eventPricings.add(b.basePrice(c.getBasePrice()).hourlyRate(c.getHourlyRate())
+                    .pricePerGuest(c.getPricePerGuest()).source("CUSTOMER").build());
+                overallSource = "CUSTOMER";
+            } else if (ovEventMap.containsKey(et.getId())) {
+                RateCodeEventPricing r = ovEventMap.get(et.getId());
+                eventPricings.add(b.basePrice(r.getBasePrice()).hourlyRate(r.getHourlyRate())
+                    .pricePerGuest(r.getPricePerGuest()).source("RATE_CODE").build());
+                if ("DEFAULT".equals(overallSource)) overallSource = "RATE_CODE";
+                displayedRateCode = override.getName();
+            } else if (profEventMap.containsKey(et.getId())) {
+                RateCodeEventPricing r = profEventMap.get(et.getId());
+                eventPricings.add(b.basePrice(r.getBasePrice()).hourlyRate(r.getHourlyRate())
+                    .pricePerGuest(r.getPricePerGuest()).source("RATE_CODE").build());
+                if ("DEFAULT".equals(overallSource)) overallSource = "RATE_CODE";
+                if (displayedRateCode == null) displayedRateCode = profileRateCode.getName();
+            } else {
+                eventPricings.add(b.basePrice(et.getBasePrice()).hourlyRate(et.getHourlyRate())
+                    .pricePerGuest(et.getPricePerGuest()).source("DEFAULT").build());
+            }
+        }
+
+        List<ResolvedPricingDto.AddonPricing> addonPricings = new ArrayList<>();
+        for (AddOn addon : allAddOns) {
+            ResolvedPricingDto.AddonPricing.AddonPricingBuilder b = ResolvedPricingDto.AddonPricing.builder()
+                .addOnId(addon.getId()).addOnName(addon.getName());
+            if (custAddonMap.containsKey(addon.getId())) {
+                addonPricings.add(b.price(custAddonMap.get(addon.getId()).getPrice()).source("CUSTOMER").build());
+                overallSource = "CUSTOMER";
+            } else if (ovAddonMap.containsKey(addon.getId())) {
+                addonPricings.add(b.price(ovAddonMap.get(addon.getId()).getPrice()).source("RATE_CODE").build());
+                if ("DEFAULT".equals(overallSource)) overallSource = "RATE_CODE";
+                displayedRateCode = override.getName();
+            } else if (profAddonMap.containsKey(addon.getId())) {
+                addonPricings.add(b.price(profAddonMap.get(addon.getId()).getPrice()).source("RATE_CODE").build());
+                if ("DEFAULT".equals(overallSource)) overallSource = "RATE_CODE";
+                if (displayedRateCode == null) displayedRateCode = profileRateCode.getName();
+            } else {
+                addonPricings.add(b.price(addon.getPrice()).source("DEFAULT").build());
+            }
+        }
+
+        return ResolvedPricingDto.builder()
+            .customerId(customerId)
+            .pricingSource(overallSource)
+            .rateCodeName(displayedRateCode)
+            .memberLabel(memberLabel)
             .eventPricings(eventPricings)
             .addonPricings(addonPricings)
             .build();

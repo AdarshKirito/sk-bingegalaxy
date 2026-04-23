@@ -114,10 +114,32 @@ public class StatusMatchService {
                 .orElseThrow(() -> new IllegalArgumentException(
                         "target tier " + req.getRequestedTierCode() + " is not active"));
 
+        // Precedence guard: earned (organic) tier ALWAYS wins over a status
+        // match. A status match may only PROMOTE a member to a higher tier;
+        // it must never downgrade (or rewrite the effective-until window of)
+        // a member whose current tier rank meets or exceeds the requested
+        // target. Previously this call unconditionally overwrote
+        // currentTierCode + tierEffectiveUntil, which could knock a
+        // lifetime/earned PLATINUM holder down to GOLD with a short
+        // challenge window — a silent demotion.
+        LoyaltyTierDefinition currentDef = configService.activeTier(program.getId(), m.getCurrentTierCode(), LocalDateTime.now())
+                .orElse(null);
+        LocalDateTime now = LocalDateTime.now();
+        if (currentDef != null && currentDef.getRankOrder() >= target.getRankOrder()) {
+            log.info("[loyalty-v2] status-match no-op: membership {} already holds {} (rank {}) >= requested {} (rank {})",
+                    m.getId(), m.getCurrentTierCode(), currentDef.getRankOrder(),
+                    target.getCode(), target.getRankOrder());
+            req.setStatus("APPROVED");
+            req.setReviewedByAdminId(adminUserId);
+            req.setReviewedAt(now);
+            req.setReviewNotes((reviewNotes == null ? "" : reviewNotes + " | ")
+                    + "Auto-approved without tier change — member already at equal or higher earned tier.");
+            return statusMatchRepository.save(req);
+        }
+
         // Apply the challenge tier immediately.  tierEffectiveUntil is
         // explicitly short — the challenge window — to force a soft
         // landing after expiry if the member doesn't qualify organically.
-        LocalDateTime now = LocalDateTime.now();
         LocalDateTime challengeExpiry = now.plusDays(challengeWindowDays);
 
         String fromTier = m.getCurrentTierCode();

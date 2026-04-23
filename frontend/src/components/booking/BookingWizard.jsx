@@ -160,13 +160,20 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
     }
   }, [isAdmin, selectedCustomer]);
 
-  // When admin explicitly selects a rate code, re-resolve pricing
+  // When admin explicitly picks a rate code, re-resolve pricing.
+  // Precedence (matches backend): customer-specific custom > admin's override rate code
+  // > customer profile's rate code > default. So when a customer is selected we call the
+  // customer-aware endpoint with the override; only fall back to the raw rate-code
+  // endpoint when there's no customer context (walk-in booking).
   useEffect(() => {
     if (!isAdmin || !selectedRateCodeId) return;
-    adminService.resolveRateCodePricing(selectedRateCodeId)
+    const req = selectedCustomer?.id
+      ? adminService.resolveCustomerPricing(selectedCustomer.id, selectedRateCodeId)
+      : adminService.resolveRateCodePricing(selectedRateCodeId);
+    req
       .then(res => setResolvedPricing(res.data.data || null))
       .catch(() => setResolvedPricing(null));
-  }, [isAdmin, selectedRateCodeId]);
+  }, [isAdmin, selectedRateCodeId, selectedCustomer?.id]);
 
   // Load venue rooms
   useEffect(() => {

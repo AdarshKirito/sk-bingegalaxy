@@ -50,4 +50,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
            "AND u.active = true AND ((u.birthdayMonth IS NOT NULL AND u.birthdayDay IS NOT NULL) " +
            "OR (u.anniversaryMonth IS NOT NULL AND u.anniversaryDay IS NOT NULL))")
     List<User> findCustomersWithCelebrationReminders();
+
+    long countByRole(UserRole role);
+    long countByRoleAndActiveTrue(UserRole role);
 }

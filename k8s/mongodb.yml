@@ -18,6 +18,7 @@ spec:
       terminationGracePeriodSeconds: 60
       automountServiceAccountToken: false
       securityContext:
+        runAsNonRoot: true
         runAsUser: 999
         runAsGroup: 999
         fsGroup: 999
@@ -27,6 +28,8 @@ spec:
         - name: mongodb
           image: mongo:7.0
           securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
             allowPrivilegeEscalation: false
             capabilities:
               drop:

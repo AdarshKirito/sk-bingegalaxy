@@ -20,6 +20,16 @@ eureka:
     fetch-registry: ${EUREKA_PEER_ENABLED:false}
     service-url:
       defaultZone: ${EUREKA_PEER_URLS:http://${spring.security.user.name}:${spring.security.user.password}@localhost:${server.port}/eureka/}
+  # ── Server-side tuning ─────────────────────────────────────────────
+  # self-preservation: if heartbeats drop below threshold, Eureka refuses
+  # to evict "down" instances to avoid registry wipe on network partition.
+  # In containerized environments this causes stale upstream routing for
+  # several minutes after a pod dies. Disabled so unhealthy instances are
+  # evicted promptly; K8s already supplies liveness/readiness protection.
+  server:
+    enable-self-preservation: ${EUREKA_SELF_PRESERVATION:false}
+    eviction-interval-timer-in-ms: ${EUREKA_EVICTION_INTERVAL_MS:10000}
+    renewal-percent-threshold: 0.85
 
 management:
   endpoints:

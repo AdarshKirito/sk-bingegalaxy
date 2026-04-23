@@ -97,6 +97,33 @@ public class User {
     @Column
     private LocalDateTime lockedUntil;
 
+    // ── Email verification (V7) ──────────────────────────────
+    @Column(name = "email_verified", nullable = false)
+    @Builder.Default
+    private boolean emailVerified = false;
+
+    @Column(name = "email_verified_at")
+    private LocalDateTime emailVerifiedAt;
+
+    // ── MFA / TOTP (V7) ──────────────────────────────────────
+    @Column(name = "mfa_enabled", nullable = false)
+    @Builder.Default
+    private boolean mfaEnabled = false;
+
+    /** Base32-encoded TOTP secret; null until enrolment completes. */
+    @Column(name = "mfa_secret", length = 64)
+    private String mfaSecret;
+
+    @Column(name = "mfa_enrolled_at")
+    private LocalDateTime mfaEnrolledAt;
+
+    /** Comma-separated list of SHA-256 hashes of single-use recovery codes. */
+    @Column(name = "mfa_recovery_codes_hash", columnDefinition = "TEXT")
+    private String mfaRecoveryCodesHash;
+
+    @Column(name = "last_password_change_at")
+    private LocalDateTime lastPasswordChangeAt;
+
     @CreationTimestamp
     @Column(updatable = false)
     private LocalDateTime createdAt;

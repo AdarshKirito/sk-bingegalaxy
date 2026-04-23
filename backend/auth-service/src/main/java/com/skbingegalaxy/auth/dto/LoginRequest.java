@@ -15,4 +15,8 @@ public class LoginRequest {
 
     @NotBlank(message = "Password is required")
     private String password;
+
+    /** Optional 6-digit TOTP code or formatted recovery code for MFA-enabled accounts. */
+    @Size(max = 32, message = "MFA code is too long")
+    private String mfaCode;
 }

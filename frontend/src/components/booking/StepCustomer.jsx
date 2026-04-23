@@ -158,7 +158,9 @@ export default function StepCustomer({
             )}
           </div>
           <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
-            Override pricing for this booking. Event and add-on prices will update in subsequent steps.
+            Apply a rate plan for this booking. If this customer already has a custom
+            price for an event or add-on, their personal price wins; the rate plan
+            applies only to items without a custom override.
           </p>
         </div>
       )}

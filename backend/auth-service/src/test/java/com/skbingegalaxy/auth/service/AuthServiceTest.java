@@ -425,7 +425,7 @@ class AuthServiceTest {
         ReflectionTestUtils.setField(request, "otp", "123456");
         ReflectionTestUtils.setField(request, "newPassword", "NewPass@123");
 
-        when(resetTokenRepository.findByTokenAndUsedFalse("valid-token")).thenReturn(Optional.of(resetToken));
+        when(resetTokenRepository.findByTokenAndUsedFalse(AuthService.sha256Hex("valid-token"))).thenReturn(Optional.of(resetToken));
         when(passwordEncoder.encode("NewPass@123")).thenReturn("encodedNew");
 
         authService.verifyOtpAndResetPassword(request);
@@ -448,7 +448,7 @@ class AuthServiceTest {
         ReflectionTestUtils.setField(request, "otp", "999999");
         ReflectionTestUtils.setField(request, "newPassword", "NewPass@123");
 
-        when(resetTokenRepository.findByTokenAndUsedFalse("valid-token")).thenReturn(Optional.of(resetToken));
+        when(resetTokenRepository.findByTokenAndUsedFalse(AuthService.sha256Hex("valid-token"))).thenReturn(Optional.of(resetToken));
 
         assertThatThrownBy(() -> authService.verifyOtpAndResetPassword(request))
                 .isInstanceOf(BusinessException.class)
@@ -473,7 +473,7 @@ class AuthServiceTest {
         ReflectionTestUtils.setField(request, "otp", "000000");
         ReflectionTestUtils.setField(request, "newPassword", "NewPass@123");
 
-        when(resetTokenRepository.findByTokenAndUsedFalse("valid-token")).thenReturn(Optional.of(resetToken));
+        when(resetTokenRepository.findByTokenAndUsedFalse(AuthService.sha256Hex("valid-token"))).thenReturn(Optional.of(resetToken));
 
         assertThatThrownBy(() -> authService.verifyOtpAndResetPassword(request))
                 .isInstanceOf(BusinessException.class)
@@ -507,7 +507,7 @@ class AuthServiceTest {
         ReflectionTestUtils.setField(request, "otp", "123456");
         ReflectionTestUtils.setField(request, "newPassword", "NewPass@123");
 
-        when(resetTokenRepository.findByTokenAndUsedFalse("expired-token")).thenReturn(Optional.of(resetToken));
+        when(resetTokenRepository.findByTokenAndUsedFalse(AuthService.sha256Hex("expired-token"))).thenReturn(Optional.of(resetToken));
 
         assertThatThrownBy(() -> authService.verifyOtpAndResetPassword(request))
                 .isInstanceOf(BusinessException.class)

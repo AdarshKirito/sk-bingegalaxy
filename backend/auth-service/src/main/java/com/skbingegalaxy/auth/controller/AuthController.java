@@ -1,8 +1,10 @@
 package com.skbingegalaxy.auth.controller;
 
 import com.skbingegalaxy.auth.dto.*;
+import com.skbingegalaxy.auth.service.AuthAuditService;
 import com.skbingegalaxy.auth.service.AuthService;
 import com.skbingegalaxy.auth.service.TokenRevocationService;
+import com.skbingegalaxy.auth.security.JwtProvider;
 import com.skbingegalaxy.common.dto.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -22,6 +24,8 @@ public class AuthController {
 
     private final AuthService authService;
     private final TokenRevocationService tokenRevocationService;
+    private final AuthAuditService auditService;
+    private final JwtProvider jwtProvider;
 
     @Value("${app.jwt.expiration-ms:3600000}")
     private long jwtExpirationMs;
@@ -49,7 +53,7 @@ public class AuthController {
                                                                HttpServletRequest httpRequest,
                                                                HttpServletResponse response) {
         AuthResponse authResponse = authService.register(request);
-        setAuthCookies(httpRequest, response, authResponse);
+        if (!authResponse.isMfaRequired()) setAuthCookies(httpRequest, response, authResponse);
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(ApiResponse.ok("Registration successful", authResponse));
     }
@@ -59,8 +63,8 @@ public class AuthController {
                                                             HttpServletRequest httpRequest,
                                                             HttpServletResponse response) {
         AuthResponse authResponse = authService.login(request);
-        setAuthCookies(httpRequest, response, authResponse);
-        return ResponseEntity.ok(ApiResponse.ok("Login successful", authResponse));
+        if (!authResponse.isMfaRequired()) setAuthCookies(httpRequest, response, authResponse);
+        return ResponseEntity.ok(ApiResponse.ok(authResponse.isMfaRequired() ? "MFA required" : "Login successful", authResponse));
     }
 
     @PostMapping("/admin/login")
@@ -68,8 +72,8 @@ public class AuthController {
                                                                  HttpServletRequest httpRequest,
                                                                  HttpServletResponse response) {
         AuthResponse authResponse = authService.adminLogin(request);
-        setAuthCookies(httpRequest, response, authResponse);
-        return ResponseEntity.ok(ApiResponse.ok("Admin login successful", authResponse));
+        if (!authResponse.isMfaRequired()) setAuthCookies(httpRequest, response, authResponse);
+        return ResponseEntity.ok(ApiResponse.ok(authResponse.isMfaRequired() ? "MFA required" : "Admin login successful", authResponse));
     }
 
     @PostMapping("/refresh")
@@ -93,18 +97,20 @@ public class AuthController {
     public ResponseEntity<ApiResponse<Void>> logout(
             @CookieValue(name = "refreshToken", required = false) String cookieRefreshToken,
             @RequestHeader(name = "Authorization", required = false) String authHeader,
+            @RequestHeader(name = "X-User-Id", required = false) Long userId,
+            @RequestHeader(name = "X-User-Email", required = false) String userEmail,
             HttpServletResponse response) {
         // Revoke the refresh token so it can't be replayed against /auth/refresh.
         if (cookieRefreshToken != null && !cookieRefreshToken.isBlank()) {
             tokenRevocationService.revoke(cookieRefreshToken);
         }
-        // Access tokens usually live for ~15 minutes and are picked up by a
-        // gateway-side denylist in a follow-up; revoking on logout here
-        // costs one row and prepares for that rollout.
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             tokenRevocationService.revoke(authHeader.substring(7));
         }
         clearAuthCookies(response);
+        if (userId != null) {
+            auditService.success(AuthAuditService.EventType.LOGOUT, userId, null, userId, userEmail, null);
+        }
         return ResponseEntity.ok(ApiResponse.ok("Logged out", null));
     }
 
@@ -253,6 +259,133 @@ public class AuthController {
         }
         int count = authService.bulkDeleteUsers(userIds);
         return ResponseEntity.ok(ApiResponse.ok(count + " users deleted", count));
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // MFA (TOTP) — authenticated user
+    // ════════════════════════════════════════════════════════════════════
+    @PostMapping("/mfa/enroll")
+    public ResponseEntity<ApiResponse<MfaEnrollmentResponse>> enrollMfa(@RequestHeader("X-User-Id") Long userId) {
+        return ResponseEntity.ok(ApiResponse.ok("MFA enrollment started", authService.beginMfaEnrollment(userId)));
+    }
+
+    @PostMapping("/mfa/confirm")
+    public ResponseEntity<ApiResponse<Void>> confirmMfa(@RequestHeader("X-User-Id") Long userId,
+                                                         @Valid @RequestBody MfaConfirmRequest request) {
+        authService.confirmMfaEnrollment(userId, request.getCode(), request.getRecoveryCodes());
+        return ResponseEntity.ok(ApiResponse.ok("MFA enabled", null));
+    }
+
+    @PostMapping("/mfa/disable")
+    public ResponseEntity<ApiResponse<Void>> disableMfa(@RequestHeader("X-User-Id") Long userId,
+                                                         @Valid @RequestBody MfaCodeRequest request) {
+        authService.disableMfa(userId, request.getCode());
+        return ResponseEntity.ok(ApiResponse.ok("MFA disabled", null));
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // Email verification — public verify endpoint + authenticated resend
+    // ════════════════════════════════════════════════════════════════════
+    @PostMapping("/verify-email")
+    public ResponseEntity<ApiResponse<Void>> verifyEmail(@Valid @RequestBody VerifyEmailRequest request) {
+        if (request.getToken() != null && !request.getToken().isBlank()) {
+            authService.verifyEmailByToken(request.getToken());
+        } else {
+            authService.verifyEmail(request.getEmail(), request.getOtp());
+        }
+        return ResponseEntity.ok(ApiResponse.ok("Email verified", null));
+    }
+
+    @PostMapping("/resend-verification")
+    public ResponseEntity<ApiResponse<Void>> resendVerification(@RequestHeader("X-User-Id") Long userId) {
+        authService.resendVerificationEmail(userId);
+        return ResponseEntity.ok(ApiResponse.ok("Verification email sent", null));
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // Sessions — self service
+    // ════════════════════════════════════════════════════════════════════
+    @GetMapping("/sessions")
+    public ResponseEntity<ApiResponse<java.util.List<UserSessionDto>>> mySessions(
+            @RequestHeader("X-User-Id") Long userId,
+            @CookieValue(name = "refreshToken", required = false) String refreshToken) {
+        String jti = null;
+        try { if (refreshToken != null && !refreshToken.isBlank()) jti = jwtProvider.getJtiFromToken(refreshToken); }
+        catch (Exception ignored) {}
+        return ResponseEntity.ok(ApiResponse.ok(authService.listMySessions(userId, jti)));
+    }
+
+    @DeleteMapping("/sessions/{id}")
+    public ResponseEntity<ApiResponse<Void>> revokeMySession(@RequestHeader("X-User-Id") Long userId,
+                                                              @PathVariable Long id) {
+        authService.revokeMySession(userId, id);
+        return ResponseEntity.ok(ApiResponse.ok("Session revoked", null));
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // Super-admin: sessions, audit log, role promotions, stats
+    // ════════════════════════════════════════════════════════════════════
+    @GetMapping("/admin/sessions")
+    public ResponseEntity<ApiResponse<org.springframework.data.domain.Page<UserSessionDto>>> allActiveSessions(
+            @RequestHeader("X-User-Role") String role,
+            @org.springframework.data.web.PageableDefault(size = 50) org.springframework.data.domain.Pageable pageable) {
+        requireSuperAdmin(role);
+        return ResponseEntity.ok(ApiResponse.ok(authService.listAllActiveSessions(pageable)));
+    }
+
+    @DeleteMapping("/admin/sessions/{id}")
+    public ResponseEntity<ApiResponse<Void>> revokeAnySession(@RequestHeader("X-User-Role") String role,
+                                                               @PathVariable Long id) {
+        requireSuperAdmin(role);
+        authService.revokeAnySession(id);
+        return ResponseEntity.ok(ApiResponse.ok("Session revoked", null));
+    }
+
+    @DeleteMapping("/admin/users/{userId}/sessions")
+    public ResponseEntity<ApiResponse<Integer>> revokeAllSessionsForUser(@RequestHeader("X-User-Role") String role,
+                                                                         @PathVariable Long userId) {
+        requireSuperAdmin(role);
+        int n = authService.revokeAllSessionsForUser(userId);
+        return ResponseEntity.ok(ApiResponse.ok("Revoked " + n + " sessions", n));
+    }
+
+    @GetMapping("/admin/audit-log")
+    public ResponseEntity<ApiResponse<org.springframework.data.domain.Page<AuthAuditLogDto>>> auditLog(
+            @RequestHeader("X-User-Role") String role,
+            @RequestParam(required = false) String eventType,
+            @RequestParam(required = false) Long actorId,
+            @RequestParam(required = false) Long targetId,
+            @org.springframework.data.web.PageableDefault(size = 50, sort = "createdAt",
+                direction = org.springframework.data.domain.Sort.Direction.DESC) org.springframework.data.domain.Pageable pageable) {
+        requireSuperAdmin(role);
+        return ResponseEntity.ok(ApiResponse.ok(authService.searchAuditLog(eventType, actorId, targetId, pageable)));
+    }
+
+    @PostMapping("/admin/admins/{id}/promote")
+    public ResponseEntity<ApiResponse<UserDto>> promoteAdmin(@RequestHeader("X-User-Role") String role,
+                                                              @PathVariable Long id) {
+        requireSuperAdmin(role);
+        return ResponseEntity.ok(ApiResponse.ok("Promoted to SUPER_ADMIN", authService.promoteToSuperAdmin(id)));
+    }
+
+    @PostMapping("/admin/admins/{id}/demote")
+    public ResponseEntity<ApiResponse<UserDto>> demoteAdmin(@RequestHeader("X-User-Role") String role,
+                                                             @PathVariable Long id) {
+        requireSuperAdmin(role);
+        return ResponseEntity.ok(ApiResponse.ok("Demoted to ADMIN", authService.demoteFromSuperAdmin(id)));
+    }
+
+    @GetMapping("/admin/super-admin/stats")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> superAdminStats(@RequestHeader("X-User-Role") String role) {
+        requireSuperAdmin(role);
+        return ResponseEntity.ok(ApiResponse.ok(authService.getSuperAdminStats()));
+    }
+
+    private void requireSuperAdmin(String role) {
+        if (!"SUPER_ADMIN".equalsIgnoreCase(role)) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Super-admin role required", HttpStatus.FORBIDDEN);
+        }
     }
 
     // ── Cookie helpers ───────────────────────────────────────
