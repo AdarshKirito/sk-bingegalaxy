@@ -1,7 +1,6 @@
 package com.skbingegalaxy.booking.loyalty.v2.controller;
 
 import com.skbingegalaxy.booking.loyalty.v2.entity.*;
-import com.skbingegalaxy.booking.loyalty.v2.ops.LoyaltyParityJob;
 import com.skbingegalaxy.booking.loyalty.v2.repository.*;
 import com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyAdminService;
 import com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyConfigService;
@@ -26,10 +25,17 @@ import java.util.List;
  * any edit be undone by simply closing the new row and reactivating
  * the prior one — full reversibility with zero data loss.
  *
- * <p><b>Authorization:</b> the upstream API gateway is expected to
- * enforce {@code X-User-Role = SUPER_ADMIN} before routing requests
- * here (same convention used by every other super-admin path in this
- * service; this controller does not duplicate the check).
+ * <p><b>Authorization:</b> defence-in-depth. Two layers enforce the
+ * SUPER_ADMIN role:
+ * <ol>
+ *   <li>The api-gateway {@code JwtAuthenticationFilter} rejects any
+ *       request to {@code /api/v*&#47;**&#47;super-admin/**} that does
+ *       not carry a SUPER_ADMIN role claim.</li>
+ *   <li>This service's {@code SecurityConfig} maps
+ *       {@code /api/v2/loyalty/super-admin/**} to
+ *       {@code hasRole("SUPER_ADMIN")} so any direct service-mesh
+ *       traffic is also gated.</li>
+ * </ol>
  */
 @RestController
 @RequestMapping("/api/v2/loyalty/super-admin")
@@ -43,7 +49,7 @@ public class LoyaltyV2SuperAdminController {
     private final LoyaltyTierDefinitionRepository tierRepository;
     private final LoyaltyPerkCatalogRepository perkRepository;
     private final LoyaltyBingeBindingRepository bindingRepository;
-    private final LoyaltyParityJob parityJob;
+
 
     // ── Program ──────────────────────────────────────────────────────────
 
@@ -135,16 +141,4 @@ public class LoyaltyV2SuperAdminController {
 
     public record BulkBindingBody(List<Long> bindingIds, String status) { }
 
-    // ── Parity (shadow-period ops) ───────────────────────────────────────
-
-    /**
-     * Run the v1-vs-v2 parity comparison on demand and return the
-     * summary counts.  Safe to call while the scheduled nightly run
-     * is also active — both paths use the same ShedLock name so one
-     * will wait for the other.
-     */
-    @PostMapping("/parity/run")
-    public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> runParity() {
-        return ResponseEntity.ok(ApiResponse.ok(parityJob.runOnce().asMap()));
-    }
 }

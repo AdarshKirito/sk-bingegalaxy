@@ -44,12 +44,25 @@ public class AdminSeeder implements CommandLineRunner {
         }        var existing = userRepository.findByEmail(adminEmail);
         if (existing.isPresent()) {
             User admin = existing.get();
+            boolean changed = false;
             if (admin.getRole() != UserRole.SUPER_ADMIN) {
                 admin.setRole(UserRole.SUPER_ADMIN);
-                userRepository.save(admin);
+                changed = true;
                 log.info("Admin user upgraded to SUPER_ADMIN: {}", adminEmail);
+            }
+            // Keep the stored bcrypt hash in sync with the current ADMIN_PASSWORD env
+            // value. Without this, rotating ADMIN_PASSWORD silently breaks admin login
+            // because the seeded hash from first-boot lingers in the DB.
+            if (!passwordEncoder.matches(adminPassword, admin.getPassword())) {
+                admin.setPassword(passwordEncoder.encode(adminPassword));
+                admin.setActive(true);
+                changed = true;
+                log.info("Super admin password re-synced from ADMIN_PASSWORD env: {}", adminEmail);
+            }
+            if (changed) {
+                userRepository.save(admin);
             } else {
-                log.info("Super admin already exists, skipping seed: {}", adminEmail);
+                log.info("Super admin already exists and is in sync: {}", adminEmail);
             }
         } else {
             String[] names = adminName.split(" ", 2);

@@ -17,6 +17,8 @@ public class BookingEvent implements Serializable {
     private String customerName;
     private String customerEmail;
     private String customerPhone;
+    /** E.164 dial prefix without subscriber number (e.g. "+91"). Populated alongside customerPhone since Apr 2026. */
+    private String customerPhoneCountryCode;
     private String eventTypeName;
     private LocalDate bookingDate;
     private LocalTime startTime;

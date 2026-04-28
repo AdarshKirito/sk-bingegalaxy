@@ -28,6 +28,7 @@ import {
 import ThemeToggle from './ThemeToggle';
 
 import NavDropdownGroup from './NavDropdownGroup';
+import NotificationsBell from './NotificationsBell';
 import './Navbar.css';
 
 export default function Navbar() {
@@ -201,6 +202,9 @@ export default function Navbar() {
         </div>
 
         <div className="navbar-right">
+          {effectiveIsAuthenticated && effectiveIsAdmin && (
+            <NotificationsBell />
+          )}
           {effectiveIsAuthenticated && effectiveIsAdmin && !effectiveSelectedBinge && (
             <span className="nav-user nav-admin-user nav-desktop-only"><FiShield /> <span>{effectiveUser?.firstName}</span><small>{adminRoleLabel}</small></span>
           )}

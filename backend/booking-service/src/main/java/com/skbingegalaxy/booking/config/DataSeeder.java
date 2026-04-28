@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.List;
 
 /**
@@ -59,9 +60,13 @@ public class DataSeeder implements CommandLineRunner {
                 .operationalDate(LocalDate.now())
                 .supportEmail("support@skbingegalaxy.com")
                 .supportPhone("9876543210")
+                .supportPhoneCountryCode("+91")
                 .supportWhatsapp("9876543210")
+                .supportWhatsappCountryCode("+91")
                 .customerCancellationEnabled(true)
                 .customerCancellationCutoffMinutes(180)
+                .openTime(LocalTime.of(10, 0))
+                .closeTime(LocalTime.of(23, 0))
                 .maxConcurrentBookings(3)
                 .build();
         binge = bingeRepository.save(binge);
@@ -118,9 +123,9 @@ public class DataSeeder implements CommandLineRunner {
         if (!venueRoomRepository.findByBingeIdOrderBySortOrderAsc(bingeId).isEmpty()) return;
 
         List<VenueRoom> rooms = List.of(
-            VenueRoom.builder().bingeId(bingeId).name("Galaxy Hall").roomType("MAIN_HALL").capacity(3).description("Main screening hall with 4K projector and surround sound").sortOrder(1).build(),
-            VenueRoom.builder().bingeId(bingeId).name("Star Lounge").roomType("PRIVATE_ROOM").capacity(2).description("Intimate private room for small celebrations").sortOrder(2).build(),
-            VenueRoom.builder().bingeId(bingeId).name("Nebula VIP").roomType("VIP_LOUNGE").capacity(1).description("Premium VIP lounge with recliner seating").sortOrder(3).build()
+            VenueRoom.builder().bingeId(bingeId).name("Galaxy Hall").roomType("MAIN_HALL").capacity(25).description("Main screening hall with 4K projector and surround sound").sortOrder(1).build(),
+            VenueRoom.builder().bingeId(bingeId).name("Star Lounge").roomType("PRIVATE_ROOM").capacity(12).description("Intimate private room for small celebrations").sortOrder(2).build(),
+            VenueRoom.builder().bingeId(bingeId).name("Nebula VIP").roomType("VIP_LOUNGE").capacity(8).description("Premium VIP lounge with recliner seating").sortOrder(3).build()
         );
         venueRoomRepository.saveAll(rooms);
         log.info("Seeded {} venue rooms for binge {}", rooms.size(), bingeId);

@@ -28,9 +28,13 @@ public class UpdateBookingRequest {
     @Size(max = 150, message = "Customer email must be under 150 characters")
     private String customerEmail;
 
-    @jakarta.validation.constraints.Pattern(regexp = "^$|^\\d{10}$", message = "Phone must be 10 digits")
-    @Size(max = 15, message = "Phone must be under 15 characters")
+    @jakarta.validation.constraints.Pattern(regexp = "^$|^\\d{4,15}$", message = "Phone must be 4-15 digits")
+    @Size(max = 20, message = "Phone must be under 20 characters")
     private String customerPhone;
+
+    @jakarta.validation.constraints.Pattern(regexp = "^$|^\\+\\d{1,4}$", message = "Phone country code must be in E.164 format (e.g. +91)")
+    @Size(max = 8, message = "Phone country code must be under 8 characters")
+    private String customerPhoneCountryCode;
 
     @Size(max = 1000, message = "Special notes must be under 1000 characters")
     private String specialNotes;

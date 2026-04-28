@@ -1,4 +1,5 @@
 server:
+  port: ${SERVER_PORT:8085}
   shutdown: graceful
 
 spring:
@@ -15,6 +16,13 @@ spring:
       database: ${SPRING_DATA_MONGODB_DATABASE:notification_db}
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 5
+      properties:
+        enable.idempotence: true
     # Reliable at-least-once semantics:
     #   • commit offsets only after the listener method returns successfully
     #     (RECORD ack-mode), so an exception re-delivers the message on retry.
@@ -22,10 +30,15 @@ spring:
     #   • isolation=read_committed so transactional outbox messages aren't
     #     consumed before their producing transaction commits.
     consumer:
+      group-id: notification-group
       enable-auto-commit: false
       max-poll-records: 20
       isolation-level: read_committed
       auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: com.skbingegalaxy.*
     listener:
       ack-mode: record
       missing-topics-fatal: false

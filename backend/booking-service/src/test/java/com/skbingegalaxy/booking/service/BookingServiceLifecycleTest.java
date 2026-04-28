@@ -55,7 +55,11 @@ class BookingServiceLifecycleTest {
     @Mock private PricingService pricingService;
     @Mock private BookingEventLogService eventLogService;
     @Mock private SagaOrchestrator sagaOrchestrator;
+    @Mock private VenueRoomRepository venueRoomRepository;
+    @Mock private BookingReviewRepository bookingReviewRepository;
         @Mock private LoyaltyService loyaltyService;
+        @Mock private com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyMembershipRepository loyaltyMembershipRepository;
+        @Mock private com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyConfigService loyaltyConfigService;
         @Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     @InjectMocks private BookingService bookingService;
@@ -67,11 +71,14 @@ class BookingServiceLifecycleTest {
     void setUp() {
         BingeContext.clear();
         ReflectionTestUtils.setField(bookingService, "availabilityClient", availabilityClient);
+        ReflectionTestUtils.setField(bookingService, "eventPublisher", eventPublisher);
         ReflectionTestUtils.setField(bookingService, "internalApiSecret", "test-secret");
         ReflectionTestUtils.setField(bookingService, "refPrefix", "SKBG");
         ReflectionTestUtils.setField(bookingService, "maxPendingPerCustomer", 2);
         ReflectionTestUtils.setField(bookingService, "cooldownMinutesAfterTimeout", 10);
-                lenient().when(loyaltyService.earnPoints(anyLong(), anyString(), any(BigDecimal.class))).thenReturn(0L);
+        ReflectionTestUtils.setField(bookingService, "maxBookingHorizonDays", 365);
+        ReflectionTestUtils.setField(bookingService, "defaultOpeningHour", 10);
+        ReflectionTestUtils.setField(bookingService, "defaultClosingHour", 23);
                 lenient().when(loyaltyService.redeemPoints(anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
                         .thenReturn(new LoyaltyService.RedemptionResult(0L, BigDecimal.ZERO));
         lenient().when(bingeRepository.findById(anyLong())).thenReturn(Optional.empty());
@@ -437,6 +444,7 @@ class BookingServiceLifecycleTest {
             BingeContext.setBingeId(11L);
             testBooking.setStatus(BookingStatus.CHECKED_IN);
             testBooking.setPaymentStatus(PaymentStatus.SUCCESS);
+            testBooking.setCollectedAmount(testBooking.getTotalAmount());
             testBooking.setBookingDate(LocalDate.now());
             testBooking.setStartTime(LocalTime.of(14, 0));
             testBooking.setDurationMinutes(180);
@@ -462,6 +470,7 @@ class BookingServiceLifecycleTest {
             BingeContext.setBingeId(11L);
             testBooking.setStatus(BookingStatus.CHECKED_IN);
             testBooking.setPaymentStatus(PaymentStatus.SUCCESS);
+            testBooking.setCollectedAmount(testBooking.getTotalAmount());
             testBooking.setBookingDate(LocalDate.now());
             testBooking.setStartTime(LocalTime.of(14, 0));
             testBooking.setDurationMinutes(180);
@@ -476,7 +485,9 @@ class BookingServiceLifecycleTest {
             BookingDto result = bookingService.earlyCheckout("SKBG25123456", checkoutTime);
 
             assertThat(testBooking.getStatus()).isEqualTo(BookingStatus.COMPLETED);
-            assertThat(testBooking.getActualUsedMinutes()).isNull(); // not set for non-early
+            assertThat(testBooking.getActualCheckoutTime()).isEqualTo(checkoutTime);
+            // Session minutes are now recorded for normal checkouts too (production-grade audit trail).
+            assertThat(testBooking.getActualUsedMinutes()).isNotNull();
         }
     }
 

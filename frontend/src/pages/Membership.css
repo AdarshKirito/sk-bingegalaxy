@@ -372,3 +372,77 @@
 }
 .join-perk strong { display: block; margin-bottom: 4px; font-size: 14px; }
 .join-perk span   { font-size: 12px; opacity: 0.85; }
+
+/* ─────────────────────────────────────────────────────────────
+   "How loyalty works" educational guide
+   ───────────────────────────────────────────────────────────── */
+.how-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+.how-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 20px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.how-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+}
+.how-ico {
+  width: 40px; height: 40px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  font-size: 20px;
+  margin-bottom: 12px;
+}
+.how-card h3 {
+  font-size: 15px;
+  margin: 0 0 8px;
+  color: #111827;
+}
+.how-card p {
+  font-size: 13.5px;
+  color: #4b5563;
+  line-height: 1.55;
+  margin: 0;
+}
+.how-card strong { color: #111827; }
+.how-ladder {
+  list-style: none;
+  padding: 12px 0 0;
+  margin: 12px 0 0;
+  border-top: 1px dashed #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.how-ladder li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+}
+.how-ladder-val { color: #6b7280; }
+.tier-chip {
+  display: inline-block;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border-radius: 999px;
+  color: #fff;
+  min-width: 68px;
+  text-align: center;
+}
+.tier-chip-bronze   { background: linear-gradient(135deg, #b45309, #78350f); }
+.tier-chip-silver   { background: linear-gradient(135deg, #94a3b8, #64748b); }
+.tier-chip-gold     { background: linear-gradient(135deg, #f59e0b, #b45309); }
+.tier-chip-platinum { background: linear-gradient(135deg, #64748b, #0f172a); }
+.tier-chip-diamond  { background: linear-gradient(135deg, #22d3ee, #3b82f6); }

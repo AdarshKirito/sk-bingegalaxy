@@ -105,7 +105,7 @@ export default function StepDateTime({
                   onClick={() => setForm(f => ({ ...f, venueRoomId: room.id }))}>
                   <span className="room-card-name">{room.name}</span>
                   <span className="room-card-detail">
-                    {room.roomType?.replace(/_/g, ' ')} · {room.capacity} guests
+                    {room.roomType?.replace(/_/g, ' ')} · {room.capacity} guest{Number(room.capacity) === 1 ? '' : 's'}
                   </span>
                   {!isAvailable && <span className="room-card-full-label">Full</span>}
                 </button>

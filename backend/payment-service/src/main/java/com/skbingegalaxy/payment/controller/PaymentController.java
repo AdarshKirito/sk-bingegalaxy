@@ -47,10 +47,12 @@ public class PaymentController {
             @RequestHeader("X-User-Id") Long userId,
             @RequestHeader(value = "X-User-Email", required = false) String userEmail,
             @RequestHeader(value = "X-User-Name", required = false) String userName,
+            @RequestHeader(value = "X-User-Phone", required = false) String userPhone,
+            @RequestHeader(value = "X-User-Phone-Country-Code", required = false) String userPhoneCountryCode,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
         PaymentDto payment = idempotencyService.execute(
             idempotencyKey, "POST", "/api/v1/payments/initiate", userId, request, PaymentDto.class,
-            () -> paymentService.initiatePayment(request, userId, userEmail, userName));
+            () -> paymentService.initiatePayment(request, userId, userEmail, userName, userPhone, userPhoneCountryCode));
         return ResponseEntity.ok(ApiResponse.ok("Payment initiated", payment));
     }
 

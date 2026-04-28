@@ -17,6 +17,9 @@ import {
   FiSettings,
   FiSearch,
   FiClock,
+  FiCheckCircle,
+  FiXCircle,
+  FiInbox,
 } from 'react-icons/fi';
 import './Entrance.css';
 
@@ -43,6 +46,10 @@ export default function AdminEntranceDashboard() {
   const [binges, setBinges] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  // Super-admin-only: pending binge approval requests.
+  const [pendingBinges, setPendingBinges] = useState([]);
+  const [pendingLoading, setPendingLoading] = useState(false);
+  const [decidingId, setDecidingId] = useState(null);
 
   useEffect(() => {
     clearBinge();
@@ -60,6 +67,64 @@ export default function AdminEntranceDashboard() {
       }
     })();
   }, []);
+
+  // Super-admin only: load pending approval queue.
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    setPendingLoading(true);
+    (async () => {
+      try {
+        const res = await adminService.getPendingBinges();
+        setPendingBinges(res.data.data || res.data || []);
+      } catch {
+        // Non-fatal; entrance dashboard still works without pending list.
+      } finally {
+        setPendingLoading(false);
+      }
+    })();
+  }, [isSuperAdmin]);
+
+  const refreshPending = async () => {
+    try {
+      const res = await adminService.getPendingBinges();
+      setPendingBinges(res.data.data || res.data || []);
+    } catch { /* ignore */ }
+  };
+
+  const handleApprove = async (binge) => {
+    if (decidingId) return;
+    setDecidingId(binge.id);
+    try {
+      await adminService.approveBinge(binge.id);
+      toast.success(`Approved: ${binge.name}`);
+      // Refresh both queues since the approved binge now also appears in the
+      // main admin list as active.
+      await Promise.all([
+        refreshPending(),
+        adminService.getAdminBinges().then((r) => setBinges(r.data.data || r.data || [])),
+      ]);
+    } catch (e) {
+      toast.error(e?.response?.data?.message || 'Failed to approve binge');
+    } finally {
+      setDecidingId(null);
+    }
+  };
+
+  const handleReject = async (binge) => {
+    if (decidingId) return;
+    const reason = window.prompt(`Reject "${binge.name}"?\n\nOptional reason (visible in audit log):`, '');
+    if (reason === null) return; // user cancelled
+    setDecidingId(binge.id);
+    try {
+      await adminService.rejectBinge(binge.id, reason);
+      toast.success(`Rejected: ${binge.name}`);
+      await refreshPending();
+    } catch (e) {
+      toast.error(e?.response?.data?.message || 'Failed to reject binge');
+    } finally {
+      setDecidingId(null);
+    }
+  };
 
   const handleSelect = (binge) => {
     saveRecentBinge(binge);
@@ -153,7 +218,71 @@ export default function AdminEntranceDashboard() {
           <p>Inactive Venues</p>
         </div>
       </div>
+      {/* ── Pending approvals (SUPER_ADMIN only) ─────────────────── */}
+      {isSuperAdmin && (
+        <section className="entrance-panel">
+          <div className="entrance-panel-head">
+            <div>
+              <span className="entrance-kicker"><FiInbox style={{ verticalAlign: '-2px', marginRight: 4 }} /> Approval Queue</span>
+              <h2>
+                Pending binge requests
+                {pendingBinges.length > 0 && (
+                  <span className="entrance-badge entrance-badge-warning" style={{ marginLeft: '0.6rem', verticalAlign: 'middle' }}>
+                    {pendingBinges.length} waiting
+                  </span>
+                )}
+              </h2>
+            </div>
+          </div>
 
+          {pendingLoading ? (
+            <SkeletonGrid count={2} columns={2} />
+          ) : pendingBinges.length === 0 ? (
+            <div className="entrance-empty">
+              <span className="entrance-empty-icon"><FiCheckCircle /></span>
+              <h3>All caught up</h3>
+              <p>No new binge requests are awaiting your approval.</p>
+            </div>
+          ) : (
+            <div className="entrance-grid">
+              {pendingBinges.map((b) => {
+                const busy = decidingId === b.id;
+                return (
+                  <article key={b.id} className="entrance-venue-card entrance-venue-card-recent">
+                    <span className="entrance-kicker"><FiInbox /> Pending approval</span>
+                    <h3>{b.name}</h3>
+                    {b.address && <p>{b.address}</p>}
+                    <p style={{ fontSize: '0.85rem', opacity: 0.75 }}>
+                      Requested by admin #{b.adminId}
+                      {b.createdAt && ` • ${new Date(b.createdAt).toLocaleString()}`}
+                    </p>
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        disabled={busy}
+                        onClick={() => handleApprove(b)}
+                      >
+                        <FiCheckCircle style={{ marginRight: 4 }} />
+                        {busy ? 'Working…' : 'Approve'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={busy}
+                        onClick={() => handleReject(b)}
+                      >
+                        <FiXCircle style={{ marginRight: 4 }} />
+                        Reject
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
       {/* ── Recent venues ─────────────────────────────────────────── */}
       {recentBinges.length > 0 && (
         <section className="entrance-panel">

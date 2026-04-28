@@ -1,11 +1,13 @@
 package com.skbingegalaxy.availability.service;
 
+import com.skbingegalaxy.availability.client.BookingBingeClient;
 import com.skbingegalaxy.availability.dto.*;
 import com.skbingegalaxy.availability.entity.BlockedDate;
 import com.skbingegalaxy.availability.entity.BlockedSlot;
 import com.skbingegalaxy.availability.repository.BlockedDateRepository;
 import com.skbingegalaxy.availability.repository.BlockedSlotRepository;
 import com.skbingegalaxy.common.context.BingeContext;
+import com.skbingegalaxy.common.dto.ApiResponse;
 import com.skbingegalaxy.common.exception.BusinessException;
 import com.skbingegalaxy.common.exception.DuplicateResourceException;
 import lombok.RequiredArgsConstructor;
@@ -26,12 +28,18 @@ public class AvailabilityService {
 
     private final BlockedDateRepository blockedDateRepository;
     private final BlockedSlotRepository blockedSlotRepository;
+    private final BookingBingeClient bookingBingeClient;
 
     @Value("${app.theater.opening-hour:0}")
     private int openingHour;
 
     @Value("${app.theater.closing-hour:24}")
     private int closingHour;
+
+    /** Short-TTL cache of resolved [openMin, closeMin, expiryEpochMs] per binge. */
+    private static final long OPERATING_WINDOW_TTL_MS = 30_000L;
+    private final java.util.concurrent.ConcurrentHashMap<Long, long[]> operatingWindowCache =
+        new java.util.concurrent.ConcurrentHashMap<>();
 
     // ── Public: get available dates in range ─────────────────
     public List<DayAvailabilityDto> getAvailability(LocalDate from, LocalDate to, LocalDate clientToday) {
@@ -188,6 +196,11 @@ public class AvailabilityService {
             ? blockedDateRepository.existsByBingeIdAndBlockedDate(bid, date)
             : blockedDateRepository.existsByBlockedDate(date);
         if (dateBlocked) return false;
+        // Reject anything outside the binge's operating window (consistent with grid).
+        int[] window = resolveOperatingWindow();
+        if (startMinute < window[0] || startMinute + durationMinutes > window[1]) {
+            return false;
+        }
         List<BlockedSlot> blocked = bid != null
             ? blockedSlotRepository.findByBingeIdAndSlotDate(bid, date)
             : blockedSlotRepository.findBySlotDate(date);
@@ -206,6 +219,59 @@ public class AvailabilityService {
     }
 
     // ── Helpers ──────────────────────────────────────────────
+
+    /**
+     * Resolve the [openMinute, closeMinute) window for the currently-scoped binge.
+     * Falls back to global app.theater.opening-hour/closing-hour when the binge
+     * has no per-binge override or when booking-service is unreachable.
+     * Cached per-binge with {@link #OPERATING_WINDOW_TTL_MS} TTL to avoid an
+     * N-call Feign storm on every slot-grid render.
+     */
+    int[] resolveOperatingWindow() {
+        Long bid = BingeContext.getBingeId();
+        if (bid == null) {
+            return new int[]{openingHour * 60, closingHour * 60};
+        }
+        long now = System.currentTimeMillis();
+        long[] cached = operatingWindowCache.get(bid);
+        if (cached != null && cached[2] > now) {
+            return new int[]{(int) cached[0], (int) cached[1]};
+        }
+        int openMin = openingHour * 60;
+        int closeMin = closingHour * 60;
+        try {
+            ApiResponse<BookingBingeDto> resp = bookingBingeClient.getBinge(bid);
+            BookingBingeDto b = resp != null ? resp.getData() : null;
+            if (b != null) {
+                if (b.getOpenTime() != null) {
+                    openMin = b.getOpenTime().getHour() * 60 + b.getOpenTime().getMinute();
+                }
+                if (b.getCloseTime() != null) {
+                    closeMin = b.getCloseTime().getHour() * 60 + b.getCloseTime().getMinute();
+                }
+            }
+        } catch (Exception ex) {
+            // Rate-limit log: only warn on first miss (cached==null) within TTL window
+            if (cached == null) {
+                log.warn("Failed to fetch per-binge hours for binge {}; using global fallback ({}-{}): {}",
+                    bid, openingHour, closingHour, ex.getMessage());
+            }
+        }
+        if (closeMin <= openMin) {
+            log.warn("Binge {} has invalid window [{},{}]; using global fallback", bid, openMin, closeMin);
+            openMin = openingHour * 60;
+            closeMin = closingHour * 60;
+        }
+        operatingWindowCache.put(bid, new long[]{openMin, closeMin, now + OPERATING_WINDOW_TTL_MS});
+        return new int[]{openMin, closeMin};
+    }
+
+    /** Manually invalidate the per-binge operating-window cache. */
+    public void evictOperatingWindowCache(Long bingeId) {
+        if (bingeId == null) operatingWindowCache.clear();
+        else operatingWindowCache.remove(bingeId);
+    }
+
     private DayAvailabilityDto buildDayAvailability(LocalDate date, List<BlockedSlot> blockedSlots) {
         // Build set of blocked half-hour indices (startHour/endHour store minutes; divide by 30 for half-hour index)
         // Use ceiling division for endHour so partial half-hours are fully blocked
@@ -216,8 +282,11 @@ public class AvailabilityService {
         List<SlotDto> available = new ArrayList<>();
         List<SlotDto> blocked = new ArrayList<>();
 
-        // Generate 30-minute slots from opening to closing
-        for (int minute = openingHour * 60; minute < closingHour * 60; minute += 30) {
+        // Generate 30-minute slots within this binge's operating window. The bound
+        // `minute + 30 <= window[1]` ensures we never emit a slot whose end exceeds
+        // the binge's closing time (e.g. close=21:45 must NOT render 21:30-22:00).
+        int[] window = resolveOperatingWindow();
+        for (int minute = window[0]; minute + 30 <= window[1]; minute += 30) {
             int endMinute = minute + 30;
             int halfHourIndex = minute / 30;
             boolean isAvailable = !blockedHalfHours.contains(halfHourIndex);

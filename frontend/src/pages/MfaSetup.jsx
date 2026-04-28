@@ -1,26 +1,40 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { authService } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import {
-  FiShield, FiSmartphone, FiKey, FiCheck, FiAlertTriangle, FiCopy, FiLock,
+  FiShield, FiSmartphone, FiKey, FiCheck, FiAlertTriangle, FiCopy,
+  FiLock, FiDownload, FiExternalLink, FiX, FiArrowRight,
 } from 'react-icons/fi';
 import SEO from '../components/SEO';
-import './AdminSecurity.css';
+import './MfaSetup.css';
 
 /**
- * Two-step MFA enrollment.
- *  1. POST /mfa/enroll → returns { secret, otpauthUri, recoveryCodes }.
- *  2. User scans the otpauth:// URI with their authenticator app and types back the code.
- *     POST /mfa/confirm with { code, recoveryCodes } persists the hashed recovery codes
- *     and marks MFA enabled.
- *
- * Recovery codes are shown exactly once. The UI nags the user to save them.
+ * Two-step MFA enrollment — redesigned to match top-tier patterns
+ * (GitHub / Stripe / Google security UX):
+ *  1. Intro card → benefits + single primary CTA.
+ *  2. Setup card → grouped secret + deep-link to authenticator app.
+ *  3. Recovery codes → download / copy with explicit acknowledgement.
+ *  4. Verify → segmented 6-box OTP input with auto-advance.
+ *  5. Confirmation state with proper "Disable" modal (no native prompt()).
  */
 export default function MfaSetup() {
   const [stage, setStage] = useState('intro'); // intro | enrolled | confirmed
   const [payload, setPayload] = useState(null);
-  const [code, setCode] = useState('');
+  const [digits, setDigits] = useState(['', '', '', '', '', '']);
   const [busy, setBusy] = useState(false);
+  const [savedAck, setSavedAck] = useState(false);
+  const [showDisable, setShowDisable] = useState(false);
+  const [disableCode, setDisableCode] = useState('');
+  const inputsRef = useRef([]);
+
+  const code = digits.join('');
+  const codeFilled = code.length === 6;
+
+  // Format the TOTP secret in groups of 4 for readability (Stripe / GitHub style).
+  const formattedSecret = useMemo(() => {
+    if (!payload?.secret) return '';
+    return payload.secret.replace(/(.{4})/g, '$1 ').trim();
+  }, [payload?.secret]);
 
   const beginEnroll = async () => {
     setBusy(true);
@@ -28,6 +42,8 @@ export default function MfaSetup() {
       const res = await authService.enrollMfa();
       setPayload(res.data?.data);
       setStage('enrolled');
+      setSavedAck(false);
+      setDigits(['', '', '', '', '', '']);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to start MFA enrollment');
     } finally { setBusy(false); }
@@ -35,26 +51,29 @@ export default function MfaSetup() {
 
   const confirm = async (e) => {
     e?.preventDefault();
-    if (!code.trim()) { toast.error('Enter the 6-digit code'); return; }
+    if (!codeFilled) { toast.error('Enter the 6-digit code'); return; }
     setBusy(true);
     try {
-      await authService.confirmMfa({ code: code.trim(), recoveryCodes: payload.recoveryCodes });
+      await authService.confirmMfa({ code, recoveryCodes: payload.recoveryCodes });
       toast.success('Two-factor authentication enabled');
       setStage('confirmed');
     } catch (err) {
       toast.error(err.response?.data?.message || 'Invalid code');
+      setDigits(['', '', '', '', '', '']);
+      inputsRef.current[0]?.focus();
     } finally { setBusy(false); }
   };
 
   const disable = async () => {
-    const entered = window.prompt('Enter a current code from your authenticator app to disable MFA');
-    if (!entered) return;
+    if (!disableCode.trim()) { toast.error('Enter your current 6-digit code'); return; }
     try {
-      await authService.disableMfa({ code: entered.trim() });
+      await authService.disableMfa({ code: disableCode.trim() });
       toast.success('MFA disabled');
       setStage('intro');
       setPayload(null);
-      setCode('');
+      setDigits(['', '', '', '', '', '']);
+      setShowDisable(false);
+      setDisableCode('');
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to disable MFA');
     }
@@ -69,164 +88,328 @@ export default function MfaSetup() {
     }
   };
 
-  const activeStep =
-    stage === 'intro' ? 0 : stage === 'confirmed' ? 3 : payload && code.length >= 6 ? 3 : 2;
+  const downloadRecovery = () => {
+    if (!payload?.recoveryCodes) return;
+    const header = 'SK Binge Galaxy — Two-factor recovery codes\n' +
+      `Generated: ${new Date().toISOString()}\n` +
+      'Each code can be used once if you lose access to your authenticator.\n\n';
+    const blob = new Blob([header + payload.recoveryCodes.join('\n') + '\n'], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'sk-binge-galaxy-recovery-codes.txt';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  // Segmented OTP input handlers
+  const setDigit = (i, val) => {
+    const v = val.replace(/\D/g, '').slice(-1);
+    setDigits((d) => {
+      const n = [...d]; n[i] = v; return n;
+    });
+    if (v && i < 5) inputsRef.current[i + 1]?.focus();
+  };
+  const onKeyDown = (i, e) => {
+    if (e.key === 'Backspace' && !digits[i] && i > 0) {
+      inputsRef.current[i - 1]?.focus();
+    } else if (e.key === 'ArrowLeft' && i > 0) {
+      inputsRef.current[i - 1]?.focus();
+    } else if (e.key === 'ArrowRight' && i < 5) {
+      inputsRef.current[i + 1]?.focus();
+    }
+  };
+  const onPaste = (e) => {
+    const txt = (e.clipboardData?.getData('text') || '').replace(/\D/g, '').slice(0, 6);
+    if (!txt) return;
+    e.preventDefault();
+    const arr = ['', '', '', '', '', ''];
+    for (let i = 0; i < txt.length; i++) arr[i] = txt[i];
+    setDigits(arr);
+    const last = Math.min(txt.length, 5);
+    inputsRef.current[last]?.focus();
+  };
+
+  useEffect(() => {
+    if (stage === 'enrolled' && savedAck) {
+      inputsRef.current[0]?.focus();
+    }
+  }, [stage, savedAck]);
+
+  const stepIndex =
+    stage === 'intro' ? 0 :
+    stage === 'confirmed' ? 3 :
+    !savedAck ? 1 : 2;
 
   return (
-    <div className="sec-page">
+    <div className="mfa2-page">
       <SEO title="Two-factor authentication" description="Protect your account with a TOTP authenticator app." />
 
-      <div className="sec-header">
-        <div className="sec-header-copy">
-          <span className="sec-kicker"><FiShield /> ACCOUNT SECURITY</span>
-          <h1>Two-factor authentication</h1>
-          <p>
-            Add a time-based one-time password (TOTP) step to every sign-in. We recommend
-            Google Authenticator, Authy, 1Password, or Microsoft Authenticator.
-          </p>
+      <div className="mfa2-shell">
+        {/* Hero */}
+        <div className="mfa2-hero">
+          <div className="mfa2-hero-icon" aria-hidden><FiShield /></div>
+          <div>
+            <span className="mfa2-kicker">Account security</span>
+            <h1>Two-factor authentication</h1>
+            <p>
+              Protect your account with a second sign-in step from an authenticator app
+              like Google Authenticator, Authy, 1Password, or Microsoft Authenticator.
+            </p>
+          </div>
         </div>
-      </div>
 
-      <div className="mfa-wizard">
-        <ol className="mfa-steps">
-          <li className={stage === 'intro' ? 'active' : 'done'}>
-            <span className="mfa-step-num">{stage === 'intro' ? '1' : <FiCheck />}</span>
-            Get started
-          </li>
-          <li className={stage === 'enrolled' ? 'active' : activeStep > 1 ? 'done' : ''}>
-            <span className="mfa-step-num">{activeStep > 1 ? <FiCheck /> : '2'}</span>
-            Scan secret
-          </li>
-          <li className={stage === 'enrolled' ? 'active' : activeStep > 2 ? 'done' : ''}>
-            <span className="mfa-step-num">{activeStep > 2 ? <FiCheck /> : '3'}</span>
-            Save recovery codes
-          </li>
-          <li className={stage === 'confirmed' ? 'active done' : ''}>
-            <span className="mfa-step-num">{stage === 'confirmed' ? <FiCheck /> : '4'}</span>
-            Verify &amp; enable
-          </li>
-        </ol>
+        {/* Stepper */}
+        {stage !== 'confirmed' && (
+          <ol className="mfa2-stepper" aria-label="Setup progress">
+            {['Get started', 'Add to app', 'Save codes', 'Verify'].map((label, i) => (
+              <li
+                key={label}
+                className={
+                  i < stepIndex ? 'is-done' :
+                  i === stepIndex ? 'is-active' : ''
+                }
+              >
+                <span className="mfa2-step-dot">
+                  {i < stepIndex ? <FiCheck /> : i + 1}
+                </span>
+                <span className="mfa2-step-label">{label}</span>
+              </li>
+            ))}
+          </ol>
+        )}
 
-        <div className="mfa-body">
-          {stage === 'intro' && (
-            <div className="mfa-panel">
-              <div className="sec-card-head">
-                <div>
-                  <h2><FiSmartphone style={{ verticalAlign: '-3px' }} /> Enable two-factor auth</h2>
-                  <p>
-                    Once enabled, sign-in will require a 6-digit code from your authenticator app
-                    in addition to your password.
-                  </p>
-                </div>
-              </div>
-              <div className="sec-actions" style={{ marginTop: 12 }}>
-                <button className="sec-btn sec-btn-primary" onClick={beginEnroll} disabled={busy}>
-                  {busy ? 'Starting…' : <><FiShield /> Enable 2FA</>}
-                </button>
-                <button className="sec-btn" onClick={disable}>
-                  <FiLock /> I already have 2FA — disable it
-                </button>
-              </div>
+        {/* ───── INTRO ───── */}
+        {stage === 'intro' && (
+          <section className="mfa2-card">
+            <div className="mfa2-card-head">
+              <h2>Why turn on 2FA?</h2>
+              <p>It only takes a minute and dramatically reduces account-takeover risk.</p>
             </div>
-          )}
 
-          {stage === 'enrolled' && payload && (
-            <>
-              <div className="mfa-panel">
-                <h2><FiSmartphone style={{ verticalAlign: '-3px' }} /> Step 1 · Add to your authenticator</h2>
-                <p style={{ color: 'var(--text-muted)', fontSize: 14, margin: '4px 0 12px' }}>
-                  Copy the <strong>setup key</strong> into your authenticator app, or paste the
-                  <code> otpauth://</code> URI if your app accepts it.
-                </p>
-
-                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                  Setup key
-                </label>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
-                  <code className="mfa-code" style={{ flex: 1 }}>{payload.secret}</code>
-                  <button className="sec-btn" onClick={() => copy(payload.secret, 'Secret')}>
-                    <FiCopy /> Copy
-                  </button>
+            <ul className="mfa2-benefits">
+              <li>
+                <span className="mfa2-bullet"><FiLock /></span>
+                <div>
+                  <strong>Stops password leaks cold.</strong>
+                  <span>Even if your password is stolen, attackers can't sign in without your phone.</span>
                 </div>
-
-                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 12, display: 'block' }}>
-                  otpauth:// URI
-                </label>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
-                  <code className="mfa-code" style={{ flex: 1 }}>{payload.otpauthUri}</code>
-                  <button className="sec-btn" onClick={() => copy(payload.otpauthUri, 'URI')}>
-                    <FiCopy /> Copy
-                  </button>
+              </li>
+              <li>
+                <span className="mfa2-bullet"><FiSmartphone /></span>
+                <div>
+                  <strong>Works with any authenticator app.</strong>
+                  <span>Google Authenticator, Authy, 1Password, Microsoft Authenticator and more.</span>
                 </div>
+              </li>
+              <li>
+                <span className="mfa2-bullet"><FiKey /></span>
+                <div>
+                  <strong>Recovery codes included.</strong>
+                  <span>10 single-use backup codes in case you lose your device.</span>
+                </div>
+              </li>
+            </ul>
+
+            <div className="mfa2-actions">
+              <button className="mfa2-btn mfa2-btn-primary" onClick={beginEnroll} disabled={busy}>
+                {busy ? 'Starting…' : <>Enable 2FA <FiArrowRight /></>}
+              </button>
+              <button className="mfa2-btn mfa2-btn-ghost" onClick={() => setShowDisable(true)}>
+                I already have 2FA — disable it
+              </button>
+            </div>
+          </section>
+        )}
+
+        {/* ───── ENROLLED ───── */}
+        {stage === 'enrolled' && payload && (
+          <>
+            <section className="mfa2-card">
+              <div className="mfa2-card-head">
+                <h2>1. Add the key to your authenticator</h2>
+                <p>Open your authenticator app and scan or paste the setup key below.</p>
               </div>
 
-              <div className="mfa-panel">
-                <h2><FiKey style={{ verticalAlign: '-3px' }} /> Step 2 · Save your recovery codes</h2>
-                <div className="mfa-warning">
-                  <FiAlertTriangle size={18} />
-                  <span>
-                    <strong>Save these codes somewhere safe right now.</strong> They let you regain access if
-                    you lose your authenticator device. They will <strong>never be shown again</strong>.
-                  </span>
-                </div>
-                <div className="mfa-recovery">
-                  {payload.recoveryCodes.map((rc) => <code key={rc}>{rc}</code>)}
-                </div>
+              <div className="mfa2-secret-box">
+                <span className="mfa2-secret-label">Setup key</span>
+                <code className="mfa2-secret">{formattedSecret}</code>
                 <button
-                  className="sec-btn"
-                  onClick={() => copy(payload.recoveryCodes.join('\n'), 'Recovery codes')}
+                  className="mfa2-icon-btn"
+                  onClick={() => copy(payload.secret, 'Setup key')}
+                  aria-label="Copy setup key"
+                  type="button"
                 >
-                  <FiCopy /> Copy all codes
+                  <FiCopy />
                 </button>
               </div>
 
-              <div className="mfa-panel">
-                <h2><FiShield style={{ verticalAlign: '-3px' }} /> Step 3 · Verify &amp; enable</h2>
-                <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>
-                  Enter the current 6-digit code from your authenticator app to finish turning on 2FA.
-                </p>
-                <form onSubmit={confirm}>
-                  <div className="mfa-input-row">
+              <div className="mfa2-deeplink">
+                <a
+                  className="mfa2-btn mfa2-btn-ghost"
+                  href={payload.otpauthUri}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <FiExternalLink /> Open in authenticator app
+                </a>
+                <button
+                  className="mfa2-btn mfa2-btn-ghost"
+                  onClick={() => copy(payload.otpauthUri, 'otpauth URI')}
+                  type="button"
+                >
+                  <FiCopy /> Copy URI
+                </button>
+              </div>
+            </section>
+
+            <section className="mfa2-card">
+              <div className="mfa2-card-head">
+                <h2>2. Save your recovery codes</h2>
+                <p>You'll need these if you lose access to your authenticator. They are shown once.</p>
+              </div>
+
+              <div className="mfa2-warning">
+                <FiAlertTriangle />
+                <span>
+                  Store these somewhere safe — a password manager or printed copy.
+                  Each code can be used <strong>only once</strong>.
+                </span>
+              </div>
+
+              <div className="mfa2-recovery">
+                {payload.recoveryCodes.map((rc) => <code key={rc}>{rc}</code>)}
+              </div>
+
+              <div className="mfa2-actions">
+                <button className="mfa2-btn mfa2-btn-ghost" onClick={downloadRecovery} type="button">
+                  <FiDownload /> Download .txt
+                </button>
+                <button
+                  className="mfa2-btn mfa2-btn-ghost"
+                  onClick={() => copy(payload.recoveryCodes.join('\n'), 'Recovery codes')}
+                  type="button"
+                >
+                  <FiCopy /> Copy all
+                </button>
+              </div>
+
+              <label className="mfa2-ack">
+                <input
+                  type="checkbox"
+                  checked={savedAck}
+                  onChange={(e) => setSavedAck(e.target.checked)}
+                />
+                <span>I've saved my recovery codes in a safe place</span>
+              </label>
+            </section>
+
+            <section className={`mfa2-card ${!savedAck ? 'is-disabled' : ''}`}>
+              <div className="mfa2-card-head">
+                <h2>3. Verify the 6-digit code</h2>
+                <p>Enter the current code shown in your authenticator app.</p>
+              </div>
+
+              <form onSubmit={confirm} onPaste={onPaste}>
+                <div className="mfa2-otp">
+                  {digits.map((d, i) => (
                     <input
+                      key={i}
+                      ref={(el) => { inputsRef.current[i] = el; }}
                       type="text"
                       inputMode="numeric"
                       autoComplete="one-time-code"
-                      maxLength={8}
-                      value={code}
-                      onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-                      placeholder="123 456"
-                      autoFocus
+                      maxLength={1}
+                      value={d}
+                      onChange={(e) => setDigit(i, e.target.value)}
+                      onKeyDown={(e) => onKeyDown(i, e)}
+                      onFocus={(e) => e.target.select()}
+                      disabled={!savedAck}
+                      aria-label={`Digit ${i + 1}`}
                     />
-                    <button
-                      type="submit"
-                      className="sec-btn sec-btn-primary"
-                      disabled={busy || code.length < 6}
-                    >
-                      {busy ? 'Confirming…' : 'Confirm & enable'}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </>
-          )}
+                  ))}
+                </div>
 
-          {stage === 'confirmed' && (
-            <div className="mfa-panel">
-              <div className="mfa-success">
-                <div className="mfa-success-icon"><FiCheck /></div>
-                <h2 style={{ margin: '4px 0' }}>Two-factor auth is on</h2>
-                <p style={{ color: 'var(--text-muted)', maxWidth: 420, margin: '6px auto 18px' }}>
-                  From now on, every sign-in will ask for a 6-digit code from your authenticator app.
-                  Keep your recovery codes somewhere safe — you'll need them if you lose your device.
-                </p>
-                <button className="sec-btn sec-btn-danger" onClick={disable}>
-                  <FiLock /> Disable 2FA
-                </button>
-              </div>
+                <div className="mfa2-actions mfa2-actions-end">
+                  <button
+                    type="submit"
+                    className="mfa2-btn mfa2-btn-primary"
+                    disabled={busy || !codeFilled || !savedAck}
+                  >
+                    {busy ? 'Verifying…' : <>Confirm &amp; enable <FiArrowRight /></>}
+                  </button>
+                </div>
+              </form>
+            </section>
+          </>
+        )}
+
+        {/* ───── CONFIRMED ───── */}
+        {stage === 'confirmed' && (
+          <section className="mfa2-card mfa2-card-success">
+            <div className="mfa2-success-icon"><FiCheck /></div>
+            <h2>Two-factor authentication is on</h2>
+            <p>
+              From now on every sign-in will ask for a 6-digit code from your authenticator.
+              Keep your recovery codes somewhere safe — you'll need them if you lose your device.
+            </p>
+            <div className="mfa2-actions mfa2-actions-center">
+              <button className="mfa2-btn mfa2-btn-danger" onClick={() => setShowDisable(true)}>
+                <FiLock /> Disable 2FA
+              </button>
             </div>
-          )}
-        </div>
+          </section>
+        )}
       </div>
+
+      {/* ───── Disable modal ───── */}
+      {showDisable && (
+        <div className="mfa2-modal-overlay" role="dialog" aria-modal="true" aria-label="Disable 2FA">
+          <div className="mfa2-modal">
+            <button
+              className="mfa2-modal-close"
+              onClick={() => { setShowDisable(false); setDisableCode(''); }}
+              aria-label="Close"
+              type="button"
+            >
+              <FiX />
+            </button>
+            <div className="mfa2-modal-icon"><FiAlertTriangle /></div>
+            <h3>Disable two-factor authentication?</h3>
+            <p>
+              Your account will be less secure. Enter a current 6-digit code from your
+              authenticator app to confirm.
+            </p>
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={8}
+              value={disableCode}
+              onChange={(e) => setDisableCode(e.target.value.replace(/\D/g, ''))}
+              placeholder="123456"
+              className="mfa2-modal-input"
+              autoFocus
+            />
+            <div className="mfa2-actions mfa2-actions-end" style={{ marginTop: 14 }}>
+              <button
+                className="mfa2-btn mfa2-btn-ghost"
+                onClick={() => { setShowDisable(false); setDisableCode(''); }}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="mfa2-btn mfa2-btn-danger"
+                onClick={disable}
+                disabled={disableCode.length < 6}
+                type="button"
+              >
+                Disable 2FA
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

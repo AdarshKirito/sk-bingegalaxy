@@ -106,15 +106,28 @@ export function mergeSupportContact(supportContact, binge) {
     if (binge.supportEmail) base.email = binge.supportEmail;
     if (binge.supportPhone) {
       const digits = binge.supportPhone.replace(/\D/g, '');
-      const raw = digits.length === 10 ? `+91${digits}` : `+${digits}`;
+      const cc = (binge.supportPhoneCountryCode || '').replace(/\D/g, '');
+      // Prefer the explicit country-code captured at admin time. Fall back to
+      // legacy heuristics (10-digit Indian numbers) only when the new field is absent.
+      let raw;
+      let display;
+      if (cc) {
+        raw = `+${cc}${digits}`;
+        display = `+${cc} ${digits}`;
+      } else if (digits.length === 10) {
+        raw = `+91${digits}`;
+        display = `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`;
+      } else {
+        raw = `+${digits}`;
+        display = binge.supportPhone;
+      }
       base.phoneRaw = raw;
-      base.phoneDisplay = digits.length === 10
-        ? `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`
-        : binge.supportPhone;
+      base.phoneDisplay = display;
     }
     if (binge.supportWhatsapp) {
       const digits = binge.supportWhatsapp.replace(/\D/g, '');
-      base.whatsappRaw = digits.length === 10 ? `91${digits}` : digits;
+      const cc = (binge.supportWhatsappCountryCode || '').replace(/\D/g, '');
+      base.whatsappRaw = cc ? `${cc}${digits}` : (digits.length === 10 ? `91${digits}` : digits);
     }
   }
   return base;

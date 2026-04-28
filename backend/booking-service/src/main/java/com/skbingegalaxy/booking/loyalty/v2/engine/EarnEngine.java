@@ -68,13 +68,19 @@ public class EarnEngine {
 
         Optional<LoyaltyBingeBinding> bindingOpt = configService.findActiveBinding(program.getId(), req.bingeId());
         if (bindingOpt.isEmpty()) {
-            log.debug("[loyalty-v2] earn skipped — no active binding for binge {}", req.bingeId());
+            // WARN, not DEBUG: a missing binding silently zeroes loyalty for an entire
+            // binge.  We want this loud in prod so on-call notices immediately.
+            log.warn("[loyalty-v2] earn skipped — no active binding for binge {} (booking={})",
+                    req.bingeId(), req.bookingRef());
             return EarnResult.skipped("NO_BINDING");
         }
         LoyaltyBingeBinding binding = bindingOpt.get();
 
         if (binding.isLegacyFrozen()) {
-            log.debug("[loyalty-v2] earn skipped — binge {} is ENABLED_LEGACY + frozen (v1 authoritative)", req.bingeId());
+            // After M13 the v1 system no longer exists, so a frozen binding
+            // means earn cannot fire anywhere — surface as WARN.
+            log.warn("[loyalty-v2] earn skipped — binge {} is ENABLED_LEGACY + frozen (booking={})",
+                    req.bingeId(), req.bookingRef());
             return EarnResult.skipped("LEGACY_FROZEN");
         }
 

@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import org.apache.kafka.common.errors.SerializationException;
 
 /**
  * Polls the outbox_event table and publishes unsent events to Kafka.
@@ -80,7 +81,14 @@ public class OutboxPublisher {
                 event.setAttempts(event.getAttempts() + 1);
                 event.setLastAttemptAt(LocalDateTime.now());
                 event.setLastError(truncate(e.getMessage()));
-                if (event.getAttempts() >= MAX_ATTEMPTS) {
+                if (isCodeBug(e)) {
+                    // Serializer / class-convert failures are code/config bugs, not
+                    // bad data. Retrying after a hotfix+redeploy WILL succeed, so we
+                    // must NOT escalate to failedPermanent (that would silently drop
+                    // the event). Log loudly for on-call and keep retrying.
+                    log.error("Outbox: event {} to {} hit RECOVERABLE code-bug on attempt {} (will keep retrying): {}",
+                        event.getId(), event.getTopic(), event.getAttempts(), event.getLastError());
+                } else if (event.getAttempts() >= MAX_ATTEMPTS) {
                     event.setFailedPermanent(true);
                     log.error("Outbox: event {} to {} marked failedPermanent after {} attempts: {}",
                         event.getId(), event.getTopic(), event.getAttempts(), event.getLastError());
@@ -101,6 +109,29 @@ public class OutboxPublisher {
     private String truncate(String s) {
         if (s == null) return null;
         return s.length() > MAX_ERROR_LEN ? s.substring(0, MAX_ERROR_LEN) : s;
+    }
+
+    /**
+     * A code / configuration bug (e.g. value-serializer misconfigured so Kafka
+     * cannot convert a domain event to bytes). These WILL succeed after a fix
+     * is deployed, so we must not mark them failedPermanent — doing that would
+     * silently drop business events. Ops gets paged via the ERROR log + the
+     * {@code kafka_outbox_code_bug} metric.
+     */
+    private boolean isCodeBug(Throwable e) {
+        Throwable cur = e;
+        for (int i = 0; i < 8 && cur != null; i++) {
+            if (cur instanceof SerializationException
+                    || cur instanceof ClassCastException) {
+                return true;
+            }
+            String msg = cur.getMessage();
+            if (msg != null && msg.contains("Can't convert value of class")) {
+                return true;
+            }
+            cur = cur.getCause();
+        }
+        return false;
     }
 
     private Object toKafkaPayload(OutboxEvent event) throws Exception {

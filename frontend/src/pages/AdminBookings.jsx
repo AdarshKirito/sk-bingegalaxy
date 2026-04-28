@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { adminService, bookingService, paymentService, toArray } from '../services/endpoints';
+import { formatTime12h, formatTimeRange12h } from '../utils/format';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
 import DOMPurify from 'dompurify';
@@ -433,7 +434,7 @@ export default function AdminBookings() {
                     </td>
                     <td>{b.eventType?.name ?? b.eventType}</td>
                     <td>{b.bookingDate}</td>
-                    <td>{b.startTime} ({(() => { const m = b.durationMinutes || (b.durationHours * 60); const h = Math.floor(m/60); const min = m%60; return h > 0 && min > 0 ? `${h}h ${min}m` : h > 0 ? `${h}h` : `${min}m`; })()})</td>
+                    <td>{formatTime12h(b.startTime)} ({(() => { const m = b.durationMinutes || (b.durationHours * 60); const h = Math.floor(m/60); const min = m%60; return h > 0 && min > 0 ? `${h}h ${min}m` : h > 0 ? `${h}h` : `${min}m`; })()})</td>
                     <td className="ab-amount">₹{b.totalAmount?.toLocaleString()}</td>
                     <td><span className={`badge ${statusBadge(b.status)}`}>{b.status?.replace('_', ' ')}</span></td>
                     <td>
@@ -890,15 +891,19 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
   };
 
   const handleModalCheckout = async () => {
-    // Check for outstanding balance before checkout
+    // Production-grade guard: balance must be settled before checkout.
     const balance = (b.balanceDue != null) ? b.balanceDue : ((b.totalAmount || 0) - (b.collectedAmount || 0));
-    // Warn if payment was fully refunded
     if (b.paymentStatus === 'REFUNDED') {
-      if (!confirm(`⚠️ Payment was fully REFUNDED (₹0 collected on a ₹${(b.totalAmount || 0).toLocaleString()} booking).\n\nCheckout anyway? The booking will be marked as completed with no revenue recorded.`)) return;
-    } else if (balance > 0.01) {
-      if (!confirm(`Outstanding balance of ₹${balance.toLocaleString()} on this booking.\nCheckout anyway? (You can collect the difference from the Payment tab)`)) return;
-    } else if (balance < -0.01) {
-      if (!confirm(`Customer overpaid by ₹${Math.abs(balance).toLocaleString()}.\nCheckout anyway? (You can issue a refund from the Payment tab)`)) return;
+      toast.error('Payment was fully refunded — use "Adjust Prices" or collect a new payment before checkout.');
+      return;
+    }
+    if (balance > 0.01) {
+      toast.error(`Cannot checkout — outstanding balance of ₹${balance.toLocaleString()}. Collect payment or use "Adjust Prices" to reconcile.`);
+      return;
+    }
+    if (balance < -0.01) {
+      toast.error(`Cannot checkout — customer overpaid by ₹${Math.abs(balance).toLocaleString()}. Issue a refund or use "Adjust Prices" to reconcile.`);
+      return;
     }
     setActionLoading(true);
     try {
@@ -1193,14 +1198,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
           <div style={rowStyle}><span style={labelStyle}>Booking Ref</span><span style={{ fontFamily: 'monospace' }}>{b.bookingRef}</span></div>
           <div style={rowStyle}><span style={labelStyle}>Event Type</span><span>{b.eventType?.name ?? b.eventType}</span></div>
           <div style={rowStyle}><span style={labelStyle}>Date</span><span>{b.bookingDate}</span></div>
-          <div style={rowStyle}><span style={labelStyle}>Time</span><span>{(() => {
-            const parts = String(b.startTime).split(':');
-            const startMin = parseInt(parts[0],10)*60 + parseInt(parts[1]||'0',10);
-            const durMin = b.durationMinutes || (b.durationHours * 60);
-            const endMin = startMin + durMin;
-            const fmt = (m) => String(Math.floor(m/60)).padStart(2,'0') + ':' + String(m%60).padStart(2,'0');
-            return `${fmt(startMin)} – ${fmt(endMin)}`;
-          })()}</span></div>
+          <div style={rowStyle}><span style={labelStyle}>Time</span><span>{formatTimeRange12h(b.startTime, b.durationMinutes || (b.durationHours * 60))}</span></div>
           <div style={rowStyle}><span style={labelStyle}>Duration</span><span>{(() => { const m = b.durationMinutes || (b.durationHours * 60); const h = Math.floor(m/60); const min = m%60; return h > 0 && min > 0 ? `${h}hr ${min}m` : h > 0 ? `${h}hr` : `${min}m`; })()}</span></div>
           {b.numberOfGuests > 0 && (
             <div style={rowStyle}><span style={labelStyle}>Guests</span><span>{b.numberOfGuests}</span></div>
@@ -1323,13 +1321,15 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
           )}
 
           {/* Edit Reservation button — navigates to booking wizard for time/addon changes */}
-          {(b.status === 'PENDING' || b.status === 'CONFIRMED' || b.status === 'CHECKED_IN') && (
+          {(b.status === 'PENDING' || b.status === 'CONFIRMED' || b.status === 'CHECKED_IN' || b.status === 'COMPLETED') && (
             <div style={{ marginTop: '0.8rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
               {!editing && !adjustingPrices && (
                 <>
-                  <button className="btn btn-primary btn-sm" onClick={() => { onEditReservation(b); onClose(); }}>
-                    ✏️ Edit Reservation (Change Time / Add-Ons)
-                  </button>
+                  {(b.status !== 'COMPLETED') && (
+                    <button className="btn btn-primary btn-sm" onClick={() => { onEditReservation(b); onClose(); }}>
+                      ✏️ Edit Reservation (Change Time / Add-Ons)
+                    </button>
+                  )}
                   <button className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}>
                     Edit Notes
                   </button>
@@ -1419,7 +1419,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
               + `<tr><td><strong>Email:</strong></td><td>${DOMPurify.sanitize(b.customerEmail || '—', { ALLOWED_TAGS: [] })}</td></tr>`
               + `<tr><td><strong>Event:</strong></td><td>${DOMPurify.sanitize(b.eventType?.name || b.eventTypeName || '—', { ALLOWED_TAGS: [] })}</td></tr>`
               + `<tr><td><strong>Date:</strong></td><td>${b.bookingDate || '—'}</td></tr>`
-              + `<tr><td><strong>Time:</strong></td><td>${b.startTime || '—'} (${b.durationMinutes || b.durationHours * 60 || 0} min)</td></tr>`
+              + `<tr><td><strong>Time:</strong></td><td>${b.startTime ? formatTimeRange12h(b.startTime, b.durationMinutes || b.durationHours * 60 || 0) : '—'}</td></tr>`
               + `<tr><td><strong>Guests:</strong></td><td>${b.numberOfGuests || 1}</td></tr>`
               + `<tr><td><strong>Status:</strong></td><td>${b.status || '—'}</td></tr>`
               + `</table><hr>`

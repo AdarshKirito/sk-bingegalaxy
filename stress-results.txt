@@ -1,0 +1,64 @@
+== STRESS TEST RUN 2026-04-25 00:33:04 ==
+[] DISCOVER /event-types => HTTP 200 :: {"success":true,"data":[{"id":8,"bingeId":1,"name":"Birthday Celebration","description":"Private theater birthday party with decorations","basePrice":2999.00,"hourlyRate":500.00,"pricePerGuest":0.00,"minHours":2,"maxHours":6,"imageUrls":[],"active":t...
+[] DISCOVER /add-ons => HTTP 200 :: {"success":true,"data":[{"id":15,"bingeId":1,"name":"Basic Decoration","description":"Balloons and ribbons","price":499.00,"category":"DECORATION","imageUrls":[],"active":true},{"id":16,"bingeId":1,"name":"Premium Decoration","description":"Premium t...
+[CRITICAL?] A2 Past-date booking (2024-01-01) => HTTP 400 :: {"success":false,"message":"Booking date cannot be in the past"}
+[] A3 Far-future booking (2031) => HTTP 201 :: {"success":true,"message":"Booking created successfully","data":{"id":3,"bookingRef":"SKBG2637B47685","bingeId":1,"customerId":17,"customerName":"Stress","customerEmail":"stresstest_1777095030@example.com","customerPhone":"9876500000","eventType":{"i...
+[] A4a Zero guests => HTTP 400 :: {"success":false,"message":"Validation failed","errors":{"numberOfGuests":"At least 1 guest required"}}
+[] A4b Negative guests => HTTP 400 :: {"success":false,"message":"Validation failed","errors":{"numberOfGuests":"At least 1 guest required"}}
+[] A4c 200 guests (over @Max=100) => HTTP 400 :: {"success":false,"message":"Validation failed","errors":{"numberOfGuests":"Maximum 100 guests"}}
+[] A8 Missing required fields => HTTP 400 :: {"success":false,"message":"Validation failed","errors":{"eventTypeId":"Event type ID is required","startTime":"Start time is required","bookingDate":"Booking date is required"}}
+[] A8b Null eventTypeId => HTTP 400 :: {"success":false,"message":"Validation failed","errors":{"eventTypeId":"Event type ID is required"}}
+[] A8c Duration 5 minutes (< @Min=30) => HTTP 400 :: {"success":false,"message":"Validation failed","errors":{"durationMinutes":"Duration must be at least 30 minutes"}}
+[] A1a Double-submit SAME idem key #1 => HTTP 201 :: {"success":true,"message":"Booking created successfully","data":{"id":4,"bookingRef":"SKBG2692304FBE","bingeId":1,"customerId":17,"customerName":"Stress","customerEmail":"stresstest_1777095030@example.com","customerPhone":"9876500000","eventType":{"i...
+[] A1a Double-submit SAME idem key #2 => HTTP 201 :: {"success":true,"message":"Booking created successfully","data":{"id":4,"bookingRef":"SKBG2692304FBE","bingeId":1,"customerId":17,"customerName":"Stress","customerEmail":"stresstest_1777095030@example.com","customerPhone":"9876500000","eventType":{"i...
+[] A1b Double-submit NO idem #1 => HTTP 429 :: 
+[] A1b Double-submit NO idem #2 => HTTP 429 :: 
+[] A5 Race - 5 concurrent same slot/user => HTTP ? :: ERR 429  | ERR 429  | ERR 429  | ERR 429  | ERR 429 
+[] C1 Tampered JWT signature => HTTP 401 :: 
+[] C2 Inject X-User-Id=6 (admin) => HTTP 200 :: {"success":true,"data":[{"id":4,"bookingRef":"SKBG2692304FBE","bingeId":1,"customerId":17,"customerName":"Stress","customerEmail":"stresstest_1777095030@example.com","customerPhone":"9876500000","eventType":{"id":8,"bingeId":1,"name":"Birthday Celebr...
+[] D3a Customer hitting super-admin endpoint => HTTP 404 :: 
+[] D5 Admin loyalty without X-Binge-Id => HTTP 404 :: 
+[HIGH?] D4a Loyalty adjust Long.MAX_VALUE => HTTP 404 :: 
+[] D4b Loyalty adjust -1,000,000 => HTTP 404 :: 
+[] D4c Loyalty adjust 0 => HTTP 404 :: 
+[] D4d Loyalty adjust 200,000 (>100k cap) => HTTP 404 :: 
+[] D4e Loyalty adjust "abc" => HTTP 404 :: 
+[] D1 Admin walk-in past date => HTTP 405 :: {"success":false,"message":"HTTP method POST is not supported for this endpoint."}
+[] F1 Emoji/RTL/long notes => HTTP 429 :: 
+[] F1b 5000-char notes => HTTP 429 :: 
+[] F3 Late-night 23:30 + 180min spans midnight => HTTP 429 :: 
+[] E0 Seed loyalty +5000 => HTTP 404 :: 
+[HIGH] E1 Concurrent redeem 5x1500 vs balance 5000 => HTTP ? :: ERR 404 | ERR 404 | ERR 404 | ERR 404 | ERR 404
+[] E1-after Final balance => HTTP 404 :: 
+== ROUND 2 2026-04-25 00:35:39 ==
+[HIGH?] A1 Parallel double-submit (no idem) => HTTP ? :: ERR 400 | ERR 400
+[] D1 Admin walk-in past date => HTTP 400 :: {"success":false,"message":"Customer name is required for admin bookings"}
+[] D1b Admin walk-in null customer => HTTP 400 :: {"success":false,"message":"Customer name is required for admin bookings"}
+[] D5 Admin loyalty bindings WITHOUT X-Binge-Id => HTTP 200 :: {"success":true}
+[] D5b Admin loyalty bindings WITH X-Binge-Id => HTTP 200 :: {"success":true}
+[] D3 Customer hitting super-admin program => HTTP 200 :: {"success":true,"data":{"id":1,"tenantId":null,"code":"SK_MEMBERSHIP","displayName":"SK Binge Galaxy Membership","description":"One membership, every binge â?? status, points, and perks that follow you.","active":true,"silentEnrollmentEnabled":true,"guestShadowEnabled":true,"retroactiveCreditDays":3...
+[] D3b Customer hitting super-admin perks => HTTP 200 :: {"success":true,"data":[{"id":6,"tenantId":null,"programId":1,"code":"BIRTHDAY_BONUS","displayName":"Birthday Bonus Points","description":"Bonus points gifted once a year around your birthday.","category":"FINANCIAL","fulfillmentType":"AUTOMATIC","deliveryHandlerKey":"BIRTHDAY_BONUS_POINTS","default...
+[] D3c SUPER_ADMIN hitting super-admin program => HTTP 200 :: {"success":true,"data":{"id":1,"tenantId":null,"code":"SK_MEMBERSHIP","displayName":"SK Binge Galaxy Membership","description":"One membership, every binge â?? status, points, and perks that follow you.","active":true,"silentEnrollmentEnabled":true,"guestShadowEnabled":true,"retroactiveCreditDays":3...
+[CRITICAL?] C3 Customer B viewing Customer A booking (SKBG2692304FBE) => HTTP 403 :: {"success":false,"message":"Not authorized to view this booking"}
+[CRITICAL?] C4 Customer B cancels A booking => HTTP 400 :: {"success":false,"message":"Not authorised to cancel this booking"}
+[CRITICAL?] C4b Customer B reschedules A booking => HTTP 400 :: {"success":false,"message":"Validation failed","errors":{"newStartTime":"New start time is required","newBookingDate":"New booking date is required"}}
+[] C3b Customer guesses other booking ref => HTTP 200 :: {"success":true,"data":{"id":3,"bookingRef":"SKBG2637B47685","bingeId":1,"customerId":17,"customerName":"Stress","customerEmail":"stresstest_1777095030@example.com","customerPhone":"9876500000","eventType":{"id":8,"bingeId":1,"name":"Birthday Celebration","description":"Private theater birthday part...
+[HIGH?] B2a Payment underpayment amount=1 => HTTP 400 :: {"success":false,"message":"Validation failed","errors":{"paymentMethod":"Payment method is required"}}
+[CRITICAL?] B2c Payment negative amount=-100 => HTTP 400 :: {"success":false,"message":"Validation failed","errors":{"amount":"Amount must be at least 1.00","paymentMethod":"Payment method is required"}}
+[] B2b Payment overpayment 99999999 => HTTP 400 :: {"success":false,"message":"Validation failed","errors":{"amount":"Amount must not exceed 1,000,000.00","paymentMethod":"Payment method is required"}}
+[] B4-prep get payment => HTTP 200 :: {"success":true,"message":"Payments for booking","data":[]}
+[] F1 Emoji/RTL notes => HTTP 400 :: {"success":false,"message":"Malformed request body. Please check your input format."}
+[] F1b 5000-char notes (limit=1000) => HTTP 400 :: {"success":false,"message":"Validation failed","errors":{"specialNotes":"Special notes limited to 1000 characters"}}
+[] F3 23:30 + 180min spans midnight => HTTP 400 :: {"success":false,"message":"You already have 2 pending booking(s). Please complete or cancel them before creating new ones."}
+[HIGH?] A3b Year 2076 booking => HTTP 400 :: {"success":false,"message":"You already have 2 pending booking(s). Please complete or cancel them before creating new ones."}
+== ROUND 3 00:40:17 ==
+CRIT-1 Customer creates loyalty tier (super-admin) => HTTP 200 :: {"success":true,"data":{"id":6,"tenantId":null,"programId":1,"code":"CUSTOMER_PWN","displayName":"Pwned Tier","rankOrder":0,"qualificationCreditsRequired":0,"qualificationWindowDays":365,"lifetimeCreditsRequired":null,"lifetimeYearsHeldRequired":null,"validityCalendarYearsAfter":null,"softLandingTierCode":null,"colorHex":null,"iconKey":null,"effect...
+CRIT-2 Customer creates super-admin perk => HTTP 409 :: {"success":false,"message":"A data conflict occurred. The record may already exist or is referenced elsewhere."}
+CRIT-3 Customer enables loyalty binding for binge 1 => HTTP 403 :: 
+CRIT-4 Customer reads admin bindings => HTTP 403 :: 
+CRIT-5 Customer reads super-admin tiers => HTTP 200 :: {"success":true,"data":[{"id":1,"tenantId":null,"programId":1,"code":"BRONZE","displayName":"Bronze","rankOrder":0,"qualificationCreditsRequired":0,"qualificationWindowDays":365,"lifetimeCreditsRequired":null,"lifetimeYearsHeldRequired":null,"validityCalendarYearsAfter":null,"softLandingTierCode":null,"colorHex":"#B08D57","iconKey":"medal","effecti...
+CRIT-6 Customer reads admin pricing surge rules => HTTP 403 :: 
+C3-enum non-existent ref => HTTP 404 :: {"success":false,"message":"Booking not found with ref: SKBG0000000001"}
+C2 X-User-Id forge=6 (customer 17 token) => HTTP 200 :: {"success":true,"data":[{"id":4,"bookingRef":"SKBG2692304FBE","bingeId":1,"customerId":17,"customerName":"Stress","customerEmail":"stresstest_1777095030@example.com","customerPhone":"9876500000","eventType":{"id":8,"bingeId":1,"name":"Birthday Celebration","description":"Private theater birthday party with decorations","basePrice":2999.00,"hourlyRa...
+C2b Forged X-User-Id booking creation => HTTP 400 :: {"success":false,"message":"You already have 2 pending booking(s). Please complete or cancel them before creating new ones."}
+C-alg-none JWT alg=none attack => HTTP 401 :: 

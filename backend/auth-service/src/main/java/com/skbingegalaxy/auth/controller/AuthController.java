@@ -165,7 +165,7 @@ public class AuthController {
             @Valid @RequestBody CompleteProfileRequest request,
             HttpServletRequest httpRequest,
             HttpServletResponse response) {
-        AuthResponse authResponse = authService.completeProfile(userId, request.getPhone());
+        AuthResponse authResponse = authService.completeProfile(userId, request);
         setAuthCookies(httpRequest, response, authResponse);
         return ResponseEntity.ok(ApiResponse.ok("Profile updated", authResponse));
     }

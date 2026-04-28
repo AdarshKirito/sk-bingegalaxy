@@ -42,6 +42,7 @@ const AdminBookingCreate = lazy(() => import('./pages/AdminBookingCreate'));
 const AdminUsersConfig = lazy(() => import('./pages/AdminUsersConfig'));
 const AdminRateCodes = lazy(() => import('./pages/AdminRateCodes'));
 const AdminCustomerPricing = lazy(() => import('./pages/AdminCustomerPricing'));
+const AdminCustomerEdit = lazy(() => import('./pages/AdminCustomerEdit'));
 const AdminVenueRooms = lazy(() => import('./pages/AdminVenueRooms'));
 const AdminSurgeRules = lazy(() => import('./pages/AdminSurgeRules'));
 const AdminWaitlist = lazy(() => import('./pages/AdminWaitlist'));
@@ -180,6 +181,7 @@ function AppFrame() {
           <Route path="/admin/platform" element={<AdminRoute><AdminEntranceDashboard /></AdminRoute>} />
           <Route path="/admin/account" element={<AdminRoute><AdminAccount /></AdminRoute>} />
           <Route path="/admin/all-users" element={<SuperAdminRoute><AdminAllUsers /></SuperAdminRoute>} />
+          <Route path="/admin/customers/:id/edit" element={<SuperAdminRoute><AdminCustomerEdit /></SuperAdminRoute>} />
           <Route path="/admin/super" element={<SuperAdminRoute><SuperAdminDashboard /></SuperAdminRoute>} />
           <Route path="/admin/sessions" element={<AdminRoute><MySessions /></AdminRoute>} />
           <Route path="/admin/security/mfa" element={<AdminRoute><MfaSetup /></AdminRoute>} />

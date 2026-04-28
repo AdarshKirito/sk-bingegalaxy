@@ -63,7 +63,6 @@ class BookingCheckoutAndRevenueTest {
                 BingeContext.clear();
                 BingeContext.setBingeId(11L);
         ReflectionTestUtils.setField(bookingService, "refPrefix", "SKBG");
-                lenient().when(loyaltyService.earnPoints(anyLong(), anyString(), any(BigDecimal.class))).thenReturn(0L);
                 lenient().when(loyaltyService.redeemPoints(anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
                         .thenReturn(new LoyaltyService.RedemptionResult(0L, BigDecimal.ZERO));
 
@@ -86,7 +85,7 @@ class BookingCheckoutAndRevenueTest {
                 .baseAmount(BigDecimal.valueOf(3500))
                 .addOnAmount(BigDecimal.ZERO)
                 .totalAmount(BigDecimal.valueOf(11000))
-                .collectedAmount(BigDecimal.ZERO)
+                .collectedAmount(BigDecimal.valueOf(11000))
                 .status(BookingStatus.CHECKED_IN)
                 .paymentStatus(PaymentStatus.SUCCESS)
                 .checkedIn(true)

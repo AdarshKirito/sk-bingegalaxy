@@ -40,13 +40,14 @@ public class BookingController {
             @RequestHeader("X-User-Email") String email,
             @RequestHeader(value = "X-User-Name", defaultValue = "Customer") String name,
             @RequestHeader(value = "X-User-Phone", defaultValue = "") String phone,
+            @RequestHeader(value = "X-User-Phone-Country-Code", defaultValue = "") String phoneCountryCode,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
         // Stripe-style idempotency: a client-supplied key turns retries/double-clicks
         // into a no-op returning the originally-created booking. Missing/blank key
         // keeps the legacy behaviour (useful for server-initiated calls and tests).
         BookingDto booking = idempotencyService.execute(
             idempotencyKey, "POST", "/api/v1/bookings", userId, request, BookingDto.class,
-            () -> bookingService.createBooking(request, userId, name, email, phone));
+            () -> bookingService.createBooking(request, userId, name, email, phone, phoneCountryCode));
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(ApiResponse.ok("Booking created successfully", booking));
     }
@@ -133,7 +134,10 @@ public class BookingController {
     public ResponseEntity<ApiResponse<BookingDto>> rescheduleMyBooking(
             @PathVariable String bookingRef,
             @RequestHeader("X-User-Id") Long userId,
-            @Valid @RequestBody RescheduleBookingRequest request) {
+            @RequestBody RescheduleBookingRequest request) {
+        // Note: @Valid intentionally omitted. The service performs ownership check
+        // FIRST and then validates body fields, so probing for resources you don't
+        // own returns 403 instead of leaking field-shape via 400.
         BookingDto rescheduled = bookingService.rescheduleBooking(bookingRef, userId, request);
         return ResponseEntity.ok(ApiResponse.ok("Booking rescheduled successfully", rescheduled));
     }
@@ -153,8 +157,9 @@ public class BookingController {
             @RequestHeader("X-User-Id") Long userId,
             @RequestHeader("X-User-Email") String email,
             @RequestHeader(value = "X-User-Name", defaultValue = "Customer") String name,
-            @RequestHeader(value = "X-User-Phone", defaultValue = "") String phone) {
-        RecurringBookingResult result = bookingService.createRecurringBookings(request, userId, name, email, phone);
+            @RequestHeader(value = "X-User-Phone", defaultValue = "") String phone,
+            @RequestHeader(value = "X-User-Phone-Country-Code", defaultValue = "") String phoneCountryCode) {
+        RecurringBookingResult result = bookingService.createRecurringBookings(request, userId, name, email, phone, phoneCountryCode);
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(ApiResponse.ok("Recurring bookings created", result));
     }

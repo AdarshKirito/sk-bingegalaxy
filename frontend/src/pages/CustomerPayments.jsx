@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { bookingService, paymentService } from '../services/endpoints';
+import { formatTime12h } from '../utils/format';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import SEO from '../components/SEO';
-import { FiAlertCircle, FiCalendar, FiCheckCircle, FiCreditCard, FiFilter, FiRefreshCw, FiSearch, FiTrendingUp } from 'react-icons/fi';
+import { FiAlertCircle, FiCalendar, FiCheckCircle, FiCreditCard, FiFilter, FiRefreshCw, FiSearch, FiTrendingUp, FiX } from 'react-icons/fi';
 import DOMPurify from 'dompurify';
 import './CustomerHub.css';
 
@@ -20,17 +21,30 @@ export default function CustomerPayments() {
   const searchInputRef = useRef(null);
 
   // ── Search semantics ──────────────────────────────────────────
-  //  Real-world admin/customer dashboards (Stripe, Amazon, Notion)
-  //  never silently redirect on an exact match — they filter in place
-  //  and, if desired, expose a *separate* "Open booking →" chip for
-  //  direct navigation.  This keeps the back button predictable and
-  //  prevents the "I clicked search and the page teleported" feel.
+  //  Real-world dashboards (Stripe, Amazon, Notion, Linear) filter
+  //  *as you type* with a small debounce — no "Search" button click
+  //  required.  We still expose Enter to commit immediately and a
+  //  clear (×) button to reset.  An explicit jump-to-booking chip
+  //  surfaces when the query exactly matches a known ref, so power
+  //  users can navigate directly without an automatic redirect.
+  useEffect(() => {
+    const trimmed = query.trim();
+    const handle = setTimeout(() => setAppliedQuery(trimmed), 220);
+    return () => clearTimeout(handle);
+  }, [query]);
+
   const applySearch = () => {
     setAppliedQuery(query.trim());
   };
 
   const handleSearchKey = (event) => {
     if (event.key === 'Enter') applySearch();
+  };
+
+  const clearSearch = () => {
+    setQuery('');
+    setAppliedQuery('');
+    if (searchInputRef.current) searchInputRef.current.focus();
   };
 
   // Case-insensitive exact match on booking ref / transaction id — used
@@ -254,7 +268,7 @@ export default function CustomerPayments() {
                 <div>
                   <span className="customer-booking-ref">{booking.bookingRef}</span>
                   <h3>{booking.eventType?.name ?? booking.eventType}</h3>
-                  <p>{booking.bookingDate} at {booking.startTime}</p>
+                  <p>{booking.bookingDate} at {formatTime12h(booking.startTime)}</p>
                 </div>
                 <div className="customer-mini-card-actions">
                   <strong>{formatAmount(booking.totalAmount)}</strong>
@@ -269,15 +283,27 @@ export default function CustomerPayments() {
       <section className="customer-hub-toolbar card">
         <div className="customer-hub-filters customer-hub-filters-wide">
           <label className="customer-hub-search">
-            <FiSearch />
+            <FiSearch aria-hidden="true" />
             <input
               ref={searchInputRef}
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={handleSearchKey}
-              placeholder="Search or enter exact booking ref / transaction ID"
+              placeholder="Search booking ref, transaction ID, event…"
+              aria-label="Search payments"
             />
+            {query && (
+              <button
+                type="button"
+                className="customer-hub-search-clear"
+                onClick={clearSearch}
+                aria-label="Clear search"
+                title="Clear search"
+              >
+                <FiX />
+              </button>
+            )}
           </label>
 
           <label className="customer-hub-select">
@@ -311,10 +337,6 @@ export default function CustomerPayments() {
               onChange={(event) => setToDate(event.target.value)}
             />
           </label>
-
-          <button className="btn btn-primary btn-sm" onClick={applySearch}>
-            <FiSearch /> Search
-          </button>
 
           <button
             className="btn btn-secondary btn-sm"

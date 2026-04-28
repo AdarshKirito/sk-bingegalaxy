@@ -69,6 +69,10 @@ public class Payment {
 
     private String customerPhone;
 
+    /** E.164 dial prefix (e.g. "+91"). */
+    @Column(name = "customer_phone_country_code", length = 8)
+    private String customerPhoneCountryCode;
+
     private String gatewayResponse;
 
     private String failureReason;

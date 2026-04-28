@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useBinge } from '../context/BingeContext';
 import { authService, bookingService, toArray } from '../services/endpoints';
+import { formatTime12h } from '../utils/format';
 import {
   buildSupportEmailHref,
   buildSupportWhatsAppHref,
@@ -17,6 +18,7 @@ import { SkeletonGrid } from '../components/ui/Skeleton';
 import Pagination from '../components/ui/Pagination';
 import { toast } from 'react-toastify';
 import SEO from '../components/SEO';
+import PhoneField, { splitPhone } from '../components/form/PhoneField';
 import {
   FiArrowRight,
   FiCalendar,
@@ -35,6 +37,7 @@ import {
   FiSend,
   FiShield,
   FiStar,
+  FiX,
 } from 'react-icons/fi';
 import './CustomerHub.css';
 
@@ -56,6 +59,16 @@ export default function MyBookings() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [query, setQuery] = useState('');
+  // Debounced version of `query` so we don't recompute the (potentially
+  // large) filtered booking list on every keystroke.  Matches the
+  // search-as-you-type UX used by Stripe / Notion / Linear: results
+  // start filtering automatically ~200ms after the user stops typing,
+  // no "Search" button click required.
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  useEffect(() => {
+    const handle = setTimeout(() => setDebouncedQuery(query.trim()), 220);
+    return () => clearTimeout(handle);
+  }, [query]);
   const [waitlistEntries, setWaitlistEntries] = useState([]);
   const [rescheduleModal, setRescheduleModal] = useState(null);
   const [transferModal, setTransferModal] = useState(null);
@@ -123,7 +136,7 @@ export default function MyBookings() {
 
   useEffect(() => {
     setPage(1);
-  }, [tab, statusFilter, paymentFilter, datePreset, fromDate, toDate, query]);
+  }, [tab, statusFilter, paymentFilter, datePreset, fromDate, toDate, debouncedQuery]);
 
   const statusBadge = (status) => ({
     PENDING: 'badge-warning', CONFIRMED: 'badge-success', CANCELLED: 'badge-danger',
@@ -182,7 +195,7 @@ export default function MyBookings() {
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
-      const matchesQuery = !query.trim() || searchTarget.includes(query.trim().toLowerCase());
+      const matchesQuery = !debouncedQuery || searchTarget.includes(debouncedQuery.toLowerCase());
 
       const bookingDate = booking.bookingDate ? new Date(`${booking.bookingDate}T00:00:00`) : null;
       const matchesPreset = !bookingDate || datePreset === 'ALL'
@@ -194,7 +207,7 @@ export default function MyBookings() {
 
       return matchesStatus && matchesPayment && matchesQuery && matchesPreset && matchesCustomFrom && matchesCustomTo;
     });
-  }, [baseBookings, statusFilter, paymentFilter, datePreset, fromDate, toDate, query]);
+  }, [baseBookings, statusFilter, paymentFilter, datePreset, fromDate, toDate, debouncedQuery]);
   const pagedBookings = filteredBookings.slice((page - 1) * perPage, page * perPage);
   const nextBooking = sortedUpcoming[0] || null;
   const pendingPayments = allBookings.filter((booking) => booking.status !== 'CANCELLED' && booking.paymentStatus !== 'SUCCESS');
@@ -289,7 +302,14 @@ export default function MyBookings() {
     }
     setActionLoading(true);
     try {
-      const res = await bookingService.transferBooking(transferModal.bookingRef, transferForm);
+      const phoneParts = splitPhone(transferForm.recipientPhone);
+      const payload = {
+        recipientName: transferForm.recipientName,
+        recipientEmail: transferForm.recipientEmail,
+        recipientPhone: phoneParts.phone,
+        recipientPhoneCountryCode: phoneParts.phoneCountryCode,
+      };
+      const res = await bookingService.transferBooking(transferModal.bookingRef, payload);
       const updated = res.data.data;
       setCurrentBookings(prev => prev.map(b => b.bookingRef === updated.bookingRef ? updated : b));
       toast.success('Booking transferred successfully');
@@ -357,7 +377,7 @@ export default function MyBookings() {
           ) : nextBooking ? (
             <>
               <h2>{nextBooking.eventType?.name ?? nextBooking.eventType}</h2>
-              <p>{nextBooking.bookingDate} at {nextBooking.startTime} for {formatDuration(nextBooking)}</p>
+              <p>{nextBooking.bookingDate} at {formatTime12h(nextBooking.startTime)} for {formatDuration(nextBooking)}</p>
               <div className="customer-hub-highlight-meta">
                 <span className={`badge ${statusBadge(nextBooking.status)}`}>{nextBooking.status}</span>
                 <span className={`badge ${paymentBadge(nextBooking.paymentStatus)}`}>{paymentLabel(nextBooking.paymentStatus)}</span>
@@ -425,7 +445,7 @@ export default function MyBookings() {
                   <div>
                     <span className="customer-booking-ref">{booking.bookingRef}</span>
                     <h3>{booking.eventType?.name ?? booking.eventType}</h3>
-                    <p>{booking.bookingDate} at {booking.startTime}</p>
+                    <p>{booking.bookingDate} at {formatTime12h(booking.startTime)}</p>
                   </div>
                   <div className="customer-review-stars" role="group" aria-label="Rate this booking">
                     {[1, 2, 3, 4, 5].map((star) => (
@@ -528,13 +548,25 @@ export default function MyBookings() {
 
         <div className="customer-hub-filters customer-hub-filters-wide">
           <label className="customer-hub-search">
-            <FiSearch />
+            <FiSearch aria-hidden="true" />
             <input
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search by ref, event, date"
+              placeholder="Search by ref, event, date…"
+              aria-label="Search bookings"
             />
+            {query && (
+              <button
+                type="button"
+                className="customer-hub-search-clear"
+                onClick={() => setQuery('')}
+                aria-label="Clear search"
+                title="Clear search"
+              >
+                <FiX />
+              </button>
+            )}
           </label>
 
           <label className="customer-hub-select">
@@ -662,7 +694,7 @@ export default function MyBookings() {
 
                 <div className="customer-booking-meta">
                   <span><FiCalendar /> {booking.bookingDate}</span>
-                  <span><FiClock /> {booking.startTime} and {formatDuration(booking)}</span>
+                  <span><FiClock /> {formatTime12h(booking.startTime)} · {formatDuration(booking)}</span>
                   <span><FiCreditCard /> {booking.paymentMethod?.replace('_', ' ') || 'Payment method at checkout'}</span>
                   {booking.venueRoomName && <span><FiMapPin /> {booking.venueRoomName}</span>}
                 </div>
@@ -835,7 +867,7 @@ export default function MyBookings() {
                     <div>
                       <strong>{b.bookingRef}</strong>
                       <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                        {b.bookingDate} · {b.startTime}
+                        {b.bookingDate} · {formatTime12h(b.startTime)}
                       </div>
                     </div>
                     <span className={`badge ${b.status === 'CONFIRMED' ? 'badge-success' : b.status === 'CANCELLED' ? 'badge-danger' : 'badge-warning'}`}>
@@ -909,9 +941,10 @@ export default function MyBookings() {
             </label>
             <label style={{ display: 'block', marginBottom: '1.5rem' }}>
               <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Phone (optional)</span>
-              <input type="tel" className="form-control" placeholder="+91XXXXXXXXXX"
+              <PhoneField
                 value={transferForm.recipientPhone}
-                onChange={(e) => setTransferForm(prev => ({ ...prev, recipientPhone: e.target.value }))} />
+                onChange={(val) => setTransferForm(prev => ({ ...prev, recipientPhone: val || '' }))}
+              />
             </label>
             <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
               <button className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => setTransferModal(null)}>Cancel</button>

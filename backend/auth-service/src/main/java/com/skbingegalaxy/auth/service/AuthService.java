@@ -88,6 +88,9 @@ public class AuthService {
     @Value("${app.admin.phone:9876543210}")
     private String supportPhone;
 
+    @Value("${app.admin.phoneCountryCode:+91}")
+    private String supportPhoneCountryCode;
+
     @Value("${app.support.hours:9:00 AM to 10:00 PM IST}")
     private String supportHours;
 
@@ -163,6 +166,13 @@ public class AuthService {
             .lastName(request.getLastName())
             .email(email)
             .phone(request.getPhone())
+            .phoneCountryCode(request.getPhoneCountryCode())
+            .addressLine1(trimToNull(request.getAddressLine1()))
+            .addressLine2(trimToNull(request.getAddressLine2()))
+            .city(trimToNull(request.getCity()))
+            .state(trimToNull(request.getState()))
+            .country(trimToNull(request.getCountry()))
+            .postalCode(trimToNull(request.getPostalCode()))
             .password(passwordEncoder.encode(request.getPassword()))
             .role(UserRole.CUSTOMER)
             .active(true)
@@ -421,7 +431,7 @@ public class AuthService {
         resetToken.setUsed(true);
         resetTokenRepository.save(resetToken);
 
-        try { sessionService.revokeAllForUser(user.getId(), user.getId(), "PASSWORD_RESET"); } catch (Exception ignored) {}
+        try { sessionService.revokeAllForUser(user.getId(), user.getId(), "PASSWORD_RESET"); } catch (Exception e) { log.warn("Failed to revoke sessions after PASSWORD_RESET for user {}: {}", user.getId(), e.getMessage()); }
         auditService.success(AuthAuditService.EventType.PASSWORD_RESET_COMPLETED, user.getId(), user.getRole(), user.getId(), user.getEmail(), null);
         log.info("Password reset completed for: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
     }
@@ -469,7 +479,7 @@ public class AuthService {
         // Invalidate ALL unused tokens for this user (not just the current one)
         resetTokenRepository.markAllUnusedAsUsedForUser(user.getId());
 
-        try { sessionService.revokeAllForUser(user.getId(), user.getId(), "PASSWORD_RESET"); } catch (Exception ignored) {}
+        try { sessionService.revokeAllForUser(user.getId(), user.getId(), "PASSWORD_RESET"); } catch (Exception e) { log.warn("Failed to revoke sessions after OTP PASSWORD_RESET for user {}: {}", user.getId(), e.getMessage()); }
         auditService.success(AuthAuditService.EventType.PASSWORD_RESET_COMPLETED, user.getId(), user.getRole(), user.getId(), user.getEmail(), "via OTP");
         log.info("OTP-based password reset completed for userId: {}", user.getId());
     }
@@ -570,13 +580,21 @@ public class AuthService {
 
     // ── Complete profile (add phone after Google sign-in) ─────
     @Transactional
-    public AuthResponse completeProfile(Long userId, String phone) {
+    public AuthResponse completeProfile(Long userId, CompleteProfileRequest request) {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+        String phone = request.getPhone();
         if (userRepository.existsByPhone(phone)) {
             throw new DuplicateResourceException("User", "phone", phone);
         }
         user.setPhone(phone);
+        user.setPhoneCountryCode(request.getPhoneCountryCode());
+        user.setAddressLine1(trimToNull(request.getAddressLine1()));
+        user.setAddressLine2(trimToNull(request.getAddressLine2()));
+        user.setCity(trimToNull(request.getCity()));
+        user.setState(trimToNull(request.getState()));
+        user.setCountry(trimToNull(request.getCountry()));
+        user.setPostalCode(trimToNull(request.getPostalCode()));
         user = userRepository.save(user);
         log.info("Profile completed for: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
         // Return fresh tokens so the JWT includes the phone claim
@@ -621,7 +639,7 @@ public class AuthService {
         }
         Long actor = currentActorId();
         UserRole actorRole = currentActorRole();
-        try { sessionService.revokeAllForUser(user.getId(), actor, "USER_DELETED"); } catch (Exception ignored) {}
+        try { sessionService.revokeAllForUser(user.getId(), actor, "USER_DELETED"); } catch (Exception e) { log.warn("Failed to revoke sessions after USER_DELETED for user {}: {}", user.getId(), e.getMessage()); }
         userRepository.delete(user);
         auditService.success(AuthAuditService.EventType.USER_DELETED, actor, actorRole, user.getId(), user.getEmail(), "role=" + user.getRole());
         log.info("Super admin deleted user: {} (ID: {}, role: {})", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()), id, user.getRole());
@@ -668,7 +686,7 @@ public class AuthService {
                 active ? AuthAuditService.EventType.USER_UNBANNED : AuthAuditService.EventType.USER_BANNED,
                 currentActorId(), currentActorRole(), user.getId(), user.getEmail(), null);
             if (!active) {
-                try { sessionService.revokeAllForUser(user.getId(), currentActorId(), "USER_BANNED"); } catch (Exception ignored) {}
+                try { sessionService.revokeAllForUser(user.getId(), currentActorId(), "USER_BANNED"); } catch (Exception e) { log.warn("Failed to revoke sessions after USER_BANNED for user {}: {}", user.getId(), e.getMessage()); }
             }
         }
         userRepository.saveAll(toUpdate);
@@ -688,7 +706,7 @@ public class AuthService {
                 .toList();
         for (User user : toDelete) {
             log.info("Bulk deleted user: {} (ID: {}, role: {})", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()), user.getId(), user.getRole());
-            try { sessionService.revokeAllForUser(user.getId(), currentActorId(), "BULK_DELETE"); } catch (Exception ignored) {}
+            try { sessionService.revokeAllForUser(user.getId(), currentActorId(), "BULK_DELETE"); } catch (Exception e) { log.warn("Failed to revoke sessions after BULK_DELETE for user {}: {}", user.getId(), e.getMessage()); }
             auditService.success(AuthAuditService.EventType.USER_BULK_DELETED, currentActorId(), currentActorRole(), user.getId(), user.getEmail(), "role=" + user.getRole());
         }
         userRepository.deleteAll(toDelete);
@@ -716,6 +734,13 @@ public class AuthService {
         user.setLastName(request.getLastName());
         user.setEmail(request.getEmail());
         user.setPhone(request.getPhone());
+        user.setPhoneCountryCode(request.getPhoneCountryCode());
+        user.setAddressLine1(trimToNull(request.getAddressLine1()));
+        user.setAddressLine2(trimToNull(request.getAddressLine2()));
+        user.setCity(trimToNull(request.getCity()));
+        user.setState(trimToNull(request.getState()));
+        user.setCountry(trimToNull(request.getCountry()));
+        user.setPostalCode(trimToNull(request.getPostalCode()));
 
         // Admin password reset
         if (request.getPassword() != null && !request.getPassword().isBlank()) {
@@ -751,6 +776,13 @@ public class AuthService {
         user.setLastName(request.getLastName());
         user.setEmail(request.getEmail());
         user.setPhone(request.getPhone());
+        user.setPhoneCountryCode(request.getPhoneCountryCode());
+        user.setAddressLine1(trimToNull(request.getAddressLine1()));
+        user.setAddressLine2(trimToNull(request.getAddressLine2()));
+        user.setCity(trimToNull(request.getCity()));
+        user.setState(trimToNull(request.getState()));
+        user.setCountry(trimToNull(request.getCountry()));
+        user.setPostalCode(trimToNull(request.getPostalCode()));
 
         if (request.getPassword() != null && !request.getPassword().isBlank()) {
             user.setPassword(passwordEncoder.encode(request.getPassword()));
@@ -783,7 +815,14 @@ public class AuthService {
             .firstName(request.getFirstName())
             .lastName(request.getLastName())
             .email(email)
-            .phone(request.getPhone())
+            .phone(trimToNull(request.getPhone()))
+            .phoneCountryCode(trimToNull(request.getPhoneCountryCode()))
+            .addressLine1(trimToNull(request.getAddressLine1()))
+            .addressLine2(trimToNull(request.getAddressLine2()))
+            .city(trimToNull(request.getCity()))
+            .state(trimToNull(request.getState()))
+            .country(trimToNull(request.getCountry()))
+            .postalCode(trimToNull(request.getPostalCode()))
             .password(passwordEncoder.encode(rawPassword))
             .role(UserRole.CUSTOMER)
             .active(true)
@@ -810,6 +849,13 @@ public class AuthService {
             .lastName(request.getLastName())
             .email(email)
             .phone(request.getPhone())
+            .phoneCountryCode(request.getPhoneCountryCode())
+            .addressLine1(trimToNull(request.getAddressLine1()))
+            .addressLine2(trimToNull(request.getAddressLine2()))
+            .city(trimToNull(request.getCity()))
+            .state(trimToNull(request.getState()))
+            .country(trimToNull(request.getCountry()))
+            .postalCode(trimToNull(request.getPostalCode()))
             .password(passwordEncoder.encode(request.getPassword()))
             .role(UserRole.ADMIN)
             .active(true)
@@ -878,6 +924,13 @@ public class AuthService {
             .lastName(user.getLastName())
             .email(user.getEmail())
             .phone(user.getPhone())
+            .phoneCountryCode(user.getPhoneCountryCode())
+            .addressLine1(user.getAddressLine1())
+            .addressLine2(user.getAddressLine2())
+            .city(user.getCity())
+            .state(user.getState())
+            .country(user.getCountry())
+            .postalCode(user.getPostalCode())
             .preferredExperience(user.getPreferredExperience())
             .vibePreference(user.getVibePreference())
             .reminderLeadDays(user.getReminderLeadDays() != null ? user.getReminderLeadDays() : 14)
@@ -1065,6 +1118,7 @@ public class AuthService {
             NotificationEvent event = NotificationEvent.builder()
                 .recipientEmail(user.getEmail())
                 .recipientPhone(user.getPhone())
+                .recipientPhoneCountryCode(user.getPhoneCountryCode())
                 .recipientName(user.getFirstName())
                 .channel(NotificationChannel.EMAIL)
                 .templateName(template)
@@ -1091,7 +1145,7 @@ public class AuthService {
         user.setRole(UserRole.SUPER_ADMIN);
         user = userRepository.save(user);
         // Role change invalidates cached JWT claims → force re-login everywhere.
-        try { sessionService.revokeAllForUser(user.getId(), currentActorId(), "ROLE_PROMOTED"); } catch (Exception ignored) {}
+        try { sessionService.revokeAllForUser(user.getId(), currentActorId(), "ROLE_PROMOTED"); } catch (Exception e) { log.warn("Failed to revoke sessions after ROLE_PROMOTED for user {}: {}", user.getId(), e.getMessage()); }
         auditService.success(AuthAuditService.EventType.ROLE_PROMOTED, currentActorId(), currentActorRole(),
             user.getId(), user.getEmail(), "ADMIN → SUPER_ADMIN");
         log.info("User {} promoted to SUPER_ADMIN", user.getId());
@@ -1116,7 +1170,7 @@ public class AuthService {
         }
         user.setRole(UserRole.ADMIN);
         user = userRepository.save(user);
-        try { sessionService.revokeAllForUser(user.getId(), actor, "ROLE_DEMOTED"); } catch (Exception ignored) {}
+        try { sessionService.revokeAllForUser(user.getId(), actor, "ROLE_DEMOTED"); } catch (Exception e) { log.warn("Failed to revoke sessions after ROLE_DEMOTED for user {}: {}", user.getId(), e.getMessage()); }
         auditService.success(AuthAuditService.EventType.ROLE_DEMOTED, actor, currentActorRole(),
             user.getId(), user.getEmail(), "SUPER_ADMIN → ADMIN");
         log.info("User {} demoted to ADMIN", user.getId());

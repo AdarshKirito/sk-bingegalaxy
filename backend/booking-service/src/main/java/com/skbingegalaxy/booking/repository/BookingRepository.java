@@ -14,6 +14,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -233,6 +234,20 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     // Anti-abuse: count current PENDING bookings for a customer
     @Query("SELECT COUNT(b) FROM Booking b WHERE b.customerId = :cid AND b.status = 'PENDING' AND b.paymentStatus = 'PENDING'")
     long countPendingByCustomerId(@Param("cid") Long customerId);
+
+    /**
+     * Content-based duplicate check used to refuse a second PENDING booking for
+     * the same customer + event + slot. Sits alongside Idempotency-Key + the
+     * gateway rate limiter as defence in depth.
+     */
+    @Query("SELECT CASE WHEN COUNT(b) > 0 THEN TRUE ELSE FALSE END FROM Booking b " +
+           "WHERE b.customerId = :cid AND b.eventType.id = :eventTypeId " +
+           "AND b.bookingDate = :date AND b.startTime = :startTime " +
+           "AND b.status = 'PENDING'")
+    boolean existsPendingDuplicate(@Param("cid") Long customerId,
+                                   @Param("eventTypeId") Long eventTypeId,
+                                   @Param("date") LocalDate date,
+                                   @Param("startTime") LocalTime startTime);
 
     // Anti-abuse: count bookings auto-cancelled due to payment timeout in the recent window
     @Query("SELECT COUNT(b) FROM Booking b WHERE b.customerId = :cid AND b.status = 'CANCELLED' AND b.paymentStatus = 'PENDING' AND b.updatedAt > :since")

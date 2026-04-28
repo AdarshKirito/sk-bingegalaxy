@@ -31,8 +31,32 @@ public class User {
     @Column(nullable = false, unique = true, length = 150)
     private String email;
 
-    @Column(unique = true, length = 15)
+    @Column(unique = true, length = 20)
     private String phone;
+
+    /** E.164 dial prefix including the leading '+', e.g. "+91". Null until the user supplies a phone. */
+    @Column(name = "phone_country_code", length = 8)
+    private String phoneCountryCode;
+
+    // ── Postal address (optional; populated via profile / registration flows) ──
+    @Column(name = "address_line1", length = 200)
+    private String addressLine1;
+
+    @Column(name = "address_line2", length = 200)
+    private String addressLine2;
+
+    @Column(length = 100)
+    private String city;
+
+    @Column(length = 100)
+    private String state;
+
+    /** ISO-3166-1 alpha-2 country code, e.g. "IN", "US". */
+    @Column(length = 2)
+    private String country;
+
+    @Column(name = "postal_code", length = 20)
+    private String postalCode;
 
     @Column(length = 100)
     private String preferredExperience;

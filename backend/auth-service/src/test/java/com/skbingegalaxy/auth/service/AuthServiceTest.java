@@ -36,6 +36,12 @@ class AuthServiceTest {
     @Mock private JwtProvider jwtProvider;
     @Mock private KafkaTemplate<String, Object> kafkaTemplate;
     @Mock private com.skbingegalaxy.auth.service.TokenRevocationService tokenRevocationService;
+    @Mock private com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier googleIdTokenVerifier;
+    @Mock private com.skbingegalaxy.auth.service.AuthAuditService auditService;
+    @Mock private com.skbingegalaxy.auth.service.UserSessionService sessionService;
+    @Mock private com.skbingegalaxy.auth.service.PasswordHistoryService passwordHistoryService;
+    @Mock private com.skbingegalaxy.auth.service.EmailVerificationService emailVerificationService;
+    @Mock private com.skbingegalaxy.auth.service.TotpService totpService;
 
     @InjectMocks private AuthService authService;
 
@@ -54,7 +60,7 @@ class AuthServiceTest {
                 .firstName("John")
                 .lastName("Doe")
                 .email("john@example.com")
-                .phone("9876543210")
+                .phone("9876543210").phoneCountryCode("+91")
                 .password("encodedPassword")
                 .role(UserRole.CUSTOMER)
                 .active(true)
@@ -68,7 +74,7 @@ class AuthServiceTest {
     void register_success() {
         RegisterRequest request = RegisterRequest.builder()
                 .firstName("John").lastName("Doe")
-                .email("john@example.com").phone("9876543210")
+                .email("john@example.com").phone("9876543210").phoneCountryCode("+91")
                 .password("Password@123").build();
 
         when(userRepository.existsByEmail(anyString())).thenReturn(false);
@@ -83,13 +89,13 @@ class AuthServiceTest {
         assertThat(response.getToken()).isEqualTo("jwt-token");
         assertThat(response.getRefreshToken()).isEqualTo("refresh-token");
         assertThat(response.getUser().getEmail()).isEqualTo("john@example.com");
-        verify(userRepository).save(any(User.class));
+        verify(userRepository, atLeastOnce()).save(any(User.class));
     }
 
     @Test
     void register_duplicateEmail_throwsException() {
         RegisterRequest request = RegisterRequest.builder()
-                .email("john@example.com").phone("9876543210").build();
+                .email("john@example.com").phone("9876543210").phoneCountryCode("+91").build();
 
         when(userRepository.existsByEmail("john@example.com")).thenReturn(true);
 
@@ -100,7 +106,7 @@ class AuthServiceTest {
     @Test
     void register_duplicatePhone_throwsException() {
         RegisterRequest request = RegisterRequest.builder()
-                .email("john@example.com").phone("9876543210").build();
+                .email("john@example.com").phone("9876543210").phoneCountryCode("+91").build();
 
         when(userRepository.existsByEmail(anyString())).thenReturn(false);
         when(userRepository.existsByPhone("9876543210")).thenReturn(true);

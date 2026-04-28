@@ -3,49 +3,67 @@ package com.skbingegalaxy.booking.service;
 import com.skbingegalaxy.booking.config.LoyaltyProperties;
 import com.skbingegalaxy.booking.dto.LoyaltyAccountDto;
 import com.skbingegalaxy.booking.dto.LoyaltyTransactionDto;
-import com.skbingegalaxy.booking.entity.LoyaltyAccount;
-import com.skbingegalaxy.booking.entity.LoyaltyTransaction;
-import com.skbingegalaxy.booking.repository.LoyaltyAccountRepository;
-import com.skbingegalaxy.booking.repository.LoyaltyTransactionRepository;
+import com.skbingegalaxy.booking.loyalty.v2.LoyaltyV2Constants;
+import com.skbingegalaxy.booking.loyalty.v2.engine.PointsWalletService;
+import com.skbingegalaxy.booking.loyalty.v2.engine.RedeemEngine;
+import com.skbingegalaxy.booking.loyalty.v2.entity.LoyaltyLedgerEntry;
+import com.skbingegalaxy.booking.loyalty.v2.entity.LoyaltyMembership;
+import com.skbingegalaxy.booking.loyalty.v2.entity.LoyaltyPointsWallet;
+import com.skbingegalaxy.booking.loyalty.v2.entity.LoyaltyTierDefinition;
+import com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyLedgerEntryRepository;
+import com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyPointsWalletRepository;
+import com.skbingegalaxy.booking.loyalty.v2.service.EnrollmentService;
+import com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyConfigService;
 import com.skbingegalaxy.common.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 
+/**
+ * Loyalty service — thin v1-shaped facade over the v2 engines.
+ *
+ * <p>The legacy v1 ledger ({@code loyalty_accounts} / {@code loyalty_transactions})
+ * was retired in M13.  Every public method here now reads / writes the
+ * v2 wallet via {@link PointsWalletService}, {@link RedeemEngine}, and
+ * {@link EnrollmentService}.  The DTO emitted by {@link #getAccount(Long)}
+ * keeps its v1 shape so the existing customer-facing endpoint
+ * {@code /api/v1/bookings/loyalty} continues to render against v2 data
+ * without a breaking change for the frontend.
+ *
+ * <p>Earn / expire / cancellation reversal are handled directly by the
+ * v2 listener {@code LoyaltyV2BookingListener} on transactional events,
+ * so they no longer have a method on this facade.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class LoyaltyService {
 
-    private final LoyaltyAccountRepository accountRepository;
-    private final LoyaltyTransactionRepository transactionRepository;
     private final LoyaltyProperties loyaltyProps;
+    private final EnrollmentService enrollmentService;
+    private final LoyaltyConfigService loyaltyConfigService;
+    private final PointsWalletService walletService;
+    private final RedeemEngine redeemEngine;
+    private final LoyaltyPointsWalletRepository walletRepository;
+    private final LoyaltyLedgerEntryRepository ledgerRepository;
 
-    // ── Tier thresholds (total points ever earned) ───────────
-    private static final Map<String, Long> TIER_THRESHOLDS = Map.of(
-        "BRONZE", 0L,
-        "SILVER", 5_000L,
-        "GOLD", 20_000L,
-        "PLATINUM", 50_000L
-    );
-    private static final List<String> TIER_ORDER = List.of("BRONZE", "SILVER", "GOLD", "PLATINUM");
+    // ── Empty-stub tier ladder used when a customer has no v2 membership yet.
+    //    Matches the v2 default ladder so the UI shows "BRONZE → SILVER" with
+    //    a sensible target instead of an empty card.
+    private static final List<String> STUB_TIER_ORDER = List.of("BRONZE", "SILVER", "GOLD", "PLATINUM");
+    private static final long STUB_NEXT_TIER_THRESHOLD = 5_000L;
 
-    /** Points expire after 365 days by default. */
-    private static final int POINTS_EXPIRY_DAYS = 365;
+    private static final long MAX_SINGLE_ADJUSTMENT = 100_000L;
 
     // ═══════════════════════════════════════════════════════════
-    //  GET ACCOUNT
+    //  GET ACCOUNT  — v1-shaped read backed by the v2 wallet
     // ═══════════════════════════════════════════════════════════
 
     @Transactional(readOnly = true)
@@ -54,353 +72,264 @@ public class LoyaltyService {
             return null;
         }
 
-        Optional<LoyaltyAccount> accountOpt = accountRepository.findByCustomerId(customerId);
-        if (accountOpt.isEmpty()) {
-            // Return an empty account DTO (customer has no history yet)
-            return LoyaltyAccountDto.builder()
-                .customerId(customerId)
-                .totalPointsEarned(0)
-                .currentBalance(0)
-                .tierLevel("BRONZE")
-                .pointsToNextTier(TIER_THRESHOLDS.get("SILVER"))
-                .nextTierLevel("SILVER")
-                .redemptionRate(loyaltyProps.getRedemptionRate())
-                .recentTransactions(List.of())
-                .build();
+        LoyaltyMembership m = enrollmentService.findForCustomer(customerId).orElse(null);
+        if (m == null) {
+            return emptyStub(customerId);
         }
 
-        LoyaltyAccount account = accountOpt.get();
-        List<LoyaltyTransactionDto> recent = transactionRepository
-            .findByAccountIdOrderByCreatedAtDesc(account.getId(), PageRequest.of(0, 10))
-            .map(this::toTransactionDto)
-            .getContent();
+        LoyaltyPointsWallet w = walletRepository.findByMembershipId(m.getId()).orElse(null);
+        long balance = w == null ? 0L : w.getCurrentBalance();
+        long earned  = w == null ? 0L : w.getLifetimeEarned();
 
-        return toAccountDto(account, recent);
+        TierGap gap = computeTierGap(m.getProgramId(), m.getCurrentTierCode(), m.getQualifyingCreditsWindow());
+
+        List<LoyaltyTransactionDto> recent = w == null ? List.of()
+                : ledgerRepository.findByWalletIdOrderByCreatedAtDesc(w.getId(), PageRequest.of(0, 10))
+                    .map(LoyaltyService::ledgerToV1Dto)
+                    .getContent();
+
+        return LoyaltyAccountDto.builder()
+            .id(m.getId())
+            .customerId(customerId)
+            .totalPointsEarned(earned)
+            .currentBalance(balance)
+            .tierLevel(m.getCurrentTierCode())
+            .pointsToNextTier(gap.pointsToNext())
+            .nextTierLevel(gap.nextTierCode())
+            .createdAt(m.getEnrolledAt())
+            .updatedAt(m.getUpdatedAt())
+            .redemptionRate(loyaltyProps.getRedemptionRate())
+            .recentTransactions(recent)
+            .build();
+    }
+
+    private LoyaltyAccountDto emptyStub(Long customerId) {
+        return LoyaltyAccountDto.builder()
+            .customerId(customerId)
+            .totalPointsEarned(0)
+            .currentBalance(0)
+            .tierLevel(STUB_TIER_ORDER.get(0))
+            .pointsToNextTier(STUB_NEXT_TIER_THRESHOLD)
+            .nextTierLevel(STUB_TIER_ORDER.get(1))
+            .redemptionRate(loyaltyProps.getRedemptionRate())
+            .recentTransactions(List.of())
+            .build();
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  EARN POINTS (called on booking checkout/completion)
+    //  REDEEM POINTS  — booking checkout discount
     // ═══════════════════════════════════════════════════════════
 
-    @Transactional
-    public long earnPoints(Long customerId, String bookingRef, BigDecimal amountPaid) {
-        if (!loyaltyProps.isEnabled() || loyaltyProps.getPointsPerRupee() <= 0) {
-            return 0;
-        }
-        // M12 cutover — v2 EarnEngine is now the single source of truth.
-        // The BookingService also publishes BookingCompletedEvent which the
-        // v2 listener handles; v1 earning is a no-op in v2-primary mode.
-        if (loyaltyProps.isV2Primary()) {
-            log.debug("[loyalty-v1] earn skipped — v2Primary is ON (booking={})", bookingRef);
-            return 0;
-        }
-
-        LoyaltyAccount account = getOrCreateAccount(customerId);
-
-        // Prevent double-earning for the same booking
-        if (transactionRepository.existsByAccountIdAndBookingRefAndType(account.getId(), bookingRef, "EARN")) {
-            log.debug("Points already earned for booking {} — skipping", bookingRef);
-            return 0;
-        }
-
-        long points = amountPaid.multiply(BigDecimal.valueOf(loyaltyProps.getPointsPerRupee()))
-            .setScale(0, RoundingMode.FLOOR).longValue();
-        if (points <= 0) return 0;
-
-        account.setTotalPointsEarned(account.getTotalPointsEarned() + points);
-        account.setCurrentBalance(account.getCurrentBalance() + points);
-        recalculateTier(account);
-        accountRepository.save(account);
-
-        transactionRepository.save(LoyaltyTransaction.builder()
-            .accountId(account.getId())
-            .bookingRef(bookingRef)
-            .type("EARN")
-            .points(points)
-            .description("Earned " + points + " points for booking " + bookingRef)
-            .expiresAt(LocalDateTime.now().plusDays(POINTS_EXPIRY_DAYS))
-            .build());
-
-        log.info("Loyalty: customer {} earned {} points for booking {} (new balance: {})",
-            customerId, points, bookingRef, account.getCurrentBalance());
-        return points;
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    //  REDEEM POINTS (called during booking creation)
-    // ═══════════════════════════════════════════════════════════
-
-    /**
-     * Attempts to redeem the requested number of loyalty points.
-     * Returns the actual discount amount in ₹.
-     */
+    /** Backwards-compatible overload — bingeId-less callers get a no-op. */
     @Transactional
     public RedemptionResult redeemPoints(Long customerId, String bookingRef,
+                                          long requestedPoints, BigDecimal maxDiscount) {
+        return redeemPoints(customerId, null, bookingRef, requestedPoints, maxDiscount);
+    }
+
+    /**
+     * Redeem loyalty points for a discount on the given booking, capped
+     * at {@code maxDiscount}.  v2 {@link RedeemEngine} additionally
+     * applies the binge's per-booking redemption-percent rule.
+     */
+    @Transactional
+    public RedemptionResult redeemPoints(Long customerId, Long bingeId, String bookingRef,
                                           long requestedPoints, BigDecimal maxDiscount) {
         if (!loyaltyProps.isEnabled() || loyaltyProps.getRedemptionRate() <= 0) {
             return new RedemptionResult(0, BigDecimal.ZERO);
         }
-
-        Optional<LoyaltyAccount> accountOpt = accountRepository.findByCustomerIdForUpdate(customerId);
-        if (accountOpt.isEmpty() || accountOpt.get().getCurrentBalance() <= 0) {
+        if (bingeId == null) {
+            log.warn("[loyalty] redeem skipped — bingeId not supplied (booking={})", bookingRef);
             return new RedemptionResult(0, BigDecimal.ZERO);
         }
 
-        LoyaltyAccount account = accountOpt.get();
-        long actualPoints = Math.min(requestedPoints, account.getCurrentBalance());
-        if (actualPoints <= 0) return new RedemptionResult(0, BigDecimal.ZERO);
-
-        BigDecimal discount = BigDecimal.valueOf(actualPoints)
-            .divide(BigDecimal.valueOf(loyaltyProps.getRedemptionRate()), 2, RoundingMode.FLOOR);
-
-        // Cap discount at the booking total
-        if (discount.compareTo(maxDiscount) > 0) {
-            discount = maxDiscount;
-            // FLOOR, not CEILING: after capping we must never debit MORE
-            // points than the (now-reduced) discount is worth. Using CEILING
-            // can shave off a fractional point of value per redemption
-            // — always in the house's favour and against the customer.
-            actualPoints = discount.multiply(BigDecimal.valueOf(loyaltyProps.getRedemptionRate()))
-                .setScale(0, RoundingMode.FLOOR).longValue();
+        LoyaltyMembership m = enrollmentService.findForCustomer(customerId).orElse(null);
+        if (m == null) {
+            log.debug("[loyalty] redeem skipped — customer {} not enrolled (booking={})",
+                customerId, bookingRef);
+            return new RedemptionResult(0, BigDecimal.ZERO);
         }
-
-        if (actualPoints <= 0 || discount.compareTo(BigDecimal.ZERO) <= 0) {
+        LoyaltyPointsWallet w = walletRepository.findByMembershipId(m.getId()).orElse(null);
+        if (w == null || w.getCurrentBalance() <= 0) {
+            return new RedemptionResult(0, BigDecimal.ZERO);
+        }
+        long pointsToBurn = Math.min(requestedPoints, w.getCurrentBalance());
+        if (pointsToBurn <= 0) {
             return new RedemptionResult(0, BigDecimal.ZERO);
         }
 
-        account.setCurrentBalance(account.getCurrentBalance() - actualPoints);
-        accountRepository.save(account);
-
-        transactionRepository.save(LoyaltyTransaction.builder()
-            .accountId(account.getId())
-            .bookingRef(bookingRef)
-            .type("REDEEM")
-            .points(-actualPoints)
-            .description("Redeemed " + actualPoints + " points (₹" + discount + " discount) for booking " + bookingRef)
-            .build());
-
-        log.info("Loyalty: customer {} redeemed {} points (₹{} discount) for booking {}",
-            customerId, actualPoints, discount, bookingRef);
-        return new RedemptionResult(actualPoints, discount);
-    }
-
-    /**
-     * Reverse a previous redemption (e.g. on booking cancellation).
-     */
-    @Transactional
-    public void reverseRedemption(Long customerId, String bookingRef, long points) {
-        if (points <= 0) return;
-        Optional<LoyaltyAccount> accountOpt = accountRepository.findByCustomerIdForUpdate(customerId);
-        if (accountOpt.isEmpty()) return;
-
-        LoyaltyAccount account = accountOpt.get();
-
-        // Idempotency: skip if already reversed for this booking
-        if (transactionRepository.existsByAccountIdAndBookingRefAndType(account.getId(), bookingRef, "REVERSAL")) {
-            log.info("Loyalty reversal already processed for booking {} — skipping", bookingRef);
-            return;
+        try {
+            RedeemEngine.RedeemResult res = redeemEngine.burn(new RedeemEngine.BurnRequest(
+                m.getId(),
+                bingeId,
+                bookingRef,
+                pointsToBurn,
+                maxDiscount,
+                LocalDateTime.now(),
+                "redeem:" + bookingRef
+            ));
+            if (!res.accepted()) {
+                log.info("[loyalty] redeem rejected for booking {} — reason={}",
+                    bookingRef, res.rejectReason());
+                return new RedemptionResult(0, BigDecimal.ZERO);
+            }
+            BigDecimal applied = res.currencyApplied();
+            long       burned  = res.pointsBurned();
+            if (applied.compareTo(maxDiscount) > 0) {
+                applied = maxDiscount;
+            }
+            log.info("[loyalty] redeemed {} pts (₹{} discount) for customer {} booking {}",
+                burned, applied, customerId, bookingRef);
+            return new RedemptionResult(burned, applied);
+        } catch (RuntimeException ex) {
+            log.warn("[loyalty] redeem failed for booking {} — {}", bookingRef, ex.getMessage());
+            return new RedemptionResult(0, BigDecimal.ZERO);
         }
-
-        account.setCurrentBalance(account.getCurrentBalance() + points);
-        accountRepository.save(account);
-
-        transactionRepository.save(LoyaltyTransaction.builder()
-            .accountId(account.getId())
-            .bookingRef(bookingRef)
-            .type("REVERSAL")
-            .points(points)
-            .description("Refunded " + points + " points for cancelled booking " + bookingRef)
-            .build());
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  ADMIN: Manual adjustment
+    //  ADMIN: manual adjustment (credit / debit)
     // ═══════════════════════════════════════════════════════════
-
-    private static final long MAX_SINGLE_ADJUSTMENT = 100_000L;
 
     @Transactional
     public LoyaltyAccountDto adjustPoints(Long customerId, long points, String description, String role) {
-        LoyaltyAccount account = getOrCreateAccount(customerId);
-
-        boolean isSuperAdmin = "SUPER_ADMIN".equalsIgnoreCase(role);
+        boolean isSuperAdmin = isSuperAdminRole(role);
         if (!isSuperAdmin && Math.abs(points) > MAX_SINGLE_ADJUSTMENT) {
             throw new BusinessException(
                 "Single adjustment cannot exceed " + MAX_SINGLE_ADJUSTMENT + " points. "
                 + "Only SUPER_ADMIN can perform larger adjustments.");
         }
 
-        if (points < 0 && account.getCurrentBalance() + points < 0) {
+        LoyaltyMembership m = enrollmentService.findForCustomer(customerId)
+            .orElseGet(() -> enrollmentService.enrollExplicit(
+                customerId, LoyaltyV2Constants.ENROLL_ADMIN_IMPORT));
+        LoyaltyPointsWallet w = walletRepository.findByMembershipId(m.getId()).orElse(null);
+        long currentBalance = w == null ? 0L : w.getCurrentBalance();
+        if (points < 0 && currentBalance + points < 0) {
             throw new BusinessException("Insufficient loyalty balance for this adjustment");
         }
 
-        account.setCurrentBalance(account.getCurrentBalance() + points);
+        LocalDateTime now = LocalDateTime.now();
+        String desc = description != null ? description : "Admin adjustment";
+        String idempotencyKey = "adjust:" + customerId + ":" + now.toEpochSecond(ZoneOffset.UTC) + ":" + points;
+        String actorRole = isSuperAdmin ? "SUPER_ADMIN" : "ADMIN";
+
         if (points > 0) {
-            account.setTotalPointsEarned(account.getTotalPointsEarned() + points);
+            walletService.credit(new PointsWalletService.CreditRequest(
+                m.getId(),
+                points,
+                LoyaltyV2Constants.LEDGER_ADJUST,
+                "ADMIN_ADJUSTMENT",
+                "adjust:customer=" + customerId,
+                null,
+                null,
+                now,
+                now.plusYears(10),
+                idempotencyKey,
+                null,
+                "ADMIN_ADJUSTMENT",
+                desc,
+                null,
+                actorRole
+            ));
+        } else if (points < 0) {
+            walletService.debit(new PointsWalletService.DebitRequest(
+                m.getId(),
+                -points,
+                LoyaltyV2Constants.LEDGER_ADJUST,
+                null,
+                null,
+                idempotencyKey,
+                null,
+                "ADMIN_ADJUSTMENT",
+                desc,
+                null,
+                actorRole
+            ));
         }
-        recalculateTier(account);
-        accountRepository.save(account);
-
-        transactionRepository.save(LoyaltyTransaction.builder()
-            .accountId(account.getId())
-            .type("ADJUST")
-            .points(points)
-            .description(description != null ? description : "Admin adjustment")
-            .build());
-
-        return toAccountDto(account, List.of());
+        return getAccount(customerId);
     }
 
-    // ═══════════════════════════════════════════════════════════
-    //  EXPIRE POINTS (scheduled daily at 2:00 AM)
-    // ═══════════════════════════════════════════════════════════
-
-    @Scheduled(cron = "0 0 2 * * *")
-    @SchedulerLock(name = "loyalty-expire-points", lockAtMostFor = "PT10M", lockAtLeastFor = "PT1M")
-    @Transactional
-    public void expirePoints() {
-        if (loyaltyProps.isV2Primary()) {
-            log.debug("[loyalty-v1] expirePoints skipped — v2Primary is ON");
-            return;
-        }
-        List<LoyaltyTransaction> expired = transactionRepository.findExpiredEarnTransactions(LocalDateTime.now());
-        int count = 0;
-        for (LoyaltyTransaction earn : expired) {
-            if (earn.getPoints() <= 0) continue;
-
-            // PESSIMISTIC_WRITE — the expiry scheduler and a user-initiated
-            // redeem/reverse can both target the same account; without this
-            // lock their read-modify-write cycles can lose updates.
-            LoyaltyAccount account = accountRepository.findByIdForUpdate(earn.getAccountId()).orElse(null);
-            if (account == null) continue;
-
-            long pointsToExpire = Math.min(earn.getPoints(), account.getCurrentBalance());
-            if (pointsToExpire <= 0) {
-                // Mark as expired even if balance is 0 (points were already redeemed)
-                earn.setPoints(0);
-                transactionRepository.save(earn);
-                continue;
-            }
-
-            account.setCurrentBalance(account.getCurrentBalance() - pointsToExpire);
-            accountRepository.save(account);
-
-            transactionRepository.save(LoyaltyTransaction.builder()
-                .accountId(account.getId())
-                .bookingRef(earn.getBookingRef())
-                .type("EXPIRE")
-                .points(-pointsToExpire)
-                .description("Expired " + pointsToExpire + " points (earned " + POINTS_EXPIRY_DAYS + "+ days ago)")
-                .build());
-
-            // Zero out the original EARN so it isn't processed again
-            earn.setPoints(0);
-            transactionRepository.save(earn);
-            count++;
-        }
-        if (count > 0) {
-            log.info("Loyalty expiry: expired points for {} transactions", count);
-        }
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    //  REVERSE EARNED POINTS (on booking cancellation)
-    // ═══════════════════════════════════════════════════════════
-
-    @Transactional
-    public void reverseEarnedPoints(Long customerId, String bookingRef) {
-        Optional<LoyaltyAccount> accountOpt = accountRepository.findByCustomerIdForUpdate(customerId);
-        if (accountOpt.isEmpty()) return;
-
-        LoyaltyAccount account = accountOpt.get();
-
-        // Idempotency: skip if EARN_REVERSAL already recorded for this booking
-        if (transactionRepository.existsByAccountIdAndBookingRefAndType(account.getId(), bookingRef, "EARN_REVERSAL")) {
-            log.info("Earned points already reversed for booking {} — skipping", bookingRef);
-            return;
-        }
-
-        long earnedForBooking = transactionRepository.sumEarnedPointsForBooking(account.getId(), bookingRef);
-        if (earnedForBooking <= 0) return;
-
-        long actualDeduction = Math.min(earnedForBooking, account.getCurrentBalance());
-        if (actualDeduction > 0) {
-            account.setCurrentBalance(account.getCurrentBalance() - actualDeduction);
-        }
-        account.setTotalPointsEarned(account.getTotalPointsEarned() - earnedForBooking);
-        recalculateTier(account);
-        accountRepository.save(account);
-
-        transactionRepository.save(LoyaltyTransaction.builder()
-            .accountId(account.getId())
-            .bookingRef(bookingRef)
-            .type("EARN_REVERSAL")
-            .points(-actualDeduction)
-            .description("Reversed " + earnedForBooking + " earned points for cancelled booking " + bookingRef)
-            .build());
-
-        log.info("Loyalty: reversed {} earned points (deducted {} from balance) for cancelled booking {}",
-            earnedForBooking, actualDeduction, bookingRef);
+    private static boolean isSuperAdminRole(String role) {
+        return role != null && role.toUpperCase().contains("SUPER_ADMIN");
     }
 
     // ═══════════════════════════════════════════════════════════
     //  HELPERS
     // ═══════════════════════════════════════════════════════════
 
-    private LoyaltyAccount getOrCreateAccount(Long customerId) {
-        return accountRepository.findByCustomerId(customerId)
-            .orElseGet(() -> accountRepository.save(LoyaltyAccount.builder()
-                .customerId(customerId)
-                .build()));
-    }
-
-    private void recalculateTier(LoyaltyAccount account) {
-        long earned = account.getTotalPointsEarned();
-        String tier = "BRONZE";
-        for (int i = TIER_ORDER.size() - 1; i >= 0; i--) {
-            if (earned >= TIER_THRESHOLDS.get(TIER_ORDER.get(i))) {
-                tier = TIER_ORDER.get(i);
-                break;
-            }
-        }
-        account.setTierLevel(tier);
-    }
-
-    private LoyaltyAccountDto toAccountDto(LoyaltyAccount account, List<LoyaltyTransactionDto> recent) {
-        int tierIdx = TIER_ORDER.indexOf(account.getTierLevel());
-        Long pointsToNext = null;
-        String nextTier = null;
-        if (tierIdx < TIER_ORDER.size() - 1) {
-            nextTier = TIER_ORDER.get(tierIdx + 1);
-            pointsToNext = TIER_THRESHOLDS.get(nextTier) - account.getTotalPointsEarned();
-            if (pointsToNext < 0) pointsToNext = 0L;
-        }
-
-        return LoyaltyAccountDto.builder()
-            .id(account.getId())
-            .customerId(account.getCustomerId())
-            .totalPointsEarned(account.getTotalPointsEarned())
-            .currentBalance(account.getCurrentBalance())
-            .tierLevel(account.getTierLevel())
-            .pointsToNextTier(pointsToNext)
-            .nextTierLevel(nextTier)
-            .createdAt(account.getCreatedAt())
-            .updatedAt(account.getUpdatedAt())
-            .redemptionRate(loyaltyProps.getRedemptionRate())
-            .recentTransactions(recent)
-            .build();
-    }
-
-    private LoyaltyTransactionDto toTransactionDto(LoyaltyTransaction t) {
+    /** Project a v2 ledger entry onto the legacy v1 transaction DTO shape. */
+    private static LoyaltyTransactionDto ledgerToV1Dto(LoyaltyLedgerEntry e) {
         return LoyaltyTransactionDto.builder()
-            .id(t.getId())
-            .bookingRef(t.getBookingRef())
-            .type(t.getType())
-            .points(t.getPoints())
-            .description(t.getDescription())
-            .createdAt(t.getCreatedAt())
+            .id(e.getId())
+            .bookingRef(e.getBookingRef())
+            .type(mapLedgerType(e.getEntryType()))
+            .points(e.getPointsDelta())
+            .description(e.getDescription())
+            .createdAt(e.getCreatedAt())
             .build();
     }
+
+    /** Map v2 ledger entry types onto the legacy v1 vocabulary the UI expects. */
+    private static String mapLedgerType(String entryType) {
+        if (entryType == null) return "ADJUST";
+        return switch (entryType) {
+            case "EARN", "BONUS", "STATUS_MATCH_GRANT", "TRANSFER_IN" -> "EARN";
+            case "REDEEM", "TRANSFER_OUT" -> "REDEEM";
+            case "REVERSE_EARN" -> "EARN_REVERSAL";
+            case "REVERSE_REDEEM" -> "REVERSAL";
+            case "EXPIRE" -> "EXPIRE";
+            default -> "ADJUST";
+        };
+    }
+
+    /**
+     * Compute "points to next tier" + "next tier code" against the v2 tier ladder.
+     * Skips non-progressive tiers (CUSTOMER_PWN admin-only tier; lifetime-status
+     * tiers like LIFETIME_PLATINUM that are earned via lifetime credits + years
+     * held, not qualification credits) so the customer-facing snapshot only
+     * advertises tiers reachable by accruing more qualifying credits.
+     */
+    private TierGap computeTierGap(Long programId, String currentTierCode, long currentQualifyingCredits) {
+        try {
+            List<LoyaltyTierDefinition> ladder = loyaltyConfigService.activeLadder(programId, LocalDateTime.now());
+            int idx = -1;
+            for (int i = 0; i < ladder.size(); i++) {
+                if (ladder.get(i).getCode().equals(currentTierCode)) { idx = i; break; }
+            }
+            if (idx < 0) {
+                return new TierGap(null, null);
+            }
+            for (int i = idx + 1; i < ladder.size(); i++) {
+                LoyaltyTierDefinition next = ladder.get(i);
+                if (!isProgressiveTier(next)) {
+                    continue;
+                }
+                long threshold = next.getQualificationCreditsRequired();
+                long gap = Math.max(0L, threshold - currentQualifyingCredits);
+                return new TierGap(gap, next.getCode());
+            }
+            return new TierGap(null, null);
+        } catch (RuntimeException ex) {
+            log.debug("[loyalty] tier-gap fallback for tier {}: {}", currentTierCode, ex.getMessage());
+            return new TierGap(null, null);
+        }
+    }
+
+    /**
+     * A tier is "progressive" (advertisable as the next goal) only if it is
+     * earned by qualifying credits. Lifetime-status tiers and the internal
+     * CUSTOMER_PWN admin tier are excluded.
+     */
+    private static boolean isProgressiveTier(LoyaltyTierDefinition t) {
+        if (t == null || t.getCode() == null) return false;
+        if (LoyaltyV2Constants.TIER_CUSTOMER_PWN.equals(t.getCode())) return false;
+        if (t.getLifetimeCreditsRequired() != null) return false;
+        if (t.getLifetimeYearsHeldRequired() != null) return false;
+        return t.getQualificationCreditsRequired() > 0L;
+    }
+
+    private record TierGap(Long pointsToNext, String nextTierCode) { }
 
     public record RedemptionResult(long pointsRedeemed, BigDecimal discountAmount) {}
 }

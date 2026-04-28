@@ -79,6 +79,17 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
 
         // SECURITY: Always strip X-User-* headers from incoming requests to prevent spoofing.
         // The gateway is the only source of truth for these headers.
+        // Log a WARN line if any client-supplied identity header was present so that
+        // SOC tooling can detect spoofing attempts (count + alert in monitoring).
+        HttpHeaders inbound = request.getHeaders();
+        if (inbound.containsKey("X-User-Id") || inbound.containsKey("X-User-Role")
+                || inbound.containsKey("X-User-Email") || inbound.containsKey("X-User-Name")
+                || inbound.containsKey("X-User-Phone") || inbound.containsKey("X-User-Phone-Country-Code")) {
+            log.warn("auth.header.spoof.attempt path={} remote={} ua={}",
+                path,
+                request.getRemoteAddress() != null ? request.getRemoteAddress().getAddress().getHostAddress() : "unknown",
+                inbound.getFirst(HttpHeaders.USER_AGENT));
+        }
         ServerHttpRequest stripped = request.mutate()
             .headers(h -> {
                 h.remove("X-User-Id");
@@ -86,6 +97,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
                 h.remove("X-User-Role");
                 h.remove("X-User-Name");
                 h.remove("X-User-Phone");
+                h.remove("X-User-Phone-Country-Code");
             })
             .build();
         exchange = exchange.mutate().request(stripped).build();
@@ -114,6 +126,12 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
                 return exchange.getResponse().setComplete();
             }
 
+            if (isSuperAdminPath(path) && !"SUPER_ADMIN".equals(role)) {
+                log.warn("Non super-admin role '{}' accessing super-admin path {}", role, path);
+                exchange.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
+                return exchange.getResponse().setComplete();
+            }
+
             if (isAdminPath(path) && !"ADMIN".equals(role) && !"SUPER_ADMIN".equals(role)) {
                 log.warn("Non-admin role '{}' accessing admin path {}", role, path);
                 exchange.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
@@ -122,6 +140,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
 
             String firstName = claims.get("firstName", String.class);
             String phone = claims.get("phone", String.class);
+            String phoneCountryCode = claims.get("phoneCountryCode", String.class);
             String subject = claims.getSubject();
             String email = claims.get("email", String.class);
 
@@ -137,6 +156,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
                 .header("X-User-Role", role)
                 .header("X-User-Name", firstName != null ? firstName : "Customer")
                 .header("X-User-Phone", phone != null ? phone : "")
+                .header("X-User-Phone-Country-Code", phoneCountryCode != null ? phoneCountryCode : "")
                 .build();
 
             return chain.filter(exchange.mutate().request(mutatedRequest).build());
@@ -167,15 +187,32 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
     }
 
     /**
-     * Returns true for any /api/v1/{service}/admin path segment.
+     * Returns true for any path that exposes admin/super-admin functionality so the
+     * gateway can enforce role-based gating. Covers:
+     *   /api/v1/{service}/admin/**
+     *   /api/v2/{service}/admin/**
+     *   /api/v2/{service}/super-admin/**
      * Uses normalized path to prevent path-traversal bypass (e.g., /../admin/).
      */
     private boolean isAdminPath(String path) {
-        // Normalize to prevent ../ bypass
         String normalized = java.net.URI.create(path).normalize().getPath();
         String[] segments = normalized.split("/");
-        // /api/v1/xxx/admin... => ["", "api", "v1", "xxx", "admin", ...]
-        return segments.length >= 5 && "admin".equals(segments[4]);
+        // ["", "api", "v1|v2", "service", "admin|super-admin", ...]
+        if (segments.length < 5) return false;
+        String fifth = segments[4];
+        return "admin".equals(fifth) || "super-admin".equals(fifth);
+    }
+
+    /**
+     * Returns true for paths that require the SUPER_ADMIN role specifically.
+     * Currently the only such surface is the loyalty v2 super-admin controller, but
+     * we match on the segment shape so any future {@code /api/v*\/.../super-admin/**}
+     * route is automatically locked down without code changes here.
+     */
+    private boolean isSuperAdminPath(String path) {
+        String normalized = java.net.URI.create(path).normalize().getPath();
+        String[] segments = normalized.split("/");
+        return segments.length >= 5 && "super-admin".equals(segments[4]);
     }
 
     private Claims validateToken(String token) {

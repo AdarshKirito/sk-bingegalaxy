@@ -58,7 +58,7 @@ class EventListenerTest {
                 .status("PENDING")
                 .build();
 
-        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(NotificationDto.builder().id("n1").build());
 
         eventListener.handleBookingCreated(event);
@@ -68,6 +68,7 @@ class EventListenerTest {
                 eq(NotificationChannel.EMAIL),
                 eq("john@example.com"),
                 eq("9876543210"),
+                isNull(),
                 eq("John Doe"),
                 contains("SKBG001"),
                 contains("Birthday Party"),
@@ -90,7 +91,7 @@ class EventListenerTest {
 
         eventListener.handleBookingCreated(event);
 
-        verify(notificationService, never()).sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any());
+        verify(notificationService, never()).sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -103,7 +104,7 @@ class EventListenerTest {
                 .eventTypeName("Movie Night")
                 .build();
 
-        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(NotificationDto.builder().id("n2").build());
 
         eventListener.handleBookingCancelled(event);
@@ -113,6 +114,7 @@ class EventListenerTest {
                 eq(NotificationChannel.EMAIL),
                 eq("jane@example.com"),
                 any(),
+                isNull(),
                 eq("Jane Doe"),
                 contains("SKBG002"),
                 any(),
@@ -132,7 +134,7 @@ class EventListenerTest {
                 .customerName("John Doe")
                 .build();
 
-        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(NotificationDto.builder().id("n3").build());
 
         eventListener.handlePaymentSuccess(event);
@@ -140,7 +142,7 @@ class EventListenerTest {
         verify(notificationService).sendNotification(
                 eq("PAYMENT_SUCCESS"),
                 eq(NotificationChannel.EMAIL),
-                eq("john@example.com"), isNull(), eq("John Doe"),
+                eq("john@example.com"), isNull(), isNull(), eq("John Doe"),
                 contains("SKBG003"),
                 any(),
                 eq("SKBG003"),
@@ -157,7 +159,7 @@ class EventListenerTest {
                 .customerName("John Doe")
                 .build();
 
-        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(NotificationDto.builder().id("n4").build());
 
         eventListener.handlePaymentFailed(event);
@@ -165,7 +167,7 @@ class EventListenerTest {
         verify(notificationService).sendNotification(
                 eq("PAYMENT_FAILED"),
                 eq(NotificationChannel.EMAIL),
-                eq("john@example.com"), isNull(), eq("John Doe"),
+                eq("john@example.com"), isNull(), isNull(), eq("John Doe"),
                 contains("SKBG004"),
                 any(),
                 eq("SKBG004"),
@@ -186,7 +188,7 @@ class EventListenerTest {
                 .bookingRef("SKBG005")
                 .build();
 
-        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(NotificationDto.builder().id("n5").build());
 
         eventListener.handleDirectNotification(event);
@@ -196,6 +198,7 @@ class EventListenerTest {
                 eq(NotificationChannel.SMS),
                 eq("john@example.com"),
                 eq("9876543210"),
+                isNull(),
                 eq("John"),
                 eq("Custom Subject"),
                 eq("Custom body"),
@@ -214,7 +217,7 @@ class EventListenerTest {
                 .body("Body")
                 .build();
 
-        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(NotificationDto.builder().id("n6").build());
 
         eventListener.handleDirectNotification(event);
@@ -223,6 +226,7 @@ class EventListenerTest {
                 eq("INFO"),
                 eq(NotificationChannel.EMAIL),
                 eq("admin@example.com"),
+                isNull(),
                 isNull(),
                 isNull(),
                 eq("Test"),
@@ -240,7 +244,7 @@ class EventListenerTest {
                 .recipientName("New User")
                 .build();
 
-        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(NotificationDto.builder().id("n7").build());
 
         eventListener.handleUserRegistered(event);
@@ -250,6 +254,7 @@ class EventListenerTest {
                 eq(NotificationChannel.EMAIL),
                 eq("newuser@example.com"),
                 eq("9876543210"),
+                isNull(),
                 eq("New User"),
                 eq("Welcome to SK Binge Galaxy!"),
                 contains("New User"),
@@ -267,7 +272,7 @@ class EventListenerTest {
                 .metadata(Map.of("otp", "123456"))
                 .build();
 
-        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(NotificationDto.builder().id("n8").build());
 
         eventListener.handlePasswordReset(event);
@@ -276,6 +281,7 @@ class EventListenerTest {
                 eq("PASSWORD_RESET"),
                 eq(NotificationChannel.EMAIL),
                 eq("john@example.com"),
+                isNull(),
                 isNull(),
                 eq("John"),
                 contains("Password Reset"),
@@ -303,7 +309,7 @@ class EventListenerTest {
                 .totalAmount(BigDecimal.ONE)
                 .build();
 
-        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new RuntimeException("SMTP boom"));
 
         org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
@@ -320,7 +326,7 @@ class EventListenerTest {
                 .eventTypeName("E")
                 .build();
 
-        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new RuntimeException("SMTP boom"));
 
         org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
@@ -339,7 +345,7 @@ class EventListenerTest {
                 .paymentMethod("UPI")
                 .build();
 
-        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new RuntimeException("SMTP boom"));
 
         org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
@@ -356,7 +362,7 @@ class EventListenerTest {
                 .transactionId("T")
                 .build();
 
-        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new RuntimeException("SMTP boom"));
 
         org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
@@ -374,7 +380,7 @@ class EventListenerTest {
                 .body("B")
                 .build();
 
-        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new RuntimeException("SMTP boom"));
 
         org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
@@ -389,7 +395,7 @@ class EventListenerTest {
                 .recipientName("X")
                 .build();
 
-        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new RuntimeException("SMTP boom"));
 
         org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
@@ -405,7 +411,7 @@ class EventListenerTest {
                 .body("OTP")
                 .build();
 
-        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(notificationService.sendNotification(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new RuntimeException("SMTP boom"));
 
         org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
@@ -423,6 +429,6 @@ class EventListenerTest {
         eventListener.handleBookingCreated(event);
 
         verify(notificationService, never()).sendNotification(
-                anyString(), any(), any(), any(), any(), any(), any(), any(), any());
+                anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 }

@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "country-state-city": "^3.2.1",
+    "react-phone-number-input": "^3.4.16"
+  }
+}

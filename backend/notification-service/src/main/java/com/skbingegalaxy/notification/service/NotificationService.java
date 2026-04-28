@@ -92,6 +92,21 @@ public class NotificationService {
             String body,
             String bookingRef,
             Map<String, Object> metadata) {
+        return sendNotification(type, channel, recipientEmail, recipientPhone, null,
+                recipientName, subject, body, bookingRef, metadata);
+    }
+
+    public NotificationDto sendNotification(
+            String type,
+            NotificationChannel channel,
+            String recipientEmail,
+            String recipientPhone,
+            String recipientPhoneCountryCode,
+            String recipientName,
+            String subject,
+            String body,
+            String bookingRef,
+            Map<String, Object> metadata) {
 
         // ── Check user preferences before persisting ──
         if (recipientEmail != null
@@ -100,7 +115,9 @@ public class NotificationService {
                     type, channel, recipientEmail);
             Notification suppressed = Notification.builder()
                     .type(type).channel(channel).recipientEmail(recipientEmail)
-                    .recipientPhone(recipientPhone).recipientName(recipientName)
+                    .recipientPhone(recipientPhone)
+                    .recipientPhoneCountryCode(recipientPhoneCountryCode)
+                    .recipientName(recipientName)
                     .subject(subject).body(body).bookingRef(bookingRef).metadata(metadata)
                     .sent(false).failureReason("Suppressed by user preference")
                     .retryCount(0).createdAt(LocalDateTime.now()).build();
@@ -112,6 +129,7 @@ public class NotificationService {
             .channel(channel)
             .recipientEmail(recipientEmail)
             .recipientPhone(recipientPhone)
+            .recipientPhoneCountryCode(recipientPhoneCountryCode)
             .recipientName(recipientName)
             .subject(subject)
             .body(body)
@@ -296,7 +314,8 @@ public class NotificationService {
             notification.setFailureReason("SMS provider not configured (set app.sms.provider)");
             return;
         }
-        String sid = smsProvider.send(notification.getRecipientPhone(), notification.getBody());
+        String e164 = toE164(notification.getRecipientPhone(), notification.getRecipientPhoneCountryCode());
+        String sid = smsProvider.send(e164, notification.getBody());
         log.info("SMS dispatched via {} — SID/ID: {}", smsProvider.providerName(), sid);
     }
 
@@ -315,18 +334,40 @@ public class NotificationService {
         // Check for a pre-approved Content SID template
         java.util.Optional<WhatsAppTemplate> waTpl = whatsAppTemplateRepository
                 .findByTemplateNameAndActiveTrue(notification.getType());
+        String e164 = toE164(notification.getRecipientPhone(), notification.getRecipientPhoneCountryCode());
         String sid;
         if (waTpl.isPresent()) {
             Map<String, String> vars = new HashMap<>();
             if (notification.getRecipientName() != null) vars.put("1", notification.getRecipientName());
             if (notification.getBookingRef() != null) vars.put("2", notification.getBookingRef());
             sid = whatsAppProvider.sendWithContentSid(
-                    notification.getRecipientPhone(), waTpl.get().getContentSid(), vars);
+                    e164, waTpl.get().getContentSid(), vars);
             log.info("WhatsApp (ContentSID) dispatched via {} — SID: {}", whatsAppProvider.providerName(), sid);
         } else {
-            sid = whatsAppProvider.send(notification.getRecipientPhone(), notification.getBody());
+            sid = whatsAppProvider.send(e164, notification.getBody());
             log.info("WhatsApp dispatched via {} — SID/ID: {}", whatsAppProvider.providerName(), sid);
         }
+    }
+
+    /**
+     * Combine the stored national phone (digits only) with the captured country code into
+     * the E.164 format expected by Twilio and most SMS gateways.
+     * Falls back gracefully when the country code is missing or the phone already starts
+     * with '+'.
+     */
+    private static String toE164(String phone, String countryCode) {
+        if (phone == null || phone.isBlank()) return phone;
+        String trimmed = phone.trim();
+        if (trimmed.startsWith("+")) return trimmed;
+        if (countryCode != null && !countryCode.isBlank()) {
+            String cc = countryCode.trim();
+            if (!cc.startsWith("+")) cc = "+" + cc.replaceAll("\\D", "");
+            return cc + trimmed.replaceAll("\\D", "");
+        }
+        // Legacy fallback: assume India when no country code was captured.
+        String digits = trimmed.replaceAll("\\D", "");
+        if (digits.length() == 10) return "+91" + digits;
+        return "+" + digits;
     }
 
     private void sendPush(Notification notification) {
@@ -380,6 +421,7 @@ public class NotificationService {
             .id(n.getId())
             .recipientEmail(n.getRecipientEmail())
             .recipientPhone(n.getRecipientPhone())
+            .recipientPhoneCountryCode(n.getRecipientPhoneCountryCode())
             .recipientName(n.getRecipientName())
             .type(n.getType())
             .channel(n.getChannel())

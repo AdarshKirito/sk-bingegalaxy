@@ -63,6 +63,33 @@ export default function AdminBookingCreate() {
     return null;
   };
 
+  // Poll until booking's collectedAmount/paymentStatus reflects the recent
+  // charge/refund action (Kafka eventing on the backend can lag a few hundred ms).
+  // We accept any of: matching expectedStatus, matching expectedCollected, or
+  // a balance change away from the pre-action snapshot.
+  const waitForBookingFinancialSync = async (bookingRef, { expectedStatus, expectedCollected, prevCollected }) => {
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+      try {
+        const res = await bookingService.getByRef(bookingRef);
+        const synced = res.data.data || res.data;
+        if (!synced) {
+          await wait(300);
+          continue;
+        }
+        const statusMatch = expectedStatus && synced.paymentStatus === expectedStatus;
+        const collectedMatch = expectedCollected != null
+          && Math.abs(Number(synced.collectedAmount || 0) - Number(expectedCollected)) < 0.01;
+        const movedFromPrev = prevCollected != null
+          && Math.abs(Number(synced.collectedAmount || 0) - Number(prevCollected)) > 0.01;
+        if (statusMatch || collectedMatch || movedFromPrev) {
+          return synced;
+        }
+      } catch (_) { /* transient – retry */ }
+      await wait(300);
+    }
+    return null;
+  };
+
   const handleSubmit = async (payload) => {
     if (editBookingData?.bookingRef) {
       // Check if date or time actually changed
@@ -200,6 +227,7 @@ export default function AdminBookingCreate() {
     if (!priceDiff) return;
     const wasPaid = priceDiff.paymentStatus === 'SUCCESS'
                  || priceDiff.paymentStatus === 'PARTIALLY_REFUNDED';
+    const prevCollected = Number(priceDiff.collectedAmount || 0);
     setProcessing(true);
     try {
       if (priceDiff.diff > 0) {
@@ -211,6 +239,14 @@ export default function AdminBookingCreate() {
           paymentMethod: chargeMethod,
           bookingTotalAmount: priceDiff.newTotal || 0,
           notes: `Additional charge: price updated ₹${priceDiff.oldTotal.toLocaleString()} → ₹${priceDiff.newTotal.toLocaleString()}`,
+        });
+        // Wait for backend Kafka sync so the bookings list reflects the new
+        // SUCCESS / collectedAmount immediately (avoids the stale "PARTIALLY_PAID"
+        // flash until manual page refresh).
+        await waitForBookingFinancialSync(priceDiff.bookingRef, {
+          expectedStatus: 'SUCCESS',
+          expectedCollected: priceDiff.newTotal,
+          prevCollected,
         });
         toast.success(`Additional ₹${priceDiff.diff.toLocaleString()} collected (${chargeMethod})`);
       } else if (wasPaid) {
@@ -234,6 +270,13 @@ export default function AdminBookingCreate() {
           paymentId: refundable.id,
           amount: refundAmt,
           reason: `Price reduced: ₹${priceDiff.oldTotal.toLocaleString()} → ₹${priceDiff.newTotal.toLocaleString()}`,
+        });
+        // After a partial refund, expected collected = newTotal (since the
+        // backend syncs paymentStatus to balance after refund Kafka event).
+        await waitForBookingFinancialSync(priceDiff.bookingRef, {
+          expectedStatus: 'SUCCESS',
+          expectedCollected: priceDiff.newTotal,
+          prevCollected,
         });
         toast.success(`Refund of ₹${refundAmt.toLocaleString()} initiated`);
       } else {

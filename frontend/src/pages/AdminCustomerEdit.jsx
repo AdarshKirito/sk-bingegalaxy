@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { authService, adminService } from '../services/endpoints';
 import { toast } from 'react-toastify';
+import AddressFields, { EMPTY_ADDRESS, validateAddress } from '../components/form/AddressFields';
+import PhoneField, { joinPhone, splitPhone, validatePhone } from '../components/form/PhoneField';
 
 export default function AdminCustomerEdit() {
   const { id } = useParams();
@@ -17,6 +19,7 @@ export default function AdminCustomerEdit() {
     email: '',
     phone: '',
     password: '',
+    address: { ...EMPTY_ADDRESS },
   });
   const [showPassword, setShowPassword] = useState(false);
 
@@ -28,8 +31,16 @@ export default function AdminCustomerEdit() {
           firstName: c.firstName || '',
           lastName: c.lastName || '',
           email: c.email || '',
-          phone: c.phone || '',
-          password: c.password || '',
+          phone: joinPhone(c.phoneCountryCode, c.phone),
+          password: '',
+          address: {
+            addressLine1: c.addressLine1 || '',
+            addressLine2: c.addressLine2 || '',
+            city: c.city || '',
+            state: c.state || '',
+            country: c.country || '',
+            postalCode: c.postalCode || '',
+          },
         });
       })
       .catch(() => toast.error('Failed to load customer'))
@@ -44,16 +55,26 @@ export default function AdminCustomerEdit() {
     if (!form.lastName.trim()) { toast.error('Last name is required'); return; }
     if (!form.email.trim()) { toast.error('Email is required'); return; }
     if (!/\S+@\S+\.\S+/.test(form.email.trim())) { toast.error('Please enter a valid email address'); return; }
-    if (!form.phone.trim()) { toast.error('Phone is required'); return; }
-    if (!/^[6-9]\d{9}$/.test(form.phone.trim())) { toast.error('Phone must be a valid 10-digit Indian number'); return; }
+    const phoneError = validatePhone(form.phone, { required: true });
+    if (phoneError) { toast.error(phoneError); return; }
+    const addressErrors = validateAddress(form.address);
+    if (Object.keys(addressErrors).length) { toast.error(Object.values(addressErrors)[0]); return; }
 
     setSaving(true);
     try {
+      const phoneSplit = splitPhone(form.phone);
       const payload = {
         firstName: form.firstName,
         lastName: form.lastName,
         email: form.email,
-        phone: form.phone,
+        phone: phoneSplit.phone,
+        phoneCountryCode: phoneSplit.phoneCountryCode,
+        addressLine1: form.address.addressLine1 || '',
+        addressLine2: form.address.addressLine2 || '',
+        city: form.address.city || '',
+        state: form.address.state || '',
+        country: form.address.country || '',
+        postalCode: form.address.postalCode || '',
       };
       if (form.password.trim()) {
         if (form.password.trim().length < 10) { toast.error('Password must be at least 10 characters'); setSaving(false); return; }
@@ -153,12 +174,19 @@ export default function AdminCustomerEdit() {
             />
           </div>
           <div style={{ gridColumn: '1 / -1' }}>
-            <label style={labelStyle}>Phone *</label>
-            <input
-              style={inputStyle}
+            <PhoneField
+              label="Phone *"
+              required
               value={form.phone}
-              onChange={e => setForm({ ...form, phone: e.target.value })}
-              placeholder="Phone number"
+              onChange={(v) => setForm({ ...form, phone: v })}
+            />
+          </div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <AddressFields
+              legend="Address"
+              description="All fields optional. Pick country first to unlock states and cities."
+              value={form.address}
+              onChange={(addr) => setForm({ ...form, address: addr })}
             />
           </div>
           <div style={{ gridColumn: '1 / -1' }}>

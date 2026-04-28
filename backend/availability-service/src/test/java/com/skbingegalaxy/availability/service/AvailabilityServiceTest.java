@@ -3,6 +3,7 @@ package com.skbingegalaxy.availability.service;
 import com.skbingegalaxy.availability.dto.*;
 import com.skbingegalaxy.availability.entity.BlockedDate;
 import com.skbingegalaxy.availability.entity.BlockedSlot;
+import com.skbingegalaxy.availability.client.BookingBingeClient;
 import com.skbingegalaxy.availability.repository.BlockedDateRepository;
 import com.skbingegalaxy.availability.repository.BlockedSlotRepository;
 import com.skbingegalaxy.common.context.BingeContext;
@@ -32,6 +33,7 @@ class AvailabilityServiceTest {
 
     @Mock private BlockedDateRepository blockedDateRepository;
     @Mock private BlockedSlotRepository blockedSlotRepository;
+    @Mock private BookingBingeClient bookingBingeClient;
 
     @InjectMocks private AvailabilityService availabilityService;
 

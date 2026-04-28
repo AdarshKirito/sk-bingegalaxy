@@ -66,6 +66,7 @@ public class JwtProvider {
         claims.put("role", user.getRole().name());
         claims.put("firstName", user.getFirstName());
         claims.put("phone", user.getPhone());
+        claims.put("phoneCountryCode", user.getPhoneCountryCode());
         claims.put("token_type", tokenType);
 
         return Jwts.builder()

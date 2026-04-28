@@ -18,6 +18,11 @@ public class TransferBookingRequest {
     @Size(max = 150)
     private String recipientEmail;
 
-    @Size(max = 15)
+    @Pattern(regexp = "^$|^\\d{4,15}$", message = "Phone must be 4-15 digits")
+    @Size(max = 20)
     private String recipientPhone;
+
+    /** E.164 dial prefix without subscriber number (e.g. "+91"). */
+    @Pattern(regexp = "^$|^\\+\\d{1,4}$", message = "Phone country code must be in '+<digits>' format")
+    private String recipientPhoneCountryCode;
 }

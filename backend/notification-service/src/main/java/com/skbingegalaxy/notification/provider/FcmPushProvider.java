@@ -25,11 +25,17 @@ public class FcmPushProvider implements PushProvider {
     @PostConstruct
     void init() throws IOException {
         if (FirebaseApp.getApps().isEmpty()) {
-            FirebaseOptions options = FirebaseOptions.builder()
-                    .setCredentials(GoogleCredentials.fromStream(new FileInputStream(credentialsPath)))
-                    .build();
-            FirebaseApp.initializeApp(options);
-            log.info("Firebase FCM provider initialised");
+            // Use try-with-resources so the service-account credentials
+            // file descriptor is released as soon as GoogleCredentials has
+            // read it. Without this the FD stays open for the lifetime of
+            // the container.
+            try (FileInputStream fis = new FileInputStream(credentialsPath)) {
+                FirebaseOptions options = FirebaseOptions.builder()
+                        .setCredentials(GoogleCredentials.fromStream(fis))
+                        .build();
+                FirebaseApp.initializeApp(options);
+                log.info("Firebase FCM provider initialised");
+            }
         }
     }
 

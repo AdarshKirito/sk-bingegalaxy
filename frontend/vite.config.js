@@ -27,6 +27,10 @@ export default defineConfig({
       workbox: {
         // Precache all built assets
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // The country-state-city dataset bundled into the address picker pushes a
+        // single chunk past the default 2 MiB Workbox limit. Bumping to 12 MiB
+        // keeps offline support intact without splitting hot user-facing code.
+        maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
         // Runtime caching strategies
         runtimeCaching: [
           {

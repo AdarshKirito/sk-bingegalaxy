@@ -12,6 +12,8 @@ import java.util.Map;
 public class NotificationEvent implements Serializable {
     private String recipientEmail;
     private String recipientPhone;
+    /** E.164 dial prefix without subscriber number (e.g. "+91"). */
+    private String recipientPhoneCountryCode;
     private String recipientName;
     private NotificationChannel channel;
     private String templateName;

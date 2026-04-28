@@ -46,8 +46,12 @@ public class Booking {
     @Column(nullable = false, length = 150)
     private String customerEmail;
 
-    @Column(nullable = false, length = 15)
+    @Column(nullable = false, length = 20)
     private String customerPhone;
+
+    /** E.164 dial prefix (e.g. "+91"). Captured separately so SMS/WhatsApp can target international numbers. */
+    @Column(name = "customer_phone_country_code", length = 8)
+    private String customerPhoneCountryCode;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "event_type_id", nullable = false)
@@ -111,6 +115,9 @@ public class Booking {
     @Column(nullable = false)
     @Builder.Default
     private boolean checkedIn = false;
+
+    // ── Check-in tracking ────────────────────────────────────
+    private LocalDateTime actualCheckInTime;
 
     // ── Early checkout tracking ──────────────────────────────
     private LocalDateTime actualCheckoutTime;

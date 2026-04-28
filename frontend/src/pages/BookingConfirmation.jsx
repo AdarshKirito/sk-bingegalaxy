@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { bookingService } from '../services/endpoints';
+import { formatTime12h, formatTimeRange12h } from '../utils/format';
 import SEO from '../components/SEO';
 import { toast } from 'react-toastify';
 import {
@@ -23,6 +24,7 @@ import {
 } from 'react-icons/fi';
 import DOMPurify from 'dompurify';
 import useBingeStore from '../stores/bingeStore';
+import PhoneField, { splitPhone } from '../components/form/PhoneField';
 import './CustomerHub.css';
 
 const formatAmount = (value) => `₹${Number(value || 0).toLocaleString()}`;
@@ -103,7 +105,14 @@ export default function BookingConfirmation() {
     }
     setActionLoading(true);
     try {
-      const res = await bookingService.transferBooking(ref, transferForm);
+      const phoneParts = splitPhone(transferForm.recipientPhone);
+      const payload = {
+        recipientName: transferForm.recipientName,
+        recipientEmail: transferForm.recipientEmail,
+        recipientPhone: phoneParts.phone,
+        recipientPhoneCountryCode: phoneParts.phoneCountryCode,
+      };
+      const res = await bookingService.transferBooking(ref, payload);
       setBooking(res.data.data);
       toast.success('Booking transferred successfully');
       setTransferOpen(false);
@@ -162,7 +171,8 @@ export default function BookingConfirmation() {
   const detailCards = [
     { icon: <FiLayers />, label: 'Event', value: eventLabel },
     { icon: <FiCalendar />, label: 'Date', value: booking.bookingDate || 'Not set' },
-    { icon: <FiClock />, label: 'Start time', value: booking.startTime || 'Not set' },
+    { icon: <FiClock />, label: 'Start time', value: booking.startTime ? formatTime12h(booking.startTime) : 'Not set' },
+    { icon: <FiClock />, label: 'Time slot', value: booking.startTime ? formatTimeRange12h(booking.startTime, booking.durationMinutes || (booking.durationHours ? booking.durationHours * 60 : 0)) : 'Not set' },
     { icon: <FiHash />, label: 'Duration', value: durationLabel },
     { icon: <FiUsers />, label: 'Guests', value: `${booking.numberOfGuests || 1} guest${Number(booking.numberOfGuests || 1) === 1 ? '' : 's'}` },
     { icon: <FiMapPin />, label: 'Venue', value: venueLabel },
@@ -321,7 +331,7 @@ export default function BookingConfirmation() {
         <aside className="customer-flow-summary">
           <span className="customer-flow-kicker">Reservation digest</span>
           <h2>{eventLabel}</h2>
-          <p>{booking.bookingDate} at {booking.startTime}</p>
+          <p>{booking.bookingDate} at {formatTime12h(booking.startTime)}</p>
           <div className="customer-flow-badges">
             <span className={`badge ${statusBadge}`}>{bookingStatusLabel}</span>
             <span className={`badge ${paymentBadge}`}>Payment: {paymentStatusLabel}</span>
@@ -523,7 +533,7 @@ export default function BookingConfirmation() {
                     <div>
                       <strong>{b.bookingRef}</strong>
                       <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                        {b.bookingDate} · {b.startTime}
+                        {b.bookingDate} · {formatTime12h(b.startTime)}
                       </div>
                     </div>
                     <span className={`badge ${b.status === 'CONFIRMED' ? 'badge-success' : b.status === 'CANCELLED' ? 'badge-danger' : 'badge-warning'}`}>
@@ -597,9 +607,10 @@ export default function BookingConfirmation() {
             </label>
             <label style={{ display: 'block', marginBottom: '1.5rem' }}>
               <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Phone (optional)</span>
-              <input type="tel" className="form-control" placeholder="+91XXXXXXXXXX"
+              <PhoneField
                 value={transferForm.recipientPhone}
-                onChange={(e) => setTransferForm(prev => ({ ...prev, recipientPhone: e.target.value }))} />
+                onChange={(val) => setTransferForm(prev => ({ ...prev, recipientPhone: val || '' }))}
+              />
             </label>
             <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
               <button className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => setTransferOpen(false)}>Cancel</button>

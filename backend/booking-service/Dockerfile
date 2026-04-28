@@ -14,5 +14,5 @@ RUN mkdir -p /app/uploads && chown -R appuser:appgroup /app
 USER appuser
 EXPOSE 8083
 HEALTHCHECK --interval=15s --timeout=5s --start-period=120s --retries=5 \
-  CMD wget --spider -q http://localhost:8083/actuator/health || exit 1
+  CMD wget --spider -q http://127.0.0.1:8083/actuator/health || exit 1
 ENTRYPOINT ["java", "-jar", "app.jar"]

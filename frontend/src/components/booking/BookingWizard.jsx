@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { bookingService, availabilityService, adminService } from '../../services/endpoints';
 import { toast } from 'react-toastify';
 import { format, addDays } from 'date-fns';
@@ -23,12 +23,12 @@ export { default as StepReview } from './StepReview';
  * Shared booking wizard used by both Customer and Admin.
  *
  * Props:
- *  - isAdmin        : boolean â€” shows customer search (step 0), CASH payment, admin notes
- *  - reinstateData   : object | null â€” pre-fill data for reinstate flow
- *  - editBookingData : object | null â€” pre-fill data for edit-reservation flow
- *  - prefillData      : object | null â€” pre-fill data for repeat booking flow
- *  - onSubmit        : async (payload) => void â€” called with the final booking payload
- *  - onCancel        : () => void â€” called when user clicks Cancel
+ *  - isAdmin        : boolean — shows customer search (step 0), CASH payment, admin notes
+ *  - reinstateData   : object | null — pre-fill data for reinstate flow
+ *  - editBookingData : object | null — pre-fill data for edit-reservation flow
+ *  - prefillData      : object | null — pre-fill data for repeat booking flow
+ *  - onSubmit        : async (payload) => void — called with the final booking payload
+ *  - onCancel        : () => void — called when user clicks Cancel
  */
 export default function BookingWizard({ isAdmin = false, reinstateData = null, editBookingData = null, prefillData = null, initialEventTypeId = null, onSubmit, onCancel }) {
   const firstStep = isAdmin ? 0 : 1;
@@ -395,6 +395,7 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
         payload.customerName = `${selectedCustomer.firstName} ${selectedCustomer.lastName || ''}`.trim();
         payload.customerEmail = selectedCustomer.email;
         payload.customerPhone = selectedCustomer.phone || '';
+        payload.customerPhoneCountryCode = selectedCustomer.phoneCountryCode || '';
         payload.adminNotes = form.adminNotes;
         const alreadyPaid = editBookingData?.paymentStatus === 'SUCCESS' || editBookingData?.paymentStatus === 'PARTIALLY_REFUNDED';
         if (!alreadyPaid) payload.paymentMethod = form.paymentMethod;
@@ -437,9 +438,12 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
   const fmtTime = (m) => {
     const val = Number(m);
     if (!Number.isFinite(val) || val < 0) return '--:--';
-    const h = Math.floor(val / 60) % 24;
+    let h = Math.floor(val / 60) % 24;
     const min = Math.floor(val % 60);
-    return String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0');
+    const period = h >= 12 ? 'PM' : 'AM';
+    h = h % 12;
+    if (h === 0) h = 12;
+    return `${h}:${String(min).padStart(2, '0')} ${period}`;
   };
 
   const fmtDuration = (m) => {

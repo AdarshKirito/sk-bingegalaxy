@@ -19,6 +19,8 @@ import { toast } from 'react-toastify';
 import { FiActivity, FiArrowRight, FiCompass, FiEdit2, FiMapPin, FiPlus, FiStar, FiToggleLeft, FiToggleRight, FiTrash2, FiUpload, FiX } from 'react-icons/fi';
 import './AdminPages.css';
 import BingeLoyaltySection from '../components/admin/BingeLoyaltySection';
+import AddressFields, { EMPTY_ADDRESS, validateAddress } from '../components/form/AddressFields';
+import PhoneField, { joinPhone, splitPhone, validatePhone } from '../components/form/PhoneField';
 
 function StarRating({ avg, count }) {
   const rounded = Math.round((avg || 0) * 2) / 2;
@@ -39,13 +41,15 @@ function StarRating({ avg, count }) {
 export default function BingeManagement() {
   const emptyForm = {
     name: '',
-    address: '',
+    address: { ...EMPTY_ADDRESS },
     supportEmail: '',
     supportPhone: '',
     supportWhatsapp: '',
     customerCancellationEnabled: true,
     customerCancellationCutoffMinutes: 180,
     maxConcurrentBookings: '',
+    openTime: '10:00',
+    closeTime: '23:00',
   };
   const [binges, setBinges] = useState([]);
   const [reviewSummaries, setReviewSummaries] = useState({});
@@ -151,12 +155,48 @@ export default function BingeManagement() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.name.trim()) { toast.error('Venue name is required'); return; }
+    if (form.openTime && form.closeTime && form.closeTime <= form.openTime) {
+      toast.error('Closing time must be later than opening time');
+      return;
+    }
+    const addressErrors = validateAddress(form.address);
+    if (Object.keys(addressErrors).length) {
+      toast.error(Object.values(addressErrors)[0]);
+      return;
+    }
+    const phoneError = validatePhone(form.supportPhone);
+    if (phoneError) { toast.error(`Support phone: ${phoneError}`); return; }
+    const waError = validatePhone(form.supportWhatsapp);
+    if (waError) { toast.error(`Support WhatsApp: ${waError}`); return; }
     try {
+      const phoneSplit = splitPhone(form.supportPhone);
+      const waSplit = splitPhone(form.supportWhatsapp);
+      const payload = {
+        name: form.name,
+        // Legacy free-form `address` is composed server-side from the structured fields.
+        address: '',
+        addressLine1: form.address?.addressLine1 || '',
+        addressLine2: form.address?.addressLine2 || '',
+        city: form.address?.city || '',
+        state: form.address?.state || '',
+        country: form.address?.country || '',
+        postalCode: form.address?.postalCode || '',
+        supportEmail: form.supportEmail,
+        supportPhone: phoneSplit.phone,
+        supportPhoneCountryCode: phoneSplit.phoneCountryCode,
+        supportWhatsapp: waSplit.phone,
+        supportWhatsappCountryCode: waSplit.phoneCountryCode,
+        customerCancellationEnabled: form.customerCancellationEnabled,
+        customerCancellationCutoffMinutes: form.customerCancellationCutoffMinutes,
+        maxConcurrentBookings: form.maxConcurrentBookings === '' ? null : form.maxConcurrentBookings,
+        openTime: form.openTime,
+        closeTime: form.closeTime,
+      };
       if (editId) {
-        await adminService.updateBinge(editId, form);
+        await adminService.updateBinge(editId, payload);
         toast.success('Binge updated');
       } else {
-        await adminService.createBinge(form);
+        await adminService.createBinge(payload);
         toast.success('Binge created');
       }
       resetForm();
@@ -170,13 +210,22 @@ export default function BingeManagement() {
     setEditId(b.id);
     setForm({
       name: b.name,
-      address: b.address || '',
+      address: {
+        addressLine1: b.addressLine1 || '',
+        addressLine2: b.addressLine2 || '',
+        city: b.city || '',
+        state: b.state || '',
+        country: b.country || '',
+        postalCode: b.postalCode || '',
+      },
       supportEmail: b.supportEmail || '',
-      supportPhone: b.supportPhone || '',
-      supportWhatsapp: b.supportWhatsapp || '',
+      supportPhone: joinPhone(b.supportPhoneCountryCode, b.supportPhone),
+      supportWhatsapp: joinPhone(b.supportWhatsappCountryCode, b.supportWhatsapp),
       customerCancellationEnabled: b.customerCancellationEnabled !== false,
       customerCancellationCutoffMinutes: b.customerCancellationCutoffMinutes ?? 180,
       maxConcurrentBookings: b.maxConcurrentBookings ?? '',
+      openTime: (b.openTime || '10:00').slice(0, 5),
+      closeTime: (b.closeTime || '23:00').slice(0, 5),
     });
     setShowForm(true);
   };
@@ -362,9 +411,17 @@ export default function BingeManagement() {
       id: binge.id,
       name: binge.name,
       address: binge.address,
+      addressLine1: binge.addressLine1,
+      addressLine2: binge.addressLine2,
+      city: binge.city,
+      state: binge.state,
+      country: binge.country,
+      postalCode: binge.postalCode,
       supportEmail: binge.supportEmail,
       supportPhone: binge.supportPhone,
+      supportPhoneCountryCode: binge.supportPhoneCountryCode,
       supportWhatsapp: binge.supportWhatsapp,
+      supportWhatsappCountryCode: binge.supportWhatsappCountryCode,
       customerCancellationEnabled: binge.customerCancellationEnabled,
       customerCancellationCutoffMinutes: binge.customerCancellationCutoffMinutes,
       maxConcurrentBookings: binge.maxConcurrentBookings,
@@ -443,21 +500,29 @@ export default function BingeManagement() {
                 <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required placeholder="e.g., Downtown Arena" />
               </div>
               <div className="input-group">
-                <label>Address</label>
-                <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="123 Main St, City" />
-              </div>
-              <div className="input-group">
                 <label>Support Email</label>
                 <input value={form.supportEmail} onChange={(e) => setForm({ ...form, supportEmail: e.target.value })} placeholder="support@venue.com" />
               </div>
-              <div className="input-group">
-                <label>Support Phone</label>
-                <input value={form.supportPhone} onChange={(e) => setForm({ ...form, supportPhone: e.target.value })} placeholder="+91 9876543210" />
+              <div className="input-group" style={{ gridColumn: '1 / -1' }}>
+                <AddressFields
+                  legend="Venue address"
+                  description="This address is shown to customers and powers postal-code search. All fields optional but recommended."
+                  value={form.address}
+                  onChange={(addr) => setForm({ ...form, address: addr })}
+                />
               </div>
-              <div className="input-group">
-                <label>Support WhatsApp (digits only)</label>
-                <input value={form.supportWhatsapp} onChange={(e) => setForm({ ...form, supportWhatsapp: e.target.value })} placeholder="919876543210" />
-              </div>
+              <PhoneField
+                label="Support Phone"
+                value={form.supportPhone}
+                onChange={(v) => setForm({ ...form, supportPhone: v })}
+                helpText="Customers see this on their booking confirmations."
+              />
+              <PhoneField
+                label="Support WhatsApp"
+                value={form.supportWhatsapp}
+                onChange={(v) => setForm({ ...form, supportWhatsapp: v })}
+                helpText="Used to render the WhatsApp deep-link in customer dashboards."
+              />
               <div className="input-group">
                 <label>Customer Cancellation</label>
                 <select value={form.customerCancellationEnabled ? 'enabled' : 'disabled'} onChange={(e) => setForm({ ...form, customerCancellationEnabled: e.target.value === 'enabled' })}>
@@ -473,6 +538,16 @@ export default function BingeManagement() {
                 <label>Max Concurrent Bookings per Slot</label>
                 <input type="number" min="1" value={form.maxConcurrentBookings} onChange={(e) => setForm({ ...form, maxConcurrentBookings: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Unlimited" />
                 <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Leave empty for unlimited capacity</span>
+              </div>
+              <div className="input-group">
+                <label>Opening Time</label>
+                <input type="time" value={form.openTime} onChange={(e) => setForm({ ...form, openTime: e.target.value })} required />
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Bookings before this time will be rejected</span>
+              </div>
+              <div className="input-group">
+                <label>Closing Time</label>
+                <input type="time" value={form.closeTime} onChange={(e) => setForm({ ...form, closeTime: e.target.value })} required />
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Bookings ending after this time will be rejected</span>
               </div>
             </div>
             <div className="adm-form-actions">

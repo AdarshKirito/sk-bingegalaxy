@@ -269,6 +269,46 @@
   color: var(--primary);
 }
 
+/* Inline clear (×) button inside the search pill — matches the affordance
+   used by Stripe / Linear / GitHub search inputs.  Hidden until the user
+   has typed something, then offers a one-click reset without forcing a
+   round-trip through the secondary "Reset" filter button. */
+.customer-hub-search-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  margin-left: 0.25rem;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.customer-hub-search-clear:hover,
+.customer-hub-search-clear:focus-visible {
+  background: rgba(var(--primary-rgb), 0.12);
+  color: var(--primary);
+  outline: none;
+}
+
+.customer-hub-search-clear svg {
+  color: inherit;
+  width: 14px;
+  height: 14px;
+}
+
+/* Hide the native ✕ from `input[type="search"]` because we render our own. */
+.customer-hub-search input[type="search"]::-webkit-search-cancel-button,
+.customer-hub-search input[type="search"]::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
 .customer-booking-grid,
 .customer-payment-grid {
   display: grid;

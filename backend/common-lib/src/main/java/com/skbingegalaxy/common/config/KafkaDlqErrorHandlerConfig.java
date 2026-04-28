@@ -16,10 +16,16 @@ import org.springframework.util.backoff.FixedBackOff;
  * <p>On listener exception, Spring Kafka will:</p>
  * <ol>
  *   <li>Retry with exponential backoff (initial 500ms, multiplier 2, max 3 attempts).</li>
- *   <li>If all retries fail, publish the original record to {@code <topic>.DLT}
+ *   <li>If all retries fail, publish the original record to {@code <topic>-dlt}
  *       (dead-letter topic) with the failure stack trace in headers, and then
  *       commit the offset so the partition progresses.</li>
  * </ol>
+ *
+ * <p>Note: suffix is {@code -dlt} (lowercase, hyphen) to match the topics
+ * pre-created by each service's {@code KafkaConfig} via {@code TopicBuilder},
+ * and the {@code AdminOpsController} DLT-replay allow-list. Using the Spring
+ * default {@code .DLT} here would silently create a second, parallel set of
+ * DLT topics that never get replayed.</p>
  *
  * <p>This prevents a single poison-pill message from blocking the consumer
  * group indefinitely (head-of-line blocking), which is the classic production
@@ -47,7 +53,7 @@ public class KafkaDlqErrorHandlerConfig {
                 log.error("Routing poison record to DLT: topic={} partition={} offset={} key={} cause={}",
                     record.topic(), record.partition(), record.offset(), record.key(),
                     ex.getClass().getSimpleName(), ex);
-                return new TopicPartition(record.topic() + ".DLT", record.partition());
+                return new TopicPartition(record.topic() + "-dlt", record.partition());
             });
 
         // Fixed back-off: 3 retries, 1 second apart. Stable across Spring

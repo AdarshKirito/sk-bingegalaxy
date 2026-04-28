@@ -67,6 +67,18 @@ spring:
                 name: bookingServiceCB
                 fallbackUri: forward:/fallback
 
+        # Loyalty v2 also lives in booking-service.
+        - id: booking-service-loyalty-v2
+          uri: lb://booking-service
+          predicates:
+            - Path=/api/v2/loyalty/**
+          filters:
+            - StripPrefix=0
+            - name: CircuitBreaker
+              args:
+                name: bookingServiceCB
+                fallbackUri: forward:/fallback
+
         - id: payment-service
           uri: lb://payment-service
           predicates:

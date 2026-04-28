@@ -101,9 +101,50 @@ public class LoyaltyV2BookingListener {
             LoyaltyPointsWallet wallet = walletRepository.findByMembershipId(membership.getId()).orElse(null);
             if (wallet == null) return;
 
-            // Find the original EARN entries for this booking.  If the
-            // booking was never earned against (e.g. cancelled pre-completion),
-            // the list is empty and we no-op.
+            BigDecimal proportion = (evt.totalAmount() != null && evt.totalAmount().signum() > 0
+                    && evt.refundAmount() != null)
+                    ? evt.refundAmount().divide(evt.totalAmount(), 4, RoundingMode.FLOOR)
+                    : BigDecimal.ONE;
+
+            // ── 1. Refund REDEEMED points proportionally ────────────────
+            //    The original REDEEM ledger entry is negative; we want the
+            //    absolute count.  Cancellation refunds never expire — set
+            //    a 10-year far-future expiry to mark them as such.
+            List<LoyaltyLedgerEntry> redeemEntries = ledgerRepository
+                    .findByWalletIdAndBookingRefAndEntryType(
+                            wallet.getId(), evt.bookingRef(), "REDEEM");
+            if (!redeemEntries.isEmpty()) {
+                long totalRedeemed = redeemEntries.stream()
+                        .mapToLong(e -> Math.abs(e.getPointsDelta()))
+                        .sum();
+                long pointsToRefund = new BigDecimal(totalRedeemed).multiply(proportion)
+                        .setScale(0, RoundingMode.FLOOR).longValueExact();
+                if (pointsToRefund > 0) {
+                    String idempKey = "reverse-redeem:booking=" + evt.bookingRef();
+                    walletService.credit(new PointsWalletService.CreditRequest(
+                            membership.getId(),
+                            pointsToRefund,
+                            "REVERSE_REDEEM",
+                            "BOOKING_CANCELLATION_REFUND",
+                            "reverse-redeem:booking=" + evt.bookingRef(),
+                            evt.bingeId(),
+                            evt.bookingRef(),
+                            evt.cancelledAt(),
+                            evt.cancelledAt().plusYears(10),
+                            idempKey,
+                            null,
+                            "REVERSE_REDEEM",
+                            "Refund " + pointsToRefund + " of " + totalRedeemed
+                                    + " redeemed points — booking " + evt.bookingRef() + " cancelled",
+                            null,
+                            "SYSTEM"
+                    ));
+                    log.info("[loyalty-v2] cancel {} → refunded {} pts (of {} redeemed, {} ratio)",
+                            evt.bookingRef(), pointsToRefund, totalRedeemed, proportion);
+                }
+            }
+
+            // ── 2. Claw back EARNED points proportionally ───────────────
             List<LoyaltyLedgerEntry> earnEntries = ledgerRepository
                     .findByWalletIdAndBookingRefAndEntryType(
                             wallet.getId(), evt.bookingRef(), LEDGER_EARN);
@@ -113,10 +154,6 @@ public class LoyaltyV2BookingListener {
             }
 
             long totalEarned = earnEntries.stream().mapToLong(LoyaltyLedgerEntry::getPointsDelta).sum();
-            BigDecimal proportion = (evt.totalAmount() != null && evt.totalAmount().signum() > 0
-                    && evt.refundAmount() != null)
-                    ? evt.refundAmount().divide(evt.totalAmount(), 4, RoundingMode.FLOOR)
-                    : BigDecimal.ONE;
             long pointsToReverse = new BigDecimal(totalEarned).multiply(proportion)
                     .setScale(0, RoundingMode.FLOOR).longValueExact();
             if (pointsToReverse <= 0) return;

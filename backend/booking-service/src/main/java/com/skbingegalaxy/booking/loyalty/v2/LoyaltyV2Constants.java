@@ -20,6 +20,8 @@ public final class LoyaltyV2Constants {
     public static final String TIER_GOLD     = "GOLD";
     public static final String TIER_PLATINUM = "PLATINUM";
     public static final String TIER_LIFETIME_PLATINUM = "LIFETIME_PLATINUM";
+    /** Internal admin-only tier; never advertised as a progression target. */
+    public static final String TIER_CUSTOMER_PWN = "CUSTOMER_PWN";
 
     // ── Binge-binding statuses ────────────────────────────────────────────
     public static final String BINDING_ENABLED        = "ENABLED";
@@ -41,6 +43,7 @@ public final class LoyaltyV2Constants {
     // ── Enrollment sources ────────────────────────────────────────────────
     public static final String ENROLL_SILENT_BOOKING  = "SILENT_BOOKING";
     public static final String ENROLL_EXPLICIT_SIGNUP = "EXPLICIT_SIGNUP";
+    public static final String ENROLL_AUTO_DASHBOARD  = "AUTO_DASHBOARD_VIEW";
     public static final String ENROLL_SSO_GOOGLE      = "SSO_GOOGLE";
     public static final String ENROLL_ADMIN_IMPORT    = "ADMIN_IMPORT";
     public static final String ENROLL_STATUS_MATCH    = "STATUS_MATCH";

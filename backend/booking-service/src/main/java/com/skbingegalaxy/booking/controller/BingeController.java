@@ -95,9 +95,49 @@ public class BingeController {
     public ResponseEntity<ApiResponse<BingeDto>> createBinge(
             @Valid @RequestBody BingeSaveRequest request,
             @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate) {
+        BingeDto created = bingeService.createBinge(request, adminId, role, clientDate);
+        String message = "PENDING_APPROVAL".equals(created.getStatus())
+            ? "Binge submitted for super-admin approval"
+            : "Binge created";
         return ResponseEntity.status(HttpStatus.CREATED)
-            .body(ApiResponse.ok("Binge created", bingeService.createBinge(request, adminId, clientDate)));
+            .body(ApiResponse.ok(message, created));
+    }
+
+    // ── Super-Admin: list pending binge approval requests ───────────────
+    @GetMapping("/admin/binges/pending")
+    public ResponseEntity<ApiResponse<List<BingeDto>>> getPendingBinges(
+            @RequestHeader("X-User-Role") String role) {
+        return ResponseEntity.ok(ApiResponse.ok(bingeService.getPendingBinges(role)));
+    }
+
+    // ── Super-Admin: approve a pending binge ──────────────────────────
+    @PostMapping("/admin/binges/{id}/approve")
+    public ResponseEntity<ApiResponse<BingeDto>> approveBinge(
+            @PathVariable Long id,
+            @RequestHeader("X-User-Id") Long superAdminId,
+            @RequestHeader("X-User-Role") String role) {
+        return ResponseEntity.ok(ApiResponse.ok(
+            "Binge approved", bingeService.approveBinge(id, superAdminId, role)));
+    }
+
+    // ── Super-Admin: reject a pending binge ────────────────────────────
+    @PostMapping("/admin/binges/{id}/reject")
+    public ResponseEntity<ApiResponse<BingeDto>> rejectBinge(
+            @PathVariable Long id,
+            @RequestBody(required = false) BingeRejectRequest body,
+            @RequestHeader("X-User-Id") Long superAdminId,
+            @RequestHeader("X-User-Role") String role) {
+        String reason = body != null ? body.getReason() : null;
+        return ResponseEntity.ok(ApiResponse.ok(
+            "Binge rejected", bingeService.rejectBinge(id, superAdminId, role, reason)));
+    }
+
+    /** Inline body for the reject endpoint. */
+    @lombok.Data
+    public static class BingeRejectRequest {
+        private String reason;
     }
 
     // ── Admin: update binge ──────────────────────────────────

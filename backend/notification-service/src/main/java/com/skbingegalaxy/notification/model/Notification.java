@@ -26,6 +26,9 @@ public class Notification {
 
     private String recipientPhone;
 
+    /** E.164 dial prefix without subscriber number (e.g. "+91"). */
+    private String recipientPhoneCountryCode;
+
     private String recipientName;
 
     @Indexed

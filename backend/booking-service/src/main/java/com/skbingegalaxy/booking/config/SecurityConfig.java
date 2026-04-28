@@ -29,6 +29,14 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/bookings/admin/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                 .requestMatchers("/api/v1/bookings/waitlist/admin/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                 .requestMatchers("/api/v1/bookings/internal/**").hasRole("SYSTEM")
+                // Loyalty v2 super-admin endpoints — program-wide config (tier ladder,
+                // perks catalogue, program metadata). MUST be SUPER_ADMIN; the gateway
+                // also enforces this but we duplicate here as defence in depth so that
+                // any direct service-mesh access still requires the role.
+                .requestMatchers("/api/v2/loyalty/super-admin/**").hasRole("SUPER_ADMIN")
+                // Loyalty v2 admin endpoints — per-binge bindings, earn/redeem rules,
+                // status-match approvals. ADMIN or SUPER_ADMIN.
+                .requestMatchers("/api/v2/loyalty/admin/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                 .requestMatchers(
                     "/api/v1/bookings/binges/**",
                     "/api/v1/bookings/event-types",

@@ -193,12 +193,18 @@ export default function AccountCenter() {
             </div>
             <div>
               <span>Phone</span>
-              <strong>{customer?.phone || 'Add a phone number to get faster help'}</strong>
+              <strong>{customer?.phone ? `${customer?.phoneCountryCode || ''} ${customer.phone}`.trim() : 'Add a phone number to get faster help'}</strong>
             </div>
             <div>
               <span>Current venue</span>
               <strong>{selectedBinge?.name || 'Choose a venue to personalize booking flow'}</strong>
             </div>
+            {(customer?.addressLine1 || customer?.city || customer?.country) && (
+              <div>
+                <span>Address</span>
+                <strong>{[customer?.addressLine1, customer?.addressLine2, customer?.city, customer?.state, customer?.postalCode, customer?.country].filter(Boolean).join(', ')}</strong>
+              </div>
+            )}
           </div>
           <p className="customer-account-note">Your email and phone power booking updates, reminders, and same-day support.</p>
         </article>

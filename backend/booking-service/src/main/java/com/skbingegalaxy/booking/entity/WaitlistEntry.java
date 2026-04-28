@@ -36,8 +36,11 @@ public class WaitlistEntry {
     @Column(nullable = false, length = 150)
     private String customerEmail;
 
-    @Column(length = 15)
+    @Column(length = 20)
     private String customerPhone;
+
+    @Column(name = "customer_phone_country_code", length = 8)
+    private String customerPhoneCountryCode;
 
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "event_type_id", nullable = false)

@@ -22,11 +22,22 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Distributed token-bucket rate limiter with dual-bucket design:
- * each client IP gets two independent buckets — auth endpoints
- * ({@code /api/v1/auth/*}) at 30 req/min and all other endpoints
- * at 100 req/min. This prevents brute-force login attempts from
- * exhausting the general API budget.
+ * Distributed token-bucket rate limiter with three-tier per-IP design:
+ * <ul>
+ *   <li><b>Sensitive credential-recovery</b> (forgot/reset/verify-email): 5 req/min/IP —
+ *       curbs account-enumeration and reset spam.</li>
+ *   <li><b>Credential-presenting auth</b> (login, register, OAuth exchange, OTP verify,
+ *       change-password): 30 req/min/IP — caps brute-force attempts on credentials.</li>
+ *   <li><b>Standard API</b> (everything else, including authenticated session endpoints
+ *       such as {@code /logout}, {@code /refresh}, {@code /profile}, admin reads, and all
+ *       business APIs): 100 req/min/IP.</li>
+ * </ul>
+ * <p>
+ * Industry practice (Google, AWS, GitHub, Auth0) is to throttle only credential-presenting
+ * endpoints aggressively per-IP and to mitigate brute-force per-account post-authentication.
+ * Logout, refresh, and profile reads are deliberately NOT bucketed with login so that a
+ * legitimate customer / admin / super-admin who logs in and out repeatedly (or whose UI
+ * fans out a few authenticated GETs per page) does not trip 429s.
  * <p>
  * Primary: Redis-backed sliding-window counters (distributed across gateway replicas).
  * Fallback: local LRU cache (max 10K entries) when Redis is unavailable.
@@ -72,18 +83,14 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         String clientIp = resolveClientIp(exchange);
         String path = exchange.getRequest().getURI().getPath();
-        boolean isAuthPath = path.startsWith("/api/v1/auth/");
-        boolean isSensitiveAuth = isAuthPath && (
-            path.contains("/forgot-password") ||
-            path.contains("/reset-password") ||
-            path.contains("/verify-email")
-        );
+        boolean isSensitiveAuth = isSensitiveAuthPath(path);
+        boolean isCredentialAuth = !isSensitiveAuth && isCredentialAuthPath(path);
         String bucketKey;
         int limit;
         if (isSensitiveAuth) {
             bucketKey = clientIp + ":auth-sensitive";
             limit = SENSITIVE_AUTH_RATE_LIMIT;
-        } else if (isAuthPath) {
+        } else if (isCredentialAuth) {
             bucketKey = clientIp + ":auth";
             limit = AUTH_RATE_LIMIT;
         } else {
@@ -105,6 +112,33 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
     @Override
     public int getOrder() {
         return -2;
+    }
+
+    /**
+     * Credential-recovery endpoints: very tight cap to throttle enumeration / reset spam.
+     */
+    private boolean isSensitiveAuthPath(String path) {
+        if (!path.startsWith("/api/v1/auth/")) return false;
+        return path.contains("/forgot-password")
+            || path.contains("/reset-password")
+            || path.contains("/verify-email");
+    }
+
+    /**
+     * Endpoints that accept credentials (password, OAuth code, OTP) or create accounts.
+     * These are the only auth routes that warrant the strict per-IP brute-force cap.
+     * Session-bearing endpoints (logout, refresh, profile, admin reads) are intentionally
+     * NOT included so normal usage by customer / admin / super-admin doesn't trip 429.
+     */
+    private boolean isCredentialAuthPath(String path) {
+        if (!path.startsWith("/api/v1/auth/")) return false;
+        return path.equals("/api/v1/auth/login")
+            || path.equals("/api/v1/auth/admin/login")
+            || path.equals("/api/v1/auth/register")
+            || path.equals("/api/v1/auth/admin/register")
+            || path.equals("/api/v1/auth/google")
+            || path.equals("/api/v1/auth/verify-otp")
+            || path.equals("/api/v1/auth/change-password");
     }
 
     private Mono<Void> applyRedisRateLimit(ServerWebExchange exchange,

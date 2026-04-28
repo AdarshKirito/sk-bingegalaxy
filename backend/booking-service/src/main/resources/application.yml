@@ -1,4 +1,10 @@
 server:
+  # Port fallback — config-server normally overrides this via
+  # configurations/booking-service.yml, but the `optional:configserver:`
+  # import means a brief config-server outage would silently fall back
+  # to Spring's default 8080, breaking Docker healthchecks and
+  # sidecar port assumptions.
+  port: ${SERVER_PORT:8083}
   shutdown: graceful
 
 spring:
@@ -15,11 +21,23 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD:?SPRING_DATASOURCE_PASSWORD must be set}
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 5
+      properties:
+        enable.idempotence: true
     consumer:
+      group-id: booking-group
       enable-auto-commit: false
       max-poll-records: 20
       isolation-level: read_committed
       auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: com.skbingegalaxy.*
     listener:
       ack-mode: record
       missing-topics-fatal: false

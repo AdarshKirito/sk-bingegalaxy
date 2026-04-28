@@ -58,6 +58,7 @@ public class BookingReminderScheduler {
                         NotificationChannel.EMAIL,
                         r.getRecipientEmail(),
                         r.getRecipientPhone(),
+                        r.getRecipientPhoneCountryCode(),
                         r.getRecipientName(),
                         subject,
                         body,

@@ -5,10 +5,20 @@ import { toast } from 'react-toastify';
 import { trackSignUp, identifyUser } from '../services/analytics';
 import { FiCalendar, FiEye, FiEyeOff, FiGift, FiUsers } from 'react-icons/fi';
 import SEO from '../components/SEO';
+import AddressFields, { EMPTY_ADDRESS, validateAddress } from '../components/form/AddressFields';
+import PhoneField, { splitPhone, validatePhone } from '../components/form/PhoneField';
 import './Auth.css';
 
 export default function Register() {
-  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '', password: '', confirmPassword: '' });
+  const [form, setForm] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    password: '',
+    confirmPassword: '',
+    address: { ...EMPTY_ADDRESS },
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [touched, setTouched] = useState({});
@@ -22,7 +32,7 @@ export default function Register() {
     firstName: touched.firstName && !form.firstName.trim() ? 'First name is required' : '',
     lastName: touched.lastName && !form.lastName.trim() ? 'Last name is required' : '',
     email: touched.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email) ? 'Enter a valid email' : '',
-    phone: touched.phone && !/^[6-9]\d{9}$/.test(form.phone.replace(/\D/g, '').slice(-10)) ? 'Enter a valid 10-digit phone' : '',
+    phone: touched.phone ? validatePhone(form.phone, { required: true }) : '',
     password: touched.password ? (form.password.length < 10 ? 'Min 10 characters' : !PW_REGEX.test(form.password) ? 'Must include uppercase, lowercase, number & special character' : '') : '',
     confirmPassword: touched.confirmPassword && form.password !== form.confirmPassword ? 'Passwords do not match' : '',
   };
@@ -34,17 +44,37 @@ export default function Register() {
     setTouched({ firstName: true, lastName: true, email: true, phone: true, password: true, confirmPassword: true });
     if (Object.values(fieldErrors).some(Boolean)) return;
     if (!form.firstName.trim() || !form.lastName.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email) || !PW_REGEX.test(form.password) || form.password !== form.confirmPassword) return;
+    if (validatePhone(form.phone, { required: true })) return;
+    const addressErrors = validateAddress(form.address);
+    if (Object.keys(addressErrors).length) {
+      const msg = Object.values(addressErrors)[0];
+      setError(msg);
+      toast.error(msg);
+      return;
+    }
     setError('');
     setLoading(true);
     try {
-      const { confirmPassword, ...data } = form;
-      data.phone = data.phone.replace(/\D/g, '').slice(-10);
+      const phoneSplit = splitPhone(form.phone);
+      const data = {
+        firstName: form.firstName,
+        lastName: form.lastName,
+        email: form.email,
+        password: form.password,
+        phone: phoneSplit.phone,
+        phoneCountryCode: phoneSplit.phoneCountryCode,
+        addressLine1: form.address.addressLine1 || '',
+        addressLine2: form.address.addressLine2 || '',
+        city: form.address.city || '',
+        state: form.address.state || '',
+        country: form.address.country || '',
+        postalCode: form.address.postalCode || '',
+      };
       await register(data);
       trackSignUp('email');
       const u = JSON.parse(localStorage.getItem('user') || '{}');
       if (u.id) identifyUser(String(u.id), { role: u.role });
       toast.success('Account created!');
-      // PublicOnlyRoute redirects to /binges via resolveAuthenticatedLanding
     } catch (err) {
       const msg = err.userMessage || err.response?.data?.message || 'Registration failed. Please try again.';
       setError(msg);
@@ -113,11 +143,20 @@ export default function Register() {
                 <input type="email" required value={form.email} onChange={update('email')} onBlur={handleBlur('email')} placeholder="you@example.com" />
                 {fieldErrors.email && <span className="field-error">{fieldErrors.email}</span>}
               </div>
-              <div className={`input-group ${fieldErrors.phone ? 'has-error' : ''}`}>
-                <label>Phone</label>
-                <input type="tel" required value={form.phone} onChange={update('phone')} onBlur={handleBlur('phone')} placeholder="+91 9876543210" />
-                {fieldErrors.phone && <span className="field-error">{fieldErrors.phone}</span>}
-              </div>
+              <PhoneField
+                label="Phone"
+                required
+                value={form.phone}
+                onChange={(v) => { setForm({ ...form, phone: v }); setTouched(t => ({ ...t, phone: true })); }}
+                error={fieldErrors.phone}
+                helpText="Pick the country and we'll handle the dial-code automatically."
+              />
+              <AddressFields
+                legend="Address (optional)"
+                description="Helps us send swag, vouchers, and reminders to the right place."
+                value={form.address}
+                onChange={(addr) => setForm({ ...form, address: addr })}
+              />
               <div className={`input-group ${fieldErrors.password ? 'has-error' : ''}`}>
                 <label>Password</label>
                 <div className="input-password-wrap">

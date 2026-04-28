@@ -229,4 +229,30 @@ class RateLimitFilterTest {
         assertThat(tenth.getResponse().getStatusCode())
             .isNotEqualTo(HttpStatus.TOO_MANY_REQUESTS);
     }
+
+    @Test
+    void sessionAuthEndpoints_useStandardBucket_notStrictAuthBucket() {
+        // Logout, refresh, and profile reads are session-bearing endpoints and must NOT be
+        // throttled at the 30/min credential cap. A user who logs in/out repeatedly or whose
+        // UI fires several authenticated GETs per page should not trip 429s. They share the
+        // standard 100/min bucket with the rest of the API.
+        String ip = "10.0.0.88";
+        // 40 mixed session-auth requests (well above the 30/min credential cap) must pass.
+        for (int i = 0; i < 40; i++) {
+            String path = switch (i % 4) {
+                case 0 -> "/api/v1/auth/logout";
+                case 1 -> "/api/v1/auth/refresh";
+                case 2 -> "/api/v1/auth/profile";
+                default -> "/api/v1/auth/admin/customers";
+            };
+            MockServerWebExchange exchange = MockServerWebExchange.from(
+                    MockServerHttpRequest.post(path)
+                            .remoteAddress(new InetSocketAddress(ip, 12345))
+                            .build());
+            filter.filter(exchange, chain).block();
+            assertThat(exchange.getResponse().getStatusCode())
+                .as("session-auth path %s on iter %d should pass", path, i)
+                .isNotEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+        }
+    }
 }

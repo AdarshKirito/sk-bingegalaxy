@@ -1,4 +1,4 @@
-package com.skbingegalaxy.payment.service;
+﻿package com.skbingegalaxy.payment.service;
 
 import com.skbingegalaxy.common.context.BingeContext;
 import com.skbingegalaxy.common.enums.PaymentMethod;
@@ -17,6 +17,7 @@ import com.skbingegalaxy.payment.entity.Refund;
 import com.skbingegalaxy.payment.event.PaymentKafkaEvent;
 import com.skbingegalaxy.payment.repository.PaymentRepository;
 import com.skbingegalaxy.payment.repository.RefundRepository;
+import com.skbingegalaxy.payment.client.BookingAmountClient.BookingSnapshot;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -115,8 +116,8 @@ class PaymentServiceTest {
         when(paymentRepository.findFirstByBookingRefAndStatusOrderByCreatedAtDesc(
                 "SKBG25123456", PaymentStatus.INITIATED))
                 .thenReturn(Optional.empty());
-        when(bookingAmountClient.getRemainingBalance("SKBG25123456"))
-                .thenReturn(BigDecimal.valueOf(5000));
+        when(bookingAmountClient.fetchSnapshot("SKBG25123456"))
+                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), "PENDING"));
         when(paymentRepository.save(any(Payment.class))).thenReturn(testPayment);
         stubNoRefunds(1L);
 
@@ -140,6 +141,8 @@ class PaymentServiceTest {
         when(paymentRepository.findFirstByBookingRefAndStatusOrderByCreatedAtDesc(
                 "SKBG25123456", PaymentStatus.INITIATED))
                 .thenReturn(Optional.of(testPayment));
+        when(bookingAmountClient.fetchSnapshot("SKBG25123456"))
+                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), "PENDING"));
         stubNoRefunds(1L);
 
         PaymentDto result = paymentService.initiatePayment(request, 1L, "test@example.com", "Test User");
@@ -159,6 +162,8 @@ class PaymentServiceTest {
 
         testPayment.setStatus(PaymentStatus.SUCCESS);
         when(paymentRepository.findByBookingRefAndStatus("SKBG25123456", PaymentStatus.SUCCESS)).thenReturn(List.of(testPayment));
+        when(bookingAmountClient.fetchSnapshot("SKBG25123456"))
+                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), "PENDING"));
 
         assertThatThrownBy(() -> paymentService.initiatePayment(request, 1L, "test@example.com", "Test User"))
                 .isInstanceOf(BusinessException.class)
@@ -195,8 +200,8 @@ class PaymentServiceTest {
         when(paymentRepository.findFirstByBookingRefAndStatusAndBingeIdOrderByCreatedAtDesc(
                 "SKBG25123456", PaymentStatus.INITIATED, 11L))
                 .thenReturn(Optional.empty());
-        when(bookingAmountClient.getRemainingBalance("SKBG25123456"))
-                .thenReturn(BigDecimal.valueOf(5000));
+        when(bookingAmountClient.fetchSnapshot("SKBG25123456"))
+                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), "PENDING"));
         when(paymentRepository.save(any(Payment.class))).thenReturn(savedPayment);
         stubNoRefunds(1L);
 
@@ -496,7 +501,7 @@ class PaymentServiceTest {
         testPayment.setStatus(PaymentStatus.SUCCESS);
         RefundRequest request = RefundRequest.builder()
                 .paymentId(1L)
-                .amount(BigDecimal.valueOf(0.50)) // below â‚¹1 minimum
+                .amount(BigDecimal.valueOf(0.50)) // below ?1 minimum
                 .build();
 
         when(paymentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(testPayment));
@@ -505,7 +510,7 @@ class PaymentServiceTest {
 
         assertThatThrownBy(() -> paymentService.initiateRefund(request, "admin"))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("at least â‚¹1.00");
+                .hasMessageContaining("at least ₹1.00");
     }
 
     // â”€â”€ Query methods â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

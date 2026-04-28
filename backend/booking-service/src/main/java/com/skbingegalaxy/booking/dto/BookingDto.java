@@ -22,6 +22,8 @@ public class BookingDto {
     private String customerName;
     private String customerEmail;
     private String customerPhone;
+    /** E.164 dial prefix (e.g. "+91"). */
+    private String customerPhoneCountryCode;
     private EventTypeDto eventType;
     private LocalDate bookingDate;
     private LocalTime startTime;
@@ -41,6 +43,7 @@ public class BookingDto {
     private PaymentStatus paymentStatus;
     private String paymentMethod;
     private boolean checkedIn;
+    private LocalDateTime actualCheckInTime;
     private LocalDateTime actualCheckoutTime;
     private Integer actualUsedMinutes;
     private String earlyCheckoutNote;

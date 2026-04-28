@@ -90,7 +90,13 @@ public class PaymentService {
      * BEFORE acquiring the advisory lock so the DB connection is not
      * held throughout a potentially slow HTTP call (3-10s).
      */
+    /** Backward-compat overload (callers without phone). */
     public PaymentDto initiatePayment(InitiatePaymentRequest request, Long customerId, String customerEmail, String customerName) {
+        return initiatePayment(request, customerId, customerEmail, customerName, null, null);
+    }
+
+    public PaymentDto initiatePayment(InitiatePaymentRequest request, Long customerId, String customerEmail, String customerName,
+                                      String customerPhone, String customerPhoneCountryCode) {
         log.info("Initiating payment for booking: {}, amount: {}", request.getBookingRef(), request.getAmount());
 
         // Create gateway order OUTSIDE the transaction - no DB locks held during the HTTP call
@@ -105,14 +111,35 @@ public class PaymentService {
         }
 
         // Transactional section: acquire lock, check guards, persist payment
-        return self.saveInitiatedPayment(request, customerId, customerEmail, customerName, gatewayOrderId);
+        return self.saveInitiatedPayment(request, customerId, customerEmail, customerName,
+                customerPhone, customerPhoneCountryCode, gatewayOrderId);
     }
 
     @Transactional
     public PaymentDto saveInitiatedPayment(InitiatePaymentRequest request, Long customerId,
-                                           String customerEmail, String customerName, String gatewayOrderId) {
+                                           String customerEmail, String customerName,
+                                           String customerPhone, String customerPhoneCountryCode,
+                                           String gatewayOrderId) {
         // Serialise concurrent initiations for the same booking to prevent duplicate INITIATED payments
         paymentRepository.acquirePaymentLock(request.getBookingRef().hashCode());
+
+        // Guard 0: Fetch booking snapshot FIRST so terminally-closed bookings (CANCELLED,
+        // NO_SHOW, EXPIRED) are rejected even if an INITIATED payment already exists from
+        // before the cancellation. Fail-closed on unreachable booking-service.
+        var snapshot = bookingAmountClient.fetchSnapshot(request.getBookingRef());
+        if (snapshot == null) {
+            throw new BusinessException(
+                "Unable to verify booking balance — booking-service unavailable. Please retry.",
+                HttpStatus.SERVICE_UNAVAILABLE);
+        }
+        if (snapshot.status() != null) {
+            String st = snapshot.status();
+            if ("CANCELLED".equals(st) || "NO_SHOW".equals(st) || "EXPIRED".equals(st)) {
+                throw new BusinessException(
+                    "This booking is " + st.toLowerCase() + " and can no longer be paid. Please create a new booking.",
+                    HttpStatus.CONFLICT);
+            }
+        }
 
         // Guard 1: payment already succeeded for this booking — reject duplicate attempt
         if (!findSuccessfulPaymentsForCurrentBinge(request.getBookingRef()).isEmpty()) {
@@ -120,7 +147,7 @@ public class PaymentService {
             throw new BusinessException("Payment already completed for booking " + request.getBookingRef(), HttpStatus.CONFLICT);
         }
 
-        // Guard 2 (idempotency): an INITIATED payment already exists â€” return it
+        // Guard 2 (idempotency): an INITIATED payment already exists — return it
         // instead of creating a duplicate (handles network-retry / double-click scenarios)
         var existing = findExistingInitiatedPaymentForCurrentBinge(request.getBookingRef());
         if (existing.isPresent()) {
@@ -130,8 +157,7 @@ public class PaymentService {
             return toPaymentDtoWithRefunds(existing.get());
         }
         // Guard 3: Validate amount against booking's remaining balance (prevent client-side tampering)
-        // Fail-closed: if booking-service is unreachable, reject the payment rather than skip validation
-        BigDecimal remainingBalance = bookingAmountClient.getRemainingBalance(request.getBookingRef());
+        BigDecimal remainingBalance = snapshot.remainingBalance();
         if (remainingBalance == null) {
             throw new BusinessException(
                 "Unable to verify booking balance — booking-service unavailable. Please retry.",
@@ -157,6 +183,8 @@ public class PaymentService {
             .currency(request.getCurrency() != null ? request.getCurrency() : "INR")
             .customerEmail(customerEmail)
             .customerName(customerName)
+            .customerPhone(customerPhone)
+            .customerPhoneCountryCode(customerPhoneCountryCode)
             .build();
 
         payment = paymentRepository.save(payment);
@@ -338,19 +366,19 @@ public class PaymentService {
             .orElseThrow(() -> new ResourceNotFoundException("Payment", "transactionId", transactionId));
         ensurePaymentInCurrentBinge(payment, "transactionId", transactionId);
 
-        // Already succeeded â€” idempotent return
+        // Already succeeded — idempotent return
         if (payment.getStatus() == PaymentStatus.SUCCESS) {
             return toPaymentDtoWithRefunds(payment);
         }
 
-        // Fully or partially refunded â€” simulation is not applicable
+        // Fully or partially refunded — simulation is not applicable
         if (payment.getStatus() == PaymentStatus.REFUNDED
                 || payment.getStatus() == PaymentStatus.PARTIALLY_REFUNDED) {
             throw new BusinessException(
                 "Cannot simulate a " + payment.getStatus() + " payment", HttpStatus.CONFLICT);
         }
 
-        // INITIATED or FAILED â†’ simulate success
+        // INITIATED or FAILED ? simulate success
         payment.setStatus(PaymentStatus.SUCCESS);
         payment.setGatewayPaymentId("SIM-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
         payment.setPaidAt(LocalDateTime.now());
@@ -409,10 +437,19 @@ public class PaymentService {
     @Transactional(readOnly = true)
     public List<PaymentDto> getPaymentsByBookingRef(String bookingRef, Long requesterId, String requesterRole) {
         List<Payment> payments = findPaymentsByBookingRefForCurrentBinge(bookingRef);
+        boolean admin = isAdminRole(requesterRole);
         if (payments.isEmpty()) {
-            return List.of();
+            // Empty list previously short-circuited as 200 [] for everyone.
+            // For non-admin callers that lets an attacker enumerate booking refs
+            // (no payments yet ⇒ same response as a real-but-empty result, so they
+            // can probe the booking-ref keyspace). Treat unknown / non-owned as 404
+            // so a foreign ref is indistinguishable from a non-existent one.
+            if (admin) {
+                return List.of();
+            }
+            throw new ResourceNotFoundException("Payment", "bookingRef", bookingRef);
         }
-        if (isAdminRole(requesterRole)) {
+        if (admin) {
             return toPaymentDtoListWithRefunds(payments);
         }
 
@@ -474,7 +511,7 @@ public class PaymentService {
 
         // Validate amount field
         if (request.getAmount() == null || request.getAmount().compareTo(BigDecimal.ONE) < 0) {
-            throw new BusinessException("Refund amount must be at least â‚¹1.00", HttpStatus.BAD_REQUEST);
+            throw new BusinessException("Refund amount must be at least ₹1.00", HttpStatus.BAD_REQUEST);
         }
 
         // DB-level authoritative sum to prevent race-condition over-refunds
@@ -487,7 +524,7 @@ public class PaymentService {
 
         if (request.getAmount().compareTo(remaining) > 0) {
             throw new BusinessException(
-                String.format("Refund amount â‚¹%.2f exceeds remaining refundable amount â‚¹%.2f",
+                String.format("Refund amount ₹%.2f exceeds remaining refundable amount ₹%.2f",
                     request.getAmount(), remaining),
                 HttpStatus.BAD_REQUEST);
         }
@@ -527,7 +564,7 @@ public class PaymentService {
                 "reason", request.getReason() == null ? "" : request.getReason(),
                 "bookingRef", payment.getBookingRef()));
 
-        log.info("Refund {} of â‚¹{} by {} for payment {} (booking: {})",
+        log.info("Refund {} of ₹{} by {} for payment {} (booking: {})",
             gatewayRefundId, request.getAmount(), initiatedBy,
             payment.getTransactionId(), payment.getBookingRef());
 
@@ -712,6 +749,7 @@ public class PaymentService {
             .customerEmail(payment.getCustomerEmail())
             .customerName(payment.getCustomerName())
             .customerPhone(payment.getCustomerPhone())
+            .customerPhoneCountryCode(payment.getCustomerPhoneCountryCode())
             .paidAt(payment.getPaidAt())
             .build();
 

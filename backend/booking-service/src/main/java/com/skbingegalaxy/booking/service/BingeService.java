@@ -10,6 +10,7 @@ import com.skbingegalaxy.booking.dto.CustomerAboutPolicyDto;
 import com.skbingegalaxy.booking.dto.CustomerDashboardExperienceDto;
 import com.skbingegalaxy.booking.dto.CustomerDashboardSlideDto;
 import com.skbingegalaxy.booking.entity.Binge;
+import com.skbingegalaxy.booking.entity.BingeApprovalStatus;
 import com.skbingegalaxy.booking.repository.AddOnRepository;
 import com.skbingegalaxy.booking.repository.BingeRepository;
 import com.skbingegalaxy.booking.repository.BookingRepository;
@@ -26,6 +27,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -60,6 +63,12 @@ public class BingeService {
     private final RateCodeRepository rateCodeRepository;
     private final CustomerPricingProfileRepository customerPricingProfileRepository;
     private final ObjectMapper objectMapper;
+    private final AdminNotificationService adminNotificationService;
+
+    /** Hours an approved binge has to create its first event before auto-deactivation. */
+    public static final int GRACE_PERIOD_HOURS = 24;
+    /** Warning is delivered when this many hours of the grace period remain. */
+    public static final int GRACE_WARNING_AT_HOURS_REMAINING = 12;
 
     public List<BingeDto> getAdminBinges(Long adminId, String role) {
         if ("SUPER_ADMIN".equals(role)) {
@@ -70,9 +79,30 @@ public class BingeService {
             .stream().map(this::toDto).toList();
     }
 
+    /**
+     * Customer-facing listing.
+     *
+     * <p>A binge is shown to customers only if all three are true:
+     * <ol>
+     *   <li>{@code active = true} (admin hasn't paused it)</li>
+     *   <li>{@code status = APPROVED} (super-admin has approved it)</li>
+     *   <li>It has at least one active {@code event_type} — empty venues never
+     *       appear so customers don't land on a binge they can't book.</li>
+     * </ol>
+     */
     @org.springframework.cache.annotation.Cacheable(value = "activeBinges")
     public List<BingeDto> getAllActiveBinges() {
-        return bingeRepository.findByActiveTrueOrderByNameAsc()
+        return bingeRepository.findCustomerVisibleBinges()
+            .stream().map(this::toDto).toList();
+    }
+
+    /** Super-admin-only: list every binge currently awaiting approval. */
+    public List<BingeDto> getPendingBinges(String role) {
+        if (!"SUPER_ADMIN".equalsIgnoreCase(role)) {
+            throw new BusinessException(
+                "Only super-admins can view pending binge approvals", HttpStatus.FORBIDDEN);
+        }
+        return bingeRepository.findByStatusOrderByCreatedAtDesc(BingeApprovalStatus.PENDING_APPROVAL)
             .stream().map(this::toDto).toList();
     }
 
@@ -108,29 +138,267 @@ public class BingeService {
 
     @Transactional
     @org.springframework.cache.annotation.CacheEvict(value = "activeBinges", allEntries = true)
-    public BingeDto createBinge(BingeSaveRequest request, Long adminId, LocalDate clientDate) {
+    public BingeDto createBinge(BingeSaveRequest request, Long adminId, String role, LocalDate clientDate) {
         if (bingeRepository.existsByNameAndAdminId(request.getName(), adminId)) {
             throw new DuplicateResourceException("Binge", "name", request.getName());
         }
 
         LocalDate opDate = clientDate != null ? clientDate : LocalDate.now();
+        LocalTime openT = request.getOpenTime() != null ? request.getOpenTime() : LocalTime.of(10, 0);
+        LocalTime closeT = request.getCloseTime() != null ? request.getCloseTime() : LocalTime.of(23, 0);
+        validateOperatingHours(openT, closeT);
+
+        // SUPER_ADMIN-created binges go live immediately. Regular ADMIN-created
+        // binges enter the pending-approval queue and stay invisible to customers
+        // until a super-admin approves them.
+        boolean isSuperAdmin = "SUPER_ADMIN".equalsIgnoreCase(role);
+        BingeApprovalStatus initialStatus = isSuperAdmin
+            ? BingeApprovalStatus.APPROVED
+            : BingeApprovalStatus.PENDING_APPROVAL;
+        boolean initialActive = isSuperAdmin; // pending binges are inactive until approved
+
         Binge binge = Binge.builder()
             .name(request.getName())
-            .address(request.getAddress())
+            .address(composeAddressDisplay(request))
+            .addressLine1(trimToNull(request.getAddressLine1()))
+            .addressLine2(trimToNull(request.getAddressLine2()))
+            .city(trimToNull(request.getCity()))
+            .state(trimToNull(request.getState()))
+            .country(trimToNull(request.getCountry()))
+            .postalCode(trimToNull(request.getPostalCode()))
             .adminId(adminId)
-            .active(true)
+            .active(initialActive)
+            .status(initialStatus)
             .operationalDate(opDate)
             .supportEmail(trimToNull(request.getSupportEmail()))
             .supportPhone(trimToNull(request.getSupportPhone()))
+            .supportPhoneCountryCode(trimToNull(request.getSupportPhoneCountryCode()))
             .supportWhatsapp(trimToNull(request.getSupportWhatsapp()))
+            .supportWhatsappCountryCode(trimToNull(request.getSupportWhatsappCountryCode()))
             .customerCancellationEnabled(request.getCustomerCancellationEnabled() == null || request.getCustomerCancellationEnabled())
             .customerCancellationCutoffMinutes(request.getCustomerCancellationCutoffMinutes() == null ? 180 : request.getCustomerCancellationCutoffMinutes())
             .maxConcurrentBookings(request.getMaxConcurrentBookings())
+            .openTime(openT)
+            .closeTime(closeT)
             .build();
 
+        if (isSuperAdmin) {
+            binge.setApprovalDecidedBy(adminId);
+            binge.setApprovalDecidedAt(LocalDateTime.now());
+        }
+
         binge = bingeRepository.save(binge);
-        log.info("Binge created: '{}' by admin {}", binge.getName(), adminId);
+        log.info("Binge created: '{}' by user {} (role={}, status={})",
+            binge.getName(), adminId, role, initialStatus);
+
+        // Notify super-admins that a new approval request is waiting in the
+        // queue. Skipped when a super-admin self-creates (auto-approved).
+        if (initialStatus == BingeApprovalStatus.PENDING_APPROVAL) {
+            adminNotificationService.broadcastToRole(
+                "SUPER_ADMIN",
+                "BINGE_APPROVAL_REQUESTED",
+                "INFO",
+                "New binge awaiting approval",
+                String.format("Admin #%d submitted '%s' for approval. Review it on the entrance dashboard.",
+                    adminId, binge.getName()),
+                binge.getId(),
+                "/admin/platform");
+        }
         return toDto(binge);
+    }
+
+    /** Super-admin approves a pending binge — flips status to APPROVED + active=true. */
+    @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "activeBinges", allEntries = true)
+    public BingeDto approveBinge(Long id, Long superAdminId, String role) {
+        if (!"SUPER_ADMIN".equalsIgnoreCase(role)) {
+            throw new BusinessException(
+                "Only super-admins can approve binge requests", HttpStatus.FORBIDDEN);
+        }
+        Binge binge = bingeRepository.findById(id)
+            .orElseThrow(() -> new ResourceNotFoundException("Binge", "id", id));
+        if (binge.getStatus() == BingeApprovalStatus.APPROVED) {
+            throw new BusinessException("Binge is already approved");
+        }
+        binge.setStatus(BingeApprovalStatus.APPROVED);
+        binge.setActive(true);
+        binge.setApprovalDecidedBy(superAdminId);
+        binge.setApprovalDecidedAt(LocalDateTime.now());
+        binge.setApprovalRejectionReason(null);
+        binge.setAutoDeactivatedAt(null);
+        binge.setGraceWarningSentAt(null);
+
+        // If the binge already has at least one active event (e.g. because a
+        // super-admin pre-seeded one), mark it operational immediately so the
+        // grace-period scheduler skips it.
+        if (binge.getFirstEventCreatedAt() == null
+                && eventTypeRepository.findByBingeIdAndActiveTrue(binge.getId()).size() > 0) {
+            binge.setFirstEventCreatedAt(LocalDateTime.now());
+        }
+        binge = bingeRepository.save(binge);
+        log.info("Binge {} ('{}') approved by super-admin {}", id, binge.getName(), superAdminId);
+
+        // Notify the requesting admin so they know to add an event within the
+        // 24-hour SLA. We only notify when first_event_created_at is unset
+        // — if events already exist, no further action is required.
+        if (binge.getFirstEventCreatedAt() == null) {
+            adminNotificationService.notifyUser(
+                binge.getAdminId(),
+                "ADMIN",
+                "BINGE_APPROVED",
+                "INFO",
+                "Binge approved — add an event within " + GRACE_PERIOD_HOURS + " hours",
+                String.format("Your binge '%s' was approved. Create at least one event type within "
+                        + "%d hours, otherwise it will be automatically paused.",
+                    binge.getName(), GRACE_PERIOD_HOURS),
+                binge.getId(),
+                "/admin/platform");
+        } else {
+            adminNotificationService.notifyUser(
+                binge.getAdminId(),
+                "ADMIN",
+                "BINGE_APPROVED",
+                "INFO",
+                "Binge approved",
+                String.format("Your binge '%s' was approved and is now visible to customers.",
+                    binge.getName()),
+                binge.getId(),
+                "/admin/platform");
+        }
+        return toDto(binge);
+    }
+
+    /** Super-admin rejects a pending binge — keeps row for audit but marks REJECTED. */
+    @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "activeBinges", allEntries = true)
+    public BingeDto rejectBinge(Long id, Long superAdminId, String role, String reason) {
+        if (!"SUPER_ADMIN".equalsIgnoreCase(role)) {
+            throw new BusinessException(
+                "Only super-admins can reject binge requests", HttpStatus.FORBIDDEN);
+        }
+        Binge binge = bingeRepository.findById(id)
+            .orElseThrow(() -> new ResourceNotFoundException("Binge", "id", id));
+        if (binge.getStatus() == BingeApprovalStatus.REJECTED) {
+            throw new BusinessException("Binge is already rejected");
+        }
+        binge.setStatus(BingeApprovalStatus.REJECTED);
+        binge.setActive(false);
+        binge.setApprovalDecidedBy(superAdminId);
+        binge.setApprovalDecidedAt(LocalDateTime.now());
+        binge.setApprovalRejectionReason(trimToNull(reason));
+        binge = bingeRepository.save(binge);
+        log.info("Binge {} ('{}') rejected by super-admin {} (reason='{}')",
+            id, binge.getName(), superAdminId, reason);
+
+        // Notify the requesting admin with the rejection reason for transparency.
+        String reasonLine = (reason == null || reason.isBlank())
+            ? ""
+            : " Reason: " + reason.trim();
+        adminNotificationService.notifyUser(
+            binge.getAdminId(),
+            "ADMIN",
+            "BINGE_REJECTED",
+            "WARNING",
+            "Binge request rejected",
+            String.format("Your binge request '%s' was not approved.%s",
+                binge.getName(), reasonLine),
+            binge.getId(),
+            "/admin/platform");
+        return toDto(binge);
+    }
+
+    // ── Grace-period helpers (called by scheduler + event-type creation hook) ──
+
+    /**
+     * Hook: stamp {@code firstEventCreatedAt} the very first time an active
+     * event type lands on a binge. Idempotent — once set, we never overwrite,
+     * so the original "became operational" timestamp is preserved for audit.
+     */
+    @Transactional
+    public void recordFirstEventIfNeeded(Long bingeId) {
+        if (bingeId == null) return;
+        bingeRepository.findById(bingeId).ifPresent(b -> {
+            if (b.getFirstEventCreatedAt() == null) {
+                b.setFirstEventCreatedAt(LocalDateTime.now());
+                bingeRepository.save(b);
+                log.info("Binge {} ('{}') marked operational (first event created)",
+                    bingeId, b.getName());
+            }
+        });
+    }
+
+    /**
+     * Scheduler entry point. For every APPROVED binge that hasn't yet seen
+     * its first event, deliver a 12-hour warning and auto-deactivate at 24h.
+     * Returns the count of binges that were auto-deactivated this sweep.
+     */
+    @Transactional
+    public int enforceGracePeriod() {
+        LocalDateTime now = LocalDateTime.now();
+        List<Binge> candidates = bingeRepository.findByStatusOrderByCreatedAtDesc(BingeApprovalStatus.APPROVED)
+            .stream()
+            .filter(b -> b.getFirstEventCreatedAt() == null)
+            .filter(b -> b.getApprovalDecidedAt() != null)
+            .toList();
+
+        int deactivated = 0;
+        for (Binge b : candidates) {
+            long minutesSinceApproval = java.time.Duration
+                .between(b.getApprovalDecidedAt(), now).toMinutes();
+            long warningAtMinutes = (long) (GRACE_PERIOD_HOURS - GRACE_WARNING_AT_HOURS_REMAINING) * 60;
+            long deadlineMinutes = (long) GRACE_PERIOD_HOURS * 60;
+
+            if (minutesSinceApproval >= deadlineMinutes && b.isActive()) {
+                // Past deadline — auto-deactivate.
+                b.setActive(false);
+                b.setAutoDeactivatedAt(now);
+                bingeRepository.save(b);
+                deactivated++;
+                log.warn("Binge {} ('{}') auto-deactivated: no events created within {}h grace period",
+                    b.getId(), b.getName(), GRACE_PERIOD_HOURS);
+
+                adminNotificationService.notifyUser(
+                    b.getAdminId(),
+                    "ADMIN",
+                    "BINGE_AUTO_DEACTIVATED",
+                    "CRITICAL",
+                    "Binge auto-paused",
+                    String.format("Your binge '%s' was auto-paused because no event types were created within "
+                            + "%d hours of approval. Add an event type and re-activate it to go live.",
+                        b.getName(), GRACE_PERIOD_HOURS),
+                    b.getId(),
+                    "/admin/platform");
+
+                adminNotificationService.broadcastToRole(
+                    "SUPER_ADMIN",
+                    "BINGE_AUTO_DEACTIVATED",
+                    "WARNING",
+                    "Approved binge auto-paused",
+                    String.format("'%s' (admin #%d) was auto-paused: no events created within %d hours of approval.",
+                        b.getName(), b.getAdminId(), GRACE_PERIOD_HOURS),
+                    b.getId(),
+                    "/admin/platform");
+            } else if (minutesSinceApproval >= warningAtMinutes && b.getGraceWarningSentAt() == null) {
+                // Mid-grace warning — deliver once.
+                b.setGraceWarningSentAt(now);
+                bingeRepository.save(b);
+                log.info("Binge {} ('{}') grace-period warning issued ({}h remaining)",
+                    b.getId(), b.getName(), GRACE_WARNING_AT_HOURS_REMAINING);
+
+                adminNotificationService.notifyUser(
+                    b.getAdminId(),
+                    "ADMIN",
+                    "BINGE_GRACE_WARNING",
+                    "WARNING",
+                    "Add an event soon",
+                    String.format("Your binge '%s' will be auto-paused in about %d hours unless you create "
+                            + "at least one event type.",
+                        b.getName(), GRACE_WARNING_AT_HOURS_REMAINING),
+                    b.getId(),
+                    "/admin/platform");
+            }
+        }
+        return deactivated;
     }
 
     @Transactional
@@ -139,13 +407,30 @@ public class BingeService {
         Binge binge = getManagedBinge(id, adminId, role);
 
         binge.setName(request.getName());
-        binge.setAddress(request.getAddress());
+        binge.setAddress(composeAddressDisplay(request));
+        binge.setAddressLine1(trimToNull(request.getAddressLine1()));
+        binge.setAddressLine2(trimToNull(request.getAddressLine2()));
+        binge.setCity(trimToNull(request.getCity()));
+        binge.setState(trimToNull(request.getState()));
+        binge.setCountry(trimToNull(request.getCountry()));
+        binge.setPostalCode(trimToNull(request.getPostalCode()));
         binge.setSupportEmail(trimToNull(request.getSupportEmail()));
         binge.setSupportPhone(trimToNull(request.getSupportPhone()));
+        binge.setSupportPhoneCountryCode(trimToNull(request.getSupportPhoneCountryCode()));
         binge.setSupportWhatsapp(trimToNull(request.getSupportWhatsapp()));
+        binge.setSupportWhatsappCountryCode(trimToNull(request.getSupportWhatsappCountryCode()));
         binge.setCustomerCancellationEnabled(request.getCustomerCancellationEnabled() == null || request.getCustomerCancellationEnabled());
         binge.setCustomerCancellationCutoffMinutes(request.getCustomerCancellationCutoffMinutes() == null ? binge.getCustomerCancellationCutoffMinutes() : request.getCustomerCancellationCutoffMinutes());
         binge.setMaxConcurrentBookings(request.getMaxConcurrentBookings());
+        // Per-binge operating hours: null in the request means "leave unchanged".
+        // We re-validate the resulting (open, close) pair to reject e.g. close <= open.
+        if (request.getOpenTime() != null) {
+            binge.setOpenTime(request.getOpenTime());
+        }
+        if (request.getCloseTime() != null) {
+            binge.setCloseTime(request.getCloseTime());
+        }
+        validateOperatingHours(binge.getOpenTime(), binge.getCloseTime());
         binge = bingeRepository.save(binge);
         log.info("Binge updated: '{}' (ID: {})", binge.getName(), id);
         return toDto(binge);
@@ -468,16 +753,75 @@ public class BingeService {
             .id(b.getId())
             .name(b.getName())
             .address(b.getAddress())
+            .addressLine1(b.getAddressLine1())
+            .addressLine2(b.getAddressLine2())
+            .city(b.getCity())
+            .state(b.getState())
+            .country(b.getCountry())
+            .postalCode(b.getPostalCode())
             .adminId(b.getAdminId())
             .active(b.isActive())
             .operationalDate(b.getOperationalDate())
             .supportEmail(b.getSupportEmail())
             .supportPhone(b.getSupportPhone())
+            .supportPhoneCountryCode(b.getSupportPhoneCountryCode())
             .supportWhatsapp(b.getSupportWhatsapp())
+            .supportWhatsappCountryCode(b.getSupportWhatsappCountryCode())
             .customerCancellationEnabled(b.isCustomerCancellationEnabled())
             .customerCancellationCutoffMinutes(b.getCustomerCancellationCutoffMinutes())
             .maxConcurrentBookings(b.getMaxConcurrentBookings())
+            .openTime(b.getOpenTime())
+            .closeTime(b.getCloseTime())
             .createdAt(b.getCreatedAt())
+            .status(b.getStatus() != null ? b.getStatus().name() : BingeApprovalStatus.APPROVED.name())
+            .approvalDecidedBy(b.getApprovalDecidedBy())
+            .approvalDecidedAt(b.getApprovalDecidedAt())
+            .approvalRejectionReason(b.getApprovalRejectionReason())
+            .firstEventCreatedAt(b.getFirstEventCreatedAt())
+            .graceWarningSentAt(b.getGraceWarningSentAt())
+            .autoDeactivatedAt(b.getAutoDeactivatedAt())
             .build();
+    }
+
+    /**
+     * Compose a human-readable single-line address from the structured fields,
+     * falling back to the legacy free-form {@code address} the caller supplied.
+     * Stored on the entity so existing UI surfaces that read {@code address}
+     * (admin emails, customer dashboards, About page) continue to render
+     * without needing to know about the new fields.
+     */
+    private String composeAddressDisplay(BingeSaveRequest request) {
+        java.util.List<String> parts = new java.util.ArrayList<>(6);
+        java.util.function.Consumer<String> add = v -> {
+            String t = trimToNull(v);
+            if (t != null) parts.add(t);
+        };
+        add.accept(request.getAddressLine1());
+        add.accept(request.getAddressLine2());
+        add.accept(request.getCity());
+        add.accept(request.getState());
+        add.accept(request.getPostalCode());
+        add.accept(request.getCountry());
+        if (parts.isEmpty()) {
+            return trimToNull(request.getAddress());
+        }
+        String composed = String.join(", ", parts);
+        return composed.length() > 500 ? composed.substring(0, 500) : composed;
+    }
+
+    /**
+     * Reject mis-configured operating hours up front so booking-service never has
+     * to deal with closeTime &le; openTime at runtime. Both args may be null
+     * (caller has already supplied defaults at create time, or kept the existing
+     * value at update time); we only validate when both are present.
+     */
+    private void validateOperatingHours(LocalTime openTime, LocalTime closeTime) {
+        if (openTime == null || closeTime == null) {
+            return;
+        }
+        if (!closeTime.isAfter(openTime)) {
+            throw new BusinessException(
+                "Closing time (" + closeTime + ") must be strictly after opening time (" + openTime + ").");
+        }
     }
 }

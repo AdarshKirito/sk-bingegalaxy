@@ -15,6 +15,8 @@ public class NotificationDto {
     private String id;
     private String recipientEmail;
     private String recipientPhone;
+    /** E.164 dial prefix without subscriber number (e.g. "+91"). */
+    private String recipientPhoneCountryCode;
     private String recipientName;
     private String type;
     private NotificationChannel channel;

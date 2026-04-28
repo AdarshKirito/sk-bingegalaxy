@@ -293,6 +293,92 @@ export default function Membership() {
         )}
       </section>
 
+      {/* ── How it works ───────────────────────────────────── */}
+      <section className="membership-section">
+        <div className="membership-section-head">
+          <div>
+            <h2>How our loyalty program works</h2>
+            <p>Everything you need to know to earn, climb, and redeem.</p>
+          </div>
+        </div>
+
+        <div className="how-grid">
+          <div className="how-card">
+            <div className="how-ico"><FiStar /></div>
+            <h3>1. Earn points on every booking</h3>
+            <p>
+              You get <strong>1 point for every ₹100</strong> you spend on stays and
+              experiences. Your tier applies a <strong>multiplier</strong> on top —
+              e.g. Gold earns 1.5× and Platinum earns 2×.
+            </p>
+          </div>
+
+          <div className="how-card">
+            <div className="how-ico"><FiTrendingUp /></div>
+            <h3>2. Climb tiers with qualifying credits</h3>
+            <p>
+              Alongside points, every booking also earns <strong>qualifying credits</strong>
+              at the base rate. When your rolling <strong>12-month credits</strong> cross a
+              threshold, your new tier unlocks <em>instantly</em>.
+            </p>
+            <ul className="how-ladder">
+              {TIER_ORDER.map((code) => (
+                <li key={code}>
+                  <span className={`tier-chip tier-chip-${code.toLowerCase()}`}>{code}</span>
+                  <span className="how-ladder-val">
+                    {TIER_THRESHOLDS[code] === 0
+                      ? 'Starting tier'
+                      : `${TIER_THRESHOLDS[code].toLocaleString('en-IN')} credits / year`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="how-card">
+            <div className="how-ico"><FiGift /></div>
+            <h3>3. Redeem points at checkout</h3>
+            <p>
+              At booking, toggle <strong>"Use points"</strong> to apply your balance —
+              100 points is worth ₹10 off. Partial redemptions are fine, and we always
+              spend your oldest points first so nothing is left on the table.
+            </p>
+          </div>
+
+          <div className="how-card">
+            <div className="how-ico"><FiClock /></div>
+            <h3>4. Keep your status active</h3>
+            <p>
+              Your tier stays valid through the <strong>current calendar year plus the
+              following year</strong>. Re-qualify before it ends and it renews seamlessly;
+              miss it and we softly move you one tier down — never all the way back to
+              Bronze.
+            </p>
+          </div>
+
+          <div className="how-card">
+            <div className="how-ico"><FiShield /></div>
+            <h3>5. Points do have a shelf life</h3>
+            <p>
+              Points expire <strong>540 days</strong> after you earn them. Every booking,
+              or any redemption, resets the clock on that batch — frequent members rarely
+              see expiries.
+            </p>
+          </div>
+
+          <div className="how-card">
+            <div className="how-ico"><FiArrowUp /></div>
+            <h3>6. Already elite? Status Match</h3>
+            <p>
+              If you hold top-tier status with another hospitality brand, submit proof
+              below. If we approve, you get a <strong>90-day challenge</strong> at the
+              matched tier — earn enough qualifying credits in that window and it's yours
+              for the full term.
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* ── Status Match ────────────────────────────────────── */}
       <section className="membership-section">
         <div className="membership-section-head">
@@ -301,7 +387,6 @@ export default function Membership() {
             <p>Bring your elite status from another hospitality program.</p>
           </div>
         </div>
-
         <form className="sm-form" onSubmit={submitStatusMatch}>
           <div className="sm-hint">
             Submit proof (screenshot or statement URL) of your current top-tier

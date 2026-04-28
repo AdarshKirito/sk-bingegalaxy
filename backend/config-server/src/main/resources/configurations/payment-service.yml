@@ -8,7 +8,10 @@ server:
 
 internal:
   api:
-    secret: ${INTERNAL_API_SECRET:changeme-local-dev-only}
+    # No default — boot fails fast if the shared Feign secret is not
+    # provided via env, rather than silently running with a well-known
+    # placeholder that would let anyone forge internal API calls.
+    secret: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET must be set}
 
 spring:
   application:

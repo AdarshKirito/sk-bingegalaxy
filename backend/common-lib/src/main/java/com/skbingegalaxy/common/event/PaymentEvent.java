@@ -18,6 +18,8 @@ public class PaymentEvent implements Serializable {
     private String status;
     private String customerEmail;
     private String customerPhone;
+    /** E.164 dial prefix without subscriber number (e.g. "+91"). */
+    private String customerPhoneCountryCode;
     private String customerName;
     private LocalDateTime paidAt;
     // Populated only for refund events

@@ -17,6 +17,7 @@ public class WaitlistEntryDto {
     private String customerName;
     private String customerEmail;
     private String customerPhone;
+    private String customerPhoneCountryCode;
     private EventTypeDto eventType;
     private LocalDate preferredDate;
     private LocalTime preferredStartTime;

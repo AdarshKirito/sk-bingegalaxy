@@ -36,8 +36,9 @@ public class WaitlistController {
             @RequestHeader("X-User-Id") Long userId,
             @RequestHeader("X-User-Email") String email,
             @RequestHeader(value = "X-User-Name", defaultValue = "Customer") String name,
-            @RequestHeader(value = "X-User-Phone", defaultValue = "") String phone) {
-        WaitlistEntryDto entry = waitlistService.joinWaitlist(request, userId, name, email, phone);
+            @RequestHeader(value = "X-User-Phone", defaultValue = "") String phone,
+            @RequestHeader(value = "X-User-Phone-Country-Code", defaultValue = "") String phoneCountryCode) {
+        WaitlistEntryDto entry = waitlistService.joinWaitlist(request, userId, name, email, phone, phoneCountryCode);
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(ApiResponse.ok("Added to waitlist", entry));
     }

@@ -27,7 +27,7 @@ public class InternalBookingController {
      * Used by payment-service to validate client-supplied payment amounts.
      */
     @GetMapping("/amount/{bookingRef}")
-    public ResponseEntity<ApiResponse<Map<String, BigDecimal>>> getBookingAmount(
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getBookingAmount(
             @PathVariable String bookingRef) {
         Booking booking = bookingRepository.findByBookingRef(bookingRef)
             .orElseThrow(() -> new ResourceNotFoundException("Booking", "bookingRef", bookingRef));
@@ -40,7 +40,8 @@ public class InternalBookingController {
         return ResponseEntity.ok(ApiResponse.ok(Map.of(
             "totalAmount", booking.getTotalAmount(),
             "collectedAmount", collected,
-            "remainingBalance", remaining
+            "remainingBalance", remaining,
+            "status", booking.getStatus().name()
         )));
     }
 }

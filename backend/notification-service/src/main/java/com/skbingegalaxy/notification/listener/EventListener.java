@@ -68,6 +68,7 @@ public class EventListener {
                 channel,
                 event.getCustomerEmail(),
                 event.getCustomerPhone(),
+                event.getCustomerPhoneCountryCode(),
                 event.getCustomerName(),
                 "Booking Confirmed - " + event.getBookingRef(),
                 buildBookingCreatedBody(event),
@@ -104,6 +105,7 @@ public class EventListener {
                 channel,
                 event.getCustomerEmail(),
                 event.getCustomerPhone(),
+                event.getCustomerPhoneCountryCode(),
                 event.getCustomerName(),
                 "Booking Cancelled - " + event.getBookingRef(),
                 buildBookingCancelledBody(event),
@@ -140,7 +142,8 @@ public class EventListener {
             notificationService.sendNotification(
                 "PAYMENT_SUCCESS",
                 channel,
-                event.getCustomerEmail(), event.getCustomerPhone(), event.getCustomerName(),
+                event.getCustomerEmail(), event.getCustomerPhone(), event.getCustomerPhoneCountryCode(),
+                event.getCustomerName(),
                 "Payment Successful - " + event.getBookingRef(),
                 buildPaymentSuccessBody(event),
                 event.getBookingRef(),
@@ -171,7 +174,8 @@ public class EventListener {
             notificationService.sendNotification(
                 "PAYMENT_FAILED",
                 channel,
-                event.getCustomerEmail(), event.getCustomerPhone(), event.getCustomerName(),
+                event.getCustomerEmail(), event.getCustomerPhone(), event.getCustomerPhoneCountryCode(),
+                event.getCustomerName(),
                 "Payment Failed - " + event.getBookingRef(),
                 buildPaymentFailedBody(event),
                 event.getBookingRef(),
@@ -186,28 +190,81 @@ public class EventListener {
     @KafkaListener(topics = KafkaTopics.NOTIFICATION_SEND, groupId = "notification-service")
     public void handleDirectNotification(NotificationEvent event) {
         try {
-            log.info("Direct notification event: type={}, to={}", event.getType(), event.getRecipientEmail());
-            if (event.getRecipientEmail() != null && event.getType() != null
-                    && recentlySentForEmail(event.getRecipientEmail(), event.getType())) {
-                log.info("Duplicate NOTIFICATION_SEND ({}) for {} — skipping", event.getType(), event.getRecipientEmail());
+            // Producers (e.g. auth-service) often populate `templateName`+`templateData`
+            // instead of `type`+`subject`+`body`. Normalize here so downstream
+            // template resolution + DB dedup keys work, and a null Subject never
+            // reaches JavaMail ("Subject must not be null" IllegalArgumentException).
+            String resolvedType = event.getType();
+            if (resolvedType == null && event.getTemplateName() != null) {
+                resolvedType = mapTemplateNameToType(event.getTemplateName());
+            }
+            String resolvedSubject = event.getSubject();
+            if (resolvedSubject == null || resolvedSubject.isBlank()) {
+                resolvedSubject = defaultSubjectFor(resolvedType, event.getTemplateName());
+            }
+            Map<String, Object> metadata = event.getMetadata();
+            if ((metadata == null || metadata.isEmpty()) && event.getTemplateData() != null) {
+                metadata = new HashMap<>(event.getTemplateData());
+            }
+
+            log.info("Direct notification event: type={}, template={}, to={}",
+                resolvedType, event.getTemplateName(), event.getRecipientEmail());
+            if (event.getRecipientEmail() != null && resolvedType != null
+                    && recentlySentForEmail(event.getRecipientEmail(), resolvedType)) {
+                log.info("Duplicate NOTIFICATION_SEND ({}) for {} — skipping", resolvedType, event.getRecipientEmail());
                 return;
             }
             NotificationChannel channel = event.getChannel() != null ? event.getChannel() : NotificationChannel.EMAIL;
 
             notificationService.sendNotification(
-                event.getType(),
+                resolvedType,
                 channel,
                 event.getRecipientEmail(),
                 event.getRecipientPhone(),
+                event.getRecipientPhoneCountryCode(),
                 event.getRecipientName(),
-                event.getSubject(),
+                resolvedSubject,
                 event.getBody(),
                 event.getBookingRef(),
-                event.getMetadata()
+                metadata
             );
         } catch (Exception e) {
             log.error("Failed to process NOTIFICATION_SEND event: {}", e.getMessage(), e);
             throw new RuntimeException("Failed to process NOTIFICATION_SEND event", e);
+        }
+    }
+
+    /**
+     * Map producer-side template aliases to internal notification types.
+     * Keeps producers decoupled from our {@code TEMPLATE_MAP} keys.
+     */
+    private static String mapTemplateNameToType(String templateName) {
+        if (templateName == null) return null;
+        switch (templateName.toUpperCase()) {
+            case "WELCOME": return "USER_REGISTERED";
+            case "PASSWORD_RESET": return "PASSWORD_RESET";
+            case "BOOKING_CREATED": return "BOOKING_CREATED";
+            case "BOOKING_CANCELLED": return "BOOKING_CANCELLED";
+            case "BOOKING_REMINDER": return "BOOKING_REMINDER";
+            case "PAYMENT_SUCCESS": return "PAYMENT_SUCCESS";
+            case "PAYMENT_FAILED": return "PAYMENT_FAILED";
+            default: return templateName.toUpperCase();
+        }
+    }
+
+    private static String defaultSubjectFor(String type, String templateName) {
+        String key = type != null ? type : templateName;
+        if (key == null) return "SK Binge Galaxy";
+        switch (key.toUpperCase()) {
+            case "USER_REGISTERED":
+            case "WELCOME":           return "Welcome to SK Binge Galaxy";
+            case "PASSWORD_RESET":    return "Reset your SK Binge Galaxy password";
+            case "BOOKING_CREATED":   return "Your booking is confirmed";
+            case "BOOKING_CANCELLED": return "Your booking was cancelled";
+            case "BOOKING_REMINDER":  return "Reminder: your upcoming booking";
+            case "PAYMENT_SUCCESS":   return "Payment received — thank you!";
+            case "PAYMENT_FAILED":    return "Action required: payment failed";
+            default:                  return "SK Binge Galaxy";
         }
     }
 
@@ -230,6 +287,7 @@ public class EventListener {
                 channel,
                 event.getRecipientEmail(),
                 event.getRecipientPhone(),
+                event.getRecipientPhoneCountryCode(),
                 event.getRecipientName(),
                 "Welcome to SK Binge Galaxy!",
                 buildWelcomeBody(event),
@@ -262,6 +320,7 @@ public class EventListener {
                 "PASSWORD_RESET",
                 channel,
                 event.getRecipientEmail(),
+                null,
                 null,
                 event.getRecipientName(),
                 "Password Reset Request - SK Binge Galaxy",
@@ -396,6 +455,7 @@ public class EventListener {
                         .bookingRef(event.getBookingRef())
                         .recipientEmail(event.getCustomerEmail())
                         .recipientPhone(event.getCustomerPhone())
+                        .recipientPhoneCountryCode(event.getCustomerPhoneCountryCode())
                         .recipientName(event.getCustomerName())
                         .eventTypeName(event.getEventTypeName())
                         .bookingDate(event.getBookingDate())
@@ -413,6 +473,7 @@ public class EventListener {
                         .bookingRef(event.getBookingRef())
                         .recipientEmail(event.getCustomerEmail())
                         .recipientPhone(event.getCustomerPhone())
+                        .recipientPhoneCountryCode(event.getCustomerPhoneCountryCode())
                         .recipientName(event.getCustomerName())
                         .eventTypeName(event.getEventTypeName())
                         .bookingDate(event.getBookingDate())

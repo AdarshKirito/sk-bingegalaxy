@@ -35,6 +35,7 @@ class BookingServiceTest {
 
     @Mock private BookingRepository bookingRepository;
         @Mock private BingeRepository bingeRepository;
+        @Mock private BookingReviewRepository bookingReviewRepository;
         @Mock private BookingAddOnRepository bookingAddOnRepository;
     @Mock private EventTypeRepository eventTypeRepository;
     @Mock private AddOnRepository addOnRepository;
@@ -52,7 +53,10 @@ class BookingServiceTest {
     @Mock private PricingService pricingService;
     @Mock private BookingEventLogService eventLogService;
     @Mock private SagaOrchestrator sagaOrchestrator;
+    @Mock private VenueRoomRepository venueRoomRepository;
         @Mock private LoyaltyService loyaltyService;
+        @Mock private com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyMembershipRepository loyaltyMembershipRepository;
+        @Mock private com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyConfigService loyaltyConfigService;
         @Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     @InjectMocks private BookingService bookingService;
@@ -67,11 +71,14 @@ class BookingServiceTest {
         // from AvailabilityClientFallback (which implements AvailabilityClient)
         // because Lombok-generated constructors don't preserve parameter names.
         ReflectionTestUtils.setField(bookingService, "availabilityClient", availabilityClient);
+        ReflectionTestUtils.setField(bookingService, "eventPublisher", eventPublisher);
         ReflectionTestUtils.setField(bookingService, "internalApiSecret", "test-internal-secret");
         ReflectionTestUtils.setField(bookingService, "refPrefix", "SKBG");
                 ReflectionTestUtils.setField(bookingService, "maxPendingPerCustomer", 2);
                 ReflectionTestUtils.setField(bookingService, "cooldownMinutesAfterTimeout", 10);
-                lenient().when(loyaltyService.earnPoints(anyLong(), anyString(), any(BigDecimal.class))).thenReturn(0L);
+                ReflectionTestUtils.setField(bookingService, "maxBookingHorizonDays", 365);
+                ReflectionTestUtils.setField(bookingService, "defaultOpeningHour", 10);
+                ReflectionTestUtils.setField(bookingService, "defaultClosingHour", 23);
                 lenient().when(loyaltyService.redeemPoints(anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
                         .thenReturn(new LoyaltyService.RedemptionResult(0L, BigDecimal.ZERO));
         lenient().when(bingeRepository.findById(anyLong())).thenReturn(Optional.empty());

@@ -156,6 +156,22 @@ public class EnrollmentService {
 
         log.info("[loyalty-v2] ENROLLED customer={} membership={} number={} source={} wallet={}",
                 customerId, membership.getId(), membership.getMemberNumber(), source, wallet.getId());
+
+        return membership;
+    }
+
+    /**
+     * Legacy tier carry-over from the retired v1 {@code loyalty_accounts}
+     * table.  Kept as a no-op stub so callers that ran during the
+     * shadow-period migration continue to compile.  The one-shot V22
+     * Flyway backfill already promoted every legacy customer to their
+     * v1 tier; v1 is dropped as of M13 so there is nothing left to
+     * reconcile against.
+     *
+     * @deprecated v1 ledger removed in M13.  Do not call from new code.
+     */
+    @Deprecated(since = "M13", forRemoval = true)
+    public LoyaltyMembership reconcileWithLegacy(LoyaltyMembership membership) {
         return membership;
     }
 }

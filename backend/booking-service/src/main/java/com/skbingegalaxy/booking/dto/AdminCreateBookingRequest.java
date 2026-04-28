@@ -20,8 +20,12 @@ public class AdminCreateBookingRequest {
     @jakarta.validation.constraints.Email(message = "Customer email must be valid")
     @Size(max = 150)
     private String customerEmail;
-    @jakarta.validation.constraints.Pattern(regexp = "^$|^\\d{10}$", message = "Phone must be 10 digits")
+    @jakarta.validation.constraints.Pattern(regexp = "^$|^\\d{4,15}$", message = "Phone must be 4-15 digits")
     private String customerPhone;
+
+    /** E.164 dial prefix without subscriber number (e.g. "+91"). */
+    @jakarta.validation.constraints.Pattern(regexp = "^$|^\\+\\d{1,4}$", message = "Phone country code must be in '+<digits>' format")
+    private String customerPhoneCountryCode;
 
     @NotNull(message = "Event type ID is required")
     private Long eventTypeId;

@@ -3,15 +3,10 @@ import { adminService, toArray } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import { format, addDays } from 'date-fns';
 import { FiCalendar, FiClock, FiUsers, FiUser, FiMail, FiPhone, FiCheck } from 'react-icons/fi';
+import { formatTime12h } from '../utils/format';
 import './AdminPages.css';
 
-const fmtTime = (timeStr) => {
-  if (!timeStr) return '--:--';
-  const parts = String(timeStr).split(':');
-  const h = parseInt(parts[0], 10);
-  const m = parseInt(parts[1] || '0', 10);
-  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
-};
+const fmtTime = (timeStr) => formatTime12h(timeStr) || '--:--';
 
 const STATUS_COLORS = {
   WAITING: 'badge-warning',

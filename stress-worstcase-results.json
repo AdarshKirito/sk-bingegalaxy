@@ -1,0 +1,330 @@
+﻿[
+    {
+        "Id":  "B1",
+        "Name":  "create-baseline",
+        "Expected":  "200",
+        "Actual":  201,
+        "Verdict":  "PASS",
+        "Note":  "ref=SKBG26DF7A1EAB"
+    },
+    {
+        "Id":  "B2",
+        "Name":  "past-date-rejected",
+        "Expected":  "400",
+        "Actual":  400,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "B3",
+        "Name":  "far-future-rejected",
+        "Expected":  "400",
+        "Actual":  400,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "B4",
+        "Name":  "negative-guests",
+        "Expected":  "4xx",
+        "Actual":  400,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "B5",
+        "Name":  "zero-duration",
+        "Expected":  "4xx",
+        "Actual":  400,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "B6",
+        "Name":  "huge-guests",
+        "Expected":  "4xx",
+        "Actual":  400,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "B7",
+        "Name":  "bogus-event-type",
+        "Expected":  "4xx",
+        "Actual":  404,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "B8",
+        "Name":  "content-dedupe",
+        "Expected":  "400 pending",
+        "Actual":  400,
+        "Verdict":  "PASS",
+        "Note":  "{\"success\":false,\"message\":\"You already have a pending booking for this event and time slot. Please check My Bookings.\"}"
+    },
+    {
+        "Id":  "B9",
+        "Name":  "idempotency-replay",
+        "Expected":  "same ref",
+        "Actual":  "SKBG26F74BA15D=SKBG26F74BA15D",
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "B10",
+        "Name":  "concurrent-race",
+        "Expected":  "no overcommit",
+        "Actual":  "OK=1 ERR=5",
+        "Verdict":  "PASS",
+        "Note":  "cap-fail"
+    },
+    {
+        "Id":  "I1",
+        "Name":  "mallory-read-alice",
+        "Expected":  "403/404",
+        "Actual":  403,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "I2",
+        "Name":  "mallory-cancel-alice",
+        "Expected":  "403",
+        "Actual":  403,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "I3",
+        "Name":  "mallory-reschedule-alice",
+        "Expected":  "403",
+        "Actual":  403,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "I4",
+        "Name":  "mallory-transfer-alice",
+        "Expected":  "403",
+        "Actual":  403,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "I5",
+        "Name":  "mallory-read-alice-payment",
+        "Expected":  "403/404",
+        "Actual":  200,
+        "Verdict":  "FAIL",
+        "Note":  ""
+    },
+    {
+        "Id":  "I6",
+        "Name":  "cust-admin-walkin",
+        "Expected":  "403",
+        "Actual":  403,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "I7",
+        "Name":  "cust-admin-refund",
+        "Expected":  "403",
+        "Actual":  403,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "I8",
+        "Name":  "cust-admin-cash",
+        "Expected":  "403",
+        "Actual":  403,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "I9",
+        "Name":  "forged-x-user-role",
+        "Expected":  "403",
+        "Actual":  403,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "C1",
+        "Name":  "cancel-own",
+        "Expected":  "200",
+        "Actual":  200,
+        "Verdict":  "PASS",
+        "Note":  "{\"success\":true,\"message\":\"Booking cancelled\",\"data\":{\"id\":6,\"bookingRef\":\"SKBG26DF7A1EAB\",\"bingeId\":1,\"customerId\":52,\""
+    },
+    {
+        "Id":  "C2",
+        "Name":  "cancel-twice",
+        "Expected":  "4xx",
+        "Actual":  400,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "C3",
+        "Name":  "cancel-bogus-ref",
+        "Expected":  "4xx",
+        "Actual":  404,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "C5",
+        "Name":  "admin-refund-neg",
+        "Expected":  "4xx",
+        "Actual":  400,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "C6",
+        "Name":  "admin-refund-excess",
+        "Expected":  "4xx",
+        "Actual":  400,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "P1",
+        "Name":  "initiate-bogus",
+        "Expected":  "4xx",
+        "Actual":  503,
+        "Verdict":  "FAIL",
+        "Note":  ""
+    },
+    {
+        "Id":  "P2",
+        "Name":  "initiate-negative",
+        "Expected":  "4xx",
+        "Actual":  400,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "P3",
+        "Name":  "initiate-huge",
+        "Expected":  "4xx",
+        "Actual":  400,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "P4",
+        "Name":  "webhook-tamper",
+        "Expected":  "4xx",
+        "Actual":  400,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "P5",
+        "Name":  "list-my-payments",
+        "Expected":  "200",
+        "Actual":  200,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "P6",
+        "Name":  "cancel-bogus-tx",
+        "Expected":  "4xx",
+        "Actual":  404,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "W1",
+        "Name":  "join-waitlist",
+        "Expected":  "200",
+        "Actual":  400,
+        "Verdict":  "INFO",
+        "Note":  "{\"success\":false,\"message\":\"Validation failed\",\"errors\":{\"preferredStartTime\":\"Preferred start time is required\",\"preferredDate\":\"Preferred "
+    },
+    {
+        "Id":  "W2",
+        "Name":  "waitlist-dup",
+        "Expected":  "4xx",
+        "Actual":  400,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "W5",
+        "Name":  "list-my-wl",
+        "Expected":  "200",
+        "Actual":  200,
+        "Verdict":  "PASS",
+        "Note":  "{\"success\":true,\"data\":[]}"
+    },
+    {
+        "Id":  "W6",
+        "Name":  "cust-admin-wl",
+        "Expected":  "403",
+        "Actual":  403,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "L1",
+        "Name":  "loyalty-self",
+        "Expected":  "200",
+        "Actual":  200,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "L2",
+        "Name":  "cust-loyalty-adjust",
+        "Expected":  "403",
+        "Actual":  403,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "L3-api_v2_loyalty_super-admin_program",
+        "Name":  "v2-cust-blocked",
+        "Expected":  "403",
+        "Actual":  403,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "L3-api_v2_loyalty_super-admin_tiers",
+        "Name":  "v2-cust-blocked",
+        "Expected":  "403",
+        "Actual":  403,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "L3-api_v2_loyalty_super-admin_perks",
+        "Name":  "v2-cust-blocked",
+        "Expected":  "403",
+        "Actual":  403,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "L3-api_v2_loyalty_admin_bindings_1",
+        "Name":  "v2-cust-blocked",
+        "Expected":  "403",
+        "Actual":  403,
+        "Verdict":  "PASS",
+        "Note":  ""
+    },
+    {
+        "Id":  "RL1",
+        "Name":  "auth-rate-limit",
+        "Expected":  "\u003e=1 429",
+        "Actual":  "got 14 of 35",
+        "Verdict":  "PASS",
+        "Note":  ""
+    }
+]

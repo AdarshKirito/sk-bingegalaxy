@@ -3,7 +3,8 @@ import { toast } from 'react-toastify';
 import {
   FiAward, FiSettings, FiLayers, FiGift, FiPackage, FiShuffle,
   FiBarChart2, FiBookOpen, FiRefreshCw, FiPlus, FiCheck, FiX,
-  FiAlertTriangle, FiEdit2, FiTrash2, FiExternalLink,
+  FiAlertTriangle, FiEdit2, FiTrash2, FiExternalLink, FiHelpCircle,
+  FiTrendingUp, FiClock, FiDollarSign, FiArrowUp,
 } from 'react-icons/fi';
 import SEO from '../components/SEO';
 import { SkeletonGrid } from '../components/ui/Skeleton';
@@ -16,6 +17,18 @@ import './AdminSecurity.css';
  * (javascript:, data:, vbscript:, file:, etc.) becomes null so that
  * a malicious proof URL cannot execute when an admin clicks it.
  */
+/**
+ * Normalize any "list" response into a plain array.
+ * The backend can return either an array or a Spring `Page` ({content, totalElements, …}),
+ * and our earlier `.map(...)` assumed array unconditionally — which blew up on Page shapes.
+ */
+function toArray(v) {
+  if (Array.isArray(v)) return v;
+  if (v && Array.isArray(v.content)) return v.content;
+  if (v && Array.isArray(v.items))   return v.items;
+  return [];
+}
+
 function safeExternalHref(url) {
   if (typeof url !== 'string') return null;
   const trimmed = url.trim();
@@ -56,6 +69,7 @@ export default function AdminLoyaltyCenter() {
     ['binges',       'Binges',       <FiPackage />],
     ['status-match', 'Status Match', <FiShuffle />],
     ['parity',       'Parity',       <FiBarChart2 />],
+    ['guide',        'How it works', <FiHelpCircle />],
     ['playbook',     'Playbook',     <FiBookOpen />],
   ];
 
@@ -88,6 +102,7 @@ export default function AdminLoyaltyCenter() {
       {tab === 'binges'       && <BindingsTab />}
       {tab === 'status-match' && <StatusMatchTab />}
       {tab === 'parity'       && <ParityTab />}
+      {tab === 'guide'        && <GuideTab />}
       {tab === 'playbook'     && <PlaybookTab />}
     </div>
   );
@@ -184,7 +199,9 @@ function TiersTab() {
   const [draft, setDraft] = useState(null);
 
   const reload = useCallback(
-    () => loyaltyV2.listTiers().then(setTiers).catch(() => toast.error('Tier load failed')),
+    () => loyaltyV2.listTiers()
+      .then((res) => setTiers(toArray(res)))
+      .catch(() => toast.error('Tier load failed')),
     [],
   );
   useEffect(() => { reload(); }, [reload]);
@@ -326,7 +343,9 @@ function PerksTab() {
   const [draft, setDraft] = useState(null);
 
   const reload = useCallback(
-    () => loyaltyV2.listPerks().then(setPerks).catch(() => toast.error('Perk load failed')),
+    () => loyaltyV2.listPerks()
+      .then((res) => setPerks(toArray(res)))
+      .catch(() => toast.error('Perk load failed')),
     [],
   );
   useEffect(() => { reload(); }, [reload]);
@@ -441,7 +460,7 @@ function BindingsTab() {
 
   const reload = useCallback(
     () => loyaltyV2.listBindings()
-      .then((rows) => { setBindings(rows || []); setSelected(new Set()); })
+      .then((res) => { setBindings(toArray(res)); setSelected(new Set()); })
       .catch(() => toast.error('Binding load failed')),
     [],
   );
@@ -719,6 +738,138 @@ function ParityTab() {
           </table>
         </>
       )}
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Guide — "How the loyalty program works" reference
+   ────────────────────────────────────────────────────────────── */
+function GuideTab() {
+  return (
+    <div className="sec-card">
+      <div className="sec-card-head">
+        <div>
+          <h2>How the loyalty program works</h2>
+          <p>
+            A single source of truth for how customers earn, climb tiers, redeem, and
+            keep their status — share this with new admins or support staff.
+          </p>
+        </div>
+      </div>
+
+      {/* Tier ladder at a glance */}
+      <h3 style={{ margin: '6px 0 12px', fontSize: 16 }}>Tier ladder</h3>
+      <div className="sec-table-wrap">
+        <table className="sec-table">
+          <thead>
+            <tr>
+              <th>Tier</th>
+              <th>Minimum qualifying credits / year</th>
+              <th>Earn multiplier</th>
+              <th>Signature perks</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span className="sec-tier-chip sec-tier-BRONZE">BRONZE</span></td>
+              <td>0</td><td>1.00×</td>
+              <td>Base earn rate, birthday surprise.</td>
+            </tr>
+            <tr>
+              <td><span className="sec-tier-chip sec-tier-SILVER">SILVER</span></td>
+              <td>5,000</td><td>1.25×</td>
+              <td>Welcome refreshment, 24 h priority booking window.</td>
+            </tr>
+            <tr>
+              <td><span className="sec-tier-chip sec-tier-GOLD">GOLD</span></td>
+              <td>15,000</td><td>1.50×</td>
+              <td>Late checkout, priority support, flex-cancel.</td>
+            </tr>
+            <tr>
+              <td><span className="sec-tier-chip sec-tier-PLATINUM">PLATINUM</span></td>
+              <td>35,000</td><td>2.00×</td>
+              <td>Room upgrade, annual choice gift, dedicated concierge.</td>
+            </tr>
+            <tr>
+              <td><span className="sec-tier-chip sec-tier-DIAMOND">DIAMOND</span></td>
+              <td>75,000</td><td>3.00×</td>
+              <td>Guaranteed upgrade, invite-only events, waived fees.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="sec-playbook-grid" style={{ marginTop: 20 }}>
+        <div className="sec-playbook-card">
+          <h3><FiTrendingUp /> Earning &amp; climbing</h3>
+          <ul>
+            <li>Every booking earns <strong>points</strong> (1 pt per ₹100) and <strong>qualifying credits</strong> at the same rate.</li>
+            <li>Points are the spendable currency; qualifying credits drive tier promotions.</li>
+            <li>Each tier applies a <strong>multiplier</strong> to points earned (e.g. Gold = 1.5×). Credits are <em>not</em> multiplied — status is earned on base spend.</li>
+            <li>We look at a rolling <strong>12-month qualifying window</strong>. When a customer crosses a threshold, the new tier activates immediately.</li>
+          </ul>
+        </div>
+
+        <div className="sec-playbook-card">
+          <h3><FiDollarSign /> Redeeming points</h3>
+          <ul>
+            <li>Points are redeemed at booking checkout via the <code>redeem-quote</code> endpoint.</li>
+            <li>Default rate: <strong>100 points = ₹10</strong> off (configurable per binge via Redeem rules).</li>
+            <li>Redemptions deduct FIFO from the oldest earn lot, so nothing expires under-water.</li>
+            <li>Partial redemptions are allowed; caps can be set per binge (e.g. max 50% of bill).</li>
+          </ul>
+        </div>
+
+        <div className="sec-playbook-card">
+          <h3><FiClock /> Expiry &amp; validity</h3>
+          <ul>
+            <li>Points expire <strong>{`{pointsExpiryDays}`} days</strong> after earning (default 540). See <em>Program → Points expiry</em>.</li>
+            <li>Tier status is valid for the <strong>validityCalendarYearsAfter</strong> period of each tier (e.g. Gold: current year + 1).</li>
+            <li>If a customer doesn't re-qualify, they soft-land to the <strong>softLandingTierCode</strong> — a graceful demote instead of dropping to Bronze.</li>
+            <li>Lifetime tiers (e.g. Diamond after 500 k lifetime credits) never expire.</li>
+          </ul>
+        </div>
+
+        <div className="sec-playbook-card">
+          <h3><FiArrowUp /> Status Match</h3>
+          <ul>
+            <li>Members submit proof of elite status in a competing program through <em>Membership → Status Match</em>.</li>
+            <li>Super admins review each request in the <strong>Status Match</strong> tab.</li>
+            <li>Approval kicks off a <strong>90-day challenge</strong> — the member must earn the tier's qualifying credits inside the window to keep it.</li>
+            <li>Auto-rejects are never issued; every decision is manual and audited.</li>
+          </ul>
+        </div>
+
+        <div className="sec-playbook-card">
+          <h3><FiPackage /> Binges &amp; bindings</h3>
+          <ul>
+            <li>A <strong>binding</strong> connects a binge (venue) to the loyalty program. Without one, the binge doesn't earn or redeem points.</li>
+            <li>Enable / disable in bulk from the <strong>Binges</strong> tab.</li>
+            <li>Per-binge earn and redeem rules are configured under <em>Binge Management → Loyalty</em>.</li>
+            <li>Legacy-frozen bindings are immutable snapshots from v1 — leave them alone until the v1 → v2 cutover is done.</li>
+          </ul>
+        </div>
+
+        <div className="sec-playbook-card">
+          <h3><FiBarChart2 /> Parity (shadow period)</h3>
+          <ul>
+            <li>During migration, both v1 and v2 write to the wallet. The parity job compares them nightly.</li>
+            <li>Zero mismatches for 7+ nights is the bar to flip <code>APP_LOYALTY_V2_PRIMARY=true</code>.</li>
+            <li>After cutover, v1 writes become no-ops and v2 is authoritative.</li>
+            <li>Trigger an on-demand check any time from the <strong>Parity</strong> tab.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div className="mfa-warning" style={{ marginTop: 20 }}>
+        <FiAlertTriangle size={18} />
+        <span>
+          Admins and support agents: <strong>never quote exact future tier dates to members</strong>.
+          Tier changes happen when qualifying credits cross a threshold; we can describe the
+          mechanism but not commit to a specific future promotion date — that's the engine's job.
+        </span>
+      </div>
     </div>
   );
 }

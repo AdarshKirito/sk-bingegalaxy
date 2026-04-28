@@ -39,6 +39,8 @@ class AuthControllerTest {
     @Autowired private ObjectMapper objectMapper;
     @MockBean private AuthService authService;
     @MockBean private com.skbingegalaxy.auth.service.TokenRevocationService tokenRevocationService;
+    @MockBean private com.skbingegalaxy.auth.service.AuthAuditService auditService;
+    @MockBean private com.skbingegalaxy.auth.security.JwtProvider jwtProvider;
 
     private AuthResponse successResponse;
 
@@ -49,7 +51,7 @@ class AuthControllerTest {
                 .refreshToken("refresh-token")
                 .user(UserDto.builder()
                         .id(1L).firstName("John").lastName("Doe")
-                        .email("john@example.com").phone("9876543210")
+                        .email("john@example.com").phone("9876543210").phoneCountryCode("+91")
                         .role(UserRole.CUSTOMER).active(true)
                         .createdAt(LocalDateTime.now()).build())
                 .build();
@@ -63,7 +65,7 @@ class AuthControllerTest {
 
         RegisterRequest request = RegisterRequest.builder()
                 .firstName("John").lastName("Doe")
-                .email("john@example.com").phone("9876543210")
+                .email("john@example.com").phone("9876543210").phoneCountryCode("+91")
                 .password("Password@123").build();
 
         mockMvc.perform(post("/api/v1/auth/register")
@@ -78,7 +80,7 @@ class AuthControllerTest {
     void register_invalidEmail_returns400() throws Exception {
         RegisterRequest request = RegisterRequest.builder()
                 .firstName("John").lastName("Doe")
-                .email("invalid-email").phone("9876543210")
+                .email("invalid-email").phone("9876543210").phoneCountryCode("+91")
                 .password("Password@123").build();
 
         mockMvc.perform(post("/api/v1/auth/register")
@@ -104,7 +106,7 @@ class AuthControllerTest {
 
         RegisterRequest request = RegisterRequest.builder()
                 .firstName("John").lastName("Doe")
-                .email("john@example.com").phone("9876543210")
+                .email("john@example.com").phone("9876543210").phoneCountryCode("+91")
                 .password("Password@123").build();
 
         mockMvc.perform(post("/api/v1/auth/register")
@@ -330,7 +332,7 @@ class AuthControllerTest {
     void register_weakPassword_noUppercase_returns400() throws Exception {
         RegisterRequest request = RegisterRequest.builder()
                 .firstName("John").lastName("Doe")
-                .email("john@example.com").phone("9876543210")
+                .email("john@example.com").phone("9876543210").phoneCountryCode("+91")
                 .password("password@123").build();
 
         mockMvc.perform(post("/api/v1/auth/register")
@@ -343,7 +345,7 @@ class AuthControllerTest {
     void register_weakPassword_noSpecialChar_returns400() throws Exception {
         RegisterRequest request = RegisterRequest.builder()
                 .firstName("John").lastName("Doe")
-                .email("john@example.com").phone("9876543210")
+                .email("john@example.com").phone("9876543210").phoneCountryCode("+91")
                 .password("Password123").build();
 
         mockMvc.perform(post("/api/v1/auth/register")
@@ -356,7 +358,7 @@ class AuthControllerTest {
     void register_weakPassword_tooShort_returns400() throws Exception {
         RegisterRequest request = RegisterRequest.builder()
                 .firstName("John").lastName("Doe")
-                .email("john@example.com").phone("9876543210")
+                .email("john@example.com").phone("9876543210").phoneCountryCode("+91")
                 .password("P@1a").build();
 
         mockMvc.perform(post("/api/v1/auth/register")

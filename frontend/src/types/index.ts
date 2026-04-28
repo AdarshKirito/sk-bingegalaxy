@@ -46,6 +46,10 @@ export interface Binge {
   supportWhatsapp?: string;
   customerCancellationEnabled?: boolean;
   customerCancellationCutoffMinutes?: number;
+  /** Per-binge opening time (HH:mm or HH:mm:ss); used by booking guard. */
+  openTime?: string;
+  /** Per-binge closing time (HH:mm or HH:mm:ss); used by booking guard. */
+  closeTime?: string;
   active?: boolean;
 }
 

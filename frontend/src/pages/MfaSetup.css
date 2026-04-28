@@ -1,0 +1,474 @@
+/* =================================================================
+   MfaSetup — top-tier security UX (GitHub / Stripe / Google flavor)
+   Centered narrow column, generous whitespace, segmented OTP input.
+   Uses globally-defined CSS variables from index.css.
+   ================================================================= */
+
+.mfa2-page {
+  min-height: calc(100vh - 64px);
+  padding: clamp(20px, 4vw, 56px) clamp(16px, 4vw, 32px);
+  background:
+    radial-gradient(1200px 600px at 50% -200px, var(--primary-bg) 0%, transparent 60%),
+    var(--bg, #f8fafc);
+}
+
+.mfa2-shell {
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ── Hero ─────────────────────────────────────────────────────── */
+.mfa2-hero {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  padding: 4px 4px 8px;
+}
+.mfa2-hero-icon {
+  flex: 0 0 auto;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  font-size: 26px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary) 60%, #6366f1));
+  box-shadow: 0 12px 28px -10px rgba(var(--primary-rgb, 99 102 241), 0.45);
+}
+.mfa2-hero h1 {
+  margin: 4px 0 6px;
+  font-size: clamp(22px, 3vw, 30px);
+  letter-spacing: -0.02em;
+  font-weight: 800;
+  line-height: 1.15;
+}
+.mfa2-hero p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.55;
+  max-width: 56ch;
+}
+.mfa2-kicker {
+  display: inline-block;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary);
+  background: var(--primary-bg);
+  padding: 4px 10px;
+  border-radius: 999px;
+  margin-bottom: 4px;
+}
+
+/* ── Stepper ──────────────────────────────────────────────────── */
+.mfa2-stepper {
+  list-style: none;
+  margin: 0;
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  background: var(--bg-card, #fff);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 2px 4px -2px rgba(0, 0, 0, 0.04);
+}
+.mfa2-stepper li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--text-muted);
+  font-weight: 500;
+  min-width: 0;
+}
+.mfa2-stepper li.is-active {
+  color: var(--text, #111);
+  font-weight: 700;
+  background: var(--primary-bg);
+}
+.mfa2-stepper li.is-done { color: #16a34a; }
+.mfa2-step-dot {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--bg-card-hover, #f1f5f9);
+  color: var(--text-muted);
+}
+.mfa2-stepper li.is-active .mfa2-step-dot { background: var(--primary); color: #fff; }
+.mfa2-stepper li.is-done .mfa2-step-dot   { background: #16a34a; color: #fff; }
+.mfa2-step-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 560px) {
+  .mfa2-stepper { grid-template-columns: 1fr 1fr; }
+}
+
+/* ── Card ─────────────────────────────────────────────────────── */
+.mfa2-card {
+  background: var(--bg-card, #fff);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: clamp(20px, 3vw, 32px);
+  box-shadow: 0 4px 14px -8px rgba(0, 0, 0, 0.08);
+  transition: opacity 150ms ease;
+}
+.mfa2-card.is-disabled { opacity: 0.55; pointer-events: none; }
+
+.mfa2-card-head { margin-bottom: 18px; }
+.mfa2-card-head h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.mfa2-card-head p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ── Benefits list (intro) ────────────────────────────────────── */
+.mfa2-benefits {
+  list-style: none;
+  margin: 0 0 24px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.mfa2-benefits li {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg, #fafbfc);
+}
+.mfa2-benefits li > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 14px;
+}
+.mfa2-benefits li strong { color: var(--text, #111); font-weight: 600; }
+.mfa2-benefits li span { color: var(--text-muted); line-height: 1.5; }
+.mfa2-bullet {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: var(--primary-bg);
+  color: var(--primary);
+  font-size: 16px;
+}
+
+/* ── Setup key box ────────────────────────────────────────────── */
+.mfa2-secret-box {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  background: #0f172a;
+  border-radius: 12px;
+  margin-bottom: 14px;
+}
+.mfa2-secret-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+.mfa2-secret {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #f8fafc;
+  font-size: 16px;
+  letter-spacing: 0.18em;
+  font-weight: 600;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.mfa2-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #f1f5f9;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+.mfa2-icon-btn:hover { background: #334155; border-color: #475569; }
+
+.mfa2-deeplink { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ── Warning banner ──────────────────────────────────────────── */
+.mfa2-warning {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  background: rgba(234, 179, 8, 0.08);
+  border: 1px solid rgba(234, 179, 8, 0.28);
+  border-radius: 12px;
+  color: #854d0e;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+.mfa2-warning svg { flex: 0 0 auto; margin-top: 2px; font-size: 18px; }
+
+/* ── Recovery codes grid ─────────────────────────────────────── */
+.mfa2-recovery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.mfa2-recovery code {
+  padding: 12px 10px;
+  background: var(--primary-bg);
+  border: 1px dashed color-mix(in srgb, var(--primary) 50%, transparent);
+  border-radius: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  letter-spacing: 0.08em;
+  color: var(--text, #111);
+}
+
+.mfa2-ack {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg, #fafbfc);
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+.mfa2-ack input { width: 16px; height: 16px; accent-color: var(--primary); cursor: pointer; }
+
+/* ── Segmented OTP input ─────────────────────────────────────── */
+.mfa2-otp {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin: 8px 0 24px;
+}
+.mfa2-otp input {
+  width: clamp(40px, 12vw, 56px);
+  height: clamp(48px, 14vw, 64px);
+  text-align: center;
+  font-size: clamp(20px, 5vw, 26px);
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card, #fff);
+  color: var(--text, #111);
+  caret-color: var(--primary);
+  transition: all 120ms ease;
+}
+.mfa2-otp input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px var(--primary-bg);
+}
+.mfa2-otp input:disabled {
+  background: var(--bg-card-hover, #f1f5f9);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────── */
+.mfa2-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.mfa2-actions-end    { justify-content: flex-end; }
+.mfa2-actions-center { justify-content: center; }
+
+.mfa2-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 18px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-card, #fff);
+  color: var(--text, #111);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 120ms ease;
+  text-decoration: none;
+}
+.mfa2-btn:hover { border-color: var(--primary); color: var(--primary); }
+.mfa2-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+.mfa2-btn-primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+  box-shadow: 0 6px 16px -8px rgba(var(--primary-rgb, 99 102 241), 0.55);
+}
+.mfa2-btn-primary:hover {
+  filter: brightness(1.05);
+  color: #fff;
+  border-color: var(--primary);
+}
+.mfa2-btn-primary:disabled { background: var(--bg-card-hover, #e5e7eb); color: var(--text-muted); box-shadow: none; }
+.mfa2-btn-ghost { background: transparent; }
+.mfa2-btn-danger {
+  background: rgba(239, 68, 68, 0.08);
+  color: #dc2626;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+.mfa2-btn-danger:hover { background: #dc2626; color: #fff; border-color: #dc2626; }
+
+/* ── Success card ────────────────────────────────────────────── */
+.mfa2-card-success { text-align: center; padding: 40px 24px; }
+.mfa2-card-success h2 { margin: 8px 0 8px; font-size: 22px; }
+.mfa2-card-success p {
+  color: var(--text-muted);
+  max-width: 46ch;
+  margin: 0 auto 20px;
+  line-height: 1.55;
+}
+.mfa2-success-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: rgba(34, 197, 94, 0.15);
+  color: #16a34a;
+  font-size: 36px;
+  margin-bottom: 8px;
+}
+
+/* ── Disable modal ───────────────────────────────────────────── */
+.mfa2-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(4px);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  z-index: 1000;
+  animation: mfa2-fade 150ms ease;
+}
+@keyframes mfa2-fade { from { opacity: 0; } to { opacity: 1; } }
+
+.mfa2-modal {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  background: var(--bg-card, #fff);
+  border-radius: 16px;
+  padding: 28px;
+  text-align: center;
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.35);
+  animation: mfa2-pop 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes mfa2-pop {
+  from { transform: translateY(8px) scale(0.97); opacity: 0; }
+  to   { transform: translateY(0) scale(1);     opacity: 1; }
+}
+.mfa2-modal h3 {
+  margin: 12px 0 6px;
+  font-size: 18px;
+  font-weight: 700;
+}
+.mfa2-modal p {
+  margin: 0 0 16px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.mfa2-modal-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+  font-size: 24px;
+}
+.mfa2-modal-input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  font-size: 18px;
+  letter-spacing: 0.2em;
+  text-align: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--bg, #fafbfc);
+  color: var(--text, #111);
+}
+.mfa2-modal-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-bg);
+}
+.mfa2-modal-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  transition: background 120ms ease;
+}
+.mfa2-modal-close:hover { background: var(--bg-card-hover, #f1f5f9); color: var(--text, #111); }
+
+/* ── Dark mode polish ────────────────────────────────────────── */
+@media (prefers-color-scheme: dark) {
+  .mfa2-warning { color: #fde68a; background: rgba(234, 179, 8, 0.1); }
+  .mfa2-benefits li { background: var(--bg-card-hover, #1e293b); }
+  .mfa2-ack { background: var(--bg-card-hover, #1e293b); }
+}

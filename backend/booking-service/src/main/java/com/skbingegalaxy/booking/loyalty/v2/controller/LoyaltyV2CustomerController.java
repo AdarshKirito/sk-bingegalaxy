@@ -48,13 +48,34 @@ public class LoyaltyV2CustomerController {
 
     // ── Membership snapshot ──────────────────────────────────────────────
 
+    /**
+     * Returns the caller's membership snapshot.
+     *
+     * <p><b>Just-in-time enrollment</b> (industry standard — Marriott Bonvoy,
+     * Hilton Honors, Sephora Beauty Insider, Starbucks Rewards): if a CUSTOMER
+     * with no membership yet hits this endpoint we silently enroll them at
+     * BRONZE and award the welcome bonus. This guarantees every signed-in
+     * customer immediately sees the dashboard rather than the static "Join"
+     * panel — without requiring a registration-time hook (which would miss
+     * OAuth/Google/social logins).
+     *
+     * <p>Admin / super-admin / staff roles never auto-enroll — the loyalty
+     * program is for customers only.
+     */
     @GetMapping
     public ResponseEntity<ApiResponse<Map<String, Object>>> getMyMembership(
-            @RequestHeader("X-User-Id") Long customerId) {
+            @RequestHeader("X-User-Id") Long customerId,
+            @RequestHeader(value = "X-User-Role", required = false) String role) {
 
         LoyaltyMembership m = enrollmentService.findForCustomer(customerId).orElse(null);
         if (m == null) {
-            return ResponseEntity.ok(ApiResponse.ok(Map.of("enrolled", false)));
+            if (!isCustomerRole(role)) {
+                // Staff roles (ADMIN, SUPER_ADMIN, etc.) are not loyalty members.
+                return ResponseEntity.ok(ApiResponse.ok(Map.of("enrolled", false)));
+            }
+            m = enrollmentService.enrollExplicit(
+                    customerId,
+                    com.skbingegalaxy.booking.loyalty.v2.LoyaltyV2Constants.ENROLL_AUTO_DASHBOARD);
         }
 
         LoyaltyPointsWallet w = walletRepository.findByMembershipId(m.getId()).orElse(null);
@@ -71,6 +92,17 @@ public class LoyaltyV2CustomerController {
         out.put("pointsEarnedLifetime", w == null ? 0L : w.getLifetimeEarned());
         out.put("pointsRedeemedLifetime", w == null ? 0L : w.getLifetimeRedeemed());
         return ResponseEntity.ok(ApiResponse.ok(out));
+    }
+
+    /**
+     * Loyalty program is customer-only. Treat a missing/blank role as customer
+     * for backward compatibility with older gateway versions that may not set
+     * the header on customer requests.
+     */
+    private boolean isCustomerRole(String role) {
+        if (role == null || role.isBlank()) return true;
+        String r = role.trim().toUpperCase();
+        return r.equals("CUSTOMER") || r.equals("USER") || r.equals("ROLE_CUSTOMER") || r.equals("ROLE_USER");
     }
 
     // ── Ledger (paginated) ──────────────────────────────────────────────

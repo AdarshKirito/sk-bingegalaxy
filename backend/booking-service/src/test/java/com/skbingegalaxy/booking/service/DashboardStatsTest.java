@@ -54,7 +54,6 @@ class DashboardStatsTest {
 
     @BeforeEach
     void initLoyaltyMocks() {
-        lenient().when(loyaltyService.earnPoints(anyLong(), anyString(), any(BigDecimal.class))).thenReturn(0L);
         lenient().when(loyaltyService.redeemPoints(anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
             .thenReturn(new LoyaltyService.RedemptionResult(0L, BigDecimal.ZERO));
     }

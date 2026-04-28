@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { authService } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import { FiUserPlus, FiShield, FiSettings, FiEye, FiEyeOff } from 'react-icons/fi';
+import PhoneField, { splitPhone, validatePhone } from '../components/form/PhoneField';
 import './Auth.css';
 
 export default function AdminRegister() {
@@ -32,7 +33,7 @@ export default function AdminRegister() {
   const fieldErrors = {
     firstName: touched.firstName && !form.firstName.trim() ? 'First name is required' : '',
     email: touched.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email) ? 'Enter a valid email' : '',
-    phone: touched.phone && !/^[6-9]\d{9}$/.test(form.phone.replace(/\D/g, '').slice(-10)) ? 'Enter a valid 10-digit phone' : '',
+    phone: touched.phone && !validatePhone(form.phone) ? 'Enter a valid phone number' : '',
     password: touched.password ? (form.password.length < 10 ? 'Min 10 characters' : !PW_REGEX.test(form.password) ? 'Must include uppercase, lowercase, number & special character (@$!%*?&#)' : '') : '',
     confirmPassword: touched.confirmPassword && form.password !== form.confirmPassword ? 'Passwords do not match' : '',
   };
@@ -60,17 +61,21 @@ export default function AdminRegister() {
       toast.error(message);
       return;
     }
-    const cleanPhone = form.phone.replace(/\D/g, '').slice(-10);
-    if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
-      const message = 'Enter a valid 10-digit Indian phone number';
+    const phoneParts = splitPhone(form.phone);
+    if (!validatePhone(form.phone)) {
+      const message = 'Enter a valid phone number';
       setError(message);
       toast.error(message);
       return;
     }
     setLoading(true);
     try {
-      const { confirmPassword, ...data } = form;
-      data.phone = cleanPhone;
+      const { confirmPassword, phone, ...rest } = form;
+      const data = {
+        ...rest,
+        phone: phoneParts.phone,
+        phoneCountryCode: phoneParts.phoneCountryCode,
+      };
       await authService.adminRegister(data);
       toast.success('New admin account created successfully!');
       setForm({ firstName: '', lastName: '', email: '', phone: '', password: '', confirmPassword: '' });
@@ -144,7 +149,12 @@ export default function AdminRegister() {
               </div>
               <div className={`input-group ${fieldErrors.phone ? 'has-error' : ''}`}>
                 <label>Phone</label>
-                <input name="phone" value={form.phone} onChange={handleChange} onBlur={handleBlur('phone')} required pattern="[6-9][0-9]{9}" title="Enter a valid 10-digit Indian phone number" placeholder="9876543210" />
+                <PhoneField
+                  value={form.phone}
+                  onChange={(val) => setForm(f => ({ ...f, phone: val || '' }))}
+                  onBlur={handleBlur('phone')}
+                  required
+                />
                 {fieldErrors.phone && <span className="field-error">{fieldErrors.phone}</span>}
               </div>
               <div className={`input-group ${fieldErrors.password ? 'has-error' : ''}`}>

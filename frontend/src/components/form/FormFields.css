@@ -1,0 +1,106 @@
+/* Shared styles for AddressFields + PhoneField. Kept lightweight so the
+   widgets inherit the host page's input styling whenever possible. */
+
+.address-fields {
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: var(--radius-sm, 8px);
+  padding: 1rem 1.25rem 1.25rem;
+  margin: 0 0 1rem;
+}
+
+.address-fields[disabled] {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.address-fields-legend {
+  font-weight: 600;
+  font-size: 0.95rem;
+  padding: 0 0.4rem;
+  color: var(--text, #111827);
+}
+
+.address-fields-help {
+  margin: 0 0 0.75rem;
+  color: var(--text-secondary, #6b7280);
+  font-size: 0.8rem;
+}
+
+.address-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem 1rem;
+}
+
+@media (max-width: 640px) {
+  .address-grid { grid-template-columns: 1fr; }
+}
+
+.address-grid .input-group:nth-child(1),
+.address-grid .input-group:nth-child(2) {
+  grid-column: 1 / -1;
+}
+
+.address-grid select,
+.address-grid input[type="text"] {
+  width: 100%;
+}
+
+/* PhoneField — react-phone-number-input renders a flag <select> + a number input.
+   Keep the host page's input styling but ensure the flag picker aligns nicely. */
+.phone-field .PhoneInput {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: var(--radius-sm, 8px);
+  background: var(--bg-input, #fff);
+  padding: 0 0.6rem;
+  min-height: 42px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.phone-field .PhoneInput:focus-within {
+  border-color: var(--accent, #6366f1);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.phone-field.has-error .PhoneInput {
+  border-color: var(--danger, #dc2626);
+}
+
+.phone-field .PhoneInputCountry {
+  align-items: center;
+  display: flex;
+  gap: 0.35rem;
+  padding-right: 0.5rem;
+  border-right: 1px solid var(--border, #e5e7eb);
+}
+
+.phone-field .PhoneInputCountrySelect {
+  background: transparent;
+  cursor: pointer;
+  color: var(--text, #111827);
+}
+
+.phone-field .PhoneInputInput {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text, #111827);
+  font-size: 0.95rem;
+  padding: 0.5rem 0;
+  width: 100%;
+}
+
+.phone-field .PhoneInputInput::placeholder {
+  color: var(--text-muted, #9ca3af);
+}
+
+.phone-field .field-hint {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.75rem;
+  color: var(--text-muted, #9ca3af);
+}

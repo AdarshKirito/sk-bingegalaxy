@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { bookingService, paymentService, toArray } from '../services/endpoints';
+import { formatTime12h } from '../utils/format';
 import { toast } from 'react-toastify';
 import { trackPaymentStarted, trackPaymentCompleted, trackPaymentFailed } from '../services/analytics';
 import SEO from '../components/SEO';
@@ -228,6 +229,9 @@ export default function PaymentPage() {
     && (paymentState === 'SUCCESS' || paymentState === 'REFUNDED' || paymentState === 'PARTIALLY_REFUNDED');
   const isInitiated = !isBalanceDue && paymentState === 'INITIATED';
   const isFailed = !isBalanceDue && paymentState === 'FAILED';
+  // Booking-level terminal states that make payment impossible.
+  const bookingState = String(booking.status || '').toUpperCase();
+  const isBookingClosed = bookingState === 'CANCELLED' || bookingState === 'NO_SHOW' || bookingState === 'EXPIRED';
   const amountLabel = formatAmount(booking.totalAmount);
   const balanceDueLabel = formatAmount(balanceDue);
   const durationLabel = formatDuration(booking);
@@ -235,7 +239,7 @@ export default function PaymentPage() {
   const bookingDetails = [
     { icon: <FiLayers />, label: 'Event', value: eventLabel },
     { icon: <FiCalendar />, label: 'Date', value: booking.bookingDate || 'Not set' },
-    { icon: <FiClock />, label: 'Start time', value: booking.startTime || 'Not set' },
+    { icon: <FiClock />, label: 'Start time', value: booking.startTime ? formatTime12h(booking.startTime) : 'Not set' },
     { icon: <FiHash />, label: 'Duration', value: durationLabel },
     { icon: <FiUsers />, label: 'Guests', value: `${booking.numberOfGuests || 1} guest${Number(booking.numberOfGuests || 1) === 1 ? '' : 's'}` },
     { icon: <FiMapPin />, label: 'Venue', value: venueLabel },
@@ -416,7 +420,7 @@ export default function PaymentPage() {
         <aside className="customer-flow-summary">
           <span className="customer-flow-kicker">Live payment state</span>
           <h2>{eventLabel}</h2>
-          <p>{booking.bookingDate} at {booking.startTime}</p>
+          <p>{booking.bookingDate} at {formatTime12h(booking.startTime)}</p>
           <div className="customer-flow-badges">
             <span className="badge badge-info">Ref {ref}</span>
             <span className={`badge ${isSuccess ? 'badge-success' : isInitiated ? 'badge-warning' : isFailed ? 'badge-danger' : 'badge-info'}`}>
@@ -528,6 +532,15 @@ export default function PaymentPage() {
             <div className="customer-flow-actions customer-flow-actions-left">
               <Link className="btn btn-primary" to={`/booking/${ref}`}>Open Booking Summary <FiArrowRight /></Link>
               <Link className="btn btn-secondary" to="/payments">View Payment History</Link>
+            </div>
+          ) : isBookingClosed ? (
+            <div className="customer-flow-actions customer-flow-actions-left">
+              <div className="customer-flow-note-danger" style={{ width: '100%' }}>
+                This booking is {bookingState.toLowerCase()} and can no longer be paid.
+                Please create a new booking to continue.
+              </div>
+              <Link className="btn btn-primary" to="/book">Create New Booking</Link>
+              <Link className="btn btn-secondary" to={`/booking/${ref}`}>View Booking</Link>
             </div>
           ) : isBalanceDue ? (
             <div className="customer-flow-actions customer-flow-actions-left">

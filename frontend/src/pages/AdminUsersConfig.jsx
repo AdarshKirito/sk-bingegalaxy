@@ -5,6 +5,8 @@ import { formatServerDateTime, formatRelativeTime } from '../services/timeFormat
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
 import DOMPurify from 'dompurify';
+import PhoneField, { splitPhone, joinPhone } from '../components/form/PhoneField';
+import AddressFields, { EMPTY_ADDRESS } from '../components/form/AddressFields';
 import './AdminPages.css';
 import './AdminBookings.css';
 import './AdminUsersConfig.css';
@@ -199,7 +201,11 @@ export default function AdminUsersConfig() {
     setAdminLoading(true);
     try {
       const res = await authService.getAllAdmins();
-      setAdmins(res.data?.data || []);
+      const payload = res.data?.data;
+      const list = Array.isArray(payload)
+        ? payload
+        : (Array.isArray(payload?.content) ? payload.content : []);
+      setAdmins(list);
     } catch { toast.error('Failed to load admins'); }
     finally { setAdminLoading(false); }
   }, []);
@@ -394,7 +400,14 @@ export default function AdminUsersConfig() {
       firstName: user.firstName || '',
       lastName: user.lastName || '',
       email: user.email || '',
-      phone: user.phone || '',
+      phone: joinPhone(user.phone, user.phoneCountryCode),
+      address: {
+        street: user.address?.street || '',
+        city: user.address?.city || '',
+        state: user.address?.state || '',
+        country: user.address?.country || '',
+        postalCode: user.address?.postalCode || '',
+      },
     });
   };
 
@@ -402,10 +415,19 @@ export default function AdminUsersConfig() {
     if (editSaving) return;
     setEditSaving(true);
     try {
+      const phoneParts = splitPhone(editForm.phone);
+      const payload = {
+        firstName: editForm.firstName,
+        lastName: editForm.lastName,
+        email: editForm.email,
+        phone: phoneParts.phone,
+        phoneCountryCode: phoneParts.phoneCountryCode,
+        address: editForm.address,
+      };
       if (detailUser?.role === 'ADMIN' || detailUser?.role === 'SUPER_ADMIN') {
-        await authService.updateAdmin(editingUser, editForm);
+        await authService.updateAdmin(editingUser, payload);
       } else {
-        await authService.adminUpdateCustomer(editingUser, editForm);
+        await authService.adminUpdateCustomer(editingUser, payload);
       }
       toast.success('User updated');
       setEditingUser(null);
@@ -697,9 +719,15 @@ export default function AdminUsersConfig() {
                         onChange={e => setEditForm(p => ({ ...p, email: e.target.value }))} />
                     </label>
                     <label>Phone
-                      <input className="ab-input" value={editForm.phone}
-                        onChange={e => setEditForm(p => ({ ...p, phone: e.target.value }))} />
+                      <PhoneField
+                        value={editForm.phone}
+                        onChange={(val) => setEditForm(p => ({ ...p, phone: val || '' }))}
+                      />
                     </label>
+                    <AddressFields
+                      value={editForm.address || EMPTY_ADDRESS}
+                      onChange={(addr) => setEditForm(p => ({ ...p, address: addr }))}
+                    />
                     <div className="ab-action-row">
                       <button className="btn btn-sm btn-primary" onClick={saveEdit} disabled={editSaving}>{editSaving ? 'Saving...' : 'Save'}</button>
                       <button className="btn btn-sm btn-secondary" onClick={() => setEditingUser(null)}>Cancel</button>
@@ -710,7 +738,7 @@ export default function AdminUsersConfig() {
                     <div className="ab-detail-row"><span className="ab-detail-label">ID</span><span>{u.id}</span></div>
                     <div className="ab-detail-row"><span className="ab-detail-label">Name</span><span>{sanitize(u.firstName)} {sanitize(u.lastName || '')}</span></div>
                     <div className="ab-detail-row"><span className="ab-detail-label">Email</span><span>{sanitize(u.email)}</span></div>
-                    <div className="ab-detail-row"><span className="ab-detail-label">Phone</span><span>{sanitize(u.phone || '—')}</span></div>
+                    <div className="ab-detail-row"><span className="ab-detail-label">Phone</span><span>{u.phone ? `${u.phoneCountryCode || ''} ${sanitize(u.phone)}`.trim() : '—'}</span></div>
                     <div className="ab-detail-row"><span className="ab-detail-label">Role</span><span className="adm-badge adm-badge-info">{u.role}</span></div>
                     <div className="ab-detail-row">
                       <span className="ab-detail-label">Status</span>

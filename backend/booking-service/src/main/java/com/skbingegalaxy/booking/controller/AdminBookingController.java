@@ -598,7 +598,12 @@ public class AdminBookingController {
 
     @GetMapping("/loyalty/{customerId}")
     public ResponseEntity<ApiResponse<LoyaltyAccountDto>> getCustomerLoyalty(
-            @PathVariable Long customerId) {
+            @PathVariable Long customerId,
+            @RequestHeader("X-User-Role") String role) {
+        // Loyalty accounts are system-level (post-V17), so per-binge scoping
+        // cannot authorize access. Restrict customer-loyalty lookups to
+        // SUPER_ADMIN to prevent IDOR across binges.
+        requireSuperAdmin(role, "view customer loyalty accounts");
         return ResponseEntity.ok(ApiResponse.ok(loyaltyService.getAccount(customerId)));
     }
 
@@ -607,6 +612,11 @@ public class AdminBookingController {
             @PathVariable Long customerId,
             @RequestBody java.util.Map<String, Object> body,
             @RequestHeader("X-User-Role") String role) {
+        requireSuperAdmin(role, "adjust customer loyalty points");
+        if (body == null || body.get("points") == null || !(body.get("points") instanceof Number)) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Request body must include numeric 'points'", HttpStatus.BAD_REQUEST);
+        }
         long points = ((Number) body.get("points")).longValue();
         String description = (String) body.getOrDefault("description", null);
         return ResponseEntity.ok(ApiResponse.ok("Points adjusted", loyaltyService.adjustPoints(customerId, points, description, role)));

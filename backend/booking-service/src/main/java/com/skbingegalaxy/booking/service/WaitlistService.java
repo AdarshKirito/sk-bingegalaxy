@@ -54,10 +54,18 @@ public class WaitlistService {
     private int maxPerCustomer;
 
     // ── Join waitlist ────────────────────────────────────────
-    @Transactional
+    /** Backward-compat overload (callers without phone country code). */
     public WaitlistEntryDto joinWaitlist(JoinWaitlistRequest request,
                                           Long customerId, String customerName,
                                           String customerEmail, String customerPhone) {
+        return joinWaitlist(request, customerId, customerName, customerEmail, customerPhone, null);
+    }
+
+    @Transactional
+    public WaitlistEntryDto joinWaitlist(JoinWaitlistRequest request,
+                                          Long customerId, String customerName,
+                                          String customerEmail, String customerPhone,
+                                          String customerPhoneCountryCode) {
         Long bingeId = BingeContext.requireBingeId();
 
         // Validate event type
@@ -92,6 +100,7 @@ public class WaitlistService {
             .customerName(customerName)
             .customerEmail(customerEmail)
             .customerPhone(customerPhone)
+            .customerPhoneCountryCode(customerPhoneCountryCode)
             .eventType(eventType)
             .preferredDate(request.getPreferredDate())
             .preferredStartTime(request.getPreferredStartTime())
@@ -220,6 +229,7 @@ public class WaitlistService {
                 .recipientEmail(entry.getCustomerEmail())
                 .recipientName(entry.getCustomerName())
                 .recipientPhone(entry.getCustomerPhone())
+                .recipientPhoneCountryCode(entry.getCustomerPhoneCountryCode())
                 .subject("A spot just opened up! - SK Binge Galaxy")
                 .body(String.format(
                     "Great news, %s! A spot just opened up for %s on %s at %s. " +
@@ -264,6 +274,7 @@ public class WaitlistService {
             .customerName(e.getCustomerName())
             .customerEmail(e.getCustomerEmail())
             .customerPhone(e.getCustomerPhone())
+            .customerPhoneCountryCode(e.getCustomerPhoneCountryCode())
             .eventType(EventTypeDto.builder()
                 .id(e.getEventType().getId())
                 .name(e.getEventType().getName())

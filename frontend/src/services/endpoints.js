@@ -214,6 +214,19 @@ export const adminService = {
   updateBingeAboutExperience: (id, data) => api.put(`/bookings/admin/binges/${id}/customer-about`, data),
   toggleBinge: (id) => api.patch(`/bookings/admin/binges/${id}/toggle-active`),
   deleteBinge: (id) => api.delete(`/bookings/admin/binges/${id}`),
+  // Binge approval workflow (super-admin)
+  getPendingBinges: () => api.get('/bookings/admin/binges/pending'),
+  approveBinge: (id) => api.post(`/bookings/admin/binges/${id}/approve`),
+  rejectBinge: (id, reason) => api.post(`/bookings/admin/binges/${id}/reject`, { reason: reason || '' }),
+  // In-app admin notifications inbox (used by the bell + entrance panel)
+  listAdminNotifications: (page = 0, size = 20) =>
+    api.get('/bookings/admin/notifications', { params: { page, size } }),
+  getAdminNotificationsUnreadCount: () =>
+    api.get('/bookings/admin/notifications/unread-count'),
+  markAdminNotificationRead: (id) =>
+    api.post(`/bookings/admin/notifications/${id}/read`),
+  markAllAdminNotificationsRead: () =>
+    api.post('/bookings/admin/notifications/read-all'),
   // Cancellation tiers
   getCancellationTiers: (bingeId) => api.get(`/bookings/admin/binges/${bingeId}/cancellation-tiers`),
   saveCancellationTiers: (bingeId, data) => api.put(`/bookings/admin/binges/${bingeId}/cancellation-tiers`, data),

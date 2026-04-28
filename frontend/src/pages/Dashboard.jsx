@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { useAuth } from '../context/AuthContext';
 import { authService, bookingService, paymentService } from '../services/endpoints';
+import { formatTime12h } from '../utils/format';
 import { normalizeDashboardExperience } from '../services/dashboardExperience';
 import useBingeStore from '../stores/bingeStore';
 import {
@@ -160,11 +161,18 @@ export default function Dashboard() {
     }
   };
 
+  const pickEventImage = (evt) => {
+    if (!evt) return '';
+    const list = Array.isArray(evt.imageUrls) ? evt.imageUrls : [];
+    return list.find((url) => typeof url === 'string' && url.trim().length > 0) || '';
+  };
+
   const customExperienceItems = useMemo(() => (
     dashboardExperience.slides.map((slide, index) => {
       const linkedEvent = slide.linkedEventTypeId
         ? eventTypes.find((et) => et.id === slide.linkedEventTypeId)
         : null;
+      const slideImage = (slide.imageUrl && slide.imageUrl.trim()) || pickEventImage(linkedEvent);
       return {
         key: `custom-${index}`,
         type: 'custom',
@@ -173,7 +181,7 @@ export default function Dashboard() {
         description: slide.description || 'Guide customers toward the atmosphere you want highlighted first.',
         ctaLabel: slide.ctaLabel || 'Open Booking',
         theme: slide.theme || 'celebration',
-        imageUrl: slide.imageUrl || '',
+        imageUrl: slideImage,
         icon: getThemeIcon(slide.theme),
         metaValue: selectedBinge?.name || 'Featured setup',
         linkState: linkedEvent ? { eventTypeId: linkedEvent.id, eventTypeName: linkedEvent.name } : undefined,
@@ -194,6 +202,7 @@ export default function Dashboard() {
         ctaLabel: 'Build This',
         theme: tone.theme,
         icon: getExpIcon(evt.name),
+        imageUrl: pickEventImage(evt),
         price: formatAmount(evt.basePrice),
         linkState: { eventTypeId: evt.id, eventTypeName: evt.name },
       };
@@ -271,7 +280,7 @@ export default function Dashboard() {
           ) : heroBooking ? (
             <div className="dash-highlight-body">
               <h2>{heroBooking.eventType?.name ?? heroBooking.eventType}</h2>
-              <p>{heroBooking.bookingDate} at {heroBooking.startTime} for {formatDuration(heroBooking)}</p>
+              <p>{heroBooking.bookingDate} at {formatTime12h(heroBooking.startTime)} for {formatDuration(heroBooking)}</p>
               <div className="dash-highlight-amount">{formatAmount(heroBooking.totalAmount)}</div>
               <div className="dash-inline-actions">
                 {pendingBookings.length > 0 ? (
@@ -650,7 +659,7 @@ export default function Dashboard() {
                     <span className="bpc-ref">{b.bookingRef}</span>
                   </div>
                   <h4>{b.eventType?.name ?? b.eventType}</h4>
-                  <p>{b.bookingDate} at {b.startTime} • {formatDuration(b)}</p>
+                  <p>{b.bookingDate} at {formatTime12h(b.startTime)} • {formatDuration(b)}</p>
                   <div className="bpc-footer">
                     <span className="bpc-amount">{formatAmount(b.totalAmount)}</span>
                     {b.status === 'PENDING' && b.paymentStatus !== 'SUCCESS' && (
