@@ -6,6 +6,7 @@ import { SkeletonGrid } from '../components/ui/Skeleton';
 import SEO from '../components/SEO';
 import { FiAlertCircle, FiCalendar, FiCheckCircle, FiCreditCard, FiFilter, FiRefreshCw, FiSearch, FiTrendingUp, FiX } from 'react-icons/fi';
 import DOMPurify from 'dompurify';
+import { toast } from 'react-toastify';
 import './CustomerHub.css';
 
 export default function CustomerPayments() {
@@ -18,6 +19,7 @@ export default function CustomerPayments() {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
+  const [cancellingRef, setCancellingRef] = useState('');
   const searchInputRef = useRef(null);
 
   // ── Search semantics ──────────────────────────────────────────
@@ -45,6 +47,41 @@ export default function CustomerPayments() {
     setQuery('');
     setAppliedQuery('');
     if (searchInputRef.current) searchInputRef.current.focus();
+  };
+
+  // ── Cancel an unpaid (PENDING) reservation ────────────────────
+  // Re-uses the existing customer cancel endpoint which only allows
+  // cancellation of bookings still in PENDING status (matches the
+  // "unpaid reservations" panel exactly).  Refund applicability is
+  // gated server-side by the binge's refundOnPendingPaymentCancel flag.
+  const handleCancelUnpaid = async (booking) => {
+    if (!booking?.bookingRef) return;
+    const ok = window.confirm(
+      `Cancel reservation ${booking.bookingRef}?\n\n` +
+      `This will free up the slot. Any refund (if applicable) will follow your venue's cancellation policy.`
+    );
+    if (!ok) return;
+    setCancellingRef(booking.bookingRef);
+    try {
+      await bookingService.cancelBooking(booking.bookingRef);
+      toast.success(`Reservation ${booking.bookingRef} cancelled.`);
+      // Refresh both lists so the row drops out of "unpaid".
+      const toArray = (val) => Array.isArray(val) ? val : [];
+      const [pay, cur, past] = await Promise.allSettled([
+        paymentService.getMyPayments(),
+        bookingService.getCurrentBookings(),
+        bookingService.getPastBookings(),
+      ]);
+      if (pay.status === 'fulfilled') setPayments(toArray(pay.value?.data?.data));
+      const c = cur.status === 'fulfilled' ? toArray(cur.value?.data?.data) : [];
+      const p = past.status === 'fulfilled' ? toArray(past.value?.data?.data) : [];
+      setBookings([...c, ...p]);
+    } catch (err) {
+      const msg = err?.response?.data?.message || err?.message || 'Failed to cancel reservation.';
+      toast.error(msg);
+    } finally {
+      setCancellingRef('');
+    }
   };
 
   // Case-insensitive exact match on booking ref / transaction id — used
@@ -106,6 +143,21 @@ export default function CustomerPayments() {
     };
   }, []);
 
+  // "/" keyboard shortcut to focus the search bar (GitHub / Slack / Linear pattern).
+  useEffect(() => {
+    const onKey = (event) => {
+      const target = event.target;
+      const isFormField = target instanceof HTMLElement
+        && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable || target.tagName === 'SELECT');
+      if (event.key === '/' && !isFormField && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const bookingByRef = bookings.reduce((lookup, booking) => {
     lookup[booking.bookingRef] = booking;
     return lookup;
@@ -146,7 +198,9 @@ export default function CustomerPayments() {
   const sortedPayments = [...payments].sort((left, right) => new Date(right.createdAt || right.paidAt || 0) - new Date(left.createdAt || left.paidAt || 0));
   const filteredPayments = sortedPayments.filter(payment => {
     const booking = bookingByRef[payment.bookingRef] || null;
-    const searchTarget = [payment.transactionId, payment.bookingRef, booking?.eventType?.name || booking?.eventType, payment.paymentMethod, payment.status]
+    const eventName = booking?.eventType?.name || booking?.eventType || '';
+    const eventDescription = booking?.eventType?.description || '';
+    const searchTarget = [payment.transactionId, payment.bookingRef, eventName, eventDescription, booking?.customerName, booking?.notes, payment.paymentMethod, payment.status]
       .filter(Boolean)
       .join(' ')
       .toLowerCase();
@@ -175,20 +229,31 @@ export default function CustomerPayments() {
   // makes the card disappear, which reads like the reservations "didn't
   // fetch".  Mirrors how Stripe's Dashboard filters Customers + Payments
   // from the same top-of-page search box.
+  const bookingSearchTarget = (booking) => [
+    booking.bookingRef,
+    booking.eventType?.name || booking.eventType,
+    booking.eventType?.description,
+    booking.status,
+    booking.paymentStatus,
+    booking.customerName,
+    booking.notes,
+  ].filter(Boolean).join(' ').toLowerCase();
+
   const filteredUnpaidBookings = unpaidBookings.filter(booking => {
-    const searchTarget = [
-      booking.bookingRef,
-      booking.eventType?.name || booking.eventType,
-      booking.status,
-      booking.paymentStatus,
-      booking.customerName,
-    ].filter(Boolean).join(' ').toLowerCase();
-    const matchesQuery = !appliedQuery || searchTarget.includes(appliedQuery.toLowerCase());
+    const matchesQuery = !appliedQuery || bookingSearchTarget(booking).includes(appliedQuery.toLowerCase());
     const bookingTs = booking.bookingDate ? new Date(booking.bookingDate) : null;
     const matchesFrom = !fromDate || !bookingTs || bookingTs >= new Date(fromDate);
     const matchesTo = !toDate || !bookingTs || bookingTs <= new Date(toDate + 'T23:59:59');
     return matchesQuery && matchesFrom && matchesTo;
   });
+
+  // Fall back: when a query is typed but no payment rows match, surface ANY
+  // matching booking (including paid / past) so the user is never staring at
+  // an empty state when their search clearly references a real booking.
+  // Mirrors how Stripe Dashboard search returns Customers when no Charges hit.
+  const queryMatchedBookings = appliedQuery
+    ? bookings.filter(b => bookingSearchTarget(b).includes(appliedQuery.toLowerCase()))
+    : [];
 
   return (
     <div className="container customer-hub">
@@ -273,6 +338,17 @@ export default function CustomerPayments() {
                 <div className="customer-mini-card-actions">
                   <strong>{formatAmount(booking.totalAmount)}</strong>
                   <Link to={`/payment/${booking.bookingRef}`} className="btn btn-primary btn-sm">Pay Now</Link>
+                  {booking.status === 'PENDING' && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ marginLeft: '0.5rem' }}
+                      disabled={cancellingRef === booking.bookingRef}
+                      onClick={() => handleCancelUnpaid(booking)}
+                    >
+                      {cancellingRef === booking.bookingRef ? 'Cancelling…' : 'Cancel'}
+                    </button>
+                  )}
                 </div>
               </article>
             ))}
@@ -280,8 +356,8 @@ export default function CustomerPayments() {
         </section>
       )}
 
-      <section className="customer-hub-toolbar card">
-        <div className="customer-hub-filters customer-hub-filters-wide">
+      <section className="customer-hub-toolbar card" data-testid="customer-payments-toolbar">
+        <div className="customer-hub-toolbar-row">
           <label className="customer-hub-search">
             <FiSearch aria-hidden="true" />
             <input
@@ -293,7 +369,7 @@ export default function CustomerPayments() {
               placeholder="Search booking ref, transaction ID, event…"
               aria-label="Search payments"
             />
-            {query && (
+            {query ? (
               <button
                 type="button"
                 className="customer-hub-search-clear"
@@ -303,12 +379,16 @@ export default function CustomerPayments() {
               >
                 <FiX />
               </button>
+            ) : (
+              <kbd className="customer-hub-kbd" aria-hidden="true">/</kbd>
             )}
           </label>
+        </div>
 
-          <label className="customer-hub-select">
+        <div className="customer-hub-filters customer-hub-filters-wide">
+          <label className="customer-hub-select" data-active={statusFilter !== 'ALL'}>
             <FiFilter />
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Filter by payment status">
               <option value="ALL">All statuses</option>
               <option value="SUCCESS">Successful</option>
               <option value="INITIATED">Initiated</option>
@@ -318,50 +398,67 @@ export default function CustomerPayments() {
             </select>
           </label>
 
-          <label className="customer-hub-date-field">
+          <label className="customer-hub-date-field" data-active={!!fromDate}>
             <span><FiCalendar /> From</span>
             <input
               type="date"
               value={fromDate}
               max={toDate || undefined}
               onChange={(event) => setFromDate(event.target.value)}
+              aria-label="From date"
             />
           </label>
 
-          <label className="customer-hub-date-field">
+          <label className="customer-hub-date-field" data-active={!!toDate}>
             <span><FiCalendar /> To</span>
             <input
               type="date"
               value={toDate}
               min={fromDate || undefined}
               onChange={(event) => setToDate(event.target.value)}
+              aria-label="To date"
             />
           </label>
-
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => { setQuery(''); setAppliedQuery(''); setStatusFilter('ALL'); setFromDate(''); setToDate(''); }}
-          >
-            <FiRefreshCw /> Reset
-          </button>
         </div>
-        {appliedQuery && (
-          <p style={{ marginTop: '0.55rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-            Showing results for <strong style={{ color: 'var(--text)' }}>"{appliedQuery}"</strong>
-            {exactMatchRef && (
-              <>
-                {' '}&mdash;{' '}
-                <button
-                  type="button"
-                  style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: 0, fontSize: 'inherit', textDecoration: 'underline' }}
-                  onClick={() => navigate(`/payment/${exactMatchRef}`)}
-                >
-                  Open {exactMatchRef} →
-                </button>
-              </>
-            )}
-            {' '}&mdash; <button style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: 0, fontSize: 'inherit' }} onClick={() => { setQuery(''); setAppliedQuery(''); }}>Clear</button>
-          </p>
+
+        {(appliedQuery || statusFilter !== 'ALL' || fromDate || toDate) && (
+          <div className="customer-hub-summary">
+            <span className="customer-hub-summary-count">
+              <strong>{filteredPayments.length}</strong>
+              {filteredPayments.length === 1 ? ' payment' : ' payments'}
+              {appliedQuery && (
+                <> matching <strong>“{appliedQuery}”</strong></>
+              )}
+              {exactMatchRef && (
+                <>
+                  {' · '}
+                  <button
+                    type="button"
+                    className="customer-hub-clear-link"
+                    onClick={() => navigate(`/payment/${exactMatchRef}`)}
+                  >
+                    Open {exactMatchRef} →
+                  </button>
+                </>
+              )}
+            </span>
+            <span className="customer-hub-summary-actions">
+              {((statusFilter !== 'ALL' ? 1 : 0) + (fromDate ? 1 : 0) + (toDate ? 1 : 0)) > 0 && (
+                <span className="customer-hub-active-pill">
+                  <FiFilter aria-hidden="true" />
+                  {(statusFilter !== 'ALL' ? 1 : 0) + (fromDate ? 1 : 0) + (toDate ? 1 : 0)}{' '}
+                  {((statusFilter !== 'ALL' ? 1 : 0) + (fromDate ? 1 : 0) + (toDate ? 1 : 0)) === 1 ? 'filter' : 'filters'}
+                </span>
+              )}
+              <button
+                type="button"
+                className="customer-hub-clear-link"
+                onClick={() => { setQuery(''); setAppliedQuery(''); setStatusFilter('ALL'); setFromDate(''); setToDate(''); }}
+              >
+                <FiRefreshCw aria-hidden="true" style={{ marginRight: '0.3rem', verticalAlign: '-2px' }} /> Clear all
+              </button>
+            </span>
+          </div>
         )}
       </section>
 
@@ -369,9 +466,38 @@ export default function CustomerPayments() {
         <SkeletonGrid count={4} columns={2} />
       ) : filteredPayments.length === 0 ? (
         <div className="card customer-hub-empty">
-          <h2>No matching payments</h2>
-          <p>Once you initiate or complete payments, the history will appear here.</p>
-          <Link to="/book" className="btn btn-primary btn-sm">Start a Booking</Link>
+          <h2>{appliedQuery ? `No payments match "${appliedQuery}"` : 'No matching payments'}</h2>
+          {appliedQuery && queryMatchedBookings.length > 0 ? (
+            <>
+              <p>
+                But {queryMatchedBookings.length === 1 ? 'a booking matches' : `${queryMatchedBookings.length} bookings match`} your search. Open one to view its payment history.
+              </p>
+              <div className="customer-mini-grid" style={{ marginTop: '1rem' }}>
+                {queryMatchedBookings.slice(0, 6).map(booking => (
+                  <article key={booking.bookingRef} className="customer-mini-card">
+                    <div>
+                      <span className="customer-booking-ref">{booking.bookingRef}</span>
+                      <h3>{booking.eventType?.name ?? booking.eventType}</h3>
+                      <p>{booking.bookingDate} at {formatTime12h(booking.startTime)}</p>
+                    </div>
+                    <div className="customer-mini-card-actions">
+                      <strong>{formatAmount(booking.totalAmount)}</strong>
+                      {['SUCCESS', 'REFUNDED', 'PARTIALLY_REFUNDED'].includes(booking.paymentStatus) ? (
+                        <Link to={`/booking/${booking.bookingRef}`} className="btn btn-secondary btn-sm">View Booking</Link>
+                      ) : (
+                        <Link to={`/payment/${booking.bookingRef}`} className="btn btn-primary btn-sm">Pay Now</Link>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <p>Once you initiate or complete payments, the history will appear here.</p>
+              <Link to="/book" className="btn btn-primary btn-sm">Start a Booking</Link>
+            </>
+          )}
         </div>
       ) : (
         <div className="customer-payment-grid">

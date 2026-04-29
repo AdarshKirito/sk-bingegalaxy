@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useBinge } from '../context/BingeContext';
@@ -216,6 +216,29 @@ export default function MyBookings() {
     .filter(booking => booking.paymentStatus === 'SUCCESS')
     .reduce((sum, booking) => sum + (booking.totalAmount || 0), 0);
   const unpaidBalance = pendingPayments.reduce((sum, booking) => sum + (booking.totalAmount || 0), 0);
+
+  // Active-filter counter shown in summary pill (Stripe / Linear style).
+  const activeFilterCount = (statusFilter !== 'ALL' ? 1 : 0)
+    + (paymentFilter !== 'ALL' ? 1 : 0)
+    + (datePreset !== 'ALL' ? 1 : 0)
+    + (fromDate ? 1 : 0)
+    + (toDate ? 1 : 0);
+
+  // "/" keyboard shortcut to focus search (matches GitHub / Slack / Linear).
+  const searchInputRef = useRef(null);
+  useEffect(() => {
+    const onKey = (event) => {
+      const target = event.target;
+      const isFormField = target instanceof HTMLElement
+        && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable || target.tagName === 'SELECT');
+      if (event.key === '/' && !isFormField && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const getRepeatBookingState = (booking) => ({
     eventTypeId: booking.eventType?.id || booking.eventTypeId,
@@ -536,27 +559,28 @@ export default function MyBookings() {
         </div>
       </section>
 
-      <section className="customer-hub-toolbar card">
-        <div className="customer-hub-tabs">
-          <button className={`btn btn-sm ${tab === 'upcoming' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('upcoming')}>Upcoming</button>
-          <button className={`btn btn-sm ${tab === 'past' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('past')}>Past</button>
-          <button className={`btn btn-sm ${tab === 'all' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('all')}>All</button>
-          {waitlistEntries.length > 0 && (
-            <button className={`btn btn-sm ${tab === 'waitlist' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('waitlist')}>Waitlist ({waitlistEntries.length})</button>
-          )}
-        </div>
+      <section className="customer-hub-toolbar card" data-testid="my-bookings-toolbar">
+        <div className="customer-hub-toolbar-row">
+          <div className="customer-hub-tabs" role="tablist" aria-label="Booking timeframe">
+            <button role="tab" aria-selected={tab === 'upcoming'} className={`btn btn-sm ${tab === 'upcoming' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('upcoming')}>Upcoming</button>
+            <button role="tab" aria-selected={tab === 'past'} className={`btn btn-sm ${tab === 'past' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('past')}>Past</button>
+            <button role="tab" aria-selected={tab === 'all'} className={`btn btn-sm ${tab === 'all' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('all')}>All</button>
+            {waitlistEntries.length > 0 && (
+              <button role="tab" aria-selected={tab === 'waitlist'} className={`btn btn-sm ${tab === 'waitlist' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('waitlist')}>Waitlist ({waitlistEntries.length})</button>
+            )}
+          </div>
 
-        <div className="customer-hub-filters customer-hub-filters-wide">
           <label className="customer-hub-search">
             <FiSearch aria-hidden="true" />
             <input
+              ref={searchInputRef}
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search by ref, event, date…"
               aria-label="Search bookings"
             />
-            {query && (
+            {query ? (
               <button
                 type="button"
                 className="customer-hub-search-clear"
@@ -566,12 +590,16 @@ export default function MyBookings() {
               >
                 <FiX />
               </button>
+            ) : (
+              <kbd className="customer-hub-kbd" aria-hidden="true">/</kbd>
             )}
           </label>
+        </div>
 
-          <label className="customer-hub-select">
+        <div className="customer-hub-filters customer-hub-filters-wide">
+          <label className="customer-hub-select" data-active={statusFilter !== 'ALL'}>
             <FiFilter />
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Filter by booking status">
               <option value="ALL">All statuses</option>
               <option value="PENDING">Pending</option>
               <option value="CONFIRMED">Confirmed</option>
@@ -581,9 +609,9 @@ export default function MyBookings() {
             </select>
           </label>
 
-          <label className="customer-hub-select">
+          <label className="customer-hub-select" data-active={paymentFilter !== 'ALL'}>
             <FiCreditCard />
-            <select value={paymentFilter} onChange={(event) => setPaymentFilter(event.target.value)}>
+            <select value={paymentFilter} onChange={(event) => setPaymentFilter(event.target.value)} aria-label="Filter by payment status">
               <option value="ALL">All payments</option>
               <option value="SUCCESS">Paid</option>
               <option value="PENDING">Pending</option>
@@ -592,9 +620,9 @@ export default function MyBookings() {
             </select>
           </label>
 
-          <label className="customer-hub-select">
+          <label className="customer-hub-select" data-active={datePreset !== 'ALL'}>
             <FiCalendar />
-            <select value={datePreset} onChange={(event) => setDatePreset(event.target.value)}>
+            <select value={datePreset} onChange={(event) => setDatePreset(event.target.value)} aria-label="Filter by date preset">
               <option value="ALL">All dates</option>
               <option value="NEXT_30">Next 30 days</option>
               <option value="THIS_MONTH">This month</option>
@@ -602,27 +630,49 @@ export default function MyBookings() {
             </select>
           </label>
 
-          <label className="customer-hub-date-field">
-            <span>From</span>
-            <input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} />
+          <label className="customer-hub-date-field" data-active={!!fromDate}>
+            <span><FiCalendar /> From</span>
+            <input type="date" value={fromDate} max={toDate || undefined} onChange={(event) => setFromDate(event.target.value)} aria-label="From date" />
           </label>
 
-          <label className="customer-hub-date-field">
-            <span>To</span>
-            <input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} />
+          <label className="customer-hub-date-field" data-active={!!toDate}>
+            <span><FiCalendar /> To</span>
+            <input type="date" value={toDate} min={fromDate || undefined} onChange={(event) => setToDate(event.target.value)} aria-label="To date" />
           </label>
-
-          <button className="btn btn-secondary btn-sm" onClick={() => {
-            setStatusFilter('ALL');
-            setPaymentFilter('ALL');
-            setDatePreset('ALL');
-            setFromDate('');
-            setToDate('');
-            setQuery('');
-          }}>
-            <FiRefreshCw /> Reset
-          </button>
         </div>
+
+        {(query || statusFilter !== 'ALL' || paymentFilter !== 'ALL' || datePreset !== 'ALL' || fromDate || toDate) && (
+          <div className="customer-hub-summary">
+            <span className="customer-hub-summary-count">
+              <strong>{filteredBookings.length}</strong>
+              {filteredBookings.length === 1 ? ' booking' : ' bookings'}
+              {filteredBookings.length !== baseBookings.length && (
+                <> · filtered from {baseBookings.length}</>
+              )}
+            </span>
+            <span className="customer-hub-summary-actions">
+              {activeFilterCount > 0 && (
+                <span className="customer-hub-active-pill">
+                  <FiFilter aria-hidden="true" /> {activeFilterCount} {activeFilterCount === 1 ? 'filter' : 'filters'}
+                </span>
+              )}
+              <button
+                type="button"
+                className="customer-hub-clear-link"
+                onClick={() => {
+                  setStatusFilter('ALL');
+                  setPaymentFilter('ALL');
+                  setDatePreset('ALL');
+                  setFromDate('');
+                  setToDate('');
+                  setQuery('');
+                }}
+              >
+                <FiRefreshCw aria-hidden="true" style={{ marginRight: '0.3rem', verticalAlign: '-2px' }} /> Clear all
+              </button>
+            </span>
+          </div>
+        )}
       </section>
 
       {loading ? (

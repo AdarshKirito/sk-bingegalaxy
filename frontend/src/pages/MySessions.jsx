@@ -1,17 +1,20 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { authService } from '../services/endpoints';
 import { toast } from 'react-toastify';
-import { FiMonitor, FiRefreshCw, FiShield, FiAlertTriangle } from 'react-icons/fi';
+import { FiMonitor, FiRefreshCw, FiShield, FiAlertTriangle, FiLogOut, FiSearch } from 'react-icons/fi';
 import SEO from '../components/SEO';
 import './AdminSecurity.css';
 
 /**
  * Self-service session manager. Shows every active refresh-token session for the
- * current user and lets them force-logout a specific device.
+ * current user and lets them force-logout a specific device — or every other device
+ * at once via {@code POST /auth/sessions/revoke-others}.
  */
 export default function MySessions() {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [search, setSearch] = useState('');
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -39,6 +42,40 @@ export default function MySessions() {
     }
   };
 
+  const otherCount = useMemo(
+    () => sessions.filter((s) => !s.current).length,
+    [sessions],
+  );
+
+  const revokeAllOthers = async () => {
+    if (otherCount === 0) return;
+    if (!window.confirm(
+      `Sign out of ${otherCount} other device${otherCount === 1 ? '' : 's'}? ` +
+      `This won't sign you out of this browser.`,
+    )) return;
+    setBulkBusy(true);
+    try {
+      const res = await authService.revokeMyOtherSessions();
+      const n = res.data?.data ?? 0;
+      toast.success(n > 0 ? `Signed out of ${n} other device${n === 1 ? '' : 's'}` : 'Nothing to revoke');
+      refresh();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to revoke other sessions');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return sessions;
+    return sessions.filter((s) => {
+      const hay = [s.deviceLabel, s.userAgent, s.ipAddress, `#${s.id}`]
+        .filter(Boolean).join(' ').toLowerCase();
+      return hay.includes(q);
+    });
+  }, [sessions, search]);
+
   return (
     <div className="sec-page">
       <SEO title="My Sessions" description="Manage your active sign-in sessions." />
@@ -52,9 +89,21 @@ export default function MySessions() {
             unfamiliar, revoke it immediately and change your password.
           </p>
         </div>
-        <button className="sec-btn" onClick={refresh} disabled={loading}>
-          <FiRefreshCw /> {loading ? 'Loading…' : 'Refresh'}
-        </button>
+        <div className="sec-actions">
+          <button className="sec-btn" onClick={refresh} disabled={loading}>
+            <FiRefreshCw /> {loading ? 'Loading…' : 'Refresh'}
+          </button>
+          {otherCount > 0 && (
+            <button
+              className="sec-btn sec-btn-danger"
+              onClick={revokeAllOthers}
+              disabled={bulkBusy}
+              title="Keeps this browser signed in"
+            >
+              <FiLogOut /> {bulkBusy ? 'Signing out…' : `Sign out other devices (${otherCount})`}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="sec-card">
@@ -75,6 +124,24 @@ export default function MySessions() {
               </span>
             </div>
 
+            {sessions.length > 3 && (
+              <div className="sec-filters">
+                <FiSearch style={{ color: 'var(--text-muted)' }} />
+                <input
+                  type="search"
+                  placeholder="Filter by device, IP, or user-agent…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  style={{ flex: 1, maxWidth: 360 }}
+                />
+                {search && (
+                  <span className="sec-meta">
+                    {filtered.length} of {sessions.length}
+                  </span>
+                )}
+              </div>
+            )}
+
             <div className="sec-table-wrap">
               <table className="sec-table">
                 <thead>
@@ -87,7 +154,7 @@ export default function MySessions() {
                   </tr>
                 </thead>
                 <tbody>
-                  {sessions.map((s) => (
+                  {filtered.map((s) => (
                     <tr key={s.id}>
                       <td>
                         <div className="sec-device-cell">
@@ -118,6 +185,13 @@ export default function MySessions() {
                       </td>
                     </tr>
                   ))}
+                  {filtered.length === 0 && (
+                    <tr>
+                      <td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 24 }}>
+                        No sessions match "{search}".
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

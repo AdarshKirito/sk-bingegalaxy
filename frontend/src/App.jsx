@@ -29,6 +29,7 @@ const PaymentPage = lazy(() => import('./pages/PaymentPage'));
 const AboutBinge = lazy(() => import('./pages/AboutBinge'));
 const AdminLogin = lazy(() => import('./pages/AdminLogin'));
 const SuperAdminDashboard = lazy(() => import('./pages/SuperAdminDashboard'));
+const AdminHomeEditor = lazy(() => import('./pages/AdminHomeEditor'));
 const MySessions = lazy(() => import('./pages/MySessions'));
 const MfaSetup = lazy(() => import('./pages/MfaSetup'));
 const VerifyEmail = lazy(() => import('./pages/VerifyEmail'));
@@ -46,6 +47,7 @@ const AdminCustomerEdit = lazy(() => import('./pages/AdminCustomerEdit'));
 const AdminVenueRooms = lazy(() => import('./pages/AdminVenueRooms'));
 const AdminSurgeRules = lazy(() => import('./pages/AdminSurgeRules'));
 const AdminWaitlist = lazy(() => import('./pages/AdminWaitlist'));
+const AdminCustomerFreezes = lazy(() => import('./pages/AdminCustomerFreezes'));
 const BingeManagement = lazy(() => import('./pages/BingeManagement'));
 const BingeSelector = lazy(() => import('./pages/BingeSelector'));
 const PlatformDashboard = lazy(() => import('./pages/PlatformDashboard'));
@@ -183,6 +185,7 @@ function AppFrame() {
           <Route path="/admin/all-users" element={<SuperAdminRoute><AdminAllUsers /></SuperAdminRoute>} />
           <Route path="/admin/customers/:id/edit" element={<SuperAdminRoute><AdminCustomerEdit /></SuperAdminRoute>} />
           <Route path="/admin/super" element={<SuperAdminRoute><SuperAdminDashboard /></SuperAdminRoute>} />
+          <Route path="/admin/home-editor" element={<SuperAdminRoute><AdminHomeEditor /></SuperAdminRoute>} />
           <Route path="/admin/sessions" element={<AdminRoute><MySessions /></AdminRoute>} />
           <Route path="/admin/security/mfa" element={<AdminRoute><MfaSetup /></AdminRoute>} />
           <Route path="/admin/binges" element={<AdminRoute><BingeManagement /></AdminRoute>} />
@@ -196,6 +199,7 @@ function AppFrame() {
           <Route path="/admin/venue-rooms" element={<AdminBingeRequired><AdminVenueRooms /></AdminBingeRequired>} />
           <Route path="/admin/surge-rules" element={<AdminBingeRequired><AdminSurgeRules /></AdminBingeRequired>} />
           <Route path="/admin/waitlist" element={<AdminBingeRequired><AdminWaitlist /></AdminBingeRequired>} />
+          <Route path="/admin/customer-freezes" element={<AdminBingeRequired><AdminCustomerFreezes /></AdminBingeRequired>} />
           <Route path="/admin/reports" element={<AdminBingeRequired><AdminReports /></AdminBingeRequired>} />
           <Route path="/admin/book" element={<AdminBingeRequired><AdminBookingCreate /></AdminBingeRequired>} />
           <Route path="/admin/users-config" element={<AdminBingeRequired><AdminUsersConfig /></AdminBingeRequired>} />

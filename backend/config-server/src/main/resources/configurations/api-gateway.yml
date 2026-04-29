@@ -45,6 +45,17 @@ spring:
                 name: authServiceCB
                 fallbackUri: forward:/fallback
 
+        - id: site-content
+          uri: lb://auth-service
+          predicates:
+            - Path=/api/v1/site-content/**
+          filters:
+            - StripPrefix=0
+            - name: CircuitBreaker
+              args:
+                name: authServiceCB
+                fallbackUri: forward:/fallback
+
         - id: availability-service
           uri: lb://availability-service
           predicates:

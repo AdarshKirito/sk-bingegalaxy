@@ -23,6 +23,7 @@ import {
   FiGrid,
   FiZap,
   FiList,
+  FiLock,
   FiAward,
 } from 'react-icons/fi';
 import ThemeToggle from './ThemeToggle';
@@ -92,6 +93,7 @@ export default function Navbar() {
     { to: '/admin/venue-rooms', icon: <FiGrid />, label: t('nav.venue_rooms', 'Rooms') },
     { to: '/admin/surge-rules', icon: <FiZap />, label: t('nav.surge_rules', 'Surge Rules') },
     { to: '/admin/waitlist', icon: <FiList />, label: t('nav.waitlist', 'Waitlist') },
+    { to: '/admin/customer-freezes', icon: <FiLock />, label: t('nav.customer_freezes', 'Customer Freezes') },
     { to: '/admin/users-config', icon: <FiUsers />, label: t('nav.users') },
     { to: '/admin/reports', icon: <FiBarChart2 />, label: t('nav.reports', 'Reports') },
   ];
@@ -309,6 +311,7 @@ export default function Navbar() {
               items={[
                 { to: '/admin/users-config', icon: <FiUsers />,  label: t('nav.users') },
                 { to: '/admin/waitlist',     icon: <FiList />,   label: t('nav.waitlist', 'Waitlist') },
+                { to: '/admin/customer-freezes', icon: <FiLock />, label: t('nav.customer_freezes', 'Customer Freezes') },
                 ...(effectiveIsSuperAdmin
                   ? [{ to: '/admin/register', icon: <FiShield />, label: t('nav.add_admin', 'Add Admin') }]
                   : []),

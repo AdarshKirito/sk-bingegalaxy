@@ -1270,6 +1270,33 @@ public class AuthService {
         }
     }
 
+    /**
+     * Self-service: revoke every active session for the caller EXCEPT the one matching
+     * {@code currentRefreshJti}. If {@code currentRefreshJti} is null/blank, every session
+     * is revoked (the caller is signing out everywhere).
+     *
+     * Returns the number of sessions actually revoked.
+     */
+    @Transactional
+    public int revokeAllOtherMySessions(Long userId, String currentRefreshJti) {
+        var sessions = sessionService.listActiveForUser(userId);
+        int n = 0;
+        for (var s : sessions) {
+            if (currentRefreshJti != null && !currentRefreshJti.isBlank()
+                && currentRefreshJti.equals(s.getRefreshJti())) {
+                continue; // keep current device
+            }
+            if (sessionService.revoke(s.getId(), userId, "USER_REVOKED_OTHERS")) {
+                n++;
+            }
+        }
+        if (n > 0) {
+            auditService.success(AuthAuditService.EventType.SESSION_REVOKED_ALL, userId, currentActorRole(),
+                userId, null, "scope=others count=" + n);
+        }
+        return n;
+    }
+
     @Transactional(readOnly = true)
     public org.springframework.data.domain.Page<UserSessionDto> listAllActiveSessions(org.springframework.data.domain.Pageable pageable) {
         return sessionService.listAllActive(pageable).map(s -> UserSessionDto.from(s, false));

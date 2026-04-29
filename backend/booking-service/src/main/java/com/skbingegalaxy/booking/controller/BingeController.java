@@ -235,4 +235,25 @@ public class BingeController {
             @PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.ok(cancellationTierService.getTiers(id)));
     }
+
+    // ── Admin: cancellation policy (binge-level freeze + refund flags) ──
+    @GetMapping("/admin/binges/{id}/cancellation-policy")
+    public ResponseEntity<ApiResponse<CancellationPolicyDto>> getCancellationPolicy(
+            @PathVariable Long id,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        adminBingeScopeService.requireBingeOwnership(id, adminId, role, "viewing cancellation policy");
+        return ResponseEntity.ok(ApiResponse.ok(bingeService.getCancellationPolicy(id)));
+    }
+
+    @PutMapping("/admin/binges/{id}/cancellation-policy")
+    public ResponseEntity<ApiResponse<CancellationPolicyDto>> saveCancellationPolicy(
+            @PathVariable Long id,
+            @Valid @RequestBody CancellationPolicyDto request,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        adminBingeScopeService.requireBingeOwnership(id, adminId, role, "updating cancellation policy");
+        return ResponseEntity.ok(ApiResponse.ok("Cancellation policy saved",
+            bingeService.saveCancellationPolicy(id, request)));
+    }
 }

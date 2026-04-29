@@ -3,6 +3,7 @@ import { bookingService, availabilityService, adminService } from '../../service
 import { toast } from 'react-toastify';
 import { format, addDays } from 'date-fns';
 import { trackBookingStarted, trackBookingStepCompleted } from '../../services/analytics';
+import { useBinge } from '../../context/BingeContext';
 
 import ImagePopup from './ImagePopup';
 import StepCustomer from './StepCustomer';
@@ -33,6 +34,7 @@ export { default as StepReview } from './StepReview';
 export default function BookingWizard({ isAdmin = false, reinstateData = null, editBookingData = null, prefillData = null, initialEventTypeId = null, onSubmit, onCancel }) {
   const firstStep = isAdmin ? 0 : 1;
   const [step, setStep] = useState(firstStep);
+  const { selectedBinge } = useBinge();
 
   // Customer (admin only)
   const [selectedCustomer, setSelectedCustomer] = useState(null);
@@ -51,6 +53,48 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
   const [activeRateCodes, setActiveRateCodes] = useState([]);
   const [selectedRateCodeId, setSelectedRateCodeId] = useState('');
   const [capacityFull, setCapacityFull] = useState(false);
+  const [freeze, setFreeze] = useState(null); // { freezeUntil, reason, message }
+  const [freezeNow, setFreezeNow] = useState(Date.now());
+
+  // ── Customer-only: detect existing booking-flow freeze on mount ───────────
+  // Admins create bookings on behalf and aren't subject to this lock.
+  useEffect(() => {
+    if (isAdmin) return;
+    const bingeId = selectedBinge?.id;
+    if (!bingeId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await bookingService.getMyFreezeForBinge(bingeId);
+        const data = res?.data?.data || res?.data;
+        if (!cancelled && data && data.freezeUntil) {
+          setFreeze({
+            freezeUntil: data.freezeUntil,
+            reason: data.reason || '',
+            message: 'Your booking flow is temporarily frozen at this binge. Please contact support to lift it immediately.',
+          });
+        }
+      } catch {
+        // 404 / no active freeze — ignore
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isAdmin, selectedBinge?.id]);
+
+  // Tick the countdown banner once a second when frozen
+  useEffect(() => {
+    if (!freeze) return undefined;
+    const t = setInterval(() => setFreezeNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [freeze]);
+
+  // Auto-clear when freeze expires client-side
+  useEffect(() => {
+    if (!freeze) return;
+    if (new Date(freeze.freezeUntil).getTime() <= freezeNow) {
+      setFreeze(null);
+    }
+  }, [freeze, freezeNow]);
   const [venueRooms, setVenueRooms] = useState([]);
   const [availableRoomIds, setAvailableRoomIds] = useState(null); // null = not yet fetched
   const [surgeRules, setSurgeRules] = useState([]);
@@ -365,6 +409,11 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
 
   const handleSubmit = async () => {
     if (submittingRef.current) return;
+    // Block customer submissions while a booking-flow freeze is active
+    if (!isAdmin && freeze && new Date(freeze.freezeUntil).getTime() > Date.now()) {
+      toast.error('Your booking flow is temporarily frozen. Please contact support.');
+      return;
+    }
     if (isAdmin && !selectedCustomer) { toast.error('Please select a customer before confirming'); return; }
     if (!form.eventTypeId) { toast.error('Please select an event type'); return; }
     if (!form.bookingDate) { toast.error('Please select a booking date'); return; }
@@ -421,14 +470,34 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
       }
     } catch (err) {
       const msg = err.userMessage || err.response?.data?.message || 'Booking failed. Please try again.';
-      if (msg.startsWith('CAPACITY_FULL:')) {
+      if (msg.startsWith('FROZEN:')) {
+        // Format: FROZEN:until={epochMs}|reason={r}|message={m}
+        const body = msg.substring('FROZEN:'.length);
+        const parts = body.split('|');
+        const get = (k) => {
+          const seg = parts.find(p => p.startsWith(`${k}=`));
+          return seg ? seg.substring(k.length + 1) : '';
+        };
+        const untilMs = Number(get('until'));
+        const reason = get('reason');
+        const message = get('message') || 'Your booking flow is temporarily frozen at this binge.';
+        setFreeze({
+          freezeUntil: Number.isFinite(untilMs) && untilMs > 0 ? new Date(untilMs).toISOString() : new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+          reason,
+          message,
+        });
+        setCapacityFull(false);
+        setError(message);
+        toast.error(message);
+      } else if (msg.startsWith('CAPACITY_FULL:')) {
         setCapacityFull(true);
         setError(msg.replace('CAPACITY_FULL:', ''));
+        toast.error(msg.replace('CAPACITY_FULL:', ''));
       } else {
         setCapacityFull(false);
         setError(msg);
+        toast.error(msg);
       }
-      toast.error(msg.replace('CAPACITY_FULL:', ''));
     } finally {
       setLoading(false);
       submittingRef.current = false;
@@ -486,6 +555,51 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
           </div>
         ))}
       </nav>
+
+      {freeze && (() => {
+        const targetMs = new Date(freeze.freezeUntil).getTime();
+        const remaining = Math.max(0, targetMs - freezeNow);
+        const totalSec = Math.floor(remaining / 1000);
+        const h = Math.floor(totalSec / 3600);
+        const m = Math.floor((totalSec % 3600) / 60);
+        const s = totalSec % 60;
+        const support = selectedBinge?.supportEmail || selectedBinge?.contactEmail;
+        const phone = selectedBinge?.supportPhone || selectedBinge?.contactPhone;
+        return (
+          <div
+            role="alert"
+            style={{
+              border: '1px solid var(--danger, #b91c1c)',
+              background: 'rgba(185,28,28,0.08)',
+              padding: '1rem 1.25rem',
+              borderRadius: '8px',
+              marginBottom: '1rem',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+              <div>
+                <strong>🔒 Booking flow temporarily frozen</strong>
+                <div style={{ marginTop: '0.25rem' }}>{freeze.message}</div>
+                {freeze.reason && (
+                  <div style={{ marginTop: '0.25rem', fontSize: '0.9em', color: 'var(--text-secondary)' }}>
+                    Reason: {freeze.reason}
+                  </div>
+                )}
+                {(support || phone) && (
+                  <div style={{ marginTop: '0.5rem', fontSize: '0.9em' }}>
+                    Contact support to unfreeze immediately:
+                    {support && <> &nbsp;<a href={`mailto:${support}`}>{support}</a></>}
+                    {phone && <> &nbsp;<a href={`tel:${phone}`}>{phone}</a></>}
+                  </div>
+                )}
+              </div>
+              <div style={{ fontFamily: 'monospace', fontSize: '1.5em', fontWeight: 600, minWidth: '120px', textAlign: 'right' }}>
+                {String(h).padStart(2, '0')}:{String(m).padStart(2, '0')}:{String(s).padStart(2, '0')}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {error && <div className="error-message" role="alert">{error}</div>}
 

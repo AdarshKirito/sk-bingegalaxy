@@ -322,6 +322,22 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.ok("Session revoked", null));
     }
 
+    /**
+     * Self-service: sign out of every other device (keeps the current browser signed in).
+     * If the caller has no refresh-token cookie (e.g. mobile), this becomes "sign out everywhere"
+     * and the caller's next request will fail auth and be redirected to login.
+     */
+    @PostMapping("/sessions/revoke-others")
+    public ResponseEntity<ApiResponse<Integer>> revokeMyOtherSessions(
+            @RequestHeader("X-User-Id") Long userId,
+            @CookieValue(name = "refreshToken", required = false) String refreshToken) {
+        String jti = null;
+        try { if (refreshToken != null && !refreshToken.isBlank()) jti = jwtProvider.getJtiFromToken(refreshToken); }
+        catch (Exception ignored) {}
+        int n = authService.revokeAllOtherMySessions(userId, jti);
+        return ResponseEntity.ok(ApiResponse.ok("Revoked " + n + " other session" + (n == 1 ? "" : "s"), n));
+    }
+
     // ════════════════════════════════════════════════════════════════════
     // Super-admin: sessions, audit log, role promotions, stats
     // ════════════════════════════════════════════════════════════════════

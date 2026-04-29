@@ -193,4 +193,13 @@ public class Booking {
 
     @UpdateTimestamp
     private LocalDateTime updatedAt;
+
+    /**
+     * Who triggered the cancellation: CUSTOMER, ADMIN, or SYSTEM. Populated
+     * by {@code BookingService#cancelBooking}; null for non-cancelled rows.
+     * Used by the freeze-policy to differentiate customer-initiated cancels
+     * from payment-timeout auto-cancels.
+     */
+    @Column(name = "cancellation_actor", length = 20)
+    private String cancellationActor;
 }

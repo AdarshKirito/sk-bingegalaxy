@@ -70,7 +70,16 @@ export default function BingeManagement() {
   const [tierRows, setTierRows] = useState([]);
   const [tierLoading, setTierLoading] = useState(false);
   const [tierSaving, setTierSaving] = useState(false);
-  const [loyaltyEditor, setLoyaltyEditor] = useState({ open: false, binge: null });
+  const DEFAULT_POLICY = {
+    freezePolicyEnabled: true,
+    freezeDurationMinutes: 60,
+    maxPendingCancelsBeforeFreeze: 3,
+    maxPendingPaymentTimeoutsBeforeFreeze: 3,
+    refundOnSuccessfulPaymentCancel: true,
+    refundOnPendingPaymentCancel: false,
+  };
+  const [policyForm, setPolicyForm] = useState(DEFAULT_POLICY);
+  const [policySaving, setPolicySaving] = useState(false);  const [loyaltyEditor, setLoyaltyEditor] = useState({ open: false, binge: null });
   const { clearBinge, selectBinge, selectedBinge } = useBinge();
   const navigate = useNavigate();
 
@@ -123,11 +132,24 @@ export default function BingeManagement() {
     setTierEditor({ open: true, binge });
     setTierLoading(true);
     try {
-      const res = await adminService.getCancellationTiers(binge.id);
-      const tiers = res.data.data || res.data || [];
-      setTierRows(tiers.length ? tiers.map(t => ({ hoursBeforeStart: t.hoursBeforeStart, refundPercentage: t.refundPercentage, label: t.label || '' })) : [{ hoursBeforeStart: 48, refundPercentage: 100, label: 'Full refund' }, { hoursBeforeStart: 24, refundPercentage: 50, label: 'Half refund' }, { hoursBeforeStart: 0, refundPercentage: 0, label: 'No refund' }]);
-    } catch {
-      setTierRows([{ hoursBeforeStart: 48, refundPercentage: 100, label: 'Full refund' }, { hoursBeforeStart: 24, refundPercentage: 50, label: 'Half refund' }, { hoursBeforeStart: 0, refundPercentage: 0, label: 'No refund' }]);
+      const [tierRes, policyRes] = await Promise.allSettled([
+        adminService.getCancellationTiers(binge.id),
+        adminService.getCancellationPolicy(binge.id),
+      ]);
+      if (tierRes.status === 'fulfilled') {
+        const tiers = tierRes.value.data.data || tierRes.value.data || [];
+        setTierRows(tiers.length
+          ? tiers.map(t => ({ hoursBeforeStart: t.hoursBeforeStart, refundPercentage: t.refundPercentage, label: t.label || '' }))
+          : [{ hoursBeforeStart: 48, refundPercentage: 100, label: 'Full refund' }, { hoursBeforeStart: 24, refundPercentage: 50, label: 'Half refund' }, { hoursBeforeStart: 0, refundPercentage: 0, label: 'No refund' }]);
+      } else {
+        setTierRows([{ hoursBeforeStart: 48, refundPercentage: 100, label: 'Full refund' }, { hoursBeforeStart: 24, refundPercentage: 50, label: 'Half refund' }, { hoursBeforeStart: 0, refundPercentage: 0, label: 'No refund' }]);
+      }
+      if (policyRes.status === 'fulfilled') {
+        const p = policyRes.value.data.data || policyRes.value.data || {};
+        setPolicyForm({ ...DEFAULT_POLICY, ...p });
+      } else {
+        setPolicyForm(DEFAULT_POLICY);
+      }
     } finally {
       setTierLoading(false);
     }
@@ -143,6 +165,26 @@ export default function BingeManagement() {
       toast.error(err.userMessage || err.response?.data?.message || 'Failed to save tiers');
     } finally {
       setTierSaving(false);
+    }
+  };
+
+  const handleSavePolicy = async () => {
+    setPolicySaving(true);
+    try {
+      const payload = {
+        freezePolicyEnabled: !!policyForm.freezePolicyEnabled,
+        freezeDurationMinutes: Number(policyForm.freezeDurationMinutes) || 60,
+        maxPendingCancelsBeforeFreeze: Number(policyForm.maxPendingCancelsBeforeFreeze) || 3,
+        maxPendingPaymentTimeoutsBeforeFreeze: Number(policyForm.maxPendingPaymentTimeoutsBeforeFreeze) || 3,
+        refundOnSuccessfulPaymentCancel: !!policyForm.refundOnSuccessfulPaymentCancel,
+        refundOnPendingPaymentCancel: !!policyForm.refundOnPendingPaymentCancel,
+      };
+      await adminService.saveCancellationPolicy(tierEditor.binge.id, payload);
+      toast.success('Cancellation policy saved');
+    } catch (err) {
+      toast.error(err.userMessage || err.response?.data?.message || 'Failed to save policy');
+    } finally {
+      setPolicySaving(false);
     }
   };
 
@@ -994,6 +1036,78 @@ export default function BingeManagement() {
                 <button type="button" className="btn btn-primary" disabled={tierSaving} onClick={handleSaveTiers}>
                   {tierSaving ? 'Saving...' : 'Save Tiers'}
                 </button>
+              </div>
+
+              {/* ── Cancellation policy (binge-level freeze + refund flags) ── */}
+              <div style={{ marginTop: '2rem', paddingTop: '1.25rem', borderTop: '1px solid var(--border)' }}>
+                <h4 style={{ margin: '0 0 0.5rem' }}>Cancellation policy</h4>
+                <p className="adm-form-intro" style={{ marginTop: 0 }}>
+                  Controls whether refunds apply when customers cancel under each payment state, and the
+                  abuse-protection freeze that temporarily blocks the booking flow after repeated abandons.
+                </p>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem 1.5rem', marginBottom: '0.75rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={!!policyForm.refundOnSuccessfulPaymentCancel}
+                      onChange={(e) => setPolicyForm(p => ({ ...p, refundOnSuccessfulPaymentCancel: e.target.checked }))}
+                    />
+                    Refund on successful-payment cancellation
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={!!policyForm.refundOnPendingPaymentCancel}
+                      onChange={(e) => setPolicyForm(p => ({ ...p, refundOnPendingPaymentCancel: e.target.checked }))}
+                    />
+                    Refund on pending-payment cancellation
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={!!policyForm.freezePolicyEnabled}
+                      onChange={(e) => setPolicyForm(p => ({ ...p, freezePolicyEnabled: e.target.checked }))}
+                    />
+                    Enable temporary freeze on repeated abandons
+                  </label>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(180px, 1fr))', gap: '0.75rem 1.25rem', marginBottom: '0.75rem' }}>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <span>Freeze duration (minutes)</span>
+                    <input
+                      type="number" min="1" max="10080"
+                      value={policyForm.freezeDurationMinutes}
+                      onChange={(e) => setPolicyForm(p => ({ ...p, freezeDurationMinutes: Number(e.target.value) }))}
+                      disabled={!policyForm.freezePolicyEnabled}
+                    />
+                  </label>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <span>Max pending cancellations before freeze</span>
+                    <input
+                      type="number" min="1" max="50"
+                      value={policyForm.maxPendingCancelsBeforeFreeze}
+                      onChange={(e) => setPolicyForm(p => ({ ...p, maxPendingCancelsBeforeFreeze: Number(e.target.value) }))}
+                      disabled={!policyForm.freezePolicyEnabled}
+                    />
+                  </label>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <span>Max payment-timeouts before freeze</span>
+                    <input
+                      type="number" min="1" max="50"
+                      value={policyForm.maxPendingPaymentTimeoutsBeforeFreeze}
+                      onChange={(e) => setPolicyForm(p => ({ ...p, maxPendingPaymentTimeoutsBeforeFreeze: Number(e.target.value) }))}
+                      disabled={!policyForm.freezePolicyEnabled}
+                    />
+                  </label>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button type="button" className="btn btn-primary" disabled={policySaving} onClick={handleSavePolicy}>
+                    {policySaving ? 'Saving...' : 'Save Policy'}
+                  </button>
+                </div>
               </div>
             </>
           )}

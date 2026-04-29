@@ -35,6 +35,14 @@ public class BingeDto {
     private LocalTime closeTime;
     private LocalDateTime createdAt;
 
+    // ── Cancellation policy + freeze settings (binge-level) ──
+    private boolean freezePolicyEnabled;
+    private int freezeDurationMinutes;
+    private int maxPendingCancelsBeforeFreeze;
+    private int maxPendingPaymentTimeoutsBeforeFreeze;
+    private boolean refundOnSuccessfulPaymentCancel;
+    private boolean refundOnPendingPaymentCancel;
+
     /** Approval status: PENDING_APPROVAL, APPROVED, or REJECTED. */
     private String status;
     private Long approvalDecidedBy;

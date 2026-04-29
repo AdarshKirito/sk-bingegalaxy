@@ -1,161 +1,277 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
 import {
-  FiArrowRight,
-  FiAward,
-  FiBriefcase,
-  FiCalendar,
-  FiCamera,
-  FiCheckCircle,
-  FiClock,
-  FiFilm,
-  FiGift,
-  FiHeart,
-  FiMapPin,
-  FiShield,
-  FiSmile,
-  FiStar,
-  FiUsers,
+  FiArrowRight, FiAward, FiBriefcase, FiCalendar, FiCamera, FiCheckCircle,
+  FiChevronLeft, FiChevronRight, FiClock, FiFilm, FiGift, FiHeart, FiMapPin,
+  FiShield, FiSmile, FiStar, FiUsers,
 } from 'react-icons/fi';
 import SEO from '../components/SEO';
+import { siteContentService } from '../services/endpoints';
+import { HOME_CMS_SLUG, defaultHomeContent, mergeHomeContent } from '../content/homeDefaults';
 import './Home.css';
 
-const experienceHighlights = [
-  {
-    title: 'Curated Private Screenings',
-    description: 'A room that feels reserved for your people, your playlist, your lights, and your moment.',
-    icon: <FiFilm />,
-  },
-  {
-    title: 'Fast Celebration Setup',
-    description: 'Dates, add-ons, timing, and event planning get shaped into one clean booking flow.',
-    icon: <FiCalendar />,
-  },
-  {
-    title: 'Safer Payments',
-    description: 'Checkout and callback handling are built for a controlled, verifiable payment path.',
-    icon: <FiShield />,
-  },
-  {
-    title: 'Photo-Ready Spaces',
-    description: 'The room is designed to feel cinematic before the movie even starts.',
-    icon: <FiCamera />,
-  },
-];
+// Map serialized icon keys → React icon nodes. Lets the CMS store small
+// stable identifiers ("film") instead of forcing the editor to think about
+// component imports. Falls back to a sensible default if unknown.
+const ICONS = {
+  film: <FiFilm />, calendar: <FiCalendar />, shield: <FiShield />, camera: <FiCamera />,
+  gift: <FiGift />, heart: <FiHeart />, star: <FiStar />, briefcase: <FiBriefcase />,
+  smile: <FiSmile />, users: <FiUsers />, award: <FiAward />, clock: <FiClock />,
+  mappin: <FiMapPin />, check: <FiCheckCircle />,
+};
+const iconFor = (key) => ICONS[String(key || '').toLowerCase()] ?? <FiStar />;
 
-const signatureMoments = [
-  {
-    eyebrow: 'Birthday rooms',
-    title: 'Celebrate with a full-screen surprise',
-    description: 'Cake table, private seating, your playlist, and a clean reveal moment without crowd noise.',
-    accent: 'Sunrise Gold',
-  },
-  {
-    eyebrow: 'Proposal setups',
-    title: 'A cinematic yes without the chaos',
-    description: 'Build a controlled, intimate setting with lighting, timing, and a sharper emotional reveal.',
-    accent: 'Rose Velvet',
-  },
-  {
-    eyebrow: 'Corporate screenings',
-    title: 'Present without a banquet-hall feel',
-    description: 'Use the theater like a polished private venue for launches, team events, or premium client sessions.',
-    accent: 'Midnight Slate',
-  },
-];
+function HeroCarousel({ images, intervalMs = 4500 }) {
+  const safe = useMemo(() => (Array.isArray(images) && images.length > 0 ? images : null), [images]);
+  const length = safe?.length ?? 0;
+  const [index, setIndex] = useState(0);
+  const [paused, setPaused] = useState(false);
 
-const planningSteps = [
-  {
-    number: '01',
-    title: 'Pick the mood',
-    description: 'Birthday, proposal, anniversary, surprise date, or a private movie night with friends.',
-  },
-  {
-    number: '02',
-    title: 'Lock the slot',
-    description: 'Choose your venue, date, show window, guest count, and add-ons in one flow.',
-  },
-  {
-    number: '03',
-    title: 'Walk into a finished setup',
-    description: 'Get the confirmation, arrive with your booking reference, and let the room do the work.',
-  },
-];
+  // Keep autoplay alive by re-arming a timer whenever the index changes,
+  // the user pauses (hover/focus), or the tab visibility changes. Manual
+  // nav (arrows/dots) updates `index`, which restarts the timer cleanly —
+  // so autoplay never permanently stops after a click.
+  useEffect(() => {
+    if (length <= 1 || paused || intervalMs <= 0) return undefined;
+    const id = setTimeout(() => setIndex(i => (i + 1) % length), intervalMs);
+    return () => clearTimeout(id);
+  }, [index, length, paused, intervalMs]);
 
-const packageCards = [
-  { name: 'Birthday Party', price: '₹4,999', icon: <FiGift />, note: 'Cake-first setup with celebration framing.' },
-  { name: 'Anniversary', price: '₹5,999', icon: <FiHeart />, note: 'Soft lighting, private seating, cleaner atmosphere.' },
-  { name: 'Proposal Setup', price: '₹7,999', icon: <FiStar />, note: 'A high-focus room built for one main reveal.' },
-  { name: 'HD Screening', price: '₹2,999', icon: <FiFilm />, note: 'Straight private screening without event extras.' },
-  { name: 'Corporate Event', price: '₹9,999', icon: <FiBriefcase />, note: 'Presentations and screenings without banquet noise.' },
-  { name: 'Baby Shower', price: '₹5,499', icon: <FiSmile />, note: 'Comfort-first staging for smaller private groups.' },
-];
+  useEffect(() => {
+    const onVis = () => setPaused(document.hidden);
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
 
-const guestSignals = [
-  {
-    label: 'For couples',
-    quote: 'It feels more like entering a planned scene than walking into a normal theater show.',
-  },
-  {
-    label: 'For birthdays',
-    quote: 'The room already feels like the event before the screen even turns on.',
-  },
-  {
-    label: 'For teams',
-    quote: 'Private enough to feel premium, simple enough to book without operational mess.',
-  },
-];
+  if (!safe) return null;
+  const go = (delta) => setIndex(i => (i + delta + length) % length);
+
+  return (
+    <div
+      className="home-carousel"
+      role="region"
+      aria-label="Featured experiences"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      onFocus={() => setPaused(true)}
+      onBlur={() => setPaused(false)}
+    >
+      <div className="home-carousel-frame">
+        {safe.map((img, i) => (
+          <figure
+            key={`${img.url}-${i}`}
+            className={`home-carousel-slide ${i === index ? 'is-active' : ''}`}
+            aria-hidden={i !== index}
+          >
+            <img src={img.url} alt={img.caption || `Featured ${i + 1}`} loading={i === 0 ? 'eager' : 'lazy'} />
+            {img.caption && <figcaption>{img.caption}</figcaption>}
+          </figure>
+        ))}
+      </div>
+      {length > 1 && (
+        <>
+          <button type="button" className="home-carousel-nav home-carousel-prev" onClick={() => go(-1)} aria-label="Previous slide"><FiChevronLeft /></button>
+          <button type="button" className="home-carousel-nav home-carousel-next" onClick={() => go(1)} aria-label="Next slide"><FiChevronRight /></button>
+          <div className="home-carousel-dots" role="tablist">
+            {safe.map((_, i) => (
+              <button
+                key={i}
+                role="tab"
+                aria-selected={i === index}
+                aria-label={`Go to slide ${i + 1}`}
+                className={`home-carousel-dot ${i === index ? 'is-active' : ''}`}
+                onClick={() => setIndex(i)}
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Full-bleed Amazon / Netflix style banner carousel. Each slide is a large
+ * photograph with overlay headline + CTA, autoplay with a thin progress bar
+ * (so the user can see when the next slide is coming), large hover-to-reveal
+ * arrow controls, dot indicators, pause-on-hover, and keyboard arrow navigation.
+ */
+function BigBannerCarousel({ slides, autoplayMs = 6000 }) {
+  const safe = useMemo(() => (Array.isArray(slides) && slides.length > 0 ? slides : []), [slides]);
+  const length = safe.length;
+  const [index, setIndex] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const rafRef = useRef(null);
+  const startRef = useRef(0);
+  const accumRef = useRef(0);
+  const rootRef = useRef(null);
+
+  // Drive autoplay with requestAnimationFrame so we can render an exact-fit
+  // progress bar without battery-draining setInterval(33ms). Pauses while
+  // the tab is hidden or the cursor is over the banner.
+  useEffect(() => {
+    if (length <= 1 || paused || autoplayMs <= 0) return undefined;
+    startRef.current = performance.now();
+    const tick = (now) => {
+      const elapsed = (now - startRef.current) + accumRef.current;
+      const pct = Math.min(1, elapsed / autoplayMs);
+      setProgress(pct);
+      if (pct >= 1) {
+        accumRef.current = 0;
+        setIndex(i => (i + 1) % length);
+        startRef.current = performance.now();
+        setProgress(0);
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      // Carry over fractional progress so pause→resume picks up where it left off.
+      accumRef.current += performance.now() - startRef.current;
+    };
+  }, [length, paused, autoplayMs, index]);
+
+  // Pause when the document is hidden (tab in background, OS lock screen).
+  useEffect(() => {
+    const onVis = () => setPaused(document.hidden);
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+
+  // Keyboard navigation when the banner has focus.
+  useEffect(() => {
+    const node = rootRef.current;
+    if (!node) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'ArrowLeft') { e.preventDefault(); reset(); setIndex(i => (i - 1 + length) % length); }
+      if (e.key === 'ArrowRight') { e.preventDefault(); reset(); setIndex(i => (i + 1) % length); }
+    };
+    node.addEventListener('keydown', onKey);
+    return () => node.removeEventListener('keydown', onKey);
+  }, [length]);
+
+  if (length === 0) return null;
+
+  const reset = () => { accumRef.current = 0; setProgress(0); startRef.current = performance.now(); };
+  const go = (delta) => { reset(); setIndex(i => (i + delta + length) % length); };
+  const goto = (i) => { reset(); setIndex(i); };
+
+  return (
+    <div
+      ref={rootRef}
+      className="home-banner"
+      role="region"
+      aria-roledescription="carousel"
+      aria-label="Featured private experiences"
+      tabIndex={0}
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      onFocus={() => setPaused(true)}
+      onBlur={() => setPaused(false)}
+    >
+      <div className="home-banner-track">
+        {safe.map((slide, i) => (
+          <article
+            key={`${slide.url}-${i}`}
+            className={`home-banner-slide ${i === index ? 'is-active' : ''} home-banner-align-${slide.align || 'left'}`}
+            aria-hidden={i !== index}
+            aria-roledescription="slide"
+            aria-label={`${i + 1} of ${length}: ${slide.title || slide.kicker || ''}`}
+          >
+            <img
+              src={slide.url}
+              alt={slide.title || slide.kicker || `Slide ${i + 1}`}
+              loading={i === 0 ? 'eager' : 'lazy'}
+              decoding="async"
+            />
+            <div className="home-banner-scrim" aria-hidden="true" />
+            <div className="home-banner-content">
+              <div className="container home-banner-shell">
+                {slide.kicker && <span className="home-banner-kicker">{slide.kicker}</span>}
+                {slide.title && <h2 className="home-banner-title">{slide.title}</h2>}
+                {slide.subtitle && <p className="home-banner-subtitle">{slide.subtitle}</p>}
+                {slide.ctaLabel && (
+                  <Link to={slide.ctaHref || '/register'} className="btn btn-primary home-banner-cta">
+                    {slide.ctaLabel} <FiArrowRight />
+                  </Link>
+                )}
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      {length > 1 && (
+        <>
+          <button type="button" className="home-banner-nav home-banner-prev" onClick={() => go(-1)} aria-label="Previous slide">
+            <FiChevronLeft />
+          </button>
+          <button type="button" className="home-banner-nav home-banner-next" onClick={() => go(1)} aria-label="Next slide">
+            <FiChevronRight />
+          </button>
+          <div className="home-banner-controls">
+            <div className="home-banner-dots" role="tablist" aria-label="Choose slide">
+              {safe.map((s, i) => (
+                <button
+                  key={i}
+                  role="tab"
+                  aria-selected={i === index}
+                  aria-label={`Go to slide ${i + 1}${s.title ? `: ${s.title}` : ''}`}
+                  className={`home-banner-dot ${i === index ? 'is-active' : ''}`}
+                  onClick={() => goto(i)}
+                >
+                  {i === index && <span className="home-banner-dot-fill" style={{ width: `${Math.round(progress * 100)}%` }} />}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 export default function Home() {
   const { isAuthenticated, isAdmin } = useAuth();
   const { t } = useTranslation();
+  const [content, setContent] = useState(defaultHomeContent);
 
-  const experienceHighlightsLocal = [
-    { title: t('home.exp_screening_title', 'Curated Private Screenings'), description: t('home.exp_screening_desc', 'A room that feels reserved for your people, your playlist, your lights, and your moment.'), icon: <FiFilm /> },
-    { title: t('home.exp_setup_title', 'Fast Celebration Setup'), description: t('home.exp_setup_desc', 'Dates, add-ons, timing, and event planning get shaped into one clean booking flow.'), icon: <FiCalendar /> },
-    { title: t('home.exp_payment_title', 'Safer Payments'), description: t('home.exp_payment_desc', 'Checkout and callback handling are built for a controlled, verifiable payment path.'), icon: <FiShield /> },
-    { title: t('home.exp_photo_title', 'Photo-Ready Spaces'), description: t('home.exp_photo_desc', 'The room is designed to feel cinematic before the movie even starts.'), icon: <FiCamera /> },
-  ];
+  useEffect(() => {
+    let cancelled = false;
+    siteContentService.getPublic(HOME_CMS_SLUG).then(res => {
+      if (cancelled) return;
+      const raw = res?.data?.data?.contentJson;
+      if (!raw) return; // never been edited — use defaults
+      try {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        setContent(mergeHomeContent(parsed));
+      } catch (err) {
+        // Bad JSON in DB — keep defaults rather than crash the homepage.
+        console.warn('[Home CMS] failed to parse content, using defaults', err);
+      }
+    }).catch(() => { /* network/no-content: defaults are fine */ });
+    return () => { cancelled = true; };
+  }, []);
 
-  const signatureMomentsLocal = [
-    { eyebrow: t('home.sig_birthday_eyebrow', 'Birthday rooms'), title: t('home.sig_birthday_title', 'Celebrate with a full-screen surprise'), description: t('home.sig_birthday_desc', 'Cake table, private seating, your playlist, and a clean reveal moment without crowd noise.'), accent: t('home.sig_birthday_accent', 'Sunrise Gold') },
-    { eyebrow: t('home.sig_proposal_eyebrow', 'Proposal setups'), title: t('home.sig_proposal_title', 'A cinematic yes without the chaos'), description: t('home.sig_proposal_desc', 'Build a controlled, intimate setting with lighting, timing, and a sharper emotional reveal.'), accent: t('home.sig_proposal_accent', 'Rose Velvet') },
-    { eyebrow: t('home.sig_corporate_eyebrow', 'Corporate screenings'), title: t('home.sig_corporate_title', 'Present without a banquet-hall feel'), description: t('home.sig_corporate_desc', 'Use the theater like a polished private venue for launches, team events, or premium client sessions.'), accent: t('home.sig_corporate_accent', 'Midnight Slate') },
-  ];
-
-  const planningStepsLocal = [
-    { number: '01', title: t('home.step1_title', 'Pick the mood'), description: t('home.step1_desc', 'Birthday, proposal, anniversary, surprise date, or a private movie night with friends.') },
-    { number: '02', title: t('home.step2_title', 'Lock the slot'), description: t('home.step2_desc', 'Choose your venue, date, show window, guest count, and add-ons in one flow.') },
-    { number: '03', title: t('home.step3_title', 'Walk into a finished setup'), description: t('home.step3_desc', 'Get the confirmation, arrive with your booking reference, and let the room do the work.') },
-  ];
-
-  const packageCardsLocal = [
-    { name: t('home.pkg_birthday', 'Birthday Party'), price: t('home.pkg_birthday_price', '₹4,999'), icon: <FiGift />, note: t('home.pkg_birthday_note', 'Cake-first setup with celebration framing.') },
-    { name: t('home.pkg_anniversary', 'Anniversary'), price: t('home.pkg_anniversary_price', '₹5,999'), icon: <FiHeart />, note: t('home.pkg_anniversary_note', 'Soft lighting, private seating, cleaner atmosphere.') },
-    { name: t('home.pkg_proposal', 'Proposal Setup'), price: t('home.pkg_proposal_price', '₹7,999'), icon: <FiStar />, note: t('home.pkg_proposal_note', 'A high-focus room built for one main reveal.') },
-    { name: t('home.pkg_screening', 'HD Screening'), price: t('home.pkg_screening_price', '₹2,999'), icon: <FiFilm />, note: t('home.pkg_screening_note', 'Straight private screening without event extras.') },
-    { name: t('home.pkg_corporate', 'Corporate Event'), price: t('home.pkg_corporate_price', '₹9,999'), icon: <FiBriefcase />, note: t('home.pkg_corporate_note', 'Presentations and screenings without banquet noise.') },
-    { name: t('home.pkg_babyshower', 'Baby Shower'), price: t('home.pkg_babyshower_price', '₹5,499'), icon: <FiSmile />, note: t('home.pkg_babyshower_note', 'Comfort-first staging for smaller private groups.') },
-  ];
-
-  const guestSignalsLocal = [
-    { label: t('home.guest_couples', 'For couples'), quote: t('home.guest_couples_quote', 'It feels more like entering a planned scene than walking into a normal theater show.') },
-    { label: t('home.guest_birthdays', 'For birthdays'), quote: t('home.guest_birthdays_quote', 'The room already feels like the event before the screen even turns on.') },
-    { label: t('home.guest_teams', 'For teams'), quote: t('home.guest_teams_quote', 'Private enough to feel premium, simple enough to book without operational mess.') },
-  ];
+  const { hero, proofStrip, gallery, marquee, features, signature, process, packages, finalCta, bannerCarousel } = content;
+  const bannerEnabled = bannerCarousel?.enabled !== false && Array.isArray(bannerCarousel?.slides) && bannerCarousel.slides.length > 0;
 
   return (
     <div className="home">
-      <SEO title={t('nav.home')} description={t('home.seo_desc', 'Book an exclusive private theater for birthdays, anniversaries, proposals, and more with SK Binge Galaxy.')} />
+      <SEO title={t('nav.home')} description={hero.description} />
+
       <section className="home-hero">
         <div className="container home-hero-shell">
           <div className="home-hero-copy">
-            <span className="home-kicker">{t('home.kicker', 'Private theater experiences for occasions that should not feel generic')}</span>
+            <span className="home-kicker">{hero.kicker}</span>
             <h1>
-              {t('home.hero_line1', 'Make the')} <span>{t('home.hero_highlight', 'first impression')}</span> {t('home.hero_line2', 'feel bigger than the screen.')}
+              {hero.headline} <span>{hero.headlineHighlight}</span> {hero.headlineSuffix}
             </h1>
-            <p>{t('home.hero_desc', 'SK Binge Galaxy is the pre-login home for private screenings, birthday rooms, proposal setups, and premium event nights. When someone clicks the SK Binge title, this is the page they should land on.')}</p>
+            <p>{hero.description}</p>
             <div className="home-hero-actions">
               {isAuthenticated ? (
                 isAdmin ? (
@@ -164,86 +280,58 @@ export default function Home() {
                   </Link>
                 ) : (
                   <Link to="/book" className="btn btn-primary home-cta-primary">
-                    {t('home.cta_book')} <FiArrowRight />
+                    {t('home.cta_book', 'Book your event')} <FiArrowRight />
                   </Link>
                 )
               ) : (
                 <>
-                  <Link to="/register" className="btn btn-primary home-cta-primary">
-                    {t('home.cta_plan', 'Plan My Experience')} <FiArrowRight />
+                  <Link to={hero.primaryCtaHref || '/register'} className="btn btn-primary home-cta-primary">
+                    {hero.primaryCtaLabel} <FiArrowRight />
                   </Link>
-                  <Link to="/login" className="btn btn-secondary home-cta-secondary">
-                    {t('auth.sign_in')}
+                  <Link to={hero.secondaryCtaHref || '/login'} className="btn btn-secondary home-cta-secondary">
+                    {hero.secondaryCtaLabel}
                   </Link>
                 </>
               )}
             </div>
             <div className="home-proof-strip" aria-label="Experience highlights">
-              <div>
-                <strong>500+</strong>
-                <span>{t('home.proof_celebrations', 'private celebrations hosted')}</span>
-              </div>
-              <div>
-                <strong>{t('home.proof_steps_num', '3 steps')}</strong>
-                <span>{t('home.proof_steps_desc', 'from plan to confirmed booking')}</span>
-              </div>
-              <div>
-                <strong>100%</strong>
-                <span>{t('home.proof_exclusive', 'exclusive room access for your slot')}</span>
-              </div>
+              {(proofStrip || []).map((p, i) => (
+                <div key={i}>
+                  <strong>{p.value}</strong>
+                  <span>{p.label}</span>
+                </div>
+              ))}
             </div>
           </div>
 
-          <div className="home-hero-stage" aria-hidden="true">
-            <div className="home-stage-card home-stage-primary">
-              <span className="stage-tag">{t('home.stage_tag', "Tonight's Signature Flow")}</span>
-              <h2>{t('home.stage_title', 'Golden aisle. Custom screen moment. Zero outside crowd.')}</h2>
-              <ul>
-                <li><FiCheckCircle /> Private venue feel from arrival to exit</li>
-                <li><FiClock /> Built for planned reveals and timed entries</li>
-                <li><FiUsers /> Works for couples, families, and premium group events</li>
-              </ul>
-            </div>
-            <div className="home-stage-card home-stage-secondary">
-              <span className="stage-mini-title">What gets remembered</span>
-              <div className="stage-metric-grid">
-                <article>
-                  <FiMapPin />
-                  <strong>Private venue vibe</strong>
-                  <span>No shared audience energy.</span>
-                </article>
-                <article>
-                  <FiAward />
-                  <strong>Premium reveal moments</strong>
-                  <span>Better for milestones than a normal show.</span>
-                </article>
-              </div>
-            </div>
+          <div className="home-hero-stage">
+            <HeroCarousel images={gallery} />
           </div>
         </div>
       </section>
 
       <section className="home-marquee">
         <div className="container home-marquee-track">
-          <span>{t('home.marquee_birthday', 'Birthday Nights')}</span>
-          <span>{t('home.marquee_proposal', 'Proposal Reveals')}</span>
-          <span>{t('home.marquee_anniversary', 'Anniversary Setups')}</span>
-          <span>{t('home.marquee_screening', 'Private Screenings')}</span>
-          <span>{t('home.marquee_corporate', 'Corporate Shows')}</span>
-          <span>{t('home.marquee_family', 'Family Celebrations')}</span>
+          {(marquee || []).map((m, i) => <span key={i}>{m}</span>)}
         </div>
       </section>
 
+      {bannerEnabled && (
+        <section className="home-banner-section" aria-label="Featured experiences">
+          <BigBannerCarousel slides={bannerCarousel.slides} autoplayMs={bannerCarousel.autoplayMs ?? 6000} />
+        </section>
+      )}
+
       <section className="home-section container">
         <div className="home-section-heading">
-          <span className="home-section-kicker">{t('home.sec_features_kicker', 'Why this home page should convert better')}</span>
-          <h2>{t('home.sec_features_title', 'It sells the feeling before it asks for the login.')}</h2>
-          <p>{t('home.sec_features_desc', 'The public landing experience should make the venue feel cinematic, private, and premium before users ever see an auth form.')}</p>
+          <span className="home-section-kicker">{features.kicker}</span>
+          <h2>{features.title}</h2>
+          <p>{features.description}</p>
         </div>
         <div className="home-feature-grid">
-          {experienceHighlightsLocal.map((item) => (
-            <article key={item.title} className="home-feature-card">
-              <div className="home-feature-icon">{item.icon}</div>
+          {(features.items || []).map((item, i) => (
+            <article key={i} className="home-feature-card">
+              <div className="home-feature-icon">{iconFor(item.icon)}</div>
               <h3>{item.title}</h3>
               <p>{item.description}</p>
             </article>
@@ -253,12 +341,12 @@ export default function Home() {
 
       <section className="home-section container home-signature-section">
         <div className="home-section-heading home-section-heading-tight">
-          <span className="home-section-kicker">{t('home.sec_signature_kicker', 'Signature moments')}</span>
-          <h2>{t('home.sec_signature_title', 'Different moods, same private-screen advantage.')}</h2>
+          <span className="home-section-kicker">{signature.kicker}</span>
+          <h2>{signature.title}</h2>
         </div>
         <div className="home-signature-grid">
-          {signatureMomentsLocal.map((moment) => (
-            <article key={moment.title} className="home-signature-card">
+          {(signature.items || []).map((moment, i) => (
+            <article key={i} className="home-signature-card">
               <span className="home-signature-accent">{moment.accent}</span>
               <span className="home-signature-eyebrow">{moment.eyebrow}</span>
               <h3>{moment.title}</h3>
@@ -270,12 +358,12 @@ export default function Home() {
 
       <section className="home-section container home-process-section">
         <div className="home-section-heading home-section-heading-tight">
-          <span className="home-section-kicker">{t('home.sec_process_kicker', 'Simple booking rhythm')}</span>
-          <h2>{t('home.sec_process_title', 'Plan the night without getting lost in the UI.')}</h2>
+          <span className="home-section-kicker">{process.kicker}</span>
+          <h2>{process.title}</h2>
         </div>
         <div className="home-process-grid">
-          {planningStepsLocal.map((step) => (
-            <article key={step.number} className="home-process-card">
+          {(process.items || []).map((step, i) => (
+            <article key={i} className="home-process-card">
               <span className="home-process-number">{step.number}</span>
               <h3>{step.title}</h3>
               <p>{step.description}</p>
@@ -284,31 +372,16 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="home-section container home-guest-section">
-        <div className="home-section-heading home-section-heading-tight">
-          <span className="home-section-kicker">{t('home.sec_guest_kicker', 'How the room should feel')}</span>
-          <h2>{t('home.sec_guest_title', 'Premium enough for a milestone, simple enough for a fast decision.')}</h2>
-        </div>
-        <div className="home-guest-grid">
-          {guestSignalsLocal.map((signal) => (
-            <article key={signal.label} className="home-guest-card">
-              <span className="home-guest-label">{signal.label}</span>
-              <p>{signal.quote}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
       <section className="home-section container home-packages-section">
         <div className="home-section-heading">
-          <span className="home-section-kicker">{t('home.sec_packages_kicker', 'Indicative packages')}</span>
-          <h2>{t('home.sec_packages_title', 'Built for occasions, not just ticket sales.')}</h2>
-          <p>{t('home.sec_packages_desc', 'Starting prices below are directional. Final pricing should still reflect slot, setup depth, and add-ons.')}</p>
+          <span className="home-section-kicker">{packages.kicker}</span>
+          <h2>{packages.title}</h2>
+          <p>{packages.description}</p>
         </div>
         <div className="home-package-grid">
-          {packageCardsLocal.map((evt) => (
-            <article key={evt.name} className="home-package-card">
-              <span className="home-package-icon">{evt.icon}</span>
+          {(packages.items || []).map((evt, i) => (
+            <article key={i} className="home-package-card">
+              <span className="home-package-icon">{iconFor(evt.icon)}</span>
               <h3>{evt.name}</h3>
               <p className="home-package-price">{t('home.starting_at', 'Starting at')} {evt.price}</p>
               <p className="home-package-note">{evt.note}</p>
@@ -319,9 +392,9 @@ export default function Home() {
 
       <section className="home-section container home-final-cta">
         <div>
-          <span className="home-section-kicker">{t('home.sec_final_kicker', 'Ready when you are')}</span>
-          <h2>{t('home.sec_final_title', 'Click the SK Binge title anytime and this should still feel like the right front door.')}</h2>
-          <p>{t('home.sec_final_desc', 'It now works as a proper public homepage before login, while still handing authenticated users off to booking or admin actions.')}</p>
+          <span className="home-section-kicker">{finalCta.kicker}</span>
+          <h2>{finalCta.title}</h2>
+          <p>{finalCta.description}</p>
         </div>
         <div className="home-final-actions">
           {isAuthenticated ? (
@@ -336,11 +409,11 @@ export default function Home() {
             )
           ) : (
             <>
-              <Link to="/register" className="btn btn-primary">
-                {t('auth.register_title')} <FiArrowRight />
+              <Link to={hero.primaryCtaHref || '/register'} className="btn btn-primary">
+                {hero.primaryCtaLabel} <FiArrowRight />
               </Link>
-              <Link to="/login" className="btn btn-secondary">
-                {t('auth.sign_in')}
+              <Link to={hero.secondaryCtaHref || '/login'} className="btn btn-secondary">
+                {hero.secondaryCtaLabel}
               </Link>
             </>
           )}

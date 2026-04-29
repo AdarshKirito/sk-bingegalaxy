@@ -1,0 +1,157 @@
+.admin-home-editor { padding: 1.5rem 0 4rem; }
+
+.admin-home-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+}
+.admin-home-head h1 { margin: 0.6rem 0 0.4rem; font-size: 1.7rem; }
+.admin-home-head p { color: var(--text-secondary, #666); max-width: 60ch; margin: 0; }
+.admin-home-head-actions { display: inline-flex; gap: 0.5rem; flex-wrap: wrap; }
+.admin-home-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-secondary, #666);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+.admin-home-back:hover { color: var(--primary, #2c6cf6); }
+
+.admin-home-tabs {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  padding: 0.4rem;
+  background: var(--bg-card, #fff);
+  border: 1px solid var(--border, #e6e6e9);
+  border-radius: 14px;
+  margin-bottom: 1rem;
+}
+.admin-home-tab {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0.55rem 1rem;
+  border-radius: 10px;
+  cursor: pointer;
+  color: var(--text-secondary, #666);
+  font-size: 0.92rem;
+  font-weight: 500;
+}
+.admin-home-tab.is-active {
+  background: rgba(var(--primary-rgb, 44 108 246), 0.12);
+  color: var(--primary, #2c6cf6);
+  box-shadow: inset 0 0 0 1px rgba(var(--primary-rgb, 44 108 246), 0.25);
+}
+
+.admin-home-card {
+  background: var(--bg-card, #fff);
+  border: 1px solid var(--border, #e6e6e9);
+  border-radius: 16px;
+  padding: 1.5rem;
+}
+.admin-home-form { display: flex; flex-direction: column; gap: 0.85rem; }
+.admin-home-form h2 { margin: 0 0 0.4rem; font-size: 1.25rem; }
+.admin-home-form h3 { margin: 1rem 0 0.4rem; font-size: 1rem; color: var(--text-secondary, #666); }
+.admin-home-helper { font-size: 0.85rem; color: var(--text-muted, #888); margin: -0.4rem 0 0.4rem; }
+.admin-home-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary, #666);
+  font-weight: 500;
+}
+.admin-home-form input,
+.admin-home-form textarea,
+.admin-home-form select {
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid var(--border, #e6e6e9);
+  background: var(--bg-input, #fff);
+  color: var(--text, #111);
+  font-size: 0.95rem;
+  font-family: inherit;
+}
+.admin-home-form input:focus,
+.admin-home-form textarea:focus,
+.admin-home-form select:focus {
+  outline: none;
+  border-color: var(--primary, #2c6cf6);
+  box-shadow: 0 0 0 3px rgba(var(--primary-rgb, 44 108 246), 0.18);
+}
+
+.admin-home-grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.85rem; }
+.admin-home-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.85rem; }
+@media (max-width: 700px) {
+  .admin-home-grid-2, .admin-home-grid-3 { grid-template-columns: 1fr; }
+}
+
+.admin-home-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.6rem;
+  border: 1px dashed var(--border, #e6e6e9);
+  border-radius: 12px;
+  background: rgba(0,0,0,0.015);
+}
+.admin-home-row > input,
+.admin-home-row > select { flex: 1 1 0; min-width: 0; }
+.admin-home-row-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)) auto;
+  gap: 0.55rem;
+}
+
+.btn-icon {
+  appearance: none;
+  border: 1px solid var(--border, #e6e6e9);
+  background: var(--bg-card, #fff);
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary, #666);
+  cursor: pointer;
+}
+.btn-icon:hover { border-color: #ef4444; color: #ef4444; }
+
+.admin-home-gallery-row {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 1rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border, #e6e6e9);
+  border-radius: 14px;
+  margin-bottom: 0.75rem;
+}
+.admin-home-gallery-thumb {
+  border-radius: 10px;
+  overflow: hidden;
+  aspect-ratio: 4 / 3;
+  background: rgba(0,0,0,0.04);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.admin-home-gallery-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.admin-home-gallery-empty { color: var(--text-muted, #888); font-size: 0.85rem; }
+.admin-home-gallery-fields { display: flex; flex-direction: column; gap: 0.5rem; }
+.admin-home-row-actions { display: inline-flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
+@media (max-width: 600px) {
+  .admin-home-gallery-row { grid-template-columns: 1fr; }
+}
+
+.admin-home-foot {
+  margin-top: 1.25rem;
+  display: flex;
+  justify-content: flex-end;
+}

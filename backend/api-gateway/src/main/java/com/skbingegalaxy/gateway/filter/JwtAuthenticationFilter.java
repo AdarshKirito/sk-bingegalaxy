@@ -45,6 +45,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         "/api/v1/bookings/add-ons",
         "/api/v1/bookings/booked-slots",
         "/api/v1/payments/callback",
+        "/api/v1/site-content/public",
         "/actuator/health"
     );
 

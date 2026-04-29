@@ -41,6 +41,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/auth/admin/super-admin/**").hasRole("SUPER_ADMIN")
                 .requestMatchers("/api/v1/auth/admin/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                 .requestMatchers("/api/v1/auth/**").permitAll()
+                .requestMatchers("/api/v1/site-content/public/**").permitAll()
+                .requestMatchers("/api/v1/site-content/admin/**").hasRole("SUPER_ADMIN")
                 .requestMatchers("/actuator/health/**", "/actuator/health").permitAll()
                 .requestMatchers("/actuator/**").hasRole("SYSTEM")
                 .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").hasAnyRole("ADMIN", "SUPER_ADMIN")

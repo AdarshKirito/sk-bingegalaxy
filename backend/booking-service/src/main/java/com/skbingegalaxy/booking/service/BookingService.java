@@ -64,6 +64,7 @@ public class BookingService {
     private final com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyMembershipRepository loyaltyMembershipRepository;
     private final com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyConfigService loyaltyConfigService;
     private final ApplicationEventPublisher eventPublisher;                 // Loyalty v2 — in-process events
+    private final CustomerFreezeService customerFreezeService;              // Anti-abuse freeze policy
 
     @Value("${internal.api.secret}")
     private String internalApiSecret;
@@ -140,6 +141,9 @@ public class BookingService {
         }
 
         Long bingeId = BingeContext.requireBingeId();
+
+        // Anti-abuse: per-binge customer freeze (raises 423 LOCKED if active)
+        customerFreezeService.assertNotFrozen(customerId, bingeId);
         EventType eventType = findBookableEventType(request.getEventTypeId());
 
         // Reject bookings in the past
@@ -795,7 +799,14 @@ public class BookingService {
         if (!decision.allowed()) {
             throw new BusinessException(decision.message());
         }
-        return cancelBooking(booking, "CUSTOMER", "Booking cancelled by customer", decision.refundPercentage());
+        BookingDto result = cancelBooking(booking, "CUSTOMER", "Booking cancelled by customer", decision.refundPercentage());
+        // Track customer-initiated pending cancellation toward the freeze policy.
+        // Best-effort hook — freeze service swallows its own exceptions.
+        if (booking.getBingeId() != null) {
+            try { customerFreezeService.recordCustomerCancellation(customerId, booking.getBingeId()); }
+            catch (Exception ex) { log.warn("Freeze record (cancellation) failed: {}", ex.getMessage()); }
+        }
+        return result;
     }
 
     // â”€â”€ Customer: reschedule own booking â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1066,6 +1077,8 @@ public class BookingService {
             throw new BusinessException(
                 "Too many unpaid bookings were auto-cancelled recently. Please wait a few minutes before trying again.");
         }
+        // Anti-abuse: per-binge customer freeze (raises 423 LOCKED if active)
+        customerFreezeService.assertNotFrozen(customerId, bingeId);
 
         String groupId = "RG-" + Year.now().getValue() + "-"
             + String.format("%08X", ThreadLocalRandom.current().nextInt());
@@ -1516,7 +1529,17 @@ public class BookingService {
     // â”€â”€ System: cancel booking without request-scoped binge context â”€â”€
     @Transactional
     public BookingDto cancelBookingForSystem(String bookingRef, String reason) {
-        return cancelBooking(findBookingByRef(bookingRef), "SYSTEM", reason, 100);
+        Booking booking = findBookingByRef(bookingRef);
+        Long customerId = booking.getCustomerId();
+        Long bingeId = booking.getBingeId();
+        BookingDto result = cancelBooking(booking, "SYSTEM", reason, 100);
+        // Detect payment-timeout origin so we can feed the freeze policy.
+        if (customerId != null && bingeId != null && reason != null
+            && reason.toLowerCase().contains("payment timeout")) {
+            try { customerFreezeService.recordPendingPaymentTimeout(customerId, bingeId); }
+            catch (Exception ex) { log.warn("Freeze record (payment-timeout) failed: {}", ex.getMessage()); }
+        }
+        return result;
     }
 
     private BookingDto cancelBooking(Booking booking, String actorRole, String description, int refundPercentage) {
@@ -1531,6 +1554,7 @@ public class BookingService {
 
         String prevStatus = booking.getStatus().name();
         booking.setStatus(BookingStatus.CANCELLED);
+        booking.setCancellationActor(actorRole);
         Booking saved = bookingRepository.save(booking);
 
         // Loyalty v2 (M6) — shadow event for the v2 cancellation listener.
@@ -2893,6 +2917,12 @@ public class BookingService {
             return new CancellationPolicyDecision(false, "This venue currently does not allow customer self-cancellation.", 0);
         }
 
+        // Refund-applicability gate based on the booking's current payment state.
+        // When a venue has set the refund flag for this payment state to false,
+        // the customer can still cancel but no refund (0%) is owed regardless
+        // of any tiered refund schedule that would otherwise apply.
+        boolean refundsAllowed = isRefundAllowedForPaymentStatus(binge, booking.getPaymentStatus());
+
         LocalDateTime eventStart = LocalDateTime.of(booking.getBookingDate(), booking.getStartTime());
         LocalDateTime now = LocalDateTime.now();
         long hoursUntilStart = ChronoUnit.HOURS.between(now, eventStart);
@@ -2907,19 +2937,22 @@ public class BookingService {
             for (var tier : tiers) {
                 if (hoursUntilStart >= tier.getHoursBeforeStart()) {
                     String label = tier.getLabel() != null ? tier.getLabel() : (tier.getRefundPercentage() + "% refund");
+                    int refund = refundsAllowed ? tier.getRefundPercentage() : 0;
+                    String suffix = refundsAllowed ? "" : " (no refund — refund-on-this-payment-state is disabled by the venue)";
                     return new CancellationPolicyDecision(true,
-                        "Cancellation available with " + tier.getRefundPercentage() + "% refund (" + label + "). "
+                        "Cancellation available with " + refund + "% refund (" + label + ")." + suffix + " "
                             + hoursUntilStart + " hours until start.",
-                        tier.getRefundPercentage());
+                        refund);
                 }
             }
             // No tier matched (too close to start) — check if there's a 0h tier
             var lastTier = tiers.get(tiers.size() - 1);
             if (lastTier.getHoursBeforeStart() == 0) {
                 String label = lastTier.getLabel() != null ? lastTier.getLabel() : (lastTier.getRefundPercentage() + "% refund");
+                int refund = refundsAllowed ? lastTier.getRefundPercentage() : 0;
                 return new CancellationPolicyDecision(true,
-                    "Late cancellation: " + lastTier.getRefundPercentage() + "% refund (" + label + ").",
-                    lastTier.getRefundPercentage());
+                    "Late cancellation: " + refund + "% refund (" + label + ").",
+                    refund);
             }
             // Beyond all tiers — deny cancellation
             return new CancellationPolicyDecision(false,
@@ -2943,7 +2976,29 @@ public class BookingService {
         long minutesLeft = Math.max(0, ChronoUnit.MINUTES.between(now, lockAt));
         return new CancellationPolicyDecision(true,
             "Cancellation is open. It will lock " + minutesLeft + " minutes from now.",
-            100); // Legacy policy = full refund if within window
+            refundsAllowed ? 100 : 0); // Legacy policy = full refund if within window (gated by venue flag)
+    }
+
+    /**
+     * Refund applicability gate — venue may opt-out of refunds based on the
+     * booking's current payment state (typically refundOnPendingPaymentCancel
+     * defaults to false to discourage repeated abandon-then-cancel abuse).
+     */
+    private boolean isRefundAllowedForPaymentStatus(Binge binge, com.skbingegalaxy.common.enums.PaymentStatus paymentStatus) {
+        if (binge == null || paymentStatus == null) return true;
+        switch (paymentStatus) {
+            case SUCCESS:
+            case PARTIALLY_PAID:
+            case PARTIALLY_REFUNDED:
+            case REFUNDED:
+                return binge.isRefundOnSuccessfulPaymentCancel();
+            case PENDING:
+            case INITIATED:
+            case FAILED:
+                return binge.isRefundOnPendingPaymentCancel();
+            default:
+                return true;
+        }
     }
 
     private BookingReviewDto toReviewDto(BookingReview review) {

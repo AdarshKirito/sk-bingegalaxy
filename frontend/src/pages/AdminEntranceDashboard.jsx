@@ -404,6 +404,12 @@ export default function AdminEntranceDashboard() {
               <p>Audit log, sessions, promote / demote admins</p>
             </Link>
           )}
+          {isSuperAdmin && (
+            <Link to="/admin/home-editor" className="entrance-nav-card">
+              <h3><FiSettings /> Edit Home Page</h3>
+              <p>Update hero, packages and gallery seen by every visitor</p>
+            </Link>
+          )}
           <Link to="/admin/security/mfa" className="entrance-nav-card">
             <h3><FiShield /> Two-factor auth</h3>
             <p>Enable or manage your authenticator app</p>

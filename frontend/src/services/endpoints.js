@@ -53,6 +53,7 @@ export const authService = {
   // ── Sessions (self) ────────────────────────────────────────
   getMySessions: () => api.get('/auth/sessions'),
   revokeMySession: (id) => api.delete(`/auth/sessions/${id}`),
+  revokeMyOtherSessions: () => api.post('/auth/sessions/revoke-others'),
   // ── Super-admin ────────────────────────────────────────────
   getAllActiveSessions: (params = {}) => api.get('/auth/admin/sessions', { params }),
   revokeAnySession: (id) => api.delete(`/auth/admin/sessions/${id}`),
@@ -101,6 +102,9 @@ export const bookingService = {
   getMyLoyalty: () => api.get('/bookings/loyalty'),
   // Surge rules (public)
   getActiveSurgeRules: () => api.get('/bookings/surge-rules'),
+  // Customer freezes (booking-flow lock self-view)
+  getMyFreezes: () => api.get('/bookings/freezes/me'),
+  getMyFreezeForBinge: (bingeId) => api.get(`/bookings/freezes/me/binge/${bingeId}`),
 };
 
 export const availabilityService = {
@@ -115,6 +119,13 @@ export const paymentService = {
   getMyPayments: () => api.get('/payments/my'),
   cancelPayment: (txnId) => api.post(`/payments/cancel/${txnId}`),
   getByTransactionId: (txnId) => api.get(`/payments/transaction/${txnId}`),
+};
+
+export const siteContentService = {
+  // Public read used by the landing page on every visitor load.
+  getPublic: (slug) => api.get(`/site-content/public/${slug}`),
+  // Super-admin write — guarded by SUPER_ADMIN role at the gateway + auth-service.
+  upsert: (slug, contentJson) => api.put(`/site-content/admin/${slug}`, { contentJson }),
 };
 
 export const adminService = {
@@ -230,6 +241,13 @@ export const adminService = {
   // Cancellation tiers
   getCancellationTiers: (bingeId) => api.get(`/bookings/admin/binges/${bingeId}/cancellation-tiers`),
   saveCancellationTiers: (bingeId, data) => api.put(`/bookings/admin/binges/${bingeId}/cancellation-tiers`, data),
+  // Cancellation policy (binge-level freeze + refund flags)
+  getCancellationPolicy: (bingeId) => api.get(`/bookings/admin/binges/${bingeId}/cancellation-policy`),
+  saveCancellationPolicy: (bingeId, data) => api.put(`/bookings/admin/binges/${bingeId}/cancellation-policy`, data),
+  // Customer freezes (admin)
+  listFreezes: (bingeId, activeOnly = true) => api.get('/bookings/admin/freezes', { params: { bingeId, activeOnly } }),
+  createFreeze: (data) => api.post('/bookings/admin/freezes', data),
+  liftFreeze: (id, reason) => api.delete(`/bookings/admin/freezes/${id}`, { data: { reason: reason || '' } }),
   // Waitlist (admin)
   getWaitlistForDate: (date) => api.get('/bookings/waitlist/admin', { params: { date } }),
   getWaitlistCount: (date) => api.get('/bookings/waitlist/admin/count', { params: { date } }),

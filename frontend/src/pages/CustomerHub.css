@@ -180,7 +180,24 @@
 .customer-hub-toolbar {
   display: grid;
   gap: 1rem;
-  padding: 1rem;
+  padding: 1.1rem 1.25rem;
+}
+
+.customer-hub-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.customer-hub-toolbar-row > .customer-hub-search {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.customer-hub-toolbar-row .customer-hub-tabs {
+  flex: 0 0 auto;
 }
 
 .customer-hub-panel {
@@ -209,45 +226,91 @@
   justify-content: flex-start;
 }
 
+/* ── Segmented tabs (Stripe-style) ─────────────────────────────── */
 .customer-hub-tabs {
   flex-wrap: wrap;
-  gap: 0.6rem;
+  gap: 0.4rem;
+  padding: 0.3rem;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.05), rgba(var(--primary-rgb), 0.02));
+  border: 1px solid rgba(var(--primary-rgb), 0.08);
+  box-shadow: inset 0 1px 0 rgba(var(--primary-rgb), 0.03);
 }
 
+.customer-hub-tabs .btn.btn-sm {
+  border-radius: 10px;
+  padding: 0.5rem 0.95rem;
+  font-weight: 600;
+  font-size: 0.86rem;
+  letter-spacing: 0.005em;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  box-shadow: none;
+  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.customer-hub-tabs .btn.btn-sm:hover {
+  color: var(--text);
+  background: rgba(var(--primary-rgb), 0.06);
+}
+
+.customer-hub-tabs .btn.btn-sm.btn-primary {
+  color: var(--text);
+  background: var(--bg-card);
+  border-color: rgba(var(--primary-rgb), 0.18);
+  box-shadow: 0 2px 8px rgba(var(--primary-rgb), 0.12),
+              0 0 0 1px rgba(var(--primary-rgb), 0.04);
+}
+
+[data-theme="dark"] .customer-hub-tabs .btn.btn-sm.btn-primary {
+  background: rgba(var(--primary-rgb), 0.16);
+  border-color: rgba(var(--primary-rgb), 0.32);
+}
+
+/* ── Search bar — large, focus-ring, keyboard hint ─────────────── */
 .customer-hub-search,
 .customer-hub-select {
   display: inline-flex;
   align-items: center;
-  gap: 0.65rem;
+  gap: 0.6rem;
   min-height: 44px;
   padding: 0 0.85rem;
-  border-radius: 999px;
-  border: 1px solid rgba(var(--primary-rgb), 0.1);
-  background:
-    linear-gradient(180deg, rgba(var(--primary-rgb), 0.04), transparent 70%),
-    var(--bg-card);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
   color: var(--text-secondary);
-  box-shadow: inset 0 1px 0 rgba(var(--primary-rgb), 0.04);
-  overflow: hidden;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.customer-hub-search {
+  min-height: 48px;
+  padding: 0 0.95rem;
+  flex: 1 1 320px;
+  min-width: 0;
+  max-width: none;
+  font-size: 0.95rem;
+}
+
+.customer-hub-search:hover,
+.customer-hub-select:hover {
+  border-color: rgba(var(--primary-rgb), 0.28);
+}
+
+.customer-hub-search:focus-within {
+  border-color: rgba(var(--primary-rgb), 0.5);
+  box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.12);
 }
 
 [data-theme="dark"] .customer-hub-search,
 [data-theme="dark"] .customer-hub-select {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-}
-
-.customer-hub-search {
-  min-width: 0;
-  max-width: 360px;
-  flex: 1 1 300px;
-}
-
-.customer-hub-select {
-  flex: 0 1 220px;
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .customer-hub-search input,
 .customer-hub-select select {
+  flex: 1 1 auto;
+  min-width: 0;
   width: 100%;
   border: none;
   background: transparent;
@@ -256,6 +319,13 @@
   -webkit-text-fill-color: var(--text);
   font-size: 0.92rem;
   line-height: 1.4;
+  appearance: auto;
+  -webkit-appearance: auto;
+}
+
+.customer-hub-search input {
+  font-size: 0.95rem;
+  padding: 0.25rem 0;
 }
 
 .customer-hub-search input::placeholder {
@@ -266,7 +336,40 @@
 .customer-hub-search svg,
 .customer-hub-select svg {
   flex-shrink: 0;
+  color: var(--text-muted);
+  width: 18px;
+  height: 18px;
+  transition: color 0.18s ease;
+}
+
+.customer-hub-search:focus-within svg {
   color: var(--primary);
+}
+
+/* Keyboard shortcut hint badge ("/" — like GitHub / Linear / Slack) */
+.customer-hub-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 0.4rem;
+  margin-left: 0.4rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.04), transparent);
+  color: var(--text-muted);
+  font-family: 'SFMono-Regular', ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  user-select: none;
+  transition: opacity 0.15s ease;
+}
+
+.customer-hub-search:focus-within .customer-hub-kbd {
+  opacity: 0;
 }
 
 /* Inline clear (×) button inside the search pill — matches the affordance
@@ -307,6 +410,41 @@
 .customer-hub-search input[type="search"]::-webkit-search-decoration {
   -webkit-appearance: none;
   appearance: none;
+}
+
+/* ── Filter chips (selects styled as chips, with active state) ─── */
+.customer-hub-select {
+  flex: 0 1 auto;
+  min-width: 150px;
+  cursor: pointer;
+  font-size: 0.88rem;
+  font-weight: 500;
+}
+
+.customer-hub-select:focus-within {
+  border-color: rgba(var(--primary-rgb), 0.5);
+  box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.12);
+}
+
+.customer-hub-select select {
+  cursor: pointer;
+  font-weight: 500;
+  padding-right: 0.25rem;
+}
+
+/* Active state — chip lights up when value != "ALL" */
+.customer-hub-select[data-active="true"] {
+  border-color: rgba(var(--primary-rgb), 0.45);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.10), rgba(var(--primary-rgb), 0.04));
+  color: var(--text);
+}
+
+.customer-hub-select[data-active="true"] svg {
+  color: var(--primary);
+}
+
+[data-theme="dark"] .customer-hub-select[data-active="true"] {
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.18), rgba(var(--primary-rgb), 0.08));
 }
 
 .customer-booking-grid,
@@ -422,18 +560,142 @@
 }
 
 .customer-hub-date-field {
-  display: grid;
-  gap: 0.35rem;
-  min-width: 148px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 44px;
+  padding: 0 0.85rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
   color: var(--text-secondary);
-  font-size: 0.82rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.customer-hub-date-field:hover {
+  border-color: rgba(var(--primary-rgb), 0.28);
+}
+
+.customer-hub-date-field:focus-within {
+  border-color: rgba(var(--primary-rgb), 0.5);
+  box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.12);
+}
+
+[data-theme="dark"] .customer-hub-date-field {
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .customer-hub-date-field span {
-  padding-left: 0.25rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
-.customer-hub-date-field input,
+.customer-hub-date-field span svg {
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+}
+
+.customer-hub-date-field input {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  outline: none;
+  font-size: 0.88rem;
+  font-weight: 500;
+  padding: 0;
+  min-width: 110px;
+}
+
+.customer-hub-date-field input[value]:not([value=""]) {
+  color: var(--text);
+}
+
+.customer-hub-date-field[data-active="true"] {
+  border-color: rgba(var(--primary-rgb), 0.45);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.10), rgba(var(--primary-rgb), 0.04));
+}
+
+[data-theme="dark"] .customer-hub-date-field[data-active="true"] {
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.18), rgba(var(--primary-rgb), 0.08));
+}
+
+/* ── Toolbar summary footer — result count + active filter pill ─ */
+.customer-hub-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-top: 0.85rem;
+  margin-top: 0.25rem;
+  border-top: 1px dashed rgba(var(--primary-rgb), 0.12);
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.customer-hub-summary-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.customer-hub-summary-count strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.customer-hub-summary-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.customer-hub-active-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.32rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(var(--primary-rgb), 0.12);
+  border: 1px solid rgba(var(--primary-rgb), 0.22);
+  color: var(--primary-dark);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+[data-theme="dark"] .customer-hub-active-pill {
+  color: #fff;
+}
+
+.customer-hub-clear-link {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 0.3rem 0.6rem;
+  border-radius: 8px;
+  color: var(--primary);
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.customer-hub-clear-link:hover,
+.customer-hub-clear-link:focus-visible {
+  background: rgba(var(--primary-rgb), 0.1);
+  outline: none;
+}
+
 .customer-account-field input,
 .customer-account-field select {
   min-height: 44px;

@@ -88,6 +88,38 @@ public class Binge {
     @Builder.Default
     private int customerCancellationCutoffMinutes = 180;
 
+    // ── Customer freeze policy (anti-abuse) ──────────────────────────────
+    /** Toggle for the entire freeze-on-abuse machinery at this binge. */
+    @Column(name = "freeze_policy_enabled", nullable = false)
+    @Builder.Default
+    private boolean freezePolicyEnabled = true;
+
+    /** How long (minutes) a triggered freeze blocks the customer. */
+    @Column(name = "freeze_duration_minutes", nullable = false)
+    @Builder.Default
+    private int freezeDurationMinutes = 60;
+
+    /** Max customer-initiated cancellations of pending bookings within freezeDurationMinutes before freeze is applied. */
+    @Column(name = "max_pending_cancels_before_freeze", nullable = false)
+    @Builder.Default
+    private int maxPendingCancelsBeforeFreeze = 3;
+
+    /** Max bookings auto-cancelled by payment-timeout within freezeDurationMinutes before freeze is applied. */
+    @Column(name = "max_pending_payment_timeouts_before_freeze", nullable = false)
+    @Builder.Default
+    private int maxPendingPaymentTimeoutsBeforeFreeze = 3;
+
+    // ── Cancellation refund applicability ────────────────────────────────
+    /** When TRUE, the configured tiered refund applies to bookings cancelled after a SUCCESSFUL payment. */
+    @Column(name = "refund_on_successful_payment_cancel", nullable = false)
+    @Builder.Default
+    private boolean refundOnSuccessfulPaymentCancel = true;
+
+    /** When TRUE, the configured tiered refund applies to bookings cancelled while still PENDING payment. */
+    @Column(name = "refund_on_pending_payment_cancel", nullable = false)
+    @Builder.Default
+    private boolean refundOnPendingPaymentCancel = false;
+
     /** Maximum concurrent bookings per time slot. Null = unlimited. */
     @Column
     private Integer maxConcurrentBookings;

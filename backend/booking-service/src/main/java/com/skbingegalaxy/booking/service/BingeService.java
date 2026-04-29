@@ -181,7 +181,6 @@ public class BingeService {
             .openTime(openT)
             .closeTime(closeT)
             .build();
-
         if (isSuperAdmin) {
             binge.setApprovalDecidedBy(adminId);
             binge.setApprovalDecidedAt(LocalDateTime.now());
@@ -773,6 +772,12 @@ public class BingeService {
             .openTime(b.getOpenTime())
             .closeTime(b.getCloseTime())
             .createdAt(b.getCreatedAt())
+            .freezePolicyEnabled(b.isFreezePolicyEnabled())
+            .freezeDurationMinutes(b.getFreezeDurationMinutes())
+            .maxPendingCancelsBeforeFreeze(b.getMaxPendingCancelsBeforeFreeze())
+            .maxPendingPaymentTimeoutsBeforeFreeze(b.getMaxPendingPaymentTimeoutsBeforeFreeze())
+            .refundOnSuccessfulPaymentCancel(b.isRefundOnSuccessfulPaymentCancel())
+            .refundOnPendingPaymentCancel(b.isRefundOnPendingPaymentCancel())
             .status(b.getStatus() != null ? b.getStatus().name() : BingeApprovalStatus.APPROVED.name())
             .approvalDecidedBy(b.getApprovalDecidedBy())
             .approvalDecidedAt(b.getApprovalDecidedAt())
@@ -823,5 +828,37 @@ public class BingeService {
             throw new BusinessException(
                 "Closing time (" + closeTime + ") must be strictly after opening time (" + openTime + ").");
         }
+    }
+
+    // ── Cancellation policy (binge-level: freeze + refund flags) ───────────
+
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    public com.skbingegalaxy.booking.dto.CancellationPolicyDto getCancellationPolicy(Long bingeId) {
+        Binge binge = bingeRepository.findById(bingeId)
+            .orElseThrow(() -> new ResourceNotFoundException("Binge", "id", bingeId));
+        return com.skbingegalaxy.booking.dto.CancellationPolicyDto.builder()
+            .freezePolicyEnabled(binge.isFreezePolicyEnabled())
+            .freezeDurationMinutes(binge.getFreezeDurationMinutes())
+            .maxPendingCancelsBeforeFreeze(binge.getMaxPendingCancelsBeforeFreeze())
+            .maxPendingPaymentTimeoutsBeforeFreeze(binge.getMaxPendingPaymentTimeoutsBeforeFreeze())
+            .refundOnSuccessfulPaymentCancel(binge.isRefundOnSuccessfulPaymentCancel())
+            .refundOnPendingPaymentCancel(binge.isRefundOnPendingPaymentCancel())
+            .build();
+    }
+
+    @org.springframework.transaction.annotation.Transactional
+    public com.skbingegalaxy.booking.dto.CancellationPolicyDto saveCancellationPolicy(
+            Long bingeId, com.skbingegalaxy.booking.dto.CancellationPolicyDto request) {
+        Binge binge = bingeRepository.findById(bingeId)
+            .orElseThrow(() -> new ResourceNotFoundException("Binge", "id", bingeId));
+        binge.setFreezePolicyEnabled(Boolean.TRUE.equals(request.getFreezePolicyEnabled()));
+        binge.setFreezeDurationMinutes(request.getFreezeDurationMinutes());
+        binge.setMaxPendingCancelsBeforeFreeze(request.getMaxPendingCancelsBeforeFreeze());
+        binge.setMaxPendingPaymentTimeoutsBeforeFreeze(request.getMaxPendingPaymentTimeoutsBeforeFreeze());
+        binge.setRefundOnSuccessfulPaymentCancel(Boolean.TRUE.equals(request.getRefundOnSuccessfulPaymentCancel()));
+        binge.setRefundOnPendingPaymentCancel(Boolean.TRUE.equals(request.getRefundOnPendingPaymentCancel()));
+        bingeRepository.save(binge);
+        log.info("Cancellation policy updated for binge {}", bingeId);
+        return getCancellationPolicy(bingeId);
     }
 }

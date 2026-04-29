@@ -253,6 +253,16 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     @Query("SELECT COUNT(b) FROM Booking b WHERE b.customerId = :cid AND b.status = 'CANCELLED' AND b.paymentStatus = 'PENDING' AND b.updatedAt > :since")
     long countRecentTimeoutCancellations(@Param("cid") Long customerId, @Param("since") LocalDateTime since);
 
+    // Freeze-policy: payment-timeout count scoped to a specific binge.
+    // Filters on cancellationActor='SYSTEM' so customer cancels don't count here.
+    @Query("SELECT COUNT(b) FROM Booking b WHERE b.customerId = :cid AND b.bingeId = :bid AND b.status = 'CANCELLED' AND b.paymentStatus = 'PENDING' AND b.cancellationActor = 'SYSTEM' AND b.updatedAt > :since")
+    long countRecentTimeoutCancellationsByBinge(@Param("cid") Long customerId, @Param("bid") Long bingeId, @Param("since") LocalDateTime since);
+
+    // Freeze-policy: customer-initiated cancellations of pending bookings within window.
+    // Filters on cancellationActor='CUSTOMER' so payment-timeout cancels don't count here.
+    @Query("SELECT COUNT(b) FROM Booking b WHERE b.customerId = :cid AND b.bingeId = :bid AND b.status = 'CANCELLED' AND b.paymentStatus = 'PENDING' AND b.cancellationActor = 'CUSTOMER' AND b.updatedAt > :since")
+    long countCustomerPendingCancelsSince(@Param("cid") Long customerId, @Param("bid") Long bingeId, @Param("since") LocalDateTime since);
+
     /**
      * Acquires a transaction-scoped advisory lock keyed on (bingeId, date).
      * Serialises all booking-creation attempts for the same binge + date so that
