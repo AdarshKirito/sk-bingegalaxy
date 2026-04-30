@@ -146,6 +146,22 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.ok("Password changed successfully", null));
     }
 
+    @PutMapping("/profile")
+    public ResponseEntity<ApiResponse<UserDto>> selfUpdateProfile(
+            @RequestHeader("X-User-Id") Long userId,
+            @Valid @RequestBody com.skbingegalaxy.auth.dto.SelfUpdateProfileRequest request) {
+        UserDto updated = authService.selfUpdateProfile(userId, request);
+        return ResponseEntity.ok(ApiResponse.ok("Profile updated", updated));
+    }
+
+    @PutMapping("/change-email")
+    public ResponseEntity<ApiResponse<UserDto>> changeEmail(
+            @RequestHeader("X-User-Id") Long userId,
+            @Valid @RequestBody com.skbingegalaxy.auth.dto.ChangeEmailRequest request) {
+        UserDto updated = authService.changeEmail(userId, request);
+        return ResponseEntity.ok(ApiResponse.ok("Email changed. Please verify your new address.", updated));
+    }
+
     @PutMapping("/profile/preferences")
     public ResponseEntity<ApiResponse<UserDto>> updateAccountPreferences(
             @RequestHeader("X-User-Id") Long userId,

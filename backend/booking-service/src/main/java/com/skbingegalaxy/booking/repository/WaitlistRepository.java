@@ -46,4 +46,8 @@ public interface WaitlistRepository extends JpaRepository<WaitlistEntry, Long> {
 
     /** All entries for a customer at a binge. */
     List<WaitlistEntry> findByBingeIdAndCustomerIdOrderByCreatedAtDesc(Long bingeId, Long customerId);
+
+    /** All entries for a binge on a specific date (any status) — admin view. */
+    List<WaitlistEntry> findByBingeIdAndPreferredDateOrderByStatusAscPositionAsc(
+            Long bingeId, LocalDate preferredDate);
 }

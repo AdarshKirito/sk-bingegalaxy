@@ -529,6 +529,78 @@ public class AuthService {
         log.info("Password changed for userId: {}", userId);
     }
 
+    // ── Self-update profile (firstName/lastName/phone/address) ─────────────
+    // Email and password are intentionally not editable here — they go through
+    // change-email / change-password flows that require additional verification.
+    @Transactional
+    public UserDto selfUpdateProfile(Long userId, com.skbingegalaxy.auth.dto.SelfUpdateProfileRequest request) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+
+        // Phone uniqueness check (only if changed)
+        if (!java.util.Objects.equals(user.getPhone(), request.getPhone())
+                && userRepository.existsByPhone(request.getPhone())) {
+            throw new DuplicateResourceException("User", "phone", request.getPhone());
+        }
+
+        user.setFirstName(request.getFirstName().trim());
+        user.setLastName(request.getLastName() == null ? null : request.getLastName().trim());
+        user.setPhone(request.getPhone());
+        user.setPhoneCountryCode(request.getPhoneCountryCode());
+        user.setAddressLine1(trimToNull(request.getAddressLine1()));
+        user.setAddressLine2(trimToNull(request.getAddressLine2()));
+        user.setCity(trimToNull(request.getCity()));
+        user.setState(trimToNull(request.getState()));
+        user.setCountry(trimToNull(request.getCountry()));
+        user.setPostalCode(trimToNull(request.getPostalCode()));
+
+        user = userRepository.save(user);
+        log.info("User {} updated own profile", userId);
+        return toDto(user);
+    }
+
+    // ── Change email (authenticated, requires current password) ────────────
+    // Production-grade flow: re-verify the user with their password before any
+    // email rotation. The new email is uniqueness-checked and the user is
+    // marked unverified so the standard email-verification flow re-runs.
+    @Transactional
+    public UserDto changeEmail(Long userId, com.skbingegalaxy.auth.dto.ChangeEmailRequest request) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+
+        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
+            auditService.failure(AuthAuditService.EventType.PASSWORD_CHANGED, userId, user.getRole(), userId, user.getEmail(), "BAD_CURRENT_PASSWORD_FOR_EMAIL_CHANGE");
+            throw new BusinessException("Current password is incorrect", HttpStatus.BAD_REQUEST);
+        }
+
+        String newEmail = request.getNewEmail().trim().toLowerCase();
+        if (newEmail.equalsIgnoreCase(user.getEmail())) {
+            throw new BusinessException("New email must be different from your current email", HttpStatus.BAD_REQUEST);
+        }
+        if (userRepository.existsByEmail(newEmail)) {
+            throw new DuplicateResourceException("User", "email", newEmail);
+        }
+
+        String oldEmail = user.getEmail();
+        user.setEmail(newEmail);
+        // Force re-verification of the new address.
+        user.setEmailVerified(false);
+        user = userRepository.save(user);
+
+        // Revoke other sessions: a credential identifier (email) just changed.
+        try {
+            sessionService.revokeAllForUser(userId, userId, "EMAIL_CHANGED");
+        } catch (Exception ex) {
+            log.warn("Failed to revoke sibling sessions after email change for userId={}: {}", userId, ex.getMessage());
+        }
+
+        log.info("User {} changed email from {} to {}",
+            userId,
+            com.skbingegalaxy.common.util.LogSanitizer.maskEmail(oldEmail),
+            com.skbingegalaxy.common.util.LogSanitizer.maskEmail(newEmail));
+        return toDto(user);
+    }
+
     public SupportContactDto getSupportContact() {
         String digits = digitsOnly(supportPhone);
         String phoneRaw = toPhoneRaw(digits);

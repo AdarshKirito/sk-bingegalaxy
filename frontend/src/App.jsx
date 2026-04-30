@@ -25,6 +25,7 @@ const Membership = lazy(() => import('./pages/Membership'));
 const AdminLoyaltyCenter = lazy(() => import('./pages/AdminLoyaltyCenter'));
 const CustomerPayments = lazy(() => import('./pages/CustomerPayments'));
 const AccountCenter = lazy(() => import('./pages/AccountCenter'));
+const CustomerSettings = lazy(() => import('./pages/CustomerSettings'));
 const PaymentPage = lazy(() => import('./pages/PaymentPage'));
 const AboutBinge = lazy(() => import('./pages/AboutBinge'));
 const AdminLogin = lazy(() => import('./pages/AdminLogin'));
@@ -174,6 +175,7 @@ function AppFrame() {
           <Route path="/payments" element={<BingeRequired><CustomerPayments /></BingeRequired>} />
           <Route path="/about" element={<BingeRequired><AboutBinge /></BingeRequired>} />
           <Route path="/account" element={<ProtectedRoute><AccountCenter /></ProtectedRoute>} />
+          <Route path="/settings" element={<ProtectedRoute><CustomerSettings /></ProtectedRoute>} />
           <Route path="/account/sessions" element={<ProtectedRoute><MySessions /></ProtectedRoute>} />
           <Route path="/account/security/mfa" element={<ProtectedRoute><MfaSetup /></ProtectedRoute>} />
           <Route path="/payment/:ref" element={<BingeRequired><PaymentPage /></BingeRequired>} />

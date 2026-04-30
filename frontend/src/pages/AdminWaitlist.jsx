@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { adminService, toArray } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import { format, addDays } from 'date-fns';
-import { FiCalendar, FiClock, FiUsers, FiUser, FiMail, FiPhone, FiCheck } from 'react-icons/fi';
+import { FiCalendar, FiClock, FiUsers, FiUser, FiMail, FiPhone, FiCheck, FiSend, FiXCircle } from 'react-icons/fi';
 import { formatTime12h } from '../utils/format';
 import './AdminPages.css';
 
@@ -12,6 +12,7 @@ const STATUS_COLORS = {
   WAITING: 'badge-warning',
   OFFERED: 'badge-info',
   CONVERTED: 'badge-success',
+  BOOKED: 'badge-success',
   EXPIRED: 'badge-secondary',
   CANCELLED: 'badge-danger',
 };
@@ -19,6 +20,7 @@ const STATUS_COLORS = {
 export default function AdminWaitlist() {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [busyEntryId, setBusyEntryId] = useState(null);
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
 
   const fetchWaitlist = async (date) => {
@@ -38,6 +40,34 @@ export default function AdminWaitlist() {
     if (selectedDate) fetchWaitlist(selectedDate);
   }, [selectedDate]);
 
+  const handleOffer = async (entry) => {
+    if (!window.confirm(`Send a waitlist offer to ${entry.customerName || 'this customer'}? They will receive an email with a time-limited booking window.`)) return;
+    setBusyEntryId(entry.id);
+    try {
+      await adminService.offerWaitlistEntry(entry.id);
+      toast.success('Offer sent');
+      await fetchWaitlist(selectedDate);
+    } catch (e) {
+      toast.error(e.response?.data?.message || e.userMessage || 'Failed to send offer');
+    } finally {
+      setBusyEntryId(null);
+    }
+  };
+
+  const handleCancel = async (entry) => {
+    if (!window.confirm(`Cancel waitlist entry for ${entry.customerName || 'this customer'}? This cannot be undone.`)) return;
+    setBusyEntryId(entry.id);
+    try {
+      await adminService.cancelWaitlistEntry(entry.id);
+      toast.success('Waitlist entry cancelled');
+      await fetchWaitlist(selectedDate);
+    } catch (e) {
+      toast.error(e.response?.data?.message || e.userMessage || 'Failed to cancel entry');
+    } finally {
+      setBusyEntryId(null);
+    }
+  };
+
   const dateOptions = useMemo(() => {
     const dates = [];
     for (let i = 0; i < 30; i++) {
@@ -56,14 +86,21 @@ export default function AdminWaitlist() {
     return map;
   }, [entries]);
 
-  const statusOrder = ['WAITING', 'OFFERED', 'CONVERTED', 'EXPIRED', 'CANCELLED'];
+  const statusOrder = ['WAITING', 'OFFERED', 'BOOKED', 'CONVERTED', 'EXPIRED', 'CANCELLED'];
+  const totals = useMemo(() => ({
+    waiting: (grouped.WAITING || []).length,
+    offered: (grouped.OFFERED || []).length,
+    booked: ((grouped.BOOKED || []).length + (grouped.CONVERTED || []).length),
+    expired: (grouped.EXPIRED || []).length,
+    cancelled: (grouped.CANCELLED || []).length,
+  }), [grouped]);
 
   return (
     <div className="container adm-shell">
       <div className="adm-page-header">
         <div>
           <h1><FiUsers /> Waitlist Management</h1>
-          <p>View and manage waitlisted customers for each date.</p>
+          <p>Manage waitlisted customers — offer slots, cancel entries, and audit history.</p>
         </div>
       </div>
 
@@ -80,10 +117,12 @@ export default function AdminWaitlist() {
             ))}
           </select>
         </div>
-        <div className="admin-toolbar-group">
-          <span className="admin-toolbar-count">
-            {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
-          </span>
+        <div className="admin-toolbar-group" style={{ gap: '0.5rem' }}>
+          <span className={`badge ${STATUS_COLORS.WAITING}`}>Waiting: {totals.waiting}</span>
+          <span className={`badge ${STATUS_COLORS.OFFERED}`}>Offered: {totals.offered}</span>
+          <span className={`badge ${STATUS_COLORS.BOOKED}`}>Converted: {totals.booked}</span>
+          <span className={`badge ${STATUS_COLORS.EXPIRED}`}>Expired: {totals.expired}</span>
+          <span className={`badge ${STATUS_COLORS.CANCELLED}`}>Cancelled: {totals.cancelled}</span>
         </div>
       </div>
 
@@ -100,6 +139,7 @@ export default function AdminWaitlist() {
           {statusOrder.map(status => {
             const group = grouped[status];
             if (!group || group.length === 0) return null;
+            const isActive = status === 'WAITING' || status === 'OFFERED';
             return (
               <div key={status} className="waitlist-status-group">
                 <h3 className="waitlist-status-heading">
@@ -118,7 +158,8 @@ export default function AdminWaitlist() {
                         <th>Guests</th>
                         <th>Joined</th>
                         {status === 'OFFERED' && <th>Offer Expires</th>}
-                        {status === 'CONVERTED' && <th>Booking Ref</th>}
+                        {(status === 'CONVERTED' || status === 'BOOKED') && <th>Booking Ref</th>}
+                        {isActive && <th>Actions</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -140,11 +181,32 @@ export default function AdminWaitlist() {
                           {status === 'OFFERED' && (
                             <td>{entry.offerExpiresAt ? new Date(entry.offerExpiresAt).toLocaleString() : '—'}</td>
                           )}
-                          {status === 'CONVERTED' && (
+                          {(status === 'CONVERTED' || status === 'BOOKED') && (
                             <td>
                               {entry.convertedBookingRef ? (
                                 <span className="badge badge-success"><FiCheck /> {entry.convertedBookingRef}</span>
                               ) : '—'}
+                            </td>
+                          )}
+                          {isActive && (
+                            <td style={{ display: 'flex', gap: '0.4rem' }}>
+                              {status === 'WAITING' && (
+                                <button
+                                  className="btn btn-sm btn-primary"
+                                  onClick={() => handleOffer(entry)}
+                                  disabled={busyEntryId === entry.id}
+                                  title="Send a time-limited offer email to this customer"
+                                >
+                                  <FiSend /> {busyEntryId === entry.id ? '…' : 'Offer'}
+                                </button>
+                              )}
+                              <button
+                                className="btn btn-sm btn-danger"
+                                onClick={() => handleCancel(entry)}
+                                disabled={busyEntryId === entry.id}
+                              >
+                                <FiXCircle /> Cancel
+                              </button>
                             </td>
                           )}
                         </tr>

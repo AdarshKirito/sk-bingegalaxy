@@ -29,6 +29,8 @@ export const authService = {
   getSupportContact: () => api.get('/auth/support-contact'),
   completeProfile: (data) => api.put('/auth/complete-profile', data),
   changePassword: (data) => api.put('/auth/change-password', data),
+  updateProfile: (data) => api.put('/auth/profile', data),
+  changeEmail: (data) => api.put('/auth/change-email', data),
   forgotPassword: (data) => api.post('/auth/forgot-password', data),
   resetPassword: (data) => api.post('/auth/reset-password', data),
   verifyOtp: (data) => api.post('/auth/verify-otp', data),
@@ -251,6 +253,8 @@ export const adminService = {
   // Waitlist (admin)
   getWaitlistForDate: (date) => api.get('/bookings/waitlist/admin', { params: { date } }),
   getWaitlistCount: (date) => api.get('/bookings/waitlist/admin/count', { params: { date } }),
+  cancelWaitlistEntry: (entryId) => api.delete(`/bookings/waitlist/admin/${entryId}`),
+  offerWaitlistEntry: (entryId) => api.post(`/bookings/waitlist/admin/${entryId}/offer`),
   // Media upload
   uploadMedia: (formData) => api.post('/bookings/admin/media/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
   // Venue rooms (admin)

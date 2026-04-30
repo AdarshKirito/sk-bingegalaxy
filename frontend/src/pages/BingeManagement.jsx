@@ -990,9 +990,9 @@ export default function BingeManagement() {
         <section className="adm-form adm-flow-card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
             <div>
-              <h3>Cancellation refund tiers</h3>
+              <h3>Cancellation refund tiers & policy</h3>
               <p className="adm-form-intro">
-                Define tiered refund percentages for <strong>{tierEditor.binge?.name}</strong>. Each row sets the refund a customer gets when cancelling at least N hours before the booking starts. The first matching tier (highest hours threshold) applies.
+                Configure refund tiers, refund applicability (yes/no per payment state), and the temporary freeze settings for <strong>{tierEditor.binge?.name}</strong>. Scroll down to find the freeze duration, threshold counters, and refund-yes/no toggles.
               </p>
             </div>
             <button type="button" className="btn btn-secondary" onClick={() => setTierEditor({ open: false, binge: null })}>Close</button>
@@ -1163,7 +1163,7 @@ export default function BingeManagement() {
                   About page
                 </button>
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleOpenTierEditor(b)}>
-                  Cancellation tiers
+                  Cancellation tiers & policy
                 </button>
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => setLoyaltyEditor({ open: true, binge: b })}>
                   Loyalty

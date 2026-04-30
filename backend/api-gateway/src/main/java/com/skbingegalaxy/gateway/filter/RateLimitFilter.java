@@ -138,7 +138,8 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
             || path.equals("/api/v1/auth/admin/register")
             || path.equals("/api/v1/auth/google")
             || path.equals("/api/v1/auth/verify-otp")
-            || path.equals("/api/v1/auth/change-password");
+            || path.equals("/api/v1/auth/change-password")
+            || path.equals("/api/v1/auth/change-email");
     }
 
     private Mono<Void> applyRedisRateLimit(ServerWebExchange exchange,

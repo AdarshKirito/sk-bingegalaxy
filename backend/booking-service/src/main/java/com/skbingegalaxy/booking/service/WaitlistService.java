@@ -142,11 +142,13 @@ public class WaitlistService {
     }
 
     // ── Admin: view waitlist for a date ─────────────────────
+    // Returns entries in ALL statuses (WAITING, OFFERED, BOOKED, EXPIRED, CANCELLED)
+    // so admins can audit history and act on stale offers.
     @Transactional(readOnly = true)
     public List<WaitlistEntryDto> getWaitlistForDate(LocalDate date) {
         Long bingeId = BingeContext.requireBingeId();
         return waitlistRepository
-            .findByBingeIdAndPreferredDateAndStatusOrderByPositionAsc(bingeId, date, WaitlistStatus.WAITING)
+            .findByBingeIdAndPreferredDateOrderByStatusAscPositionAsc(bingeId, date)
             .stream().map(this::toDto).toList();
     }
 
@@ -155,6 +157,49 @@ public class WaitlistService {
     public long getWaitlistCount(LocalDate date) {
         Long bingeId = BingeContext.requireBingeId();
         return waitlistRepository.countByBingeIdAndPreferredDateAndStatus(bingeId, date, WaitlistStatus.WAITING);
+    }
+
+    // ── Admin: cancel any waitlist entry ────────────────────
+    @Transactional
+    public WaitlistEntryDto adminCancelEntry(Long entryId, Long adminId) {
+        Long bingeId = BingeContext.requireBingeId();
+        WaitlistEntry entry = waitlistRepository.findById(entryId)
+            .orElseThrow(() -> new ResourceNotFoundException("WaitlistEntry", "id", entryId));
+        if (!entry.getBingeId().equals(bingeId)) {
+            // Defence in depth: never let an admin at venue A touch venue B's waitlist.
+            throw new BusinessException("Waitlist entry does not belong to the selected venue");
+        }
+        if (entry.getStatus() == WaitlistStatus.BOOKED) {
+            throw new BusinessException("Cannot cancel a waitlist entry that already converted to a booking");
+        }
+        if (entry.getStatus() == WaitlistStatus.CANCELLED) {
+            return toDto(entry);
+        }
+        entry.setStatus(WaitlistStatus.CANCELLED);
+        waitlistRepository.save(entry);
+        log.info("Admin {} cancelled waitlist entry {} (binge {})", adminId, entryId, bingeId);
+        return toDto(entry);
+    }
+
+    // ── Admin: manually offer a waitlist slot to next/specific customer ──
+    @Transactional
+    public WaitlistEntryDto adminOfferEntry(Long entryId, Long adminId) {
+        Long bingeId = BingeContext.requireBingeId();
+        WaitlistEntry entry = waitlistRepository.findById(entryId)
+            .orElseThrow(() -> new ResourceNotFoundException("WaitlistEntry", "id", entryId));
+        if (!entry.getBingeId().equals(bingeId)) {
+            throw new BusinessException("Waitlist entry does not belong to the selected venue");
+        }
+        if (entry.getStatus() != WaitlistStatus.WAITING) {
+            throw new BusinessException("Only WAITING entries can be offered. Current: " + entry.getStatus());
+        }
+        entry.setStatus(WaitlistStatus.OFFERED);
+        entry.setNotifiedAt(LocalDateTime.now());
+        entry.setOfferExpiresAt(LocalDateTime.now().plusMinutes(offerExpiryMinutes));
+        waitlistRepository.save(entry);
+        sendWaitlistNotification(entry);
+        log.info("Admin {} manually offered waitlist entry {} (binge {})", adminId, entryId, bingeId);
+        return toDto(entry);
     }
 
     // ── Promote: called when a booking is cancelled, check if waitlisted customers can be notified ──

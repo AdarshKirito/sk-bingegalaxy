@@ -231,9 +231,15 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     @Query("SELECT b FROM Booking b WHERE b.status = 'PENDING' AND b.paymentStatus = 'PENDING' AND b.createdAt < :cutoff")
     List<Booking> findStalePendingBookings(@Param("cutoff") LocalDateTime cutoff);
 
-    // Anti-abuse: count current PENDING bookings for a customer
+    // Anti-abuse: count current PENDING bookings for a customer (across all binges, kept for legacy callers)
     @Query("SELECT COUNT(b) FROM Booking b WHERE b.customerId = :cid AND b.status = 'PENDING' AND b.paymentStatus = 'PENDING'")
     long countPendingByCustomerId(@Param("cid") Long customerId);
+
+    // Anti-abuse: count current PENDING bookings for a customer scoped to one binge.
+    // Per-binge scoping prevents cross-venue blocking (a customer with pending payments
+    // at venue A should still be able to book at venue B).
+    @Query("SELECT COUNT(b) FROM Booking b WHERE b.customerId = :cid AND b.bingeId = :bid AND b.status = 'PENDING' AND b.paymentStatus = 'PENDING'")
+    long countPendingByCustomerIdAndBingeId(@Param("cid") Long customerId, @Param("bid") Long bingeId);
 
     /**
      * Content-based duplicate check used to refuse a second PENDING booking for

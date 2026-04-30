@@ -76,4 +76,22 @@ public class WaitlistController {
         adminBingeScopeService.requireManagedBinge(adminId, role, "viewing waitlist count");
         return ResponseEntity.ok(ApiResponse.ok(waitlistService.getWaitlistCount(date)));
     }
+
+    @DeleteMapping("/admin/{entryId}")
+    public ResponseEntity<ApiResponse<WaitlistEntryDto>> adminCancelEntry(
+            @PathVariable Long entryId,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        adminBingeScopeService.requireManagedBinge(adminId, role, "cancelling waitlist entry");
+        return ResponseEntity.ok(ApiResponse.ok("Waitlist entry cancelled", waitlistService.adminCancelEntry(entryId, adminId)));
+    }
+
+    @PostMapping("/admin/{entryId}/offer")
+    public ResponseEntity<ApiResponse<WaitlistEntryDto>> adminOfferEntry(
+            @PathVariable Long entryId,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        adminBingeScopeService.requireManagedBinge(adminId, role, "offering waitlist entry");
+        return ResponseEntity.ok(ApiResponse.ok("Waitlist offer sent", waitlistService.adminOfferEntry(entryId, adminId)));
+    }
 }

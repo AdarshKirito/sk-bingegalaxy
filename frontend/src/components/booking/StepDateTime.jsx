@@ -7,6 +7,19 @@ export default function StepDateTime({
   fmtTime, fmtDuration,
   onNext, onBack,
 }) {
+  // Find the next date (after the current selection) that still has slots free —
+  // we use this to power the "Try {next date}" button on the empty-state message.
+  // Note: real availability for a given date depends on duration, existing bookings,
+  // and "today" filtering, so this is a best-effort hint based on `fullyBlocked` only.
+  const nextOpenDate = (() => {
+    if (!form.bookingDate) return null;
+    const sorted = (availability || []).filter(d => !d.fullyBlocked).map(d => d.date).sort();
+    const idx = sorted.indexOf(form.bookingDate);
+    if (idx < 0 || idx >= sorted.length - 1) return null;
+    return sorted[idx + 1];
+  })();
+
+  const isTodaySelected = form.bookingDate === format(new Date(), 'yyyy-MM-dd');
   return (
     <div className="booking-section">
       <h2>Select Date & Time</h2>
@@ -70,7 +83,38 @@ export default function StepDateTime({
                   </button>
                 ))}
               </div>
-            ) : <p style={{ color: 'var(--text-muted)' }}>No available slots for this date with {fmtDuration(form.durationMinutes)} duration</p>
+            ) : (
+              <div className="slot-empty-state" role="status" style={{
+                padding: '1rem 1.1rem', borderRadius: '10px',
+                border: '1px dashed var(--border, #d1d5db)',
+                background: 'var(--surface-muted, rgba(99,102,241,0.04))',
+                color: 'var(--text-secondary, #555)', fontSize: '0.9rem',
+                lineHeight: 1.5, display: 'flex', flexDirection: 'column', gap: '0.5rem',
+              }}>
+                <strong style={{ color: 'var(--text-primary, #222)' }}>
+                  No {fmtDuration(form.durationMinutes)} slots available on {format(new Date(form.bookingDate + 'T00:00:00'), 'EEE, MMM dd')}
+                </strong>
+                <span>
+                  {isTodaySelected
+                    ? 'Today is mostly booked or past business hours for the duration you selected. Try a shorter duration or pick the next available date.'
+                    : 'This date is fully booked for the duration you selected. Try a different date or a shorter duration.'}
+                </span>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+                  {Number(form.durationMinutes) > (isAdmin ? 30 : 120) && (
+                    <button type="button" className="btn btn-sm btn-secondary"
+                      onClick={() => setForm(f => ({ ...f, durationMinutes: Number(f.durationMinutes) - 30, startTime: '' }))}>
+                      Try {fmtDuration(Number(form.durationMinutes) - 30)}
+                    </button>
+                  )}
+                  {nextOpenDate && (
+                    <button type="button" className="btn btn-sm btn-primary"
+                      onClick={() => setForm(f => ({ ...f, bookingDate: nextOpenDate, startTime: '' }))}>
+                      Try {format(new Date(nextOpenDate + 'T00:00:00'), 'EEE, MMM dd')}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )
           ) : <p style={{ color: 'var(--text-muted)' }}>Select a date first</p>}
         </div>
       </div>

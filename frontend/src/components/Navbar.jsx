@@ -81,6 +81,7 @@ export default function Navbar() {
     { to: '/payments', icon: <FiCreditCard />, label: t('nav.payments') },
     { to: '/membership', icon: <FiAward />, label: t('nav.membership', 'Membership') },
     { to: '/about', icon: <FiInfo />, label: t('nav.about') },
+    { to: '/settings', icon: <FiSettings />, label: t('nav.settings', 'Settings') },
   ];
 
   const adminConsoleLinks = [
@@ -211,7 +212,7 @@ export default function Navbar() {
             <span className="nav-user nav-admin-user nav-desktop-only"><FiShield /> <span>{effectiveUser?.firstName}</span><small>{adminRoleLabel}</small></span>
           )}
 
-          {effectiveIsAuthenticated && effectiveIsAdmin && !effectiveSelectedBinge && (
+          {effectiveIsAuthenticated && effectiveIsAdmin && (
             <button onClick={handleLogout} className="nav-link nav-btn nav-desktop-only nav-logout-btn" aria-label={t('nav.logout')}>
               <FiLogOut /> <span className="nav-action-label">{t('nav.logout')}</span>
             </button>
@@ -274,6 +275,7 @@ export default function Navbar() {
             <NavDropdownGroup to="/payments" icon={<FiCreditCard />} label={t('nav.payments')} />
             <NavDropdownGroup to="/about"    icon={<FiInfo />}       label={t('nav.about')} />
             <NavDropdownGroup to="/account"  icon={<FiUser />}       label={t('nav.account')} />
+            <NavDropdownGroup to="/settings" icon={<FiSettings />}   label={t('nav.settings', 'Settings')} />
           </nav>
         </div>
       )}
@@ -330,9 +332,6 @@ export default function Navbar() {
               </span>
             </button>
             <span className="nav-user nav-admin-user"><FiShield /> <span>{effectiveUser?.firstName}</span><small>{adminRoleLabel}</small></span>
-            <button onClick={handleLogout} className="nav-link nav-btn nav-logout-btn" aria-label={t('nav.logout')}>
-              <FiLogOut /> <span className="nav-action-label">{t('nav.logout')}</span>
-            </button>
           </div>
         </div>
       )}

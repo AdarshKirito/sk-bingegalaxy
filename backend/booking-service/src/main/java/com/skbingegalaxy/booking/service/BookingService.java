@@ -125,22 +125,24 @@ public class BookingService {
                                     String customerEmail, String customerPhone,
                                     String customerPhoneCountryCode) {
 
-        // Anti-abuse: limit concurrent PENDING bookings per customer
-        long pendingCount = bookingRepository.countPendingByCustomerId(customerId);
+        Long bingeId = BingeContext.requireBingeId();
+
+        // Anti-abuse: limit concurrent PENDING bookings per customer **per binge**.
+        // Per-binge scope prevents a customer with pending payments at venue A from
+        // being blocked at venue B (each binge runs its own tenancy of pending limits).
+        long pendingCount = bookingRepository.countPendingByCustomerIdAndBingeId(customerId, bingeId);
         if (pendingCount >= maxPendingPerCustomer) {
             throw new BusinessException(
-                "You already have " + pendingCount + " pending booking(s). Please complete or cancel them before creating new ones.");
+                "You already have " + pendingCount + " pending booking(s) at this venue. Please complete or cancel them before creating new ones.");
         }
 
-        // Anti-abuse: cooldown after auto-cancelled (timed-out) bookings
+        // Anti-abuse: cooldown after auto-cancelled (timed-out) bookings — also per binge.
         LocalDateTime cooldownSince = LocalDateTime.now().minusMinutes(cooldownMinutesAfterTimeout);
-        long recentTimeouts = bookingRepository.countRecentTimeoutCancellations(customerId, cooldownSince);
+        long recentTimeouts = bookingRepository.countRecentTimeoutCancellationsByBinge(customerId, bingeId, cooldownSince);
         if (recentTimeouts >= 2) {
             throw new BusinessException(
-                "Too many unpaid bookings were auto-cancelled recently. Please wait a few minutes before trying again.");
+                "Too many unpaid bookings were auto-cancelled at this venue recently. Please wait a few minutes before trying again.");
         }
-
-        Long bingeId = BingeContext.requireBingeId();
 
         // Anti-abuse: per-binge customer freeze (raises 423 LOCKED if active)
         customerFreezeService.assertNotFrozen(customerId, bingeId);
