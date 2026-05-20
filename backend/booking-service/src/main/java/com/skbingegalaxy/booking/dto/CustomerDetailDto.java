@@ -21,7 +21,7 @@ public class CustomerDetailDto {
     private String currentRateCodeName;
     private String memberLabel;
 
-    // ── Membership / loyalty snapshot (populated from LoyaltyService) ──
+    // ── Membership / loyalty snapshot (populated from LoyaltyMemberService) ──
     /** BRONZE / SILVER / GOLD / PLATINUM (null when loyalty is disabled) */
     private String memberTier;
     /** Current redeemable points balance */

@@ -1,6 +1,8 @@
 package com.skbingegalaxy.auth.security;
 
 import com.skbingegalaxy.common.security.GatewayHeaderAuthFilter;
+import com.skbingegalaxy.common.security.InternalApiAuthFilter;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -15,6 +17,9 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @EnableWebSecurity
 public class SecurityConfig {
 
+    @Value("${internal.api.secret}")
+    private String internalApiSecret;
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
@@ -27,8 +32,22 @@ public class SecurityConfig {
             // re-enabled here.
             .csrf(csrf -> csrf.disable())
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            // InternalApiAuthFilter MUST run before GatewayHeaderAuthFilter so
+            // the shared-secret check on /internal/** rejects external callers
+            // (no header / wrong header → 403) before the gateway-trust filter
+            // would otherwise see them as anonymous. Service-to-service Feign
+            // calls supplying X-Internal-Secret get a SYSTEM authentication
+            // and pass the hasRole("SYSTEM") matcher below.
+            .addFilterBefore(new InternalApiAuthFilter(internalApiSecret), UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(new GatewayHeaderAuthFilter(), UsernamePasswordAuthenticationFilter.class)
             .authorizeHttpRequests(auth -> auth
+                // Authority Handover internal lock lookup — consulted by
+                // downstream services (booking-service AdminCurrencyController,
+                // etc.) to enforce locks server-side. Must come BEFORE the
+                // generic /api/v1/auth/** permitAll rule so the SYSTEM role
+                // requirement is honoured (defence in depth on top of the
+                // shared-secret filter above).
+                .requestMatchers("/api/v1/auth/authority/internal/**").hasRole("SYSTEM")
                 .requestMatchers("/api/v1/auth/admin/login").permitAll()
                 .requestMatchers("/api/v1/auth/admin/register").hasRole("SUPER_ADMIN")
                 .requestMatchers("/api/v1/auth/admin/user/**").hasRole("SUPER_ADMIN")

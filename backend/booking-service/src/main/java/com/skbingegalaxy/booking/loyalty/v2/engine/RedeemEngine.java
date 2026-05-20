@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.skbingegalaxy.booking.loyalty.v2.LoyaltyV2Constants;
 import com.skbingegalaxy.booking.loyalty.v2.entity.*;
 import com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyMembershipRepository;
+import com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyPointsWalletRepository;
 import com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyConfigService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -54,6 +55,7 @@ public class RedeemEngine {
     private final LoyaltyConfigService configService;
     private final PointsWalletService walletService;
     private final LoyaltyMembershipRepository membershipRepository;
+    private final LoyaltyPointsWalletRepository walletRepository;
     private final TierEngine tierEngine;
 
     /**
@@ -62,6 +64,7 @@ public class RedeemEngine {
      */
     @Transactional(readOnly = true)
     public RedeemQuote quote(QuoteRequest req) {
+        if (req == null) return RedeemQuote.rejected(0, "INVALID_REQUEST");
         return compute(req.membershipId(), req.bingeId(), req.pointsToBurn(),
                 req.bookingAmount(), req.at());
     }
@@ -73,32 +76,39 @@ public class RedeemEngine {
      */
     @Transactional
     public RedeemResult burn(BurnRequest req) {
+        if (req == null) return RedeemResult.rejected("INVALID_REQUEST");
+        LocalDateTime mutationAt = req.at() == null ? LocalDateTime.now() : req.at();
         RedeemQuote q = compute(req.membershipId(), req.bingeId(), req.pointsToBurn(),
-                req.bookingAmount(), req.at());
+                req.bookingAmount(), mutationAt);
         if (!q.eligible()) {
             return RedeemResult.rejected(q.rejectReason());
         }
 
-        walletService.debit(new PointsWalletService.DebitRequest(
-                req.membershipId(),
-                req.pointsToBurn(),
-                LoyaltyV2Constants.LEDGER_REDEEM,
-                req.bingeId(),
-                req.bookingRef(),
-                "redeem:booking=" + req.bookingRef() + ",pts=" + req.pointsToBurn(),
-                req.correlationId(),
-                "BOOKING_REDEMPTION",
-                "Redemption at binge " + req.bingeId() + " on booking " + req.bookingRef()
-                        + " worth " + q.currencyValue(),
-                null,
-                "CUSTOMER"
-        ));
+        try {
+            walletService.debit(new PointsWalletService.DebitRequest(
+                    req.membershipId(),
+                    q.pointsToBurn(),
+                    LoyaltyV2Constants.LEDGER_REDEEM,
+                    req.bingeId(),
+                    req.bookingRef(),
+                    "redeem:booking=" + req.bookingRef() + ",pts=" + q.pointsToBurn(),
+                    req.correlationId(),
+                    "BOOKING_REDEMPTION",
+                    "Redemption at binge " + req.bingeId() + " on booking " + req.bookingRef()
+                            + " worth " + q.currencyValue(),
+                    null,
+                    "CUSTOMER"
+            ));
+        } catch (PointsWalletService.InsufficientPointsException ex) {
+            log.info("[loyalty-v2] redemption rejected after wallet lock: {}", ex.getMessage());
+            return RedeemResult.rejected("INSUFFICIENT_POINTS");
+        }
 
         // Redemption shouldn't change qualification credits or tier, but
         // we DO want the summary to refresh (lifetime_redeemed counter, etc.).
         // TierEngine.recalc is cheap; calling it is harmless and keeps the
         // membership snapshot consistent after every wallet mutation.
-        tierEngine.recalculateTier(req.membershipId(), req.at());
+        tierEngine.recalculateTier(req.membershipId(), mutationAt);
 
         return RedeemResult.accepted(q.pointsToBurn(), q.currencyValue());
     }
@@ -107,8 +117,18 @@ public class RedeemEngine {
 
     private RedeemQuote compute(Long membershipId, Long bingeId, long pointsToBurn,
                                 BigDecimal bookingAmount, LocalDateTime at) {
+        if (membershipId == null)
+            return RedeemQuote.rejected(pointsToBurn, "INVALID_MEMBERSHIP");
         LoyaltyMembership membership = membershipRepository.findById(membershipId)
                 .orElseThrow(() -> new IllegalStateException("Membership " + membershipId + " not found"));
+
+        if (bingeId == null)
+            return RedeemQuote.rejected(pointsToBurn, "INVALID_BINGE");
+        if (pointsToBurn <= 0)
+            return RedeemQuote.rejected(pointsToBurn, "INVALID_POINTS");
+        if (bookingAmount == null || bookingAmount.signum() <= 0)
+            return RedeemQuote.rejected(pointsToBurn, "INVALID_BOOKING_AMOUNT");
+        if (at == null) at = LocalDateTime.now();
 
         LoyaltyProgram program = configService.requireDefaultProgram();
         Optional<LoyaltyBingeBinding> bindingOpt = configService.findActiveBinding(program.getId(), bingeId);
@@ -125,6 +145,10 @@ public class RedeemEngine {
 
         LoyaltyBingeRedemptionRule rule = ruleOpt.get();
 
+        if (rule.getPointsPerCurrencyUnit() <= 0)
+            return RedeemQuote.rejected(pointsToBurn, "INVALID_REDEEM_RULE");
+        if (rule.getMaxRedemptionPercent() == null || rule.getMaxRedemptionPercent().signum() <= 0)
+            return RedeemQuote.rejected(pointsToBurn, "REDEMPTION_DISABLED");
         if (pointsToBurn < rule.getMinRedemptionPoints())
             return RedeemQuote.rejected(pointsToBurn, "BELOW_MIN_POINTS");
 
@@ -135,15 +159,28 @@ public class RedeemEngine {
         BigDecimal maxByPct = bookingAmount
                 .multiply(rule.getMaxRedemptionPercent())
                 .divide(new BigDecimal("100"), 2, RoundingMode.FLOOR);
+        long effectivePoints = pointsToBurn;
+        String note = null;
         if (currencyValue.compareTo(maxByPct) > 0) {
             currencyValue = maxByPct;
             // Also scale down the points so we burn exactly what's
             // redeemable — never overcharge the member.
-            long cappedPts = currencyToPoints(maxByPct, rule.getPointsPerCurrencyUnit(), tierBonusPct);
-            return RedeemQuote.accepted(cappedPts, currencyValue, tierBonusPct, "CAPPED_BY_BOOKING_PCT");
+            effectivePoints = currencyToPoints(maxByPct, rule.getPointsPerCurrencyUnit(), tierBonusPct);
+            note = "CAPPED_BY_BOOKING_PCT";
         }
 
-        return RedeemQuote.accepted(pointsToBurn, currencyValue, tierBonusPct, null);
+        if (effectivePoints <= 0 || currencyValue.signum() <= 0)
+            return RedeemQuote.rejected(pointsToBurn, "NO_REDEEMABLE_VALUE");
+        if (effectivePoints < rule.getMinRedemptionPoints())
+            return RedeemQuote.rejected(effectivePoints, "BELOW_MIN_POINTS_AFTER_CAP");
+
+        LoyaltyPointsWallet wallet = walletRepository.findByMembershipId(membershipId).orElse(null);
+        if (wallet == null)
+            return RedeemQuote.rejected(effectivePoints, "NO_WALLET");
+        if (wallet.getCurrentBalance() < effectivePoints)
+            return RedeemQuote.rejected(effectivePoints, "INSUFFICIENT_POINTS");
+
+        return RedeemQuote.accepted(effectivePoints, currencyValue, tierBonusPct, note);
     }
 
     private BigDecimal resolveTierBonus(LoyaltyBingeRedemptionRule rule, String tierCode) {

@@ -25,6 +25,7 @@ import java.math.RoundingMode;
 import java.util.List;
 
 import static com.skbingegalaxy.booking.loyalty.v2.LoyaltyV2Constants.LEDGER_EARN;
+import static com.skbingegalaxy.booking.loyalty.v2.LoyaltyV2Constants.LEDGER_REDEEM;
 
 /**
  * Loyalty v2 — listener that bridges in-process booking events into
@@ -112,7 +113,7 @@ public class LoyaltyV2BookingListener {
             //    a 10-year far-future expiry to mark them as such.
             List<LoyaltyLedgerEntry> redeemEntries = ledgerRepository
                     .findByWalletIdAndBookingRefAndEntryType(
-                            wallet.getId(), evt.bookingRef(), "REDEEM");
+                            wallet.getId(), evt.bookingRef(), LEDGER_REDEEM);
             if (!redeemEntries.isEmpty()) {
                 long totalRedeemed = redeemEntries.stream()
                         .mapToLong(e -> Math.abs(e.getPointsDelta()))

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'react-toastify';
+import { useConfirm } from '../ui/ConfirmProvider';
 import loyaltyV2 from '../../services/loyaltyV2';
 
 /**
@@ -15,11 +16,11 @@ import loyaltyV2 from '../../services/loyaltyV2';
  *
  * Safe to open on a binge that has never been wired to loyalty —
  * the controller returns 404 on the binding call; we treat that as
- * "not enabled" and show a prominent Enable button.  Legacy-frozen
- * bindings (dual-write window) are marked read-only with an
- * explanatory banner instead of edit controls.
+ * "not enabled" and show a prominent Enable button.  Legacy bindings
+ * can be moved onto v2 rules with the same enable action.
  */
 export default function BingeLoyaltySection({ binge, onClose }) {
+  const confirm = useConfirm();
   const [binding, setBinding] = useState(null);
   const [earnRules, setEarnRules] = useState([]);
   const [redeemRule, setRedeemRule] = useState(null);
@@ -85,7 +86,13 @@ export default function BingeLoyaltySection({ binge, onClose }) {
 
   async function handleDisable() {
     if (!binding?.id) return;
-    if (!window.confirm('Disable loyalty earning & redeeming for this binge? Existing balances are untouched.')) return;
+    const ok = await confirm({
+      title: 'Disable loyalty for this binge?',
+      message: 'Earning and redemption will stop immediately. Existing member balances and transaction history are fully preserved.',
+      confirmLabel: 'Disable loyalty',
+      variant: 'danger',
+    });
+    if (!ok) return;
     setSaving(true);
     try {
       await loyaltyV2.disableBinding(binding.id);
@@ -156,9 +163,14 @@ export default function BingeLoyaltySection({ binge, onClose }) {
                   <p>
                     Status: <strong>{binding.status}</strong>
                     {frozen && <span style={{ color: '#b45309', marginLeft: 8 }}>
-                      (LEGACY_FROZEN — v1 is authoritative during dual-write; thaw from Super Admin)
+                      (legacy snapshot — enable to move this binge onto v2 rules)
                     </span>}
                   </p>
+                  {frozen && (
+                    <button className="btn btn-primary" disabled={saving} onClick={handleEnable}>
+                      Enable v2 loyalty
+                    </button>
+                  )}
                   {!frozen && binding.status !== 'DISABLED' && (
                     <button className="btn btn-danger" disabled={saving} onClick={handleDisable}>
                       Disable loyalty
@@ -285,7 +297,7 @@ function LabeledInput({ label, value, onChange, type = 'text', step, placeholder
 
 function sanitizeEarn(d) {
   return {
-    tierCode: d.tierCode?.trim() || null,
+    tierCode: d.tierCode?.trim()?.toUpperCase() || null,
     ruleType: d.ruleType || 'FLAT_PER_AMOUNT',
     pointsNumerator: Number(d.pointsNumerator) || 0,
     amountDenominator: Number(d.amountDenominator) || 1,

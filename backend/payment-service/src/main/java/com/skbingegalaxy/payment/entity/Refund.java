@@ -38,6 +38,29 @@ public class Refund {
     @Column(nullable = false)
     private PaymentStatus status;
 
+    /**
+     * Per-attempt refund lifecycle. See {@link RefundStatus}. Defaults to
+     * {@code SUCCEEDED} for backward-compat with the existing synchronous
+     * gateway path; new code should set the appropriate value at each
+     * transition (INITIATED → PROCESSING → SUCCEEDED/FAILED).
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "refund_status", nullable = false, length = 32)
+    @Builder.Default
+    private RefundStatus refundStatus = RefundStatus.SUCCEEDED;
+
+    /**
+     * If this row is a retry of an earlier failed refund, points to that
+     * (now {@link RefundStatus#SUPERSEDED}) row. Null for first-attempt rows.
+     */
+    @Column(name = "retry_of_id")
+    private Long retryOfId;
+
+    /** How many retries have been issued against the original refund attempt. */
+    @Column(name = "retry_count", nullable = false)
+    @Builder.Default
+    private int retryCount = 0;
+
     private String gatewayResponse;
 
     private String failureReason;

@@ -6,8 +6,8 @@ import './AdminPages.css';
 
 const ADDON_CATEGORIES = ['DECORATION', 'BEVERAGE', 'PHOTOGRAPHY', 'EFFECT', 'FOOD', 'EXPERIENCE'];
 
-const emptyEventType = { name: '', description: '', basePrice: '', hourlyRate: '', pricePerGuest: '', minHours: 1, maxHours: 8, imageUrls: [''] };
-const emptyAddOn = { name: '', description: '', price: '', category: 'DECORATION', imageUrls: [''] };
+const emptyEventType = { name: '', description: '', basePrice: '', hourlyRate: '', pricePerGuest: '', minHours: 1, maxHours: 8, minGuests: '', maxGuests: '', imageUrls: [''] };
+const emptyAddOn = { name: '', description: '', price: '', category: 'DECORATION', stockPerDay: '', advanceNoticeMinutes: '', imageUrls: [''] };
 
 export default function AdminEventTypes() {
   const [tab, setTab] = useState('eventTypes');
@@ -50,6 +50,8 @@ export default function AdminEventTypes() {
       pricePerGuest: et.pricePerGuest || '',
       minHours: et.minHours,
       maxHours: et.maxHours,
+      minGuests: et.minGuests ?? '',
+      maxGuests: et.maxGuests ?? '',
       imageUrls: et.imageUrls?.length ? [...et.imageUrls] : [''],
     });
     setModal({ open: true, mode: 'edit', item: et, type: 'et' });
@@ -61,6 +63,11 @@ export default function AdminEventTypes() {
     if (!form.basePrice || isNaN(Number(form.basePrice)) || Number(form.basePrice) < 0) { toast.error('Base price must be a valid positive number.'); return; }
     if (!form.hourlyRate || isNaN(Number(form.hourlyRate)) || Number(form.hourlyRate) < 0) { toast.error('Hourly rate must be a valid positive number.'); return; }
     if (Number(form.minHours) >= Number(form.maxHours)) { toast.error('Min hours must be less than max hours.'); return; }
+    if (form.minGuests !== '' && form.maxGuests !== '' && Number(form.minGuests) > Number(form.maxGuests)) {
+      toast.error('Min guests must be ≤ max guests.'); return;
+    }
+    if (form.minGuests !== '' && Number(form.minGuests) < 0) { toast.error('Min guests cannot be negative.'); return; }
+    if (form.maxGuests !== '' && Number(form.maxGuests) < 0) { toast.error('Max guests cannot be negative.'); return; }
     setSaving(true);
     try {
       const payload = {
@@ -70,6 +77,8 @@ export default function AdminEventTypes() {
         pricePerGuest: Number(form.pricePerGuest) || 0,
         minHours: Number(form.minHours),
         maxHours: Number(form.maxHours),
+        minGuests: form.minGuests === '' ? null : Number(form.minGuests),
+        maxGuests: form.maxGuests === '' ? null : Number(form.maxGuests),
         imageUrls: form.imageUrls.filter(u => u.trim()),
       };
       if (modal.mode === 'create') {
@@ -128,6 +137,8 @@ export default function AdminEventTypes() {
       description: ao.description || '',
       price: ao.price,
       category: ao.category,
+      stockPerDay: ao.stockPerDay ?? '',
+      advanceNoticeMinutes: ao.advanceNoticeMinutes ?? '',
       imageUrls: ao.imageUrls?.length ? [...ao.imageUrls] : [''],
     });
     setModal({ open: true, mode: 'edit', item: ao, type: 'ao' });
@@ -139,7 +150,15 @@ export default function AdminEventTypes() {
     if (!addonForm.price || Number(addonForm.price) < 0) { toast.error('Price must be a positive number.'); return; }
     setSaving(true);
     try {
-      const payload = { ...addonForm, price: Number(addonForm.price), imageUrls: addonForm.imageUrls.filter(u => u.trim()) };
+      if (addonForm.stockPerDay !== '' && Number(addonForm.stockPerDay) < 0) { toast.error('Stock per day cannot be negative.'); setSaving(false); return; }
+      if (addonForm.advanceNoticeMinutes !== '' && Number(addonForm.advanceNoticeMinutes) < 0) { toast.error('Advance notice cannot be negative.'); setSaving(false); return; }
+      const payload = {
+        ...addonForm,
+        price: Number(addonForm.price),
+        stockPerDay: addonForm.stockPerDay === '' ? null : Number(addonForm.stockPerDay),
+        advanceNoticeMinutes: addonForm.advanceNoticeMinutes === '' ? null : Number(addonForm.advanceNoticeMinutes),
+        imageUrls: addonForm.imageUrls.filter(u => u.trim()),
+      };
       if (modal.mode === 'create') {
         await adminService.createAddOn(payload);
         toast.success('Add-on created');
@@ -347,6 +366,20 @@ export default function AdminEventTypes() {
                       onChange={e => setForm({ ...form, maxHours: e.target.value })} />
                   </div>
                 </div>
+                <div className="grid-2">
+                  <div className="input-group">
+                    <label>Min Guests</label>
+                    <input type="number" min="0" value={form.minGuests}
+                      onChange={e => setForm({ ...form, minGuests: e.target.value })}
+                      placeholder="blank = no minimum" />
+                  </div>
+                  <div className="input-group">
+                    <label>Max Guests</label>
+                    <input type="number" min="0" value={form.maxGuests}
+                      onChange={e => setForm({ ...form, maxGuests: e.target.value })}
+                      placeholder="blank = no maximum" />
+                  </div>
+                </div>
                 <div className="input-group">
                   <label><FiImage style={{ marginRight: 4, verticalAlign: -2 }} />Image URLs</label>
                   {form.imageUrls.map((url, i) => (
@@ -394,6 +427,22 @@ export default function AdminEventTypes() {
                     <select value={addonForm.category} onChange={e => setAddonForm({ ...addonForm, category: e.target.value })}>
                       {ADDON_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
+                  </div>
+                </div>
+                <div className="grid-2">
+                  <div className="input-group">
+                    <label>Stock per day</label>
+                    <input type="number" min="0" value={addonForm.stockPerDay}
+                      onChange={e => setAddonForm({ ...addonForm, stockPerDay: e.target.value })}
+                      placeholder="blank = unlimited" />
+                    <span className="adm-hint">Max units bookable per day across all bookings</span>
+                  </div>
+                  <div className="input-group">
+                    <label>Advance notice (minutes)</label>
+                    <input type="number" min="0" value={addonForm.advanceNoticeMinutes}
+                      onChange={e => setAddonForm({ ...addonForm, advanceNoticeMinutes: e.target.value })}
+                      placeholder="blank = no minimum" />
+                    <span className="adm-hint">Minimum lead time before the booking start</span>
                   </div>
                 </div>
                 <div className="input-group">

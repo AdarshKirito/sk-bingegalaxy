@@ -51,6 +51,7 @@ public class PaymentService {
     private final WebhookDedupService webhookDedupService;
     private final AuditLogService auditLogService;
     private final PaymentMetrics metrics;
+    private final AdminApprovalService approvalService;
 
     /** Self-reference for calling @Transactional methods from within the same bean. */
     @org.springframework.context.annotation.Lazy
@@ -65,6 +66,14 @@ public class PaymentService {
 
     @Value("${app.payment.simulation-enabled:false}")
     private boolean paymentSimulationEnabled;
+
+    /**
+     * Above this amount (in payment currency, treated as a flat number),
+     * a refund retry must go through the maker-checker workflow before it
+     * actually moves money. Default 5,000 INR — overridable per environment.
+     */
+    @Value("${app.refund.retry-approval-threshold:5000}")
+    private java.math.BigDecimal refundRetryApprovalThreshold;
 
     @Value("${app.payment.dedup-window-seconds:30}")
     private int dedupWindowSeconds;
@@ -537,6 +546,7 @@ public class PaymentService {
             .reason(request.getReason())
             .gatewayRefundId(gatewayRefundId)
             .status(PaymentStatus.REFUNDED)
+            .refundStatus(com.skbingegalaxy.payment.entity.RefundStatus.SUCCEEDED)
             .initiatedBy(initiatedBy)
             .refundedAt(LocalDateTime.now())
             .build();
@@ -702,6 +712,206 @@ public class PaymentService {
     }
 
     /**
+     * Customer-facing refund timeline for a booking. Returns every refund row
+     * (any lifecycle state) in reverse-chronological order so the UI can show
+     * "Refund initiated → processing → succeeded" history. Tenancy-scoped.
+     */
+    @Transactional(readOnly = true)
+    public List<RefundDto> getRefundsForBooking(String bookingRef) {
+        Long bingeId = getCurrentBingeId();
+        var rows = (bingeId != null)
+            ? refundRepository.findByBookingRefAndBingeIdOrderByCreatedAtDesc(bookingRef, bingeId)
+            : refundRepository.findByBookingRefOrderByCreatedAtDesc(bookingRef);
+        return rows.stream().map(this::toRefundDto).toList();
+    }
+
+    /**
+     * Admin failed-refund queue. Lists every refund whose own per-attempt
+     * lifecycle ended in {@link com.skbingegalaxy.payment.entity.RefundStatus#FAILED},
+     * scoped to the currently selected binge.
+     */
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<RefundDto> getFailedRefunds(
+            org.springframework.data.domain.Pageable pageable) {
+        Long bingeId = getCurrentBingeId();
+        if (bingeId == null) {
+            throw new BusinessException(
+                "No binge selected for failed-refund query", HttpStatus.BAD_REQUEST);
+        }
+        return refundRepository
+            .findByRefundStatusAndPayment_BingeIdOrderByCreatedAtDesc(
+                com.skbingegalaxy.payment.entity.RefundStatus.FAILED, bingeId, pageable)
+            .map(this::toRefundDto);
+    }
+
+    /**
+     * Admin retry of a failed refund. Marks the original row as
+     * {@link com.skbingegalaxy.payment.entity.RefundStatus#SUPERSEDED}, creates
+     * a new {@link com.skbingegalaxy.payment.entity.RefundStatus#INITIATED}
+     * attempt linked via {@code retry_of_id}, and (today, with the synchronous
+     * gateway path) immediately settles it as {@code SUCCEEDED}.
+     *
+     * <p>The over-refund and pessimistic-lock guards from {@link #initiateRefund}
+     * are reused so a retry can never push the parent payment past its full
+     * refundable amount.
+     */
+    @Transactional
+    public RefundDto retryFailedRefund(Long refundId, String adminEmail) {
+        Refund original = refundRepository.findById(refundId)
+            .orElseThrow(() -> new ResourceNotFoundException("Refund", "id", refundId.toString()));
+        ensurePaymentInCurrentBinge(original.getPayment(), "id", original.getPayment().getId());
+
+        if (original.getRefundStatus() != com.skbingegalaxy.payment.entity.RefundStatus.FAILED) {
+            throw new BusinessException(
+                "Only FAILED refunds can be retried. Current: " + original.getRefundStatus(),
+                HttpStatus.CONFLICT);
+        }
+
+        // Maker-checker gate: above the configured threshold, the request must
+        // be approved by a different admin first. We create the request here
+        // and short-circuit with a 202 ACCEPTED via a typed business exception
+        // carrying the approval id, so the caller can poll/notify the second
+        // admin. Once approved, the executor calls
+        // executeApprovedRefundRetry(approvalId) which performs this method's
+        // body without re-checking the threshold.
+        if (refundRetryApprovalThreshold != null
+                && original.getAmount().compareTo(refundRetryApprovalThreshold) > 0) {
+            // Are we already past an APPROVED gate for this same refund?
+            // If yes, fall through and execute. If no, create a new request.
+            // Here we only INITIATE — the executor path is on the
+            // /admin/approvals/{id}/execute-refund-retry endpoint.
+            com.skbingegalaxy.payment.entity.AdminApprovalRequest req = approvalService.createRequest(
+                "REFUND_RETRY",
+                "REFUND",
+                String.valueOf(original.getId()),
+                original.getAmount(),
+                original.getPayment().getCurrency(),
+                original.getPayment().getBingeId(),
+                java.util.Map.of(
+                    "refundId", String.valueOf(original.getId()),
+                    "paymentId", String.valueOf(original.getPayment().getId()),
+                    "bookingRef", original.getPayment().getBookingRef()),
+                adminEmail,
+                null,
+                "Refund retry above threshold of " + refundRetryApprovalThreshold);
+            throw new BusinessException(
+                "Refund retry above ₹" + refundRetryApprovalThreshold
+                    + " requires a second admin's approval. "
+                    + "Approval request id: " + req.getId(),
+                HttpStatus.ACCEPTED);
+        }
+
+        return doRetryFailedRefund(original, adminEmail, null);
+    }
+
+    /**
+     * Domain action invoked by the maker-checker controller after a different
+     * admin has APPROVED the request. Re-validates the approval, executes the
+     * retry without the threshold gate, and stamps the approval as EXECUTED
+     * so the same approval can never be replayed.
+     */
+    @Transactional
+    public java.util.Map<String, Object> executeApprovedRefundRetry(Long approvalId, String executorEmail) {
+        com.skbingegalaxy.payment.dto.AdminApprovalRequestDto approval = approvalService.get(approvalId);
+        if (!"REFUND_RETRY".equals(approval.getActionType())) {
+            throw new BusinessException(
+                "Approval is for action " + approval.getActionType()
+                    + " — not REFUND_RETRY",
+                HttpStatus.BAD_REQUEST);
+        }
+        if (!"APPROVED".equals(approval.getStatus())) {
+            throw new BusinessException(
+                "Only APPROVED approvals can be executed. Current: " + approval.getStatus(),
+                HttpStatus.CONFLICT);
+        }
+        Long refundId = Long.parseLong(approval.getResourceId());
+        Refund original = refundRepository.findById(refundId)
+            .orElseThrow(() -> new ResourceNotFoundException("Refund", "id", refundId.toString()));
+        if (original.getRefundStatus() != com.skbingegalaxy.payment.entity.RefundStatus.FAILED) {
+            throw new BusinessException(
+                "Underlying refund is no longer FAILED (now: "
+                    + original.getRefundStatus() + ") — approval cannot be executed",
+                HttpStatus.CONFLICT);
+        }
+        RefundDto retried = doRetryFailedRefund(original, executorEmail, approvalId);
+        approvalService.markExecuted(approvalId,
+            "Refund retried; new gateway id: " + retried.getGatewayRefundId());
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("approvalId", approvalId);
+        body.put("refund", retried);
+        return body;
+    }
+
+    /**
+     * Inner refund-retry: shared by direct (below-threshold) and approval-driven
+     * (above-threshold) call sites. Holds all the pessimistic-lock + over-refund
+     * + audit + outbox publishing logic.
+     */
+    private RefundDto doRetryFailedRefund(Refund original, String adminEmail, Long approvalId) {
+        // Reuse the same guards as initiateRefund — pessimistic lock, over-refund check.
+        Payment payment = paymentRepository.findByIdForUpdate(original.getPayment().getId())
+            .orElseThrow(() -> new ResourceNotFoundException(
+                "Payment", "id", original.getPayment().getId().toString()));
+
+        BigDecimal alreadyRefunded = refundRepository.sumCompletedRefundsByPaymentId(
+            payment.getId(), REFUNDED_STATUSES);
+        BigDecimal remaining = payment.getAmount().subtract(alreadyRefunded);
+        if (remaining.compareTo(original.getAmount()) < 0) {
+            throw new BusinessException(
+                String.format(
+                    "Retry would over-refund: requested ₹%.2f but only ₹%.2f remaining",
+                    original.getAmount(), remaining),
+                HttpStatus.CONFLICT);
+        }
+
+        // Mark original as SUPERSEDED and bump its retry count
+        original.setRefundStatus(com.skbingegalaxy.payment.entity.RefundStatus.SUPERSEDED);
+        original.setRetryCount(original.getRetryCount() + 1);
+        refundRepository.save(original);
+
+        String gatewayRefundId = "RFD-" + UUID.randomUUID().toString().substring(0, 12).toUpperCase();
+        Refund retry = Refund.builder()
+            .payment(payment)
+            .amount(original.getAmount())
+            .reason(original.getReason())
+            .gatewayRefundId(gatewayRefundId)
+            .status(PaymentStatus.REFUNDED)
+            .refundStatus(com.skbingegalaxy.payment.entity.RefundStatus.SUCCEEDED)
+            .retryOfId(original.getId())
+            .retryCount(0)
+            .initiatedBy(adminEmail)
+            .refundedAt(LocalDateTime.now())
+            .build();
+        retry = refundRepository.save(retry);
+
+        // Settle parent payment status
+        BigDecimal newTotalRefunded = alreadyRefunded.add(retry.getAmount());
+        if (newTotalRefunded.compareTo(payment.getAmount()) >= 0) {
+            payment.setStatus(PaymentStatus.REFUNDED);
+        } else {
+            payment.setStatus(PaymentStatus.PARTIALLY_REFUNDED);
+        }
+        paymentRepository.save(payment);
+
+        publishRefundEvent(payment, retry);
+        metrics.refundIssued();
+        java.util.Map<String, String> auditMeta = new java.util.LinkedHashMap<>();
+        auditMeta.put("refundId", gatewayRefundId);
+        auditMeta.put("retryOfRefundId", String.valueOf(original.getId()));
+        auditMeta.put("bookingRef", payment.getBookingRef());
+        if (approvalId != null) auditMeta.put("approvalId", String.valueOf(approvalId));
+        auditLogService.record(
+            adminEmail, AuditLogService.ACTION_REFUND_ISSUED, "PAYMENT",
+            payment.getTransactionId(),
+            retry.getAmount(), payment.getCurrency(), payment.getBingeId(),
+            java.util.Map.copyOf(auditMeta));
+        log.info("Refund retry {} of {} (orig refund id {}) by admin {} for booking {}{}",
+            gatewayRefundId, retry.getAmount(), original.getId(), adminEmail, payment.getBookingRef(),
+            approvalId != null ? " (approval " + approvalId + ")" : "");
+        return toRefundDto(retry);
+    }
+
+    /**
      * Admin dashboard statistics for the payment service.
      */
     @Transactional(readOnly = true, timeout = 10)
@@ -852,6 +1062,9 @@ public class PaymentService {
             .reason(r.getReason())
             .gatewayRefundId(r.getGatewayRefundId())
             .status(r.getStatus())
+            .refundStatus(r.getRefundStatus())
+            .retryOfId(r.getRetryOfId())
+            .retryCount(r.getRetryCount())
             .failureReason(r.getFailureReason())
             .initiatedBy(r.getInitiatedBy())
             .refundedAt(r.getRefundedAt())

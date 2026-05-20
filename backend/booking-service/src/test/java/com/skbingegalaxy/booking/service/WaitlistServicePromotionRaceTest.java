@@ -1,6 +1,7 @@
 package com.skbingegalaxy.booking.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.skbingegalaxy.booking.client.AvailabilityClient;
 import com.skbingegalaxy.booking.entity.WaitlistEntry;
 import com.skbingegalaxy.booking.entity.WaitlistEntry.WaitlistStatus;
 import com.skbingegalaxy.booking.repository.BookingRepository;
@@ -60,6 +61,7 @@ class WaitlistServicePromotionRaceTest {
     @Mock private BookingRepository bookingRepository;
     @Mock private OutboxEventRepository outboxEventRepository;
     @Mock private ObjectMapper objectMapper;
+    @Mock private AvailabilityClient availabilityClient;
 
     @InjectMocks
     private WaitlistService waitlistService;
@@ -78,7 +80,7 @@ class WaitlistServicePromotionRaceTest {
     @Test
     @DisplayName("acquires advisory slot lock BEFORE querying the waiting list")
     void lockIsAcquiredFirst() {
-        when(waitlistRepository.findByBingeIdAndPreferredDateAndStatusOrderByPositionAsc(
+        when(waitlistRepository.findByBingeIdAndPreferredDateAndStatusOrderByPriorityDescPositionAsc(
                 eq(BINGE_ID), eq(DATE), eq(WaitlistStatus.WAITING)))
             .thenReturn(List.of());
 
@@ -86,14 +88,14 @@ class WaitlistServicePromotionRaceTest {
 
         InOrder order = inOrder(bookingRepository, waitlistRepository);
         order.verify(bookingRepository).acquireSlotLock(anyLong());
-        order.verify(waitlistRepository).findByBingeIdAndPreferredDateAndStatusOrderByPositionAsc(
+        order.verify(waitlistRepository).findByBingeIdAndPreferredDateAndStatusOrderByPriorityDescPositionAsc(
             eq(BINGE_ID), eq(DATE), eq(WaitlistStatus.WAITING));
     }
 
     @Test
     @DisplayName("empty waiting list → no save, no outbox event")
     void emptyQueueIsNoOp() {
-        when(waitlistRepository.findByBingeIdAndPreferredDateAndStatusOrderByPositionAsc(
+        when(waitlistRepository.findByBingeIdAndPreferredDateAndStatusOrderByPriorityDescPositionAsc(
                 any(), any(), any()))
             .thenReturn(List.of());
 
@@ -109,7 +111,7 @@ class WaitlistServicePromotionRaceTest {
         WaitlistEntry e1 = waitingEntry(1L, 1);
         WaitlistEntry e2 = waitingEntry(2L, 2);
         WaitlistEntry e3 = waitingEntry(3L, 3);
-        when(waitlistRepository.findByBingeIdAndPreferredDateAndStatusOrderByPositionAsc(
+        when(waitlistRepository.findByBingeIdAndPreferredDateAndStatusOrderByPriorityDescPositionAsc(
                 any(), any(), any()))
             .thenReturn(List.of(e1, e2, e3));
 
@@ -118,6 +120,11 @@ class WaitlistServicePromotionRaceTest {
         capacity.put("isFull", false);
         when(bookingService.getSlotCapacityForBinge(anyLong(), any(), anyInt(), anyInt()))
             .thenReturn(capacity);
+        // Item 26 hardening: WaitlistService re-checks the authoritative
+        // availability source before promoting (catches admin-blocked slots).
+        // Stub it as still-available so the promotion proceeds.
+        when(availabilityClient.checkSlotAvailable(any(), any(), anyLong(), anyInt(), anyInt()))
+            .thenReturn(Boolean.TRUE);
 
         waitlistService.promoteWaitlistOnCancellation(BINGE_ID, DATE);
 
@@ -129,7 +136,7 @@ class WaitlistServicePromotionRaceTest {
     @DisplayName("skips promotion if the freed slot is already full again")
     void noPromotionWhenSlotFull() {
         WaitlistEntry e1 = waitingEntry(1L, 1);
-        when(waitlistRepository.findByBingeIdAndPreferredDateAndStatusOrderByPositionAsc(
+        when(waitlistRepository.findByBingeIdAndPreferredDateAndStatusOrderByPriorityDescPositionAsc(
                 any(), any(), any()))
             .thenReturn(List.of(e1));
 

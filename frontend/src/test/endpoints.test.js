@@ -26,19 +26,31 @@ describe('authService', () => {
   it('register calls POST /auth/register', async () => {
     api.post.mockResolvedValue({ data: { data: { user: {}, token: '' } } });
     await authService.register({ email: 'test@test.com', password: '123' });
-    expect(api.post).toHaveBeenCalledWith('/auth/register', { email: 'test@test.com', password: '123' });
+    expect(api.post).toHaveBeenCalledWith(
+      '/auth/register',
+      { email: 'test@test.com', password: '123' },
+      { timeout: 45000 }
+    );
   });
 
   it('login calls POST /auth/login', async () => {
     api.post.mockResolvedValue({ data: {} });
     await authService.login({ email: 'a@b.com', password: 'pw' });
-    expect(api.post).toHaveBeenCalledWith('/auth/login', { email: 'a@b.com', password: 'pw' });
+    expect(api.post).toHaveBeenCalledWith(
+      '/auth/login',
+      { email: 'a@b.com', password: 'pw' },
+      { timeout: 30000 }
+    );
   });
 
   it('adminLogin calls POST /auth/admin/login', async () => {
     api.post.mockResolvedValue({ data: {} });
     await authService.adminLogin({ email: 'admin@test.com', password: 'pw' });
-    expect(api.post).toHaveBeenCalledWith('/auth/admin/login', { email: 'admin@test.com', password: 'pw' });
+    expect(api.post).toHaveBeenCalledWith(
+      '/auth/admin/login',
+      { email: 'admin@test.com', password: 'pw' },
+      { timeout: 30000 }
+    );
   });
 
   it('getProfile calls GET /auth/profile', async () => {
@@ -50,7 +62,11 @@ describe('authService', () => {
   it('googleLogin sends credential', async () => {
     api.post.mockResolvedValue({ data: {} });
     await authService.googleLogin({ credential: 'google-token' });
-    expect(api.post).toHaveBeenCalledWith('/auth/google', { credential: 'google-token' });
+    expect(api.post).toHaveBeenCalledWith(
+      '/auth/google',
+      { credential: 'google-token' },
+      { timeout: 30000 }
+    );
   });
 
   it('forgotPassword calls POST /auth/forgot-password', async () => {
@@ -207,7 +223,7 @@ describe('adminService', () => {
   it('cancelBooking calls POST with reason', async () => {
     api.post.mockResolvedValue({ data: {} });
     await adminService.cancelBooking('BK-001', 'No show');
-    expect(api.post).toHaveBeenCalledWith('/bookings/admin/BK-001/cancel', null, { params: { reason: 'No show' } });
+    expect(api.post).toHaveBeenCalledWith('/bookings/admin/BK-001/cancel', { reason: 'No show' });
   });
 
   it('confirmBooking calls POST /bookings/admin/:ref/confirm', async () => {

@@ -65,14 +65,45 @@ export function identifyUser(userId, traits = {}) {
 
 /* ── Booking Funnel Events ─────────────────────────────── */
 
+/**
+ * Best-effort ping to the booking-service funnel-ingest endpoint so the
+ * Prometheus dashboard sees the same funnel as GA. Stage names match
+ * `BookingAnalyticsMetrics.recordClientFunnelStage` on the backend (Item 27).
+ * Failures are swallowed — analytics must never block the wizard.
+ */
+function pingServerFunnel(stage) {
+  try {
+    const url = '/api/v1/bookings/analytics/funnel';
+    const body = JSON.stringify({ stage });
+    if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+      const blob = new Blob([body], { type: 'application/json' });
+      navigator.sendBeacon(url, blob);
+      return;
+    }
+    if (typeof fetch === 'function') {
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        keepalive: true,
+        credentials: 'omit',
+      }).catch(() => {});
+    }
+  } catch (_) { /* analytics must not throw */ }
+}
+
 /** Customer started the booking wizard */
 export function trackBookingStarted(eventTypeName) {
   trackEvent('booking_started', { event_type: eventTypeName });
+  pingServerFunnel('booking_started');
 }
 
 /** Customer completed a specific wizard step */
 export function trackBookingStepCompleted(step, stepName) {
   trackEvent('booking_step_completed', { step_number: step, step_name: stepName });
+  if (step === 1) pingServerFunnel('booking_step_1_completed');
+  else if (step === 2) pingServerFunnel('booking_step_2_completed');
+  else if (step === 3) pingServerFunnel('booking_step_3_completed');
 }
 
 /** Customer submitted the booking */
@@ -83,6 +114,7 @@ export function trackBookingCompleted(bookingRef, totalAmount) {
 /** Customer reached the payment page */
 export function trackPaymentStarted(bookingRef, amount) {
   trackEvent('payment_started', { booking_ref: bookingRef, value: amount, currency: 'INR' });
+  pingServerFunnel('payment_started');
 }
 
 /** Payment succeeded */

@@ -1,15 +1,20 @@
 package com.skbingegalaxy.common.event;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.skbingegalaxy.common.enums.NotificationChannel;
 import lombok.*;
-import java.io.Serializable;
+import lombok.experimental.SuperBuilder;
+
 import java.util.Map;
 
-@Data
+@Getter
+@Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
-public class NotificationEvent implements Serializable {
+@SuperBuilder(toBuilder = true)
+@ToString(callSuper = true)
+@JsonIgnoreProperties(ignoreUnknown = true)
+public class NotificationEvent extends EventEnvelope {
     private String recipientEmail;
     private String recipientPhone;
     /** E.164 dial prefix without subscriber number (e.g. "+91"). */

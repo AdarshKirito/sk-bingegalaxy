@@ -45,7 +45,12 @@ public class SecurityConfig {
                     "/api/v1/bookings/slot-capacity",
                     "/api/v1/bookings/venue-rooms",
                     "/api/v1/bookings/venue-rooms/available",
-                    "/api/v1/bookings/surge-rules"
+                    "/api/v1/bookings/surge-rules",
+                    // Funnel analytics ingest — wizard fires this for guests too.
+                    // Controller is documented as "unauthenticated-friendly".
+                    "/api/v1/bookings/analytics/funnel",
+                    // Booking-transfer recipient endpoints (magic-link pattern).
+                    "/api/v1/booking-transfers/by-token/**"
                 ).permitAll()
                 .requestMatchers("/actuator/health/**", "/actuator/health").permitAll()
                 .requestMatchers("/actuator/**").hasRole("SYSTEM")

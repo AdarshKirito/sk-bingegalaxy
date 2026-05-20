@@ -80,15 +80,23 @@ public class ExpiryEngine {
 
         Long membershipId = walletRepository.findById(lot.getWalletId())
                 .map(w -> w.getMembershipId())
-                .orElseThrow(() -> new IllegalStateException(
-                        "Wallet " + lot.getWalletId() + " missing — cannot expire lot " + lotId));
+                .orElse(null);
+
+        if (membershipId == null) {
+            // Orphaned lot — wallet was deleted or never created.  Skip
+            // expiry rather than crashing the entire nightly run.  This
+            // should never happen in normal operation; log at ERROR so
+            // on-call can investigate and clean up the orphan manually.
+            log.error("[loyalty-v2] expiry skipped — wallet {} not found for lot {} (orphaned lot); "
+                    + "manual cleanup required", lot.getWalletId(), lotId);
+            return;
+        }
 
         walletService.expireLot(membershipId, lotId, at);
 
-        // Tier recalc (harmless if QC counters unchanged).  EXPIRE never
-        // touches qualification events directly — but if we later add
-        // "QC expires when its matching point lot expires" semantics, this
-        // is the hook point.
+        // Tier recalc is harmless here (EXPIRE never touches QC events),
+        // but keeps the membership snapshot consistent after the wallet
+        // mutation and provides a hook if we later couple lot-expiry to QC.
         tierEngine.recalculateTier(membershipId, at);
     }
 }

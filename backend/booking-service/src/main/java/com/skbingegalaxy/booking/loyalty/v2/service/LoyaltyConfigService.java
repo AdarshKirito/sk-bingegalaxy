@@ -77,7 +77,7 @@ public class LoyaltyConfigService {
     // Cached on programId only — 5-minute TTL means membership-grain
     // `at` variation is tolerable (tier definitions don't change
     // effective-date within a 5-minute window in practice).
-    @Cacheable(value = "loyaltyV2.tiers", key = "#programId")
+    @Cacheable(value = "loyaltyV2.tiers", key = "#programId + ':' + #at")
     public List<LoyaltyTierDefinition> activeLadder(Long programId, LocalDateTime at) {
         return tierDefinitionRepository.findActiveLadder(programId, at);
     }
@@ -88,7 +88,7 @@ public class LoyaltyConfigService {
 
     // ── Perks ────────────────────────────────────────────────────────────
 
-    @Cacheable(value = "loyaltyV2.perks", key = "#programId")
+    @Cacheable(value = "loyaltyV2.perks", key = "#programId + ':' + #at")
     public List<LoyaltyPerkCatalog> activePerks(Long programId, LocalDateTime at) {
         return perkCatalogRepository.findActiveByProgram(programId, at);
     }
@@ -148,6 +148,27 @@ public class LoyaltyConfigService {
 
     public Optional<LoyaltyBingeRedemptionRule> resolveRedemptionRule(Long bindingId, LocalDateTime at) {
         return redemptionRuleRepository.findActive(bindingId, at);
+    }
+
+    /**
+     * Conservative display rate for non-binge-specific surfaces.
+     *
+     * <p>Redemption is configured per binge, so checkout must use
+     * {@link #resolveRedemptionRule(Long, LocalDateTime)}. Account summaries
+     * still expose a single legacy-shaped "points per currency unit" field;
+     * use the highest active rate so the UI never over-promises point value.
+     */
+    public int resolveDisplayRedemptionRate(Long programId, LocalDateTime at) {
+        long rate = bindingRepository.findAllActive(programId).stream()
+                .filter(b -> LoyaltyV2Constants.BINDING_ENABLED.equals(b.getStatus()))
+                .filter(b -> !b.isLegacyFrozen())
+                .map(b -> redemptionRuleRepository.findActive(b.getId(), at))
+                .flatMap(Optional::stream)
+                .mapToLong(LoyaltyBingeRedemptionRule::getPointsPerCurrencyUnit)
+                .filter(r -> r > 0)
+                .max()
+                .orElse(LoyaltyV2Constants.DEFAULT_REDEMPTION_RATE);
+        return rate > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) rate;
     }
 
     /**

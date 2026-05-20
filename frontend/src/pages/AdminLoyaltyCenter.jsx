@@ -2,11 +2,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
   FiAward, FiSettings, FiLayers, FiGift, FiPackage, FiShuffle,
-  FiBarChart2, FiBookOpen, FiRefreshCw, FiPlus, FiCheck, FiX,
+  FiBookOpen, FiRefreshCw, FiPlus, FiCheck, FiX,
   FiAlertTriangle, FiEdit2, FiTrash2, FiExternalLink, FiHelpCircle,
   FiTrendingUp, FiClock, FiDollarSign, FiArrowUp,
+  FiSearch, FiUsers, FiUser,
 } from 'react-icons/fi';
 import SEO from '../components/SEO';
+import { useConfirm } from '../components/ui/ConfirmProvider';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import loyaltyV2 from '../services/loyaltyV2';
 import './AdminSecurity.css';
@@ -50,7 +52,7 @@ function safeExternalHref(url) {
  *   3. Perks        — catalog CRUD + tier assignments.
  *   4. Binges       — bulk enable / disable with checkbox selection.
  *   5. Status Match — pending request review queue.
- *   6. Parity       — v1 ↔ v2 reconciliation.
+ *   6. Guide        — operator reference.
  *   7. Playbook     — operator dos & don'ts.
  *
  * All mutations go through the loyaltyV2 service, which hits
@@ -68,7 +70,7 @@ export default function AdminLoyaltyCenter() {
     ['perks',        'Perks',        <FiGift />],
     ['binges',       'Binges',       <FiPackage />],
     ['status-match', 'Status Match', <FiShuffle />],
-    ['parity',       'Parity',       <FiBarChart2 />],
+    ['members',      'Members',      <FiUsers />],
     ['guide',        'How it works', <FiHelpCircle />],
     ['playbook',     'Playbook',     <FiBookOpen />],
   ];
@@ -101,7 +103,7 @@ export default function AdminLoyaltyCenter() {
       {tab === 'perks'        && <PerksTab />}
       {tab === 'binges'       && <BindingsTab />}
       {tab === 'status-match' && <StatusMatchTab />}
-      {tab === 'parity'       && <ParityTab />}
+      {tab === 'members'      && <MembersTab />}
       {tab === 'guide'        && <GuideTab />}
       {tab === 'playbook'     && <PlaybookTab />}
     </div>
@@ -195,6 +197,7 @@ function ProgramTab() {
    Tier ladder
    ────────────────────────────────────────────────────────────── */
 function TiersTab() {
+  const confirm = useConfirm();
   const [tiers, setTiers] = useState([]);
   const [draft, setDraft] = useState(null);
 
@@ -209,14 +212,20 @@ function TiersTab() {
   const save = async (e) => {
     e.preventDefault();
     try {
-      await loyaltyV2.upsertTier(draft);
+      await loyaltyV2.upsertTier(toTierPayload(draft));
       toast.success('Tier saved');
       setDraft(null);
       reload();
     } catch { toast.error('Save failed'); }
   };
   const retire = async (t) => {
-    if (!window.confirm(`Retire tier "${t.tierCode}"? This is effective-dated — prior wallet balances are preserved.`)) return;
+    const ok = await confirm({
+      title: `Retire tier “${t.code}”?`,
+      message: 'Retirement is effective-dated. Prior wallet balances are preserved and members keep their accumulated benefits, but no new members can be assigned to this tier.',
+      confirmLabel: 'Retire tier',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
       await loyaltyV2.retireTier(t.id);
       toast.success('Tier retired');
@@ -234,10 +243,10 @@ function TiersTab() {
         <button
           className="sec-btn sec-btn-primary"
           onClick={() => setDraft({
-            tierCode: '', displayName: '', sequence: tiers.length + 1,
-            minQualifyingCredits: 0, pointsMultiplier: 1.0,
+            code: '', displayName: '', rankOrder: tiers.length,
+            qualificationCreditsRequired: 0, qualificationWindowDays: 365,
             softLandingTierCode: '', validityCalendarYearsAfter: 1,
-            lifetime: false,
+            lifetimeCreditsRequired: null, lifetimeYearsHeldRequired: null,
           })}
         >
           <FiPlus /> Add tier
@@ -252,21 +261,21 @@ function TiersTab() {
             <thead>
               <tr>
                 <th>#</th><th>Tier</th><th>Name</th>
-                <th>Min credits</th><th>Multiplier</th>
-                <th>Soft-land</th><th>Validity (yr)</th><th>Lifetime</th><th></th>
+                <th>Min credits</th><th>Window</th>
+                <th>Soft-land</th><th>Validity (yr)</th><th>Lifetime req.</th><th></th>
               </tr>
             </thead>
             <tbody>
               {tiers.map((t) => (
                 <tr key={t.id}>
-                  <td>{t.sequence}</td>
-                  <td><TierChip code={t.tierCode} /></td>
+                  <td>{t.rankOrder}</td>
+                  <td><TierChip code={t.code} /></td>
                   <td style={{ fontWeight: 600 }}>{t.displayName}</td>
-                  <td>{Number(t.minQualifyingCredits || 0).toLocaleString()}</td>
-                  <td>{Number(t.pointsMultiplier || 1).toFixed(2)}×</td>
+                  <td>{Number(t.qualificationCreditsRequired || 0).toLocaleString()}</td>
+                  <td>{Number(t.qualificationWindowDays || 365).toLocaleString()}d</td>
                   <td>{t.softLandingTierCode ? <TierChip code={t.softLandingTierCode} /> : '—'}</td>
                   <td>{t.validityCalendarYearsAfter ?? '—'}</td>
-                  <td>{t.lifetime ? <span className="sec-pill success">Lifetime</span> : '—'}</td>
+                  <td>{t.lifetimeCreditsRequired ? <span className="sec-pill success">{Number(t.lifetimeCreditsRequired).toLocaleString()}</span> : '—'}</td>
                   <td>
                     <div className="sec-row-actions">
                       <button className="sec-btn" onClick={() => setDraft({ ...t })}><FiEdit2 /> Edit</button>
@@ -286,8 +295,8 @@ function TiersTab() {
           <form className="sec-form" onSubmit={save}>
             <label>
               Code
-              <input required value={draft.tierCode || ''}
-                     onChange={(e) => setDraft({ ...draft, tierCode: e.target.value.toUpperCase() })} />
+              <input required value={draft.code || ''}
+                     onChange={(e) => setDraft({ ...draft, code: e.target.value.toUpperCase() })} />
             </label>
             <label>
               Display name
@@ -295,19 +304,19 @@ function TiersTab() {
                      onChange={(e) => setDraft({ ...draft, displayName: e.target.value })} />
             </label>
             <label>
-              Sequence
-              <input type="number" value={draft.sequence ?? 1}
-                     onChange={(e) => setDraft({ ...draft, sequence: Number(e.target.value) })} />
+              Rank order
+              <input type="number" value={draft.rankOrder ?? 0}
+                     onChange={(e) => setDraft({ ...draft, rankOrder: Number(e.target.value) })} />
             </label>
             <label>
               Min qualifying credits
-              <input type="number" value={draft.minQualifyingCredits ?? 0}
-                     onChange={(e) => setDraft({ ...draft, minQualifyingCredits: Number(e.target.value) })} />
+              <input type="number" value={draft.qualificationCreditsRequired ?? 0}
+                     onChange={(e) => setDraft({ ...draft, qualificationCreditsRequired: Number(e.target.value) })} />
             </label>
             <label>
-              Points multiplier
-              <input type="number" step="0.05" value={draft.pointsMultiplier ?? 1}
-                     onChange={(e) => setDraft({ ...draft, pointsMultiplier: Number(e.target.value) })} />
+              Qualification window (days)
+              <input type="number" value={draft.qualificationWindowDays ?? 365}
+                     onChange={(e) => setDraft({ ...draft, qualificationWindowDays: Number(e.target.value) })} />
             </label>
             <label>
               Soft-landing tier code
@@ -320,9 +329,22 @@ function TiersTab() {
                      onChange={(e) => setDraft({ ...draft, validityCalendarYearsAfter: Number(e.target.value) })} />
             </label>
             <label className="sec-checkbox">
-              <input type="checkbox" checked={!!draft.lifetime}
-                     onChange={(e) => setDraft({ ...draft, lifetime: e.target.checked })} />
-              Lifetime tier
+              <input
+                type="checkbox"
+                checked={draft.validityCalendarYearsAfter == null}
+                onChange={(e) => setDraft({ ...draft, validityCalendarYearsAfter: e.target.checked ? null : 1 })}
+              />
+              Permanent tier
+            </label>
+            <label>
+              Lifetime credits required
+              <input type="number" value={draft.lifetimeCreditsRequired ?? ''}
+                     onChange={(e) => setDraft({ ...draft, lifetimeCreditsRequired: e.target.value === '' ? null : Number(e.target.value) })} />
+            </label>
+            <label>
+              Lifetime years held required
+              <input type="number" value={draft.lifetimeYearsHeldRequired ?? ''}
+                     onChange={(e) => setDraft({ ...draft, lifetimeYearsHeldRequired: e.target.value === '' ? null : Number(e.target.value) })} />
             </label>
             <div className="sec-form-actions">
               <button type="button" className="sec-btn" onClick={() => setDraft(null)}>Cancel</button>
@@ -336,34 +358,83 @@ function TiersTab() {
 }
 
 /* ──────────────────────────────────────────────────────────────
-   Perk catalog
+   Perk catalog + tier-perk assignments
    ────────────────────────────────────────────────────────────── */
 function PerksTab() {
-  const [perks, setPerks] = useState([]);
-  const [draft, setDraft] = useState(null);
+  const [perks, setPerks]           = useState([]);
+  const [tiers, setTiers]           = useState([]);
+  const [tierPerks, setTierPerks]   = useState([]);
+  const [draft, setDraft]           = useState(null);
+  const [assignForm, setAssignForm] = useState({ tierDefinitionId: '', perkId: '', autoGrant: true });
+  const [assigning, setAssigning]   = useState(false);
 
-  const reload = useCallback(
+  const reloadPerks = useCallback(
     () => loyaltyV2.listPerks()
       .then((res) => setPerks(toArray(res)))
       .catch(() => toast.error('Perk load failed')),
     [],
   );
+  const reloadTierPerks = useCallback(
+    () => loyaltyV2.listTierPerks()
+      .then((res) => setTierPerks(Array.isArray(res) ? res : []))
+      .catch(() => {}),
+    [],
+  );
+  const reload = useCallback(() => {
+    reloadPerks();
+    reloadTierPerks();
+    loyaltyV2.listTiers()
+      .then((res) => setTiers(toArray(res)))
+      .catch(() => {});
+  }, [reloadPerks, reloadTierPerks]);
+
   useEffect(() => { reload(); }, [reload]);
 
   const save = async (e) => {
     e.preventDefault();
     try {
-      await loyaltyV2.savePerk(draft);
+      await loyaltyV2.savePerk(toPerkPayload(draft));
       toast.success('Perk saved');
       setDraft(null);
-      reload();
+      reloadPerks();
     } catch { toast.error('Save failed'); }
   };
 
+  const handleAssignPerk = async (e) => {
+    e.preventDefault();
+    if (!assignForm.tierDefinitionId || !assignForm.perkId) {
+      toast.warn('Select a tier and a perk');
+      return;
+    }
+    setAssigning(true);
+    try {
+      await loyaltyV2.assignPerkToTier({
+        tierDefinitionId: Number(assignForm.tierDefinitionId),
+        perkId: Number(assignForm.perkId),
+        autoGrant: assignForm.autoGrant,
+        sortOrder: 0,
+      });
+      toast.success('Perk assigned to tier');
+      setAssignForm({ tierDefinitionId: '', perkId: '', autoGrant: true });
+      reloadTierPerks();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Assign failed');
+    } finally { setAssigning(false); }
+  };
+
+  const handleRemoveTierPerk = async (tierPerkId) => {
+    try {
+      await loyaltyV2.removePerkFromTier(tierPerkId);
+      toast.success('Perk removed from tier');
+      reloadTierPerks();
+    } catch { toast.error('Remove failed'); }
+  };
+
   const HANDLERS = [
-    'tierDiscountPercent','freeCancellationExtended','extraMultiplier','priorityWaitlist',
-    'earlyAccessBookingWindow','birthdayBonusPoints','welcomeBonusPoints','extensionMonths',
-    'rewardCatalogClaim','surpriseDelightBudget',
+    'DISCOUNT_PERCENT_OF_BOOKING', 'FREE_CANCELLATION_EXTENDED', 'BONUS_POINTS_MULTIPLIER',
+    'PRIORITY_WAITLIST', 'EARLY_ACCESS_BOOKING_WINDOW', 'BIRTHDAY_BONUS_POINTS',
+    'WELCOME_BONUS_POINTS', 'STATUS_EXTENSION_GRANT', 'REWARD_CATALOG_CLAIM',
+    'SURPRISE_DELIGHT_BUDGET',
   ];
 
   return (
@@ -375,7 +446,11 @@ function PerksTab() {
         </div>
         <button
           className="sec-btn sec-btn-primary"
-          onClick={() => setDraft({ perkKey: '', displayName: '', handlerKey: '', active: true })}
+          onClick={() => setDraft({
+            code: '', displayName: '', description: '', category: 'SOFT',
+            fulfillmentType: 'AUTOMATIC', deliveryHandlerKey: '', defaultPointCost: 0,
+            cooldownHours: 0, paramsJson: '', active: true,
+          })}
         >
           <FiPlus /> Add perk
         </button>
@@ -392,9 +467,9 @@ function PerksTab() {
             <tbody>
               {perks.map((p) => (
                 <tr key={p.id}>
-                  <td><code>{p.perkKey}</code></td>
+                  <td><code>{p.code}</code></td>
                   <td style={{ fontWeight: 600 }}>{p.displayName}</td>
-                  <td><code style={{ fontSize: 12 }}>{p.handlerKey}</code></td>
+                  <td><code style={{ fontSize: 12 }}>{p.deliveryHandlerKey}</code></td>
                   <td>
                     <span className={`sec-pill ${p.active ? 'success' : 'mfa-off'}`}>
                       {p.active ? 'Active' : 'Inactive'}
@@ -417,9 +492,9 @@ function PerksTab() {
           <h4>{draft.id ? 'Edit perk' : 'New perk'}</h4>
           <form className="sec-form" onSubmit={save}>
             <label>
-              Perk key
-              <input required value={draft.perkKey || ''}
-                     onChange={(e) => setDraft({ ...draft, perkKey: e.target.value })} />
+              Perk code
+              <input required value={draft.code || ''}
+                     onChange={(e) => setDraft({ ...draft, code: e.target.value.toUpperCase() })} />
             </label>
             <label>
               Display name
@@ -428,11 +503,39 @@ function PerksTab() {
             </label>
             <label>
               Handler key
-              <select value={draft.handlerKey || ''}
-                      onChange={(e) => setDraft({ ...draft, handlerKey: e.target.value })}>
+              <select value={draft.deliveryHandlerKey || ''}
+                      onChange={(e) => setDraft({ ...draft, deliveryHandlerKey: e.target.value })}>
                 <option value="">— select —</option>
                 {HANDLERS.map((h) => <option key={h} value={h}>{h}</option>)}
               </select>
+            </label>
+            <label>
+              Category
+              <select value={draft.category || 'SOFT'}
+                      onChange={(e) => setDraft({ ...draft, category: e.target.value })}>
+                <option value="FINANCIAL">FINANCIAL</option>
+                <option value="SOFT">SOFT</option>
+                <option value="INVISIBLE">INVISIBLE</option>
+              </select>
+            </label>
+            <label>
+              Fulfillment
+              <select value={draft.fulfillmentType || 'AUTOMATIC'}
+                      onChange={(e) => setDraft({ ...draft, fulfillmentType: e.target.value })}>
+                <option value="AUTOMATIC">AUTOMATIC</option>
+                <option value="ON_DEMAND">ON_DEMAND</option>
+                <option value="MANUAL">MANUAL</option>
+              </select>
+            </label>
+            <label>
+              Default point cost
+              <input type="number" value={draft.defaultPointCost ?? 0}
+                     onChange={(e) => setDraft({ ...draft, defaultPointCost: Number(e.target.value) })} />
+            </label>
+            <label>
+              Cooldown hours
+              <input type="number" value={draft.cooldownHours ?? 0}
+                     onChange={(e) => setDraft({ ...draft, cooldownHours: Number(e.target.value) })} />
             </label>
             <label className="sec-checkbox">
               <input type="checkbox" checked={!!draft.active}
@@ -446,6 +549,95 @@ function PerksTab() {
           </form>
         </div>
       )}
+
+      {/* ── Tier-perk assignments ─────────────────────────────── */}
+      <div style={{ marginTop: 32, borderTop: '1px solid var(--border)', paddingTop: 24 }}>
+        <div className="sec-card-head">
+          <div>
+            <h2>Tier-perk assignments</h2>
+            <p>Which perks each tier receives. Auto-grant perks apply automatically; on-demand perks require a member claim.</p>
+          </div>
+        </div>
+
+        {tiers.length === 0 ? (
+          <div className="sec-empty" style={{ padding: '20px 0' }}>
+            <p>No tiers configured — add tiers first.</p>
+          </div>
+        ) : (
+          <div className="sec-tier-perk-grid">
+            {tiers.map((tier) => {
+              const assigned = tierPerks.filter((tp) => tp.tierDefinitionId === tier.id);
+              return (
+                <div key={tier.id} className="sec-tier-perk-row">
+                  <div className="sec-tier-perk-label">
+                    <TierChip code={tier.code} />
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{tier.displayName}</span>
+                  </div>
+                  <div className="sec-tier-perk-chips">
+                    {assigned.length === 0 ? (
+                      <span style={{ fontSize: 13, color: 'var(--text-muted)', fontStyle: 'italic' }}>No perks assigned</span>
+                    ) : (
+                      assigned.map((tp) => {
+                        const perk = perks.find((p) => p.id === tp.perkId);
+                        return (
+                          <div key={tp.id} className="sec-perk-chip">
+                            <span>{perk?.displayName || `Perk #${tp.perkId}`}</span>
+                            {tp.autoGrant && (
+                              <span className="sec-pill success" style={{ fontSize: 10, padding: '1px 6px' }}>auto</span>
+                            )}
+                            <button
+                              className="sec-perk-chip-remove"
+                              title="Remove from tier"
+                              onClick={() => handleRemoveTierPerk(tp.id)}
+                            >
+                              <FiX size={11} />
+                            </button>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <form className="sec-form sec-tier-perk-assign-form" onSubmit={handleAssignPerk}
+              style={{ marginTop: 20 }}>
+          <h4 style={{ margin: '0 0 12px', fontSize: 14 }}>Assign a perk to a tier</h4>
+          <label>
+            Tier
+            <select value={assignForm.tierDefinitionId}
+                    onChange={(e) => setAssignForm({ ...assignForm, tierDefinitionId: e.target.value })}>
+              <option value="">— select tier —</option>
+              {tiers.map((t) => (
+                <option key={t.id} value={t.id}>{t.displayName} ({t.code})</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Perk
+            <select value={assignForm.perkId}
+                    onChange={(e) => setAssignForm({ ...assignForm, perkId: e.target.value })}>
+              <option value="">— select perk —</option>
+              {perks.filter((p) => p.active).map((p) => (
+                <option key={p.id} value={p.id}>{p.displayName}</option>
+              ))}
+            </select>
+          </label>
+          <label className="sec-checkbox">
+            <input type="checkbox" checked={assignForm.autoGrant}
+                   onChange={(e) => setAssignForm({ ...assignForm, autoGrant: e.target.checked })} />
+            Auto-grant (applied automatically — no member action needed)
+          </label>
+          <div className="sec-form-actions">
+            <button className="sec-btn sec-btn-primary" disabled={assigning}>
+              {assigning ? 'Assigning…' : <><FiPlus /> Assign to tier</>}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
@@ -454,6 +646,7 @@ function PerksTab() {
    Binge bindings (bulk enable / disable)
    ────────────────────────────────────────────────────────────── */
 function BindingsTab() {
+  const confirm = useConfirm();
   const [bindings, setBindings] = useState([]);
   const [selected, setSelected] = useState(new Set());
   const [busy, setBusy] = useState(false);
@@ -472,14 +665,23 @@ function BindingsTab() {
     setSelected(next);
   };
   const toggleAll = () => {
-    const eligible = bindings.filter((b) => !b.legacyFrozen);
+    const eligible = bindings;
     if (selected.size === eligible.length) setSelected(new Set());
     else setSelected(new Set(eligible.map((b) => b.id)));
   };
 
   const bulkDo = async (status) => {
     if (selected.size === 0) { toast.info('Select at least one binge'); return; }
-    if (!window.confirm(`${status === 'ENABLED' ? 'Enable' : 'Disable'} loyalty for ${selected.size} binge(s)?`)) return;
+    const enabling = status === 'ENABLED';
+    const ok = await confirm({
+      title: `${enabling ? 'Enable' : 'Disable'} loyalty for ${selected.size} binge${selected.size === 1 ? '' : 's'}?`,
+      message: enabling
+        ? 'Members at the selected binges will start accruing points and qualifying for tiers immediately.'
+        : 'New accruals at the selected binges will stop. Existing balances and tiers are preserved.',
+      confirmLabel: enabling ? 'Enable loyalty' : 'Disable loyalty',
+      variant: enabling ? 'primary' : 'danger',
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       const touched = await loyaltyV2.bulkSetBindingStatus(Array.from(selected), status);
@@ -489,7 +691,7 @@ function BindingsTab() {
     finally { setBusy(false); }
   };
 
-  const eligible = bindings.filter((b) => !b.legacyFrozen);
+  const eligible = bindings;
   const allChecked = eligible.length > 0 && selected.size === eligible.length;
 
   return (
@@ -497,7 +699,7 @@ function BindingsTab() {
       <div className="sec-card-head">
         <div>
           <h2>Binge bindings <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>({bindings.length})</span></h2>
-          <p>Bulk-toggle loyalty participation per binge. Legacy-frozen rows are immutable until migrated.</p>
+          <p>Bulk-toggle loyalty participation per binge. Legacy rows are thawed automatically when enabled.</p>
         </div>
         <div className="sec-actions">
           {selected.size > 0 && (
@@ -537,7 +739,6 @@ function BindingsTab() {
                 <tr key={b.id}>
                   <td>
                     <input type="checkbox"
-                           disabled={b.legacyFrozen}
                            checked={selected.has(b.id)}
                            onChange={() => toggle(b.id)} />
                   </td>
@@ -564,6 +765,7 @@ function BindingsTab() {
    Status match review queue
    ────────────────────────────────────────────────────────────── */
 function StatusMatchTab() {
+  const confirm = useConfirm();
   const [pending, setPending] = useState({ content: [], totalElements: 0 });
 
   const reload = useCallback(
@@ -574,7 +776,18 @@ function StatusMatchTab() {
   useEffect(() => { reload(); }, [reload]);
 
   const approve = async (r) => {
-    const notes = window.prompt('Approval notes (optional)') || '';
+    const result = await confirm({
+      title: 'Approve status-match request?',
+      message: 'A 90-day challenge will start. The member must meet the matched-tier requirements during the challenge window or they revert to their earned tier.',
+      confirmLabel: 'Approve & start challenge',
+      variant: 'primary',
+      withReason: true,
+      reasonRequired: false,
+      reasonLabel: 'Approval notes (optional)',
+      reasonPlaceholder: 'Add an optional note for the audit log…',
+    });
+    if (!result) return;
+    const notes = result.reason || '';
     try {
       await loyaltyV2.approveStatusMatch(r.id, { notes, challengeDays: 90 });
       toast.success('Approved — 90-day challenge started');
@@ -582,8 +795,18 @@ function StatusMatchTab() {
     } catch { toast.error('Approve failed'); }
   };
   const reject = async (r) => {
-    const notes = window.prompt('Reason for rejection');
-    if (!notes) return;
+    const result = await confirm({
+      title: 'Reject status-match request?',
+      message: 'A reason is required and will be visible to the member and in the audit log.',
+      confirmLabel: 'Reject request',
+      variant: 'danger',
+      withReason: true,
+      reasonRequired: true,
+      reasonLabel: 'Reason for rejection',
+      reasonPlaceholder: 'Explain why this request is being rejected…',
+    });
+    if (!result) return;
+    const notes = result.reason;
     try {
       await loyaltyV2.rejectStatusMatch(r.id, { notes });
       toast.success('Rejected');
@@ -655,94 +878,6 @@ function StatusMatchTab() {
 }
 
 /* ──────────────────────────────────────────────────────────────
-   Parity (v1 ↔ v2)
-   ────────────────────────────────────────────────────────────── */
-function ParityTab() {
-  const [summary, setSummary] = useState(null);
-  const [busy, setBusy]       = useState(false);
-
-  const run = async () => {
-    if (!window.confirm('Run parity now? This is read-only and may take up to a minute.')) return;
-    setBusy(true);
-    try {
-      const s = await loyaltyV2.runParityNow();
-      setSummary(s);
-      const mismatches = (s.v1Ahead || 0) + (s.v2Ahead || 0);
-      toast.success(`Checked ${s.customersChecked} customers — ${mismatches} mismatches, ${s.v2Missing} missing v2, ${s.v1Missing} missing v1`);
-    } catch { toast.error('Parity run failed'); }
-    finally { setBusy(false); }
-  };
-
-  const mismatches = summary ? (summary.v1Ahead || 0) + (summary.v2Ahead || 0) : 0;
-
-  return (
-    <div className="sec-card">
-      <div className="sec-card-head">
-        <div>
-          <h2>v1 ↔ v2 parity audit</h2>
-          <p>
-            Dual-write shadow comparison. Runs automatically every night at 04:00 UTC;
-            use the button to trigger an on-demand check.
-          </p>
-        </div>
-        <button className="sec-btn sec-btn-primary" disabled={busy} onClick={run}>
-          {busy ? 'Running…' : <><FiRefreshCw /> Run parity now</>}
-        </button>
-      </div>
-
-      <div className="mfa-warning">
-        <FiAlertTriangle size={18} />
-        <span>
-          While the program runs in dual-write shadow mode, this job compares v1 and v2 wallet
-          balances per customer and emits Micrometer counters
-          (<code>loyalty.parity.mismatch</code>, <code>loyalty.parity.missing</code>).
-          It is gated off once <code>APP_LOYALTY_V2_PRIMARY=true</code>.
-        </span>
-      </div>
-
-      {summary && (
-        <>
-          <div className="sec-stats" style={{ marginTop: 16 }}>
-            <div className="sec-stat">
-              <div className="sec-stat-icon"><FiBarChart2 /></div>
-              <div className="sec-stat-label">Customers checked</div>
-              <div className="sec-stat-value">{Number(summary.customersChecked || 0).toLocaleString()}</div>
-            </div>
-            <div className="sec-stat">
-              <div className="sec-stat-icon" style={{ background: 'rgba(34,197,94,0.15)', color: '#16a34a' }}><FiCheck /></div>
-              <div className="sec-stat-label">Matches</div>
-              <div className="sec-stat-value">{Number(summary.matches || 0).toLocaleString()}</div>
-            </div>
-            <div className="sec-stat">
-              <div className="sec-stat-icon" style={{ background: 'rgba(239,68,68,0.12)', color: '#dc2626' }}><FiAlertTriangle /></div>
-              <div className="sec-stat-label">Mismatches</div>
-              <div className="sec-stat-value">{mismatches.toLocaleString()}</div>
-            </div>
-            <div className="sec-stat">
-              <div className="sec-stat-icon" style={{ background: 'rgba(234,179,8,0.15)', color: '#a16207' }}><FiX /></div>
-              <div className="sec-stat-label">Missing rows</div>
-              <div className="sec-stat-value">{Number((summary.v1Missing || 0) + (summary.v2Missing || 0)).toLocaleString()}</div>
-            </div>
-          </div>
-
-          <table className="sec-kv-table">
-            <tbody>
-              <tr><th>v1 ahead</th><td>{summary.v1Ahead}</td></tr>
-              <tr><th>v2 ahead</th><td>{summary.v2Ahead}</td></tr>
-              <tr><th>Missing in v2</th><td>{summary.v2Missing}</td></tr>
-              <tr><th>Missing in v1</th><td>{summary.v1Missing}</td></tr>
-              <tr><th>Total |Δ| points</th><td>{Number(summary.totalDiff || 0).toLocaleString()}</td></tr>
-              <tr><th>Started at</th><td>{String(summary.startedAt)}</td></tr>
-              <tr><th>Finished at</th><td>{String(summary.finishedAt)}</td></tr>
-            </tbody>
-          </table>
-        </>
-      )}
-    </div>
-  );
-}
-
-/* ──────────────────────────────────────────────────────────────
    Guide — "How the loyalty program works" reference
    ────────────────────────────────────────────────────────────── */
 function GuideTab() {
@@ -783,18 +918,13 @@ function GuideTab() {
             </tr>
             <tr>
               <td><span className="sec-tier-chip sec-tier-GOLD">GOLD</span></td>
-              <td>15,000</td><td>1.50×</td>
+              <td>20,000</td><td>1.50×</td>
               <td>Late checkout, priority support, flex-cancel.</td>
             </tr>
             <tr>
               <td><span className="sec-tier-chip sec-tier-PLATINUM">PLATINUM</span></td>
-              <td>35,000</td><td>2.00×</td>
+              <td>50,000</td><td>2.00×</td>
               <td>Room upgrade, annual choice gift, dedicated concierge.</td>
-            </tr>
-            <tr>
-              <td><span className="sec-tier-chip sec-tier-DIAMOND">DIAMOND</span></td>
-              <td>75,000</td><td>3.00×</td>
-              <td>Guaranteed upgrade, invite-only events, waived fees.</td>
             </tr>
           </tbody>
         </table>
@@ -804,9 +934,9 @@ function GuideTab() {
         <div className="sec-playbook-card">
           <h3><FiTrendingUp /> Earning &amp; climbing</h3>
           <ul>
-            <li>Every booking earns <strong>points</strong> (1 pt per ₹100) and <strong>qualifying credits</strong> at the same rate.</li>
+            <li>Every booking earns <strong>points</strong> (default 10 pts per ₹1) and <strong>qualifying credits</strong> from the active earn rule.</li>
             <li>Points are the spendable currency; qualifying credits drive tier promotions.</li>
-            <li>Each tier applies a <strong>multiplier</strong> to points earned (e.g. Gold = 1.5×). Credits are <em>not</em> multiplied — status is earned on base spend.</li>
+            <li>Per-binge rules can add tier or campaign multipliers while preserving an auditable base earn rate.</li>
             <li>We look at a rolling <strong>12-month qualifying window</strong>. When a customer crosses a threshold, the new tier activates immediately.</li>
           </ul>
         </div>
@@ -815,7 +945,7 @@ function GuideTab() {
           <h3><FiDollarSign /> Redeeming points</h3>
           <ul>
             <li>Points are redeemed at booking checkout via the <code>redeem-quote</code> endpoint.</li>
-            <li>Default rate: <strong>100 points = ₹10</strong> off (configurable per binge via Redeem rules).</li>
+            <li>Default rate: <strong>100 points = ₹1</strong> off (configurable per binge via Redeem rules).</li>
             <li>Redemptions deduct FIFO from the oldest earn lot, so nothing expires under-water.</li>
             <li>Partial redemptions are allowed; caps can be set per binge (e.g. max 50% of bill).</li>
           </ul>
@@ -827,7 +957,7 @@ function GuideTab() {
             <li>Points expire <strong>{`{pointsExpiryDays}`} days</strong> after earning (default 540). See <em>Program → Points expiry</em>.</li>
             <li>Tier status is valid for the <strong>validityCalendarYearsAfter</strong> period of each tier (e.g. Gold: current year + 1).</li>
             <li>If a customer doesn't re-qualify, they soft-land to the <strong>softLandingTierCode</strong> — a graceful demote instead of dropping to Bronze.</li>
-            <li>Lifetime tiers (e.g. Diamond after 500 k lifetime credits) never expire.</li>
+            <li>Lifetime tiers such as Lifetime Platinum never expire.</li>
           </ul>
         </div>
 
@@ -847,19 +977,10 @@ function GuideTab() {
             <li>A <strong>binding</strong> connects a binge (venue) to the loyalty program. Without one, the binge doesn't earn or redeem points.</li>
             <li>Enable / disable in bulk from the <strong>Binges</strong> tab.</li>
             <li>Per-binge earn and redeem rules are configured under <em>Binge Management → Loyalty</em>.</li>
-            <li>Legacy-frozen bindings are immutable snapshots from v1 — leave them alone until the v1 → v2 cutover is done.</li>
+            <li>Legacy bindings are automatically thawed after cutover; disabled bindings preserve existing balances.</li>
           </ul>
         </div>
 
-        <div className="sec-playbook-card">
-          <h3><FiBarChart2 /> Parity (shadow period)</h3>
-          <ul>
-            <li>During migration, both v1 and v2 write to the wallet. The parity job compares them nightly.</li>
-            <li>Zero mismatches for 7+ nights is the bar to flip <code>APP_LOYALTY_V2_PRIMARY=true</code>.</li>
-            <li>After cutover, v1 writes become no-ops and v2 is authoritative.</li>
-            <li>Trigger an on-demand check any time from the <strong>Parity</strong> tab.</li>
-          </ul>
-        </div>
       </div>
 
       <div className="mfa-warning" style={{ marginTop: 20 }}>
@@ -894,7 +1015,7 @@ function PlaybookTab() {
             <li>Use <strong>effective dates</strong> when changing tier thresholds or earn/redeem rules — never edit a live row in place.</li>
             <li>Communicate <strong>tier changes</strong> at least 30 days in advance. Promotions are immediate; demotions are deferred.</li>
             <li>Review the <strong>Status Match</strong> queue weekly. Approved members get a 90-day challenge.</li>
-            <li>Watch the <strong>Parity</strong> tab during the shadow period. Investigate mismatches before flipping <code>APP_LOYALTY_V2_PRIMARY=true</code>.</li>
+            <li>Review ledger activity after rule changes and keep earn/redeem rules effective-dated.</li>
             <li>For per-binge configuration, use <em>Binge Management → Loyalty</em> on the venue card.</li>
           </ul>
         </div>
@@ -904,20 +1025,19 @@ function PlaybookTab() {
           <ul>
             <li>Don't disable a binge binding to "fix" a calculation bug — that strands accrued points.</li>
             <li>Don't manually edit wallet balances in the database; reconciliation breaks without a ledger entry.</li>
-            <li>Don't thaw a <code>LEGACY_FROZEN</code> binding until v1 has been migrated and reconciled.</li>
+            <li>Don't bypass the wallet service; every balance change needs a ledger entry.</li>
             <li>Don't promise members a tier — promotions are computed from qualifying credits.</li>
             <li>Don't lower <code>pointsExpiryDays</code> without a 90-day grace announcement.</li>
           </ul>
         </div>
 
         <div className="sec-playbook-card">
-          <h3><FiBookOpen /> Cutover checklist (v1 → v2 primary)</h3>
+          <h3><FiBookOpen /> Production checks</h3>
           <ol>
-            <li>Run V22 backfill migration and verify <code>loyalty_membership</code> count ≈ <code>loyalty_accounts</code> count.</li>
-            <li>Run the parity job nightly for at least 7 days with zero mismatches.</li>
-            <li>Set <code>APP_LOYALTY_V2_PRIMARY=true</code>. v1 earn/expire becomes a no-op; v2 authoritative.</li>
-            <li>Monitor <code>loyalty.v2.*</code> Micrometer counters and customer-support tickets for 30 days.</li>
-            <li>Schedule the V23 v1-drop migration after the soak period.</li>
+            <li>Verify every enabled binge has one active earn rule and one active redemption rule.</li>
+            <li>Watch wallet balance, lot remaining, and ledger delta totals during support audits.</li>
+            <li>Keep disabled bindings disabled instead of deleting them; balances and history remain intact.</li>
+            <li>Monitor <code>loyalty.v2.*</code> Micrometer counters and customer-support tickets after edits.</li>
           </ol>
         </div>
       </div>
@@ -926,8 +1046,287 @@ function PlaybookTab() {
 }
 
 /* ──────────────────────────────────────────────────────────────
+   Members — customer lookup, wallet snapshot, ledger, adjustments
+   ────────────────────────────────────────────────────────────── */
+function MembersTab() {
+  const [inputId, setInputId]     = useState('');
+  const [searching, setSearching] = useState(false);
+  const [profile, setProfile]     = useState(null);
+  const [ledger, setLedger]       = useState(null);
+  const [ledgerPage, setLedgerPage] = useState(0);
+  const [adjustPts, setAdjustPts] = useState('');
+  const [adjustReason, setAdjustReason] = useState('');
+  const [adjusting, setAdjusting] = useState(false);
+
+  const activeId = profile ? parseInt(inputId, 10) : null;
+
+  const loadLedger = useCallback(async (cid, pg) => {
+    try {
+      const l = await loyaltyV2.getCustomerLedger(cid, { page: pg, size: 25 });
+      setLedger(l && Array.isArray(l.content) ? l : { content: [], totalPages: 0, number: 0 });
+      setLedgerPage(pg);
+    } catch { toast.error('Could not load ledger'); }
+  }, []);
+
+  const search = async (e) => {
+    e.preventDefault();
+    const id = parseInt(inputId, 10);
+    if (!id || id <= 0) { toast.warn('Enter a valid numeric customer ID'); return; }
+    setSearching(true);
+    setProfile(null);
+    setLedger(null);
+    try {
+      const p = await loyaltyV2.getCustomerAccount(id);
+      setProfile(p);
+      await loadLedger(id, 0);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Customer not found or not enrolled');
+    } finally { setSearching(false); }
+  };
+
+  const doAdjust = async (e) => {
+    e.preventDefault();
+    const pts = parseInt(adjustPts, 10);
+    if (!pts) { toast.warn('Enter a non-zero point amount'); return; }
+    setAdjusting(true);
+    try {
+      const updated = await loyaltyV2.adjustCustomerPoints(activeId, {
+        points: pts,
+        description: adjustReason || undefined,
+      });
+      setProfile(updated);
+      setAdjustPts('');
+      setAdjustReason('');
+      toast.success(`Points adjusted: ${pts > 0 ? '+' : ''}${pts.toLocaleString()}`);
+      await loadLedger(activeId, 0);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Adjustment failed');
+    } finally { setAdjusting(false); }
+  };
+
+  return (
+    <div className="sec-card">
+      <div className="sec-card-head">
+        <div>
+          <h2>Member lookup</h2>
+          <p>
+            Search any customer by their numeric ID to inspect their wallet, full ledger history,
+            and apply manual point adjustments. Every adjustment writes an auditable ledger entry.
+          </p>
+        </div>
+      </div>
+
+      <form className="sec-member-search-form" onSubmit={search}>
+        <label style={{ flex: 1 }}>
+          Customer ID
+          <input
+            type="number"
+            min="1"
+            required
+            value={inputId}
+            onChange={(e) => setInputId(e.target.value)}
+            placeholder="e.g. 42"
+          />
+        </label>
+        <button className="sec-btn sec-btn-primary" disabled={searching} style={{ alignSelf: 'flex-end' }}>
+          {searching ? 'Searching…' : <><FiSearch /> Look up</>}
+        </button>
+      </form>
+
+      {profile && (
+        <>
+          {/* ── Wallet snapshot ─────────────────────────────── */}
+          <div className="sec-member-card">
+            <div className="sec-member-card-header">
+              <FiUser size={16} />
+              <span className="sec-member-number">Member #{profile.memberNumber || '—'}</span>
+              <TierChip code={profile.tierCode} />
+              {profile.tierEffectiveUntil ? (
+                <span className="sec-member-validity">
+                  <FiClock size={12} style={{ verticalAlign: '-1px' }} />
+                  Tier valid until {new Date(profile.tierEffectiveUntil).toLocaleDateString()}
+                </span>
+              ) : profile.tierCode && (
+                <span className="sec-member-validity">Lifetime tier</span>
+              )}
+            </div>
+            <div className="sec-member-stats">
+              <div className="sec-member-stat">
+                <span>{Number(profile.pointsBalance ?? 0).toLocaleString()}</span>
+                <small>Balance</small>
+              </div>
+              <div className="sec-member-stat">
+                <span>{Number(profile.pointsEarnedLifetime ?? 0).toLocaleString()}</span>
+                <small>Lifetime earned</small>
+              </div>
+              <div className="sec-member-stat">
+                <span>{Number(profile.pointsRedeemedLifetime ?? 0).toLocaleString()}</span>
+                <small>Lifetime redeemed</small>
+              </div>
+              <div className="sec-member-stat">
+                <span>{Number(profile.qualifyingCreditsWindow ?? 0).toLocaleString()}</span>
+                <small>QC window (12 mo)</small>
+              </div>
+              <div className="sec-member-stat">
+                <span>{Number(profile.lifetimeCredits ?? 0).toLocaleString()}</span>
+                <small>Lifetime credits</small>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Manual points adjustment ─────────────────────── */}
+          <div className="sec-adjustment-panel">
+            <h4>Manual points adjustment</h4>
+            <p>Positive to credit, negative to debit. Required for goodwill credits, support resolutions, and corrections.</p>
+            <form className="sec-form" onSubmit={doAdjust}>
+              <label>
+                Points (+credit / −debit)
+                <input
+                  type="number"
+                  value={adjustPts}
+                  onChange={(e) => setAdjustPts(e.target.value)}
+                  placeholder="e.g. 500 or -100"
+                  required
+                />
+              </label>
+              <label>
+                Reason (audit log)
+                <input
+                  value={adjustReason}
+                  onChange={(e) => setAdjustReason(e.target.value)}
+                  placeholder="e.g. Goodwill credit — support ticket #1234"
+                />
+              </label>
+              <div className="sec-form-actions">
+                <button className="sec-btn sec-btn-primary" disabled={adjusting}>
+                  {adjusting ? 'Applying…' : <><FiCheck /> Apply adjustment</>}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* ── Ledger ───────────────────────────────────────── */}
+          {ledger && (
+            <div className="sec-member-ledger">
+              <h4>Point history</h4>
+              {ledger.content.length === 0 ? (
+                <div className="sec-empty" style={{ padding: '20px 0' }}>
+                  <p>No ledger entries yet.</p>
+                </div>
+              ) : (
+                <>
+                  <div className="sec-table-wrap">
+                    <table className="sec-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Activity</th>
+                          <th>Points</th>
+                          <th>Booking</th>
+                          <th>Note</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ledger.content.map((entry) => {
+                          const isCredit = entry.pointsDelta > 0;
+                          const isDebit  = entry.pointsDelta < 0;
+                          const color    = isCredit ? '#15803d' : isDebit ? '#dc2626' : 'var(--text-muted)';
+                          return (
+                            <tr key={entry.id}>
+                              <td style={{ whiteSpace: 'nowrap', fontSize: 12, color: 'var(--text-muted)' }}>
+                                {new Date(entry.createdAt).toLocaleDateString()}
+                              </td>
+                              <td>
+                                <span style={{ fontSize: 13, fontWeight: 600 }}>
+                                  {humanAdminReason(entry.reasonCode, entry.entryType)}
+                                </span>
+                              </td>
+                              <td>
+                                <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', color }}>
+                                  {isCredit ? '+' : ''}{Number(entry.pointsDelta).toLocaleString()}
+                                </span>
+                              </td>
+                              <td>
+                                {entry.bookingRef
+                                  ? <code style={{ fontSize: 12 }}>{entry.bookingRef}</code>
+                                  : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                              </td>
+                              <td style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 240 }}>
+                                {entry.description || '—'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {ledger.totalPages > 1 && (
+                    <div className="sec-pager">
+                      <button className="sec-btn" disabled={ledgerPage === 0}
+                              onClick={() => loadLedger(activeId, ledgerPage - 1)}>← Prev</button>
+                      <span>Page {ledgerPage + 1} of {ledger.totalPages}</span>
+                      <button className="sec-btn" disabled={ledgerPage + 1 >= ledger.totalPages}
+                              onClick={() => loadLedger(activeId, ledgerPage + 1)}>Next →</button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function humanAdminReason(code, type) {
+  if (!code) return type || 'Activity';
+  const map = {
+    EARN_BOOKING: 'Earned on booking', BOOKING_COMPLETED: 'Earned on booking',
+    EARN_BONUS: 'Bonus points', EARN_WELCOME: 'Welcome bonus', WELCOME_BONUS: 'Welcome bonus',
+    EARN_BIRTHDAY: 'Birthday bonus', REDEEM_BOOKING: 'Redeemed on booking',
+    BOOKING_REDEMPTION: 'Redeemed on booking', REDEEM_REWARD: 'Redeemed reward',
+    EXPIRE: 'Points expired', LOT_EXPIRED: 'Points expired',
+    ADJUST_ADMIN: 'Admin adjustment', ADMIN_ADJUSTMENT: 'Admin adjustment',
+    STATUS_MATCH: 'Status match bonus', GUEST_MERGE: 'Guest activity credited',
+    REVERSE_REDEEM: 'Redemption refunded', CANCELLATION: 'Booking cancellation',
+  };
+  return map[code] || code.replace(/_/g, ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase());
+}
+
+/* ──────────────────────────────────────────────────────────────
    Shared: tier chip
    ────────────────────────────────────────────────────────────── */
+function toPerkPayload(draft) {
+  return {
+    ...draft,
+    code: String(draft.code || '').trim().toUpperCase(),
+    category: draft.category || 'SOFT',
+    fulfillmentType: draft.fulfillmentType || 'AUTOMATIC',
+    deliveryHandlerKey: String(draft.deliveryHandlerKey || '').trim(),
+    defaultPointCost: Number(draft.defaultPointCost ?? 0),
+    cooldownHours: Number(draft.cooldownHours ?? 0),
+    paramsJson: draft.paramsJson?.trim() || null,
+  };
+}
+
+function toTierPayload(draft) {
+  return {
+    ...draft,
+    code: String(draft.code || '').trim().toUpperCase(),
+    rankOrder: Number(draft.rankOrder ?? 0),
+    qualificationCreditsRequired: Number(draft.qualificationCreditsRequired ?? 0),
+    qualificationWindowDays: Number(draft.qualificationWindowDays ?? 365),
+    softLandingTierCode: draft.softLandingTierCode?.trim()?.toUpperCase() || null,
+    validityCalendarYearsAfter:
+      draft.validityCalendarYearsAfter === '' ? null : draft.validityCalendarYearsAfter,
+    lifetimeCreditsRequired:
+      draft.lifetimeCreditsRequired === '' ? null : draft.lifetimeCreditsRequired,
+    lifetimeYearsHeldRequired:
+      draft.lifetimeYearsHeldRequired === '' ? null : draft.lifetimeYearsHeldRequired,
+  };
+}
+
 function TierChip({ code }) {
   const c = String(code || '').toUpperCase();
   if (!c) return <span style={{ color: 'var(--text-muted)' }}>—</span>;

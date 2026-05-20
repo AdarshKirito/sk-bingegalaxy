@@ -8,11 +8,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
+import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
+
+import java.nio.charset.StandardCharsets;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -181,10 +186,18 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
 
     private Mono<Void> rejectRequest(ServerWebExchange exchange, String path, String bucketKey) {
         log.warn("Rate limit exceeded for {} on path {}", bucketKey, path);
-        exchange.getResponse().setStatusCode(HttpStatus.TOO_MANY_REQUESTS);
-        exchange.getResponse().getHeaders().add("Retry-After", RETRY_AFTER_SECONDS);
-        exchange.getResponse().getHeaders().add("X-RateLimit-Retry-After", RETRY_AFTER_SECONDS);
-        return exchange.getResponse().setComplete();
+        ServerHttpResponse response = exchange.getResponse();
+        response.setStatusCode(HttpStatus.TOO_MANY_REQUESTS);
+        response.getHeaders().add("Retry-After", RETRY_AFTER_SECONDS);
+        response.getHeaders().add("X-RateLimit-Retry-After", RETRY_AFTER_SECONDS);
+        response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
+        long retrySecs = Long.parseLong(RETRY_AFTER_SECONDS);
+        String body = "{\"status\":429,\"error\":\"Too Many Requests\",\"message\":\"You're sending requests too quickly. Please wait "
+                + retrySecs + " second" + (retrySecs != 1 ? "s" : "") + " before trying again.\",\"retryAfterSeconds\":"
+                + retrySecs + "}";
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        DataBuffer buffer = response.bufferFactory().wrap(bytes);
+        return response.writeWith(Mono.just(buffer));
     }
 
     private String resolveRedisCounterKey(String bucketKey) {

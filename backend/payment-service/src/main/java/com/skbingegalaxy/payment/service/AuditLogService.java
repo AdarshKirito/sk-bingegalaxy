@@ -35,6 +35,9 @@ public class AuditLogService {
     public static final String ACTION_CASH_RECORDED   = "CASH_RECORDED";
     public static final String ACTION_PAYMENT_ADDED   = "PAYMENT_ADDED";
     public static final String ACTION_SIM_SUCCESS     = "PAYMENT_SIMULATED";
+    public static final String ACTION_APPROVAL_REQUESTED = "APPROVAL_REQUESTED";
+    public static final String ACTION_APPROVAL_APPROVED  = "APPROVAL_APPROVED";
+    public static final String ACTION_APPROVAL_REJECTED  = "APPROVAL_REJECTED";
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void record(String actor,

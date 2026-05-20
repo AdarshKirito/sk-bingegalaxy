@@ -119,6 +119,8 @@
   font-weight: 500;
   background: transparent;
   color: var(--text-secondary);
+  white-space: nowrap;   /* never wrap label text inside a pill */
+  flex-shrink: 0;        /* let the row wrap instead of squashing/stacking text */
 }
 
 .ab-sub-tab.active {
@@ -489,6 +491,17 @@
   padding: 0.6rem 0;
   border-bottom: 1px solid var(--border);
   font-size: 0.85rem;
+}
+
+/* Critical entries (manual-review, refund-failed, approval-rejected,
+ * escalations) get a red left rail so admins notice them in long logs. */
+.ab-event-log-entry--critical {
+  padding-left: 0.65rem;
+  border-left: 3px solid #ef4444;
+  background: rgba(239, 68, 68, 0.06);
+}
+.ab-event-log-entry--critical .ab-event-log-type {
+  color: #ef4444;
 }
 
 .ab-event-log-header {

@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { adminService, toArray } from '../services/endpoints';
+import { useConfirm } from '../components/ui/ConfirmProvider';
 import { toast } from 'react-toastify';
 import { FiLock, FiUnlock, FiPlus, FiRefreshCw, FiClock } from 'react-icons/fi';
 import { useBinge } from '../context/BingeContext';
@@ -29,6 +30,7 @@ function Countdown({ until }) {
 
 export default function AdminCustomerFreezes() {
   const { selectedBinge } = useBinge();
+  const confirm = useConfirm();
   const [freezes, setFreezes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -52,10 +54,19 @@ export default function AdminCustomerFreezes() {
   useEffect(() => { fetchFreezes(); }, [fetchFreezes, refreshTick]);
 
   const handleLift = async (freeze) => {
-    const reason = window.prompt(`Lift freeze for customer ${freeze.customerId}? Enter a brief reason (optional):`, '');
-    if (reason === null) return; // cancelled
+    const result = await confirm({
+      title: `Lift freeze for customer #${freeze.customerId}?`,
+      message: 'The customer will regain immediate access to bookings. The lift action and reason are recorded in the audit log.',
+      confirmLabel: 'Lift freeze',
+      variant: 'primary',
+      withReason: true,
+      reasonRequired: false,
+      reasonLabel: 'Reason (optional)',
+      reasonPlaceholder: 'e.g. Verified contact, customer escalation…',
+    });
+    if (!result) return;
     try {
-      await adminService.liftFreeze(freeze.id, reason || 'Lifted by admin');
+      await adminService.liftFreeze(freeze.id, result.reason || 'Lifted by admin');
       toast.success('Freeze lifted');
       setRefreshTick(t => t + 1);
     } catch (err) {

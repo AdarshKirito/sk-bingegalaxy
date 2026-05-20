@@ -79,6 +79,42 @@ public class Booking {
     @Column(length = 1000)
     private String adminNotes;
 
+    // ── Item 24 — support console fields ─────────────────────────────────
+    /**
+     * Customer-supplied or admin-supplied cancellation reason. Captured at
+     * cancel time so the support timeline shows WHY a booking was cancelled
+     * without parsing free-form notes. Null until cancelled.
+     */
+    @Column(length = 500)
+    private String cancellationReason;
+
+    /**
+     * Escalation level for support cases. NONE means no active escalation.
+     * Stored as a String (not enum) to keep the column open to product
+     * tweaks without a migration; controller accepts a fixed enum-like set
+     * (NONE, L1, L2, L3).
+     */
+    @Column(length = 16)
+    @Builder.Default
+    private String escalationLevel = "NONE";
+
+    /** Free-text reason supplied with the most recent escalation. */
+    @Column(length = 500)
+    private String escalationReason;
+
+    /** Goodwill credit (in rupees, mirrors totalAmount precision) issued to this booking by support. */
+    @Column(precision = 10, scale = 2)
+    private BigDecimal goodwillCredit;
+
+    /** Why the goodwill was issued (e.g. "missed reminder"). */
+    @Column(length = 500)
+    private String goodwillReason;
+
+    /** Admin user id who issued the goodwill (for audit). */
+    private Long goodwillIssuedByAdminId;
+
+    private java.time.LocalDateTime goodwillIssuedAt;
+
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal baseAmount;
 
@@ -115,6 +151,16 @@ public class Booking {
     @Column(nullable = false)
     @Builder.Default
     private boolean checkedIn = false;
+
+    /**
+     * True when the customer checked in after their {@code startTime} (plus
+     * the configured grace window). Set at consume-token time; used by the
+     * admin UI to surface a derived "LATE_ARRIVAL" pill without expanding
+     * the {@link BookingStatus} enum.
+     */
+    @Column(name = "late_arrival", nullable = false)
+    @Builder.Default
+    private boolean lateArrival = false;
 
     // ── Check-in tracking ────────────────────────────────────
     private LocalDateTime actualCheckInTime;
@@ -187,6 +233,67 @@ public class Booking {
     @Column(length = 100)
     private String surgeLabel;
 
+    // ── Tax / currency snapshot (V38 + V39 migrations) ───────
+    /** Pre-tax subtotal in base currency (V38). */
+    @Column(name = "subtotal_amount", precision = 12, scale = 2)
+    private BigDecimal subtotalAmount;
+
+    /** Total tax charged in base currency (V38). */
+    @Column(name = "tax_amount", precision = 12, scale = 2)
+    @Builder.Default
+    private BigDecimal taxAmount = BigDecimal.ZERO;
+
+    /** Per-rule tax breakdown serialised as JSON for invoice rendering (V38). */
+    @Column(name = "tax_breakdown_json", columnDefinition = "text")
+    private String taxBreakdownJson;
+
+    /** Currency the customer was quoted in at booking time (V38). */
+    @Column(name = "currency_code", length = 8)
+    @Builder.Default
+    private String currencyCode = "INR";
+
+    /** Total in the display currency, after FX conversion (V38). */
+    @Column(name = "display_amount", precision = 14, scale = 2)
+    private BigDecimal displayAmount;
+
+    /** FX rate captured at booking time so historical invoices stay reproducible (V38). */
+    @Column(name = "fx_rate", precision = 18, scale = 8)
+    @Builder.Default
+    private BigDecimal fxRate = BigDecimal.ONE;
+
+    /** Canonical base currency the booking is stored in (V39). */
+    @Column(name = "base_currency_code", length = 8)
+    private String baseCurrencyCode;
+
+    /** Currency shown to the customer; usually the same as quoted (V39). */
+    @Column(name = "display_currency_code", length = 8)
+    private String displayCurrencyCode;
+
+    /** Currency the payment was charged in (V39). */
+    @Column(name = "payment_currency_code", length = 8)
+    private String paymentCurrencyCode;
+
+    /** Currency funds will be settled into (V39). */
+    @Column(name = "settlement_currency_code", length = 8)
+    private String settlementCurrencyCode;
+
+    /** FK to immutable {@code booking_price_snapshots} row (V39). */
+    @Column(name = "price_snapshot_id")
+    private Long priceSnapshotId;
+
+    /** FK to {@code billing_addresses} row used for invoice (V39). */
+    @Column(name = "billing_address_id")
+    private Long billingAddressId;
+
+    /** When the FX quote stops being valid (V39). */
+    @Column(name = "fx_locked_until")
+    private LocalDateTime fxLockedUntil;
+
+    /** Schema version for the pricing/tax calculation engine (V39). */
+    @Column(name = "calculation_version", nullable = false)
+    @Builder.Default
+    private int calculationVersion = 1;
+
     @CreationTimestamp
     @Column(updatable = false)
     private LocalDateTime createdAt;
@@ -202,4 +309,30 @@ public class Booking {
      */
     @Column(name = "cancellation_actor", length = 20)
     private String cancellationActor;
+
+    /**
+     * Defensive defaulting for the V38 finance-snapshot columns. The DB
+     * marks {@code subtotal_amount} as {@code NOT NULL}; if any code path
+     * forgets to set it (we already had one such regression), default it
+     * to {@code totalAmount} so the persist succeeds with the same value
+     * the V38 backfill would have written. {@code taxAmount} also gets a
+     * zero default for the rare case the {@code @Builder.Default} was
+     * bypassed (e.g. reflective construction).
+     *
+     * <p>This is belt-and-suspenders: the canonical place to compute the
+     * pre-tax subtotal is the booking creation flow; this hook only
+     * guards against the column-not-set error class.
+     */
+    @PrePersist
+    void prePersistFinanceDefaults() {
+        if (this.subtotalAmount == null) {
+            this.subtotalAmount = this.totalAmount;
+        }
+        if (this.taxAmount == null) {
+            this.taxAmount = BigDecimal.ZERO;
+        }
+        if (this.currencyCode == null) {
+            this.currencyCode = "INR";
+        }
+    }
 }

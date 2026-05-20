@@ -18,6 +18,10 @@ public class BookingEventLogDto {
     private String triggeredByName;
     private String description;
     private String snapshot;
+    private String reason;
+    private String ipAddress;
+    private String userAgent;
+    private Long bingeId;
     private int eventVersion;
     private LocalDateTime createdAt;
 }

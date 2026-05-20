@@ -43,6 +43,8 @@ public class BookingDto {
     private PaymentStatus paymentStatus;
     private String paymentMethod;
     private boolean checkedIn;
+    /** True when the customer checked in after the scheduled startTime. Derived state surfaced to admin UI. */
+    private boolean lateArrival;
     private LocalDateTime actualCheckInTime;
     private LocalDateTime actualCheckoutTime;
     private Integer actualUsedMinutes;

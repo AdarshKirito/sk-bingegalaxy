@@ -3,11 +3,13 @@ import { adminService } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import { FiBarChart2, FiCalendar, FiCheckCircle, FiClock, FiAlertTriangle, FiDownload } from 'react-icons/fi';
 import { exportReportCSV, exportReportPDF } from '../services/exportUtils';
+import { useAuth } from '../context/AuthContext';
 import './AdminPages.css';
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 export default function AdminReports() {
+  const { isSuperAdmin } = useAuth();
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState(todayISO());
   const [days, setDays] = useState('');
@@ -18,6 +20,11 @@ export default function AdminReports() {
   const [opInfo, setOpInfo] = useState(null);  // OperationalDateDto from backend
   const [auditResult, setAuditResult] = useState(null);
   const [auditing, setAuditing] = useState(false);
+
+  // SUPER_ADMIN manual operational-date override
+  const [overrideDate, setOverrideDate] = useState('');
+  const [overrideBusy, setOverrideBusy] = useState(false);
+  const [advanceBusy, setAdvanceBusy] = useState(false);
 
   // Fetch operational date info (poll every 30s so the "available" status refreshes near midnight)
   const fetchOpInfo = useCallback(() => {
@@ -83,6 +90,53 @@ export default function AdminReports() {
       toast.error(err.response?.data?.message || err.userMessage || 'Audit failed');
     }
     setAuditing(false);
+  };
+
+  // ── SUPER_ADMIN: manual operational-date controls ──
+  const handleAdvanceOpDate = async () => {
+    if (!isSuperAdmin) return;
+    if (!window.confirm(
+      `Advance the operational date by one day?\n\n` +
+      `Current: ${opInfo?.operationalDate}\n` +
+      `This skips the daily audit — bookings on the current operational day ` +
+      `that aren't checked-in / completed will remain in their current status.`)) return;
+    setAdvanceBusy(true);
+    try {
+      const res = await adminService.advanceOperationalDate();
+      const result = res.data.data || res.data;
+      toast.success(`Operational date advanced to ${result.operationalDate}`);
+      fetchOpInfo();
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.userMessage || 'Failed to advance operational date');
+    } finally {
+      setAdvanceBusy(false);
+    }
+  };
+
+  const handleSetOpDate = async () => {
+    if (!isSuperAdmin) return;
+    if (!overrideDate) { toast.error('Pick a date to override'); return; }
+    if (overrideDate === opInfo?.operationalDate) {
+      toast.info('Operational date is already set to that value');
+      return;
+    }
+    if (!window.confirm(
+      `Override operational date to ${overrideDate}?\n\n` +
+      `Current: ${opInfo?.operationalDate}\n` +
+      `This bypasses the nightly audit. Bookings on intermediate days will ` +
+      `keep their current status until manually reconciled.`)) return;
+    setOverrideBusy(true);
+    try {
+      const res = await adminService.setOperationalDate(overrideDate);
+      const result = res.data.data || res.data;
+      toast.success(`Operational date set to ${result.operationalDate}`);
+      setOverrideDate('');
+      fetchOpInfo();
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.userMessage || 'Failed to set operational date');
+    } finally {
+      setOverrideBusy(false);
+    }
   };
 
   const daysLabel = fromDate && toDate ? (() => {
@@ -233,6 +287,66 @@ export default function AdminReports() {
             <FiAlertTriangle style={{ verticalAlign: -2, marginRight: 3 }} />
             The audit button will activate after 11:59 PM server time.
           </p>
+        )}
+
+        {/* SUPER_ADMIN-only manual operational-date overrides.
+            Used to recover from clock drift, push past stuck audit windows,
+            and roll forward the business day in non-prod environments. */}
+        {isSuperAdmin && (
+          <div
+            className="adm-op-override"
+            style={{
+              marginTop: '1.25rem',
+              padding: '0.9rem 1rem',
+              border: '1px dashed var(--border)',
+              borderRadius: 'var(--radius-sm)',
+              background: 'rgba(255, 165, 0, 0.05)'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+              <FiAlertTriangle style={{ color: 'var(--warning, #f59e0b)' }} />
+              <strong style={{ fontSize: '0.9rem' }}>Super-admin override</strong>
+              <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                — bypass the nightly audit gate
+              </span>
+            </div>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '0 0 0.6rem' }}>
+              Use these controls to recover from clock drift or to roll the business day forward
+              in non-production environments. Bookings on intermediate days are <strong>not</strong>
+              auto-resolved — the daily audit is the canonical path.
+            </p>
+            <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleAdvanceOpDate}
+                disabled={advanceBusy || overrideBusy || !opInfo}
+                title="Advance the operational date by one calendar day"
+              >
+                {advanceBusy ? 'Advancing…' : '+1 Day'}
+              </button>
+              <div className="input-group" style={{ margin: 0 }}>
+                <label htmlFor="op-override-date" style={{ fontSize: '0.78rem' }}>Set to specific date</label>
+                <input
+                  id="op-override-date"
+                  type="date"
+                  value={overrideDate}
+                  onChange={(e) => setOverrideDate(e.target.value)}
+                  disabled={overrideBusy || advanceBusy}
+                  style={{ minWidth: 160 }}
+                />
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={handleSetOpDate}
+                disabled={overrideBusy || advanceBusy || !overrideDate}
+                title="Force-set the operational date (within ±90/30 days)"
+              >
+                {overrideBusy ? 'Setting…' : 'Override'}
+              </button>
+            </div>
+          </div>
         )}
 
         {auditResult && (

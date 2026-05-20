@@ -25,6 +25,7 @@ import {
 import DOMPurify from 'dompurify';
 import useBingeStore from '../stores/bingeStore';
 import PhoneField, { splitPhone } from '../components/form/PhoneField';
+import BookingTimelinePanel from '../components/booking/BookingTimelinePanel';
 import './CustomerHub.css';
 
 const formatAmount = (value) => `₹${Number(value || 0).toLocaleString()}`;
@@ -349,6 +350,17 @@ export default function BookingConfirmation() {
       </section>
 
       <section className="customer-flow-grid">
+        <article className="customer-flow-card customer-flow-stack">
+          <div className="customer-flow-card-head">
+            <div>
+              <span className="customer-flow-section-label">Lifecycle</span>
+              <h2>Booking timeline</h2>
+              <p>A live trail of every milestone from reservation to completion.</p>
+            </div>
+          </div>
+          <BookingTimelinePanel bookingRef={booking.bookingRef} />
+        </article>
+
         <article className="customer-flow-card customer-flow-stack">
           <div className="customer-flow-card-head">
             <div>

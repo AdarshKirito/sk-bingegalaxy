@@ -10,6 +10,7 @@ import org.springframework.cache.annotation.Caching;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -102,6 +103,10 @@ public class LoyaltyAdminService {
      */
     @CacheEvict(value = "loyaltyV2.perks", allEntries = true)
     public LoyaltyPerkCatalog savePerk(LoyaltyPerkCatalog draft) {
+        validatePerk(draft);
+        if (draft.getEffectiveFrom() == null) {
+            draft.setEffectiveFrom(LocalDateTime.now());
+        }
         LoyaltyPerkCatalog saved = perkCatalogRepository.save(draft);
         log.info("[loyalty-v2] perk saved: program={} code={} handler={}",
                 saved.getProgramId(), saved.getCode(), saved.getDeliveryHandlerKey());
@@ -124,7 +129,7 @@ public class LoyaltyAdminService {
 
     @CacheEvict(value = "loyaltyV2.bindings", allEntries = true)
     public LoyaltyBingeBinding enableBingeForLoyalty(Long programId, Long bingeId, Long tenantId, Long adminUserId) {
-        LoyaltyBingeBinding binding = bindingRepository.findActive(programId, bingeId)
+        LoyaltyBingeBinding binding = bindingRepository.findByProgramIdAndBingeId(programId, bingeId)
                 .orElseGet(() -> LoyaltyBingeBinding.builder()
                         .programId(programId)
                         .bingeId(bingeId)
@@ -133,6 +138,7 @@ public class LoyaltyAdminService {
                         .effectiveFrom(LocalDateTime.now())
                         .build());
         binding.setStatus(LoyaltyV2Constants.BINDING_ENABLED);
+        binding.setLegacyFrozen(false);
         binding.setEnrolledAt(LocalDateTime.now());
         binding.setEnrolledByAdminId(adminUserId);
         binding.setDisabledAt(null);
@@ -146,6 +152,9 @@ public class LoyaltyAdminService {
     public LoyaltyBingeBinding disableBingeForLoyalty(Long bindingId, Long adminUserId) {
         LoyaltyBingeBinding binding = bindingRepository.findById(bindingId)
                 .orElseThrow(() -> new IllegalArgumentException("binding not found: " + bindingId));
+        if (binding.isLegacyFrozen()) {
+            throw new IllegalStateException("legacy-frozen binding must be enabled/thawed before it can be disabled");
+        }
         binding.setStatus(LoyaltyV2Constants.BINDING_DISABLED);
         binding.setDisabledAt(LocalDateTime.now());
         binding.setDisabledByAdminId(adminUserId);
@@ -165,15 +174,19 @@ public class LoyaltyAdminService {
     @CacheEvict(value = "loyaltyV2.bindings", allEntries = true)
     public int bulkSetStatus(List<Long> bindingIds, String status, Long adminUserId) {
         if (bindingIds == null || bindingIds.isEmpty()) return 0;
+        if (!LoyaltyV2Constants.BINDING_ENABLED.equals(status)
+                && !LoyaltyV2Constants.BINDING_DISABLED.equals(status)) {
+            throw new IllegalArgumentException("status must be ENABLED or DISABLED");
+        }
         LocalDateTime now = LocalDateTime.now();
         boolean enabling = LoyaltyV2Constants.BINDING_ENABLED.equals(status);
         int touched = 0;
         for (Long id : bindingIds) {
             LoyaltyBingeBinding b = bindingRepository.findById(id).orElse(null);
             if (b == null) continue;
-            if (b.isLegacyFrozen()) continue;               // legacy-frozen bindings are immutable
             b.setStatus(status);
             if (enabling) {
+                b.setLegacyFrozen(false);
                 b.setEnrolledAt(now);
                 b.setEnrolledByAdminId(adminUserId);
                 b.setDisabledAt(null);
@@ -195,6 +208,7 @@ public class LoyaltyAdminService {
     // ─────────────────────────────────────────────────────────────────────
 
     public LoyaltyBingeEarningRule upsertEarningRule(LoyaltyBingeEarningRule draft, LocalDateTime at) {
+        validateEarningRule(draft);
         // Close any active rule with the same (bindingId, tierCode).
         earningRuleRepository.findActive(draft.getBindingId(), at).stream()
                 .filter(r -> java.util.Objects.equals(r.getTierCode(), draft.getTierCode()))
@@ -210,6 +224,7 @@ public class LoyaltyAdminService {
     }
 
     public LoyaltyBingeRedemptionRule upsertRedemptionRule(LoyaltyBingeRedemptionRule draft, LocalDateTime at) {
+        validateRedemptionRule(draft);
         redemptionRuleRepository.findActive(draft.getBindingId(), at)
                 .ifPresent(r -> { r.setEffectiveTo(at); redemptionRuleRepository.save(r); });
         draft.setId(null);
@@ -219,6 +234,62 @@ public class LoyaltyAdminService {
         log.info("[loyalty-v2] redeem-rule upsert: binding={} pts-per-currency={} at={}",
                 saved.getBindingId(), saved.getPointsPerCurrencyUnit(), at);
         return saved;
+    }
+
+    private void validateEarningRule(LoyaltyBingeEarningRule draft) {
+        if (draft.getBindingId() == null) throw new IllegalArgumentException("bindingId is required");
+        if (draft.getPointsNumerator() <= 0) throw new IllegalArgumentException("pointsNumerator must be > 0");
+        if (draft.getAmountDenominator() == null || draft.getAmountDenominator().compareTo(BigDecimal.ZERO) <= 0)
+            throw new IllegalArgumentException("amountDenominator must be > 0");
+        if (draft.getTierMultiplier() == null || draft.getTierMultiplier().compareTo(BigDecimal.ZERO) <= 0)
+            draft.setTierMultiplier(BigDecimal.ONE);
+        if (draft.getQcMultiplier() == null || draft.getQcMultiplier().compareTo(BigDecimal.ZERO) < 0)
+            draft.setQcMultiplier(BigDecimal.ONE);
+        if (draft.getMinBookingAmount() != null && draft.getMinBookingAmount().compareTo(BigDecimal.ZERO) < 0)
+            throw new IllegalArgumentException("minBookingAmount must be >= 0");
+        if (draft.getCapPerBooking() != null && draft.getCapPerBooking() < 0)
+            throw new IllegalArgumentException("capPerBooking must be >= 0");
+        if (draft.getTierCode() != null && draft.getTierCode().isBlank()) {
+            draft.setTierCode(null);
+        } else if (draft.getTierCode() != null) {
+            draft.setTierCode(draft.getTierCode().trim().toUpperCase());
+        }
+        if (draft.getRuleType() == null || draft.getRuleType().isBlank()) {
+            draft.setRuleType("FLAT_PER_AMOUNT");
+        }
+    }
+
+    private void validateRedemptionRule(LoyaltyBingeRedemptionRule draft) {
+        if (draft.getBindingId() == null) throw new IllegalArgumentException("bindingId is required");
+        if (draft.getPointsPerCurrencyUnit() <= 0)
+            throw new IllegalArgumentException("pointsPerCurrencyUnit must be > 0");
+        if (draft.getMinRedemptionPoints() < 0)
+            throw new IllegalArgumentException("minRedemptionPoints must be >= 0");
+        if (draft.getMaxRedemptionPercent() == null
+                || draft.getMaxRedemptionPercent().compareTo(BigDecimal.ZERO) <= 0
+                || draft.getMaxRedemptionPercent().compareTo(new BigDecimal("100.00")) > 0) {
+            throw new IllegalArgumentException("maxRedemptionPercent must be > 0 and <= 100");
+        }
+        if (draft.getTierBonusPctJson() != null && draft.getTierBonusPctJson().isBlank()) {
+            draft.setTierBonusPctJson(null);
+        }
+    }
+
+    private void validatePerk(LoyaltyPerkCatalog draft) {
+        if (draft.getProgramId() == null) throw new IllegalArgumentException("programId is required");
+        if (draft.getCode() == null || draft.getCode().isBlank())
+            throw new IllegalArgumentException("code is required");
+        if (draft.getDisplayName() == null || draft.getDisplayName().isBlank())
+            throw new IllegalArgumentException("displayName is required");
+        if (draft.getCategory() == null || draft.getCategory().isBlank())
+            draft.setCategory("SOFT");
+        if (draft.getFulfillmentType() == null || draft.getFulfillmentType().isBlank())
+            draft.setFulfillmentType("AUTOMATIC");
+        if (draft.getDeliveryHandlerKey() == null || draft.getDeliveryHandlerKey().isBlank())
+            throw new IllegalArgumentException("deliveryHandlerKey is required");
+        if (draft.getDefaultPointCost() < 0) throw new IllegalArgumentException("defaultPointCost must be >= 0");
+        if (draft.getCooldownHours() < 0) throw new IllegalArgumentException("cooldownHours must be >= 0");
+        draft.setCode(draft.getCode().trim().toUpperCase());
     }
 
     @CacheEvict(value = "loyaltyV2.perks", allEntries = true)

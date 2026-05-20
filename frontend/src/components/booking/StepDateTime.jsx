@@ -1,9 +1,11 @@
 import { format } from 'date-fns';
+import SlotSuggestionsPanel from './SlotSuggestionsPanel';
 
 export default function StepDateTime({
   form, setForm, isAdmin, selectedEvent,
   durationOptions, durationSlots, availability, resolvedPricing,
   venueRooms, activeSurge, availableRoomIds,
+  surgeRules, editBookingRef,
   fmtTime, fmtDuration,
   onNext, onBack,
 }) {
@@ -35,15 +37,28 @@ export default function StepDateTime({
           Number of Guests
         </label>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <button type="button" className="btn btn-secondary btn-sm" aria-label="Decrease guests"
-            style={{ width: '36px', height: '36px', padding: 0, fontSize: '1.2rem', fontWeight: 700 }}
-            disabled={form.numberOfGuests <= 1}
-            onClick={() => setForm(f => ({ ...f, numberOfGuests: Math.max(1, f.numberOfGuests - 1) }))}>−</button>
-          <span style={{ fontSize: '1.1rem', fontWeight: 700, minWidth: '28px', textAlign: 'center' }} aria-live="polite">{form.numberOfGuests}</span>
-          <button type="button" className="btn btn-secondary btn-sm" aria-label="Increase guests"
-            style={{ width: '36px', height: '36px', padding: 0, fontSize: '1.2rem', fontWeight: 700 }}
-            disabled={form.numberOfGuests >= 100}
-            onClick={() => setForm(f => ({ ...f, numberOfGuests: Math.min(100, f.numberOfGuests + 1) }))}>+</button>
+          {(() => {
+            const minG = Number.isFinite(Number(selectedEvent?.minGuests)) && selectedEvent?.minGuests != null
+              ? Number(selectedEvent.minGuests) : 1;
+            const maxG = Number.isFinite(Number(selectedEvent?.maxGuests)) && selectedEvent?.maxGuests != null
+              ? Number(selectedEvent.maxGuests) : 100;
+            return (<>
+              <button type="button" className="btn btn-secondary btn-sm" aria-label="Decrease guests"
+                style={{ width: '36px', height: '36px', padding: 0, fontSize: '1.2rem', fontWeight: 700 }}
+                disabled={form.numberOfGuests <= minG}
+                onClick={() => setForm(f => ({ ...f, numberOfGuests: Math.max(minG, f.numberOfGuests - 1) }))}>−</button>
+              <span style={{ fontSize: '1.1rem', fontWeight: 700, minWidth: '28px', textAlign: 'center' }} aria-live="polite">{form.numberOfGuests}</span>
+              <button type="button" className="btn btn-secondary btn-sm" aria-label="Increase guests"
+                style={{ width: '36px', height: '36px', padding: 0, fontSize: '1.2rem', fontWeight: 700 }}
+                disabled={form.numberOfGuests >= maxG}
+                onClick={() => setForm(f => ({ ...f, numberOfGuests: Math.min(maxG, f.numberOfGuests + 1) }))}>+</button>
+              {(selectedEvent?.minGuests != null || selectedEvent?.maxGuests != null) && (
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  ({selectedEvent?.minGuests ?? 1}–{selectedEvent?.maxGuests ?? '∞'})
+                </span>
+              )}
+            </>);
+          })()}
         </div>
         {(() => {
           const rep = resolvedPricing?.eventPricings?.find(ep => ep.eventTypeId === selectedEvent?.id);
@@ -113,6 +128,18 @@ export default function StepDateTime({
                     </button>
                   )}
                 </div>
+                <SlotSuggestionsPanel
+                  desiredDate={form.bookingDate}
+                  desiredStartMin={form.startTime}
+                  durationMinutes={form.durationMinutes}
+                  availability={availability}
+                  surgeRules={surgeRules}
+                  isAdmin={isAdmin}
+                  editBookingRef={editBookingRef}
+                  fmtTime={fmtTime}
+                  fmtDuration={fmtDuration}
+                  onPick={(date, startMin) => setForm(f => ({ ...f, bookingDate: date, startTime: startMin }))}
+                />
               </div>
             )
           ) : <p style={{ color: 'var(--text-muted)' }}>Select a date first</p>}

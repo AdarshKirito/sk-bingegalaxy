@@ -200,6 +200,15 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     long countByBingeIdAndBookingDateAndStatus(Long bingeId, LocalDate date, BookingStatus status);
     long countByBingeIdAndStatus(Long bingeId, BookingStatus status);
 
+    /**
+     * Find bookings on {@code date} that are still PENDING/CONFIRMED and whose
+     * start time is at-or-before {@code cutoffTime} — i.e. the customer never
+     * showed up. Used by {@code NoShowAutomationScheduler} to mark NO_SHOW
+     * after the configured grace period.
+     */
+    @Query("SELECT b FROM Booking b WHERE b.bookingDate = :date AND b.status IN ('PENDING','CONFIRMED') AND b.startTime <= :cutoffTime")
+    List<Booking> findNoShowCandidates(@Param("date") LocalDate date, @Param("cutoffTime") LocalTime cutoffTime);
+
     @Query("SELECT COUNT(b) FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate = :date AND b.checkedIn = :ci AND b.status = 'CHECKED_IN'")
     long countByBingeAndDateAndCheckedIn(@Param("bid") Long bingeId, @Param("date") LocalDate date, @Param("ci") boolean checkedIn);
 
@@ -230,6 +239,63 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     // Saga: find PENDING bookings older than a cutoff (for timeout cancellation)
     @Query("SELECT b FROM Booking b WHERE b.status = 'PENDING' AND b.paymentStatus = 'PENDING' AND b.createdAt < :cutoff")
     List<Booking> findStalePendingBookings(@Param("cutoff") LocalDateTime cutoff);
+
+    // Recovery queue: bookings paid by the customer but never marked CONFIRMED
+    // by the saga. Indicates the BOOKING_CONFIRMED side of the
+    // payment.success → confirm transition is stuck.
+    @Query("SELECT b FROM Booking b WHERE b.status = 'PENDING' " +
+           "AND b.paymentStatus = 'SUCCESS' AND b.updatedAt < :cutoff " +
+           "ORDER BY b.updatedAt ASC")
+    Page<Booking> findPaidButNotConfirmed(@Param("cutoff") LocalDateTime cutoff, Pageable pageable);
+
+    // Recovery queue: NO_SHOW bookings within a date range — admin reviews
+    // these to follow up with customers and reconcile partial refunds.
+    @Query("SELECT b FROM Booking b WHERE b.status = 'NO_SHOW' " +
+           "AND b.bookingDate BETWEEN :from AND :to ORDER BY b.bookingDate DESC")
+    Page<Booking> findNoShowBookings(@Param("from") LocalDate from,
+                                     @Param("to") LocalDate to,
+                                     Pageable pageable);
+
+    // Recovery queue: stuck pending — paged variant of findStalePendingBookings.
+    @Query("SELECT b FROM Booking b WHERE b.status = 'PENDING' " +
+           "AND b.paymentStatus = 'PENDING' AND b.createdAt < :cutoff " +
+           "ORDER BY b.createdAt ASC")
+    Page<Booking> findStuckPending(@Param("cutoff") LocalDateTime cutoff, Pageable pageable);
+
+
+    // ── Funnel analytics (binge-scoped via service layer) ────
+    // All filter on createdAt (when the booking was started) so a booking that
+    // ends up CANCELLED still counts toward the "Started" stage. Aggregates are
+    // counts only — no PII flows through these queries.
+
+    @Query("SELECT COUNT(b) FROM Booking b WHERE b.bingeId = :bid " +
+           "AND b.createdAt >= :from AND b.createdAt < :to")
+    long countCreatedInRange(@Param("bid") Long bingeId,
+                             @Param("from") LocalDateTime from,
+                             @Param("to") LocalDateTime to);
+
+    @Query("SELECT COUNT(b) FROM Booking b WHERE b.bingeId = :bid " +
+           "AND b.createdAt >= :from AND b.createdAt < :to AND b.status = :status")
+    long countCreatedInRangeByStatus(@Param("bid") Long bingeId,
+                                     @Param("from") LocalDateTime from,
+                                     @Param("to") LocalDateTime to,
+                                     @Param("status") BookingStatus status);
+
+    @Query("SELECT COUNT(b) FROM Booking b WHERE b.bingeId = :bid " +
+           "AND b.createdAt >= :from AND b.createdAt < :to AND b.paymentStatus = :paymentStatus")
+    long countCreatedInRangeByPaymentStatus(@Param("bid") Long bingeId,
+                                            @Param("from") LocalDateTime from,
+                                            @Param("to") LocalDateTime to,
+                                            @Param("paymentStatus") PaymentStatus paymentStatus);
+
+    @Query("SELECT COUNT(b) FROM Booking b WHERE b.bingeId = :bid " +
+           "AND b.createdAt >= :from AND b.createdAt < :to " +
+           "AND b.status = 'CANCELLED' AND b.cancellationActor = :actor")
+    long countCancelledByActor(@Param("bid") Long bingeId,
+                               @Param("from") LocalDateTime from,
+                               @Param("to") LocalDateTime to,
+                               @Param("actor") String cancellationActor);
+
 
     // Anti-abuse: count current PENDING bookings for a customer (across all binges, kept for legacy callers)
     @Query("SELECT COUNT(b) FROM Booking b WHERE b.customerId = :cid AND b.status = 'PENDING' AND b.paymentStatus = 'PENDING'")
@@ -268,6 +334,46 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     // Filters on cancellationActor='CUSTOMER' so payment-timeout cancels don't count here.
     @Query("SELECT COUNT(b) FROM Booking b WHERE b.customerId = :cid AND b.bingeId = :bid AND b.status = 'CANCELLED' AND b.paymentStatus = 'PENDING' AND b.cancellationActor = 'CUSTOMER' AND b.updatedAt > :since")
     long countCustomerPendingCancelsSince(@Param("cid") Long customerId, @Param("bid") Long bingeId, @Param("since") LocalDateTime since);
+
+    // Freeze-policy: NO_SHOW bookings scoped to a specific binge within the window.
+    // The daily audit scheduler flips status to NO_SHOW and bumps updatedAt, so
+    // we filter on (status=NO_SHOW, updatedAt>since). Booking date is the more
+    // semantically correct timestamp but updatedAt aligns with the other counters
+    // and gives operators a consistent rolling-window meaning across all 3 triggers.
+    @Query("SELECT COUNT(b) FROM Booking b WHERE b.customerId = :cid AND b.bingeId = :bid AND b.status = 'NO_SHOW' AND b.updatedAt > :since")
+    long countNoShowsByBingeSince(@Param("cid") Long customerId, @Param("bid") Long bingeId, @Param("since") LocalDateTime since);
+
+    // ── Risk evaluator helpers (fraud / abuse — Item 23) ─────────────────
+    /**
+     * Count of distinct {@code customerId} values that have ever booked using
+     * the given phone number. The risk evaluator flags a booking when the
+     * count exceeds a threshold (default 2) — phone numbers SHOULD be
+     * one-to-one with customer accounts; a higher count is a strong
+     * shared-account or duplicate-account signal.
+     */
+    @Query("SELECT COUNT(DISTINCT b.customerId) FROM Booking b WHERE b.customerPhone = :phone")
+    long countDistinctCustomersByPhone(@Param("phone") String phone);
+
+    @Query("SELECT COUNT(DISTINCT b.customerId) FROM Booking b WHERE LOWER(b.customerEmail) = LOWER(:email)")
+    long countDistinctCustomersByEmail(@Param("email") String email);
+
+    /**
+     * Burst detection: how many bookings the customer created in the last
+     * window. Used by the risk evaluator's RAPID_REBOOKING_BURST rule.
+     */
+    @Query("SELECT COUNT(b) FROM Booking b WHERE b.customerId = :cid AND b.createdAt > :since")
+    long countByCustomerIdCreatedSince(@Param("cid") Long customerId, @Param("since") LocalDateTime since);
+
+    /**
+     * Cross-binge cancellation count for risk scoring. Counts ALL customer-
+     * initiated cancels, not just within a single binge — abusers rotate
+     * binges to evade per-binge freezes (see audit, item 23).
+     */
+    @Query("SELECT COUNT(b) FROM Booking b WHERE b.customerId = :cid AND b.status = 'CANCELLED' AND b.cancellationActor = 'CUSTOMER' AND b.updatedAt > :since")
+    long countCustomerCancelsAcrossBingesSince(@Param("cid") Long customerId, @Param("since") LocalDateTime since);
+
+    @Query("SELECT COUNT(b) FROM Booking b WHERE b.customerId = :cid AND b.status = 'NO_SHOW' AND b.updatedAt > :since")
+    long countNoShowsAcrossBingesSince(@Param("cid") Long customerId, @Param("since") LocalDateTime since);
 
     /**
      * Acquires a transaction-scoped advisory lock keyed on (bingeId, date).

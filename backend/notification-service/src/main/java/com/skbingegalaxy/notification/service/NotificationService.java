@@ -201,6 +201,37 @@ public class NotificationService {
     }
 
     /**
+     * Per-row retry triggered from the support console (Item 24). Unlike the
+     * scheduled retry, this is operator-initiated and bypasses the
+     * {@code maxRetries} cap so an admin can force a re-dispatch after a
+     * provider outage. Resets retry bookkeeping on success.
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public NotificationDto retryById(String id, Long adminId) {
+        Notification n = notificationRepository.findById(id)
+            .orElseThrow(() -> new com.skbingegalaxy.common.exception.ResourceNotFoundException(
+                "Notification", "id", id));
+        if (n.isSent() && n.getDeliveryStatus() == DeliveryStatus.SENT) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Notification was already delivered successfully");
+        }
+        n.setRetryCount(n.getRetryCount() + 1);
+        boolean success = dispatchNotification(n);
+        n.setSent(success);
+        if (success) {
+            n.setSentAt(LocalDateTime.now());
+            n.setDeliveryStatus(DeliveryStatus.SENT);
+            n.setNextRetryAt(null);
+            n.setFailureReason(null);
+        } else {
+            n.setNextRetryAt(computeNextRetryAt(n.getRetryCount()));
+        }
+        Notification saved = notificationRepository.save(n);
+        log.info("admin-retry notificationId={} adminId={} success={}", id, adminId, success);
+        return toDto(saved);
+    }
+
+    /**
      * Compute the next retry time using exponential backoff.
      * Intervals: 1 min → 5 min → 30 min (capped).
      */

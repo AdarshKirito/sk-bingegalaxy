@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
+import { ConfirmProvider } from '../components/ui/ConfirmProvider';
 
 vi.mock('react-toastify', () => ({
   toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
@@ -32,6 +33,7 @@ const { mockGetBlockedDates, mockGetBlockedSlots, mockBlockDate, mockUnblockDate
   mockUnblockSlot: vi.fn(),
 }));
 vi.mock('../services/endpoints', () => ({
+  toArray: (value) => Array.isArray(value) ? value : [],
   adminService: {
     getBlockedDates: mockGetBlockedDates,
     getBlockedSlots: mockGetBlockedSlots,
@@ -48,7 +50,9 @@ function renderAdminBlockedDates() {
   return render(
     <HelmetProvider>
       <MemoryRouter initialEntries={['/admin/blocked-dates']}>
-        <AdminBlockedDates />
+        <ConfirmProvider>
+          <AdminBlockedDates />
+        </ConfirmProvider>
       </MemoryRouter>
     </HelmetProvider>
   );

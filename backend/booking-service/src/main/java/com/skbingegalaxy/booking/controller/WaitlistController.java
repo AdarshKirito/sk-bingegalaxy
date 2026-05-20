@@ -3,6 +3,7 @@ package com.skbingegalaxy.booking.controller;
 import com.skbingegalaxy.booking.dto.JoinWaitlistRequest;
 import com.skbingegalaxy.booking.dto.WaitlistEntryDto;
 import com.skbingegalaxy.booking.service.AdminBingeScopeService;
+import com.skbingegalaxy.booking.service.IdempotencyService;
 import com.skbingegalaxy.booking.service.WaitlistService;
 import com.skbingegalaxy.common.dto.ApiResponse;
 import jakarta.validation.Valid;
@@ -22,6 +23,7 @@ public class WaitlistController {
 
     private final AdminBingeScopeService adminBingeScopeService;
     private final WaitlistService waitlistService;
+    private final IdempotencyService idempotencyService;
 
     @ModelAttribute
     void validateSelectedBinge() {
@@ -37,8 +39,12 @@ public class WaitlistController {
             @RequestHeader("X-User-Email") String email,
             @RequestHeader(value = "X-User-Name", defaultValue = "Customer") String name,
             @RequestHeader(value = "X-User-Phone", defaultValue = "") String phone,
-            @RequestHeader(value = "X-User-Phone-Country-Code", defaultValue = "") String phoneCountryCode) {
-        WaitlistEntryDto entry = waitlistService.joinWaitlist(request, userId, name, email, phone, phoneCountryCode);
+            @RequestHeader(value = "X-User-Phone-Country-Code", defaultValue = "") String phoneCountryCode,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        WaitlistEntryDto entry = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/bookings/waitlist", userId,
+            request, WaitlistEntryDto.class,
+            () -> waitlistService.joinWaitlist(request, userId, name, email, phone, phoneCountryCode));
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(ApiResponse.ok("Added to waitlist", entry));
     }
@@ -93,5 +99,21 @@ public class WaitlistController {
             @RequestHeader("X-User-Role") String role) {
         adminBingeScopeService.requireManagedBinge(adminId, role, "offering waitlist entry");
         return ResponseEntity.ok(ApiResponse.ok("Waitlist offer sent", waitlistService.adminOfferEntry(entryId, adminId)));
+    }
+
+    /**
+     * Set the priority boost on a waitlist entry. Higher priority is offered first;
+     * ties broken by FIFO position. Use values like 0 (default), 10 (silver),
+     * 20 (gold), 30 (platinum), 100 (ops override).
+     */
+    @PatchMapping("/admin/{entryId}/priority")
+    public ResponseEntity<ApiResponse<WaitlistEntryDto>> adminSetPriority(
+            @PathVariable Long entryId,
+            @RequestParam int priority,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        adminBingeScopeService.requireManagedBinge(adminId, role, "setting waitlist priority");
+        return ResponseEntity.ok(ApiResponse.ok("Waitlist priority updated",
+            waitlistService.adminSetPriority(entryId, priority, adminId)));
     }
 }

@@ -48,6 +48,7 @@ const {
 }));
 
 vi.mock('../services/endpoints', () => ({
+  toArray: (value) => Array.isArray(value) ? value : [],
   adminService: {
     getAllEventTypes: mockGetAllEventTypes,
     createEventType: mockCreateEventType,

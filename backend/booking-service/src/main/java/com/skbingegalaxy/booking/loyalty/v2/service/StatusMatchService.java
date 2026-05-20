@@ -12,7 +12,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 
 /**
  * Loyalty v2 — Status-Match service.
@@ -246,11 +245,4 @@ public class StatusMatchService {
                 .orElseThrow(() -> new IllegalArgumentException("status-match request not found: " + id));
     }
 
-    @SuppressWarnings("unused")
-    private void unusedReference() {
-        // Forces the compiler to keep the Optional import should the
-        // helpers evolve to return Optional-valued lookups.
-        Optional<LoyaltyStatusMatchRequest> o = Optional.empty();
-        if (o.isPresent()) log.debug("noop");
-    }
 }

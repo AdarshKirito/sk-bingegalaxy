@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
+import useBingeStore from '../stores/bingeStore';
 
 /**
  * Hook that connects to the admin SSE (Server-Sent Events) stream,
@@ -8,7 +9,8 @@ import { useEffect, useRef, useCallback, useState } from 'react';
  *   const { lastEvent, connected } = useRealtimeUpdates({ onEvent: (e) => refetchData() });
  *
  * The hook auto-reconnects with exponential back-off and re-subscribes
- * when the selected binge changes.
+ * when the selected binge changes (so picking a venue after mount works
+ * without a page reload).
  */
 export default function useRealtimeUpdates({ onEvent, enabled = true } = {}) {
   const [connected, setConnected] = useState(false);
@@ -19,13 +21,9 @@ export default function useRealtimeUpdates({ onEvent, enabled = true } = {}) {
   const onEventRef = useRef(onEvent);
   onEventRef.current = onEvent;
 
-  // Read bingeId from localStorage (same source as api.js X-Binge-Id)
-  const getBingeId = () => {
-    try {
-      const raw = localStorage.getItem('selectedBinge');
-      return raw ? JSON.parse(raw).id : null;
-    } catch { return null; }
-  };
+  // Subscribe to the binge store so we re-connect whenever the selected
+  // binge changes (e.g. user picks a venue after the hook mounted).
+  const selectedBingeId = useBingeStore((s) => s.selectedBinge?.id || null);
 
   const connect = useCallback(() => {
     if (!enabled) return;
@@ -40,14 +38,13 @@ export default function useRealtimeUpdates({ onEvent, enabled = true } = {}) {
       retryTimerRef.current = null;
     }
 
-    const bingeId = getBingeId();
-    if (!bingeId) {
+    if (!selectedBingeId) {
       setConnected(false);
       return; // No binge selected — nothing to subscribe to
     }
 
     try {
-      const url = `/api/v1/bookings/admin/events/stream?bingeId=${encodeURIComponent(bingeId)}`;
+      const url = `/api/v1/bookings/admin/events/stream?bingeId=${encodeURIComponent(selectedBingeId)}`;
       const es = new EventSource(url, { withCredentials: true });
       sourceRef.current = es;
 
@@ -81,7 +78,7 @@ export default function useRealtimeUpdates({ onEvent, enabled = true } = {}) {
       // EventSource not supported or network down — silent fallback
       setConnected(false);
     }
-  }, [enabled]);
+  }, [enabled, selectedBingeId]);
 
   useEffect(() => {
     connect();

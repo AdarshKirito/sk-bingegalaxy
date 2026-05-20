@@ -2,11 +2,30 @@ import { useState, useEffect, useMemo } from 'react';
 import { adminService, toArray } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import { format, addDays } from 'date-fns';
-import { FiCalendar, FiClock, FiUsers, FiUser, FiMail, FiPhone, FiCheck, FiSend, FiXCircle } from 'react-icons/fi';
+import { FiCalendar, FiClock, FiUsers, FiUser, FiMail, FiPhone, FiCheck, FiSend, FiXCircle, FiStar } from 'react-icons/fi';
 import { formatTime12h } from '../utils/format';
 import './AdminPages.css';
 
 const fmtTime = (timeStr) => formatTime12h(timeStr) || '--:--';
+
+// Priority presets used by the inline editor. The numeric value drives the
+// server-side ordering: higher number = higher position in the queue. The
+// 100 "ops override" tier is intentionally outside the loyalty band so
+// support agents can guarantee a slot for VIPs without colliding with the
+// loyalty tiers.
+const PRIORITY_PRESETS = [
+  { value: 0,   label: 'Standard' },
+  { value: 10,  label: 'Silver' },
+  { value: 20,  label: 'Gold' },
+  { value: 30,  label: 'Platinum' },
+  { value: 100, label: 'Ops override' },
+];
+const priorityLabel = (val) => {
+  const exact = PRIORITY_PRESETS.find(p => p.value === Number(val));
+  if (exact) return exact.label;
+  if (val == null) return 'Standard';
+  return `Custom (${val})`;
+};
 
 const STATUS_COLORS = {
   WAITING: 'badge-warning',
@@ -63,6 +82,24 @@ export default function AdminWaitlist() {
       await fetchWaitlist(selectedDate);
     } catch (e) {
       toast.error(e.response?.data?.message || e.userMessage || 'Failed to cancel entry');
+    } finally {
+      setBusyEntryId(null);
+    }
+  };
+
+  // Re-prioritise a waitlist entry. The server re-computes positions after
+  // each change so we just refresh the list once the PATCH succeeds.
+  const handlePriorityChange = async (entry, nextPriority) => {
+    const value = Number(nextPriority);
+    if (Number.isNaN(value)) return;
+    if (value === Number(entry.priority || 0)) return;
+    setBusyEntryId(entry.id);
+    try {
+      await adminService.updateWaitlistPriority(entry.id, value);
+      toast.success(`Priority updated to ${priorityLabel(value)}`);
+      await fetchWaitlist(selectedDate);
+    } catch (e) {
+      toast.error(e.response?.data?.message || e.userMessage || 'Failed to update priority');
     } finally {
       setBusyEntryId(null);
     }
@@ -156,6 +193,7 @@ export default function AdminWaitlist() {
                         <th>Preferred Time</th>
                         <th>Duration</th>
                         <th>Guests</th>
+                        <th><FiStar /> Priority</th>
                         <th>Joined</th>
                         {status === 'OFFERED' && <th>Offer Expires</th>}
                         {(status === 'CONVERTED' || status === 'BOOKED') && <th>Booking Ref</th>}
@@ -177,6 +215,29 @@ export default function AdminWaitlist() {
                           <td><FiClock /> {fmtTime(entry.preferredStartTime)}</td>
                           <td>{entry.durationMinutes ? `${entry.durationMinutes}m` : '—'}</td>
                           <td>{entry.numberOfGuests}</td>
+                          <td>
+                            {status === 'WAITING' ? (
+                              <select
+                                className="admin-select"
+                                style={{ fontSize: '0.8rem', padding: '0.25rem 0.4rem' }}
+                                value={Number(entry.priority || 0)}
+                                disabled={busyEntryId === entry.id}
+                                onChange={(e) => handlePriorityChange(entry, e.target.value)}
+                                title="Higher priority moves the entry up the queue"
+                              >
+                                {PRIORITY_PRESETS.some(p => p.value === Number(entry.priority || 0))
+                                  ? null
+                                  : <option value={Number(entry.priority || 0)}>Custom ({entry.priority})</option>}
+                                {PRIORITY_PRESETS.map(p => (
+                                  <option key={p.value} value={p.value}>{p.label}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              <span className="badge badge-secondary" style={{ fontSize: '0.75rem' }}>
+                                {priorityLabel(entry.priority)}
+                              </span>
+                            )}
+                          </td>
                           <td>{entry.createdAt ? new Date(entry.createdAt).toLocaleString() : '—'}</td>
                           {status === 'OFFERED' && (
                             <td>{entry.offerExpiresAt ? new Date(entry.offerExpiresAt).toLocaleString() : '—'}</td>

@@ -60,4 +60,27 @@ public class OutboxEvent {
     @Builder.Default
     @Column(nullable = false)
     private boolean failedPermanent = false;
+
+    // ── V46: Kafka envelope columns ─────────────────────────
+    // Nullable for backward compatibility with rows written before V46.
+    // BookingEventPublisher populates them on insert; OutboxPublisher
+    // promotes them to Kafka record headers.
+
+    /** Globally-unique idempotency key. UNIQUE index — repeated inserts fail. */
+    @Column(length = 64, unique = true)
+    private String eventId;
+
+    /** Domain event type, e.g. "booking.confirmed". Mirrors {@link #topic} today. */
+    @Column(length = 80)
+    private String eventType;
+
+    /** Schema version. Defaults to 1 when null. */
+    private Integer eventVersion;
+
+    /** Producer-side timestamp (when the row was created, not the domain time). */
+    private LocalDateTime occurredAt;
+
+    /** Distributed-trace correlation id (from MDC / RequestContext). */
+    @Column(length = 64)
+    private String correlationId;
 }

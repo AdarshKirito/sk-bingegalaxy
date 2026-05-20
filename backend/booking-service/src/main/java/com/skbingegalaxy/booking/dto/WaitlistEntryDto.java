@@ -25,6 +25,7 @@ public class WaitlistEntryDto {
     private int numberOfGuests;
     private String status;
     private int position;
+    private int priority;
     private LocalDateTime offerExpiresAt;
     private LocalDateTime notifiedAt;
     private String convertedBookingRef;

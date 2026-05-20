@@ -687,6 +687,195 @@ button.sec-stat[disabled] {
   flex: 1;
   min-width: 200px;
 }
+
+/* ================================================================
+   Loyalty Center additions — Members tab, Tier-Perk assignments
+   ================================================================ */
+
+/* ── Member search form (horizontal layout) ─────────────────── */
+.sec-member-search-form {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.sec-member-search-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  flex: 1;
+  min-width: 180px;
+}
+.sec-member-search-form input {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text, #111);
+  font-size: 14px;
+}
+.sec-member-search-form input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-bg);
+}
+
+/* ── Wallet snapshot card ───────────────────────────────────── */
+.sec-member-card {
+  background: var(--primary-bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 20px;
+  margin-bottom: 20px;
+}
+.sec-member-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  color: var(--primary);
+}
+.sec-member-number {
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--text, #111);
+}
+.sec-member-validity {
+  font-size: 12px;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.sec-member-stats {
+  display: flex;
+  gap: 0;
+  flex-wrap: wrap;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg-card);
+}
+.sec-member-stat {
+  flex: 1;
+  min-width: 120px;
+  padding: 12px 16px;
+  border-right: 1px solid var(--border);
+  text-align: center;
+}
+.sec-member-stat:last-child { border-right: none; }
+.sec-member-stat span {
+  display: block;
+  font-size: 20px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.sec-member-stat small {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+/* ── Manual adjustment panel ────────────────────────────────── */
+.sec-adjustment-panel {
+  padding: 18px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  margin-bottom: 24px;
+}
+.sec-adjustment-panel h4 {
+  margin: 0 0 6px 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+.sec-adjustment-panel p {
+  margin: 0 0 14px 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ── Member ledger section ──────────────────────────────────── */
+.sec-member-ledger { margin-top: 4px; }
+.sec-member-ledger h4 {
+  margin: 0 0 12px 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+/* ── Tier-perk grid ─────────────────────────────────────────── */
+.sec-tier-perk-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.sec-tier-perk-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 12px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  flex-wrap: wrap;
+}
+.sec-tier-perk-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 120px;
+}
+.sec-tier-perk-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: 1;
+  align-items: center;
+}
+.sec-perk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 12px;
+  background: var(--primary-bg);
+  border: 1px solid rgba(var(--primary-rgb, 99 102 241), 0.3);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.sec-perk-chip-remove {
+  display: inline-grid;
+  place-items: center;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+  cursor: pointer;
+  padding: 0;
+  transition: background 120ms;
+}
+.sec-perk-chip-remove:hover { background: #dc2626; color: #fff; }
+
+/* ── Assign perk form (inside PerksTab) ─────────────────────── */
+.sec-tier-perk-assign-form {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+}
 .sec-activity-time {
   color: var(--text-muted);
   font-size: 12px;

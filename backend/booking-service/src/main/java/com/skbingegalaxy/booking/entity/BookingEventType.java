@@ -1,6 +1,7 @@
 package com.skbingegalaxy.booking.entity;
 
 public enum BookingEventType {
+    // Core lifecycle
     CREATED,
     CONFIRMED,
     CANCELLED,
@@ -12,5 +13,26 @@ public enum BookingEventType {
     REINSTATED,
     COMPLETED,
     RESCHEDULED,
-    TRANSFERRED
+    TRANSFERRED,
+    // Production-grade timeline milestones (V43)
+    SLOT_HELD,
+    PAYMENT_INITIATED,
+    PAYMENT_SUCCEEDED,
+    PAYMENT_FAILED,
+    REFUND_INITIATED,
+    REFUND_COMPLETED,
+    REFUND_FAILED,
+    NOTIFICATION_SENT,
+    REMINDER_SENT,
+    MANUAL_REVIEW_FLAGGED,
+    PRICE_OVERRIDE,
+    CHECK_IN_REVERTED,
+    APPROVAL_REQUESTED,
+    APPROVAL_APPROVED,
+    APPROVAL_REJECTED,
+    // Support console (Item 24)
+    CONFIRMATION_RESENT,
+    ESCALATED,
+    DE_ESCALATED,
+    GOODWILL_ISSUED
 }

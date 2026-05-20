@@ -16,6 +16,10 @@ public interface LoyaltyLedgerEntryRepository extends JpaRepository<LoyaltyLedge
     /** Used when an idempotency hit is detected and we want to return the already-persisted entry. */
     Optional<LoyaltyLedgerEntry> findByWalletIdAndEntryTypeAndIdempotencyKey(Long walletId, String entryType, String idempotencyKey);
 
+    /** Returns the per-lot rows created for an aggregate debit idempotency key. */
+    List<LoyaltyLedgerEntry> findByWalletIdAndEntryTypeAndIdempotencyKeyStartingWithOrderByIdAsc(
+            Long walletId, String entryType, String idempotencyKeyPrefix);
+
     Page<LoyaltyLedgerEntry> findByWalletIdOrderByCreatedAtDesc(Long walletId, Pageable pageable);
 
     List<LoyaltyLedgerEntry> findByBookingRef(String bookingRef);

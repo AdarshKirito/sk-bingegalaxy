@@ -1,5 +1,6 @@
 package com.skbingegalaxy.booking.loyalty.v2.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -37,9 +38,11 @@ public class LoyaltyLedgerEntry {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @JsonIgnore
     @Column(name = "tenant_id")
     private Long tenantId;
 
+    @JsonIgnore
     @Column(name = "wallet_id", nullable = false)
     private Long walletId;
 
@@ -60,6 +63,7 @@ public class LoyaltyLedgerEntry {
     @Column(name = "booking_ref", length = 20)
     private String bookingRef;
 
+    @JsonIgnore
     @Column(name = "actor_id")
     private Long actorId;
 
@@ -72,9 +76,11 @@ public class LoyaltyLedgerEntry {
     @Column(length = 500)
     private String description;
 
+    @JsonIgnore
     @Column(name = "correlation_id", length = 64)
     private String correlationId;
 
+    @JsonIgnore
     @Column(name = "idempotency_key", length = 128)
     private String idempotencyKey;
 

@@ -17,4 +17,8 @@ public class AddOnDto {
     private String category;
     private List<String> imageUrls;
     private boolean active;
+    /** Daily inventory cap (null = unlimited). */
+    private Integer stockPerDay;
+    /** Minimum minutes ahead of booking start time the add-on must be ordered (null = none). */
+    private Integer advanceNoticeMinutes;
 }

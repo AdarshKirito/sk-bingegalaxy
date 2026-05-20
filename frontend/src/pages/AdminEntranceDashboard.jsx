@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useBinge } from '../context/BingeContext';
+import { useConfirm } from '../components/ui/ConfirmProvider';
 import { adminService } from '../services/endpoints';
 import SEO from '../components/SEO';
 import { SkeletonGrid } from '../components/ui/Skeleton';
@@ -41,7 +42,8 @@ const getRecentBinges = () => {
 
 export default function AdminEntranceDashboard() {
   const { user, isSuperAdmin } = useAuth();
-  const { selectBinge, clearBinge } = useBinge();
+  const { selectBinge } = useBinge();
+  const confirm = useConfirm();
   const navigate = useNavigate();
   const [binges, setBinges] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -51,9 +53,10 @@ export default function AdminEntranceDashboard() {
   const [pendingLoading, setPendingLoading] = useState(false);
   const [decidingId, setDecidingId] = useState(null);
 
-  useEffect(() => {
-    clearBinge();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Note: We intentionally do NOT clearBinge() on mount. The previously-selected
+  // binge is preserved so admins can refresh per-binge URLs and deep-link back.
+  // Switching venues is an explicit action via the venue card or sidebar venue
+  // button (which calls clearBinge through navigation back here).
 
   useEffect(() => {
     (async () => {
@@ -112,8 +115,18 @@ export default function AdminEntranceDashboard() {
 
   const handleReject = async (binge) => {
     if (decidingId) return;
-    const reason = window.prompt(`Reject "${binge.name}"?\n\nOptional reason (visible in audit log):`, '');
-    if (reason === null) return; // user cancelled
+    const result = await confirm({
+      title: `Reject "${binge.name}"?`,
+      message: 'Rejecting removes this binge from the approval queue. The maker will be notified with your reason.',
+      confirmLabel: 'Reject binge',
+      variant: 'danger',
+      withReason: true,
+      reasonRequired: false,
+      reasonLabel: 'Reason (visible in audit log)',
+      reasonPlaceholder: 'Add an optional note explaining why…',
+    });
+    if (!result) return;
+    const reason = result.reason || '';
     setDecidingId(binge.id);
     try {
       await adminService.rejectBinge(binge.id, reason);

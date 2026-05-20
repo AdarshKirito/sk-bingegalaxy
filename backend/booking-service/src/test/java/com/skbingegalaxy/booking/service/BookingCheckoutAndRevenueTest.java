@@ -53,6 +53,13 @@ class BookingCheckoutAndRevenueTest {
     @Mock private BookingEventLogService eventLogService;
     @Mock private SagaOrchestrator sagaOrchestrator;
         @Mock private LoyaltyService loyaltyService;
+        @Mock private com.skbingegalaxy.booking.service.CustomerFreezeService customerFreezeService;
+        @Mock private com.skbingegalaxy.booking.repository.SlotHoldRepository slotHoldRepository;
+        @Mock private com.skbingegalaxy.booking.service.BookingEventPublisher bookingEventPublisher;
+        @Mock private com.skbingegalaxy.booking.service.BookingAnalyticsMetrics analyticsMetrics;
+        @Mock private com.skbingegalaxy.booking.service.BookingRiskEvaluator bookingRiskEvaluator;
+        @Mock private com.skbingegalaxy.booking.repository.BookingTransferRepository bookingTransferRepository;
+        @Mock private com.skbingegalaxy.booking.service.statemachine.BookingStateMachine stateMachineMock;
 
     @InjectMocks private BookingService bookingService;
 
@@ -63,6 +70,12 @@ class BookingCheckoutAndRevenueTest {
                 BingeContext.clear();
                 BingeContext.setBingeId(11L);
         ReflectionTestUtils.setField(bookingService, "refPrefix", "SKBG");
+        // Replace mocked SM with a real one wired to the same mocked
+        // collaborators so existing assertions on bookingRepository.save()
+        // and eventLogService keep working transparently.
+        ReflectionTestUtils.setField(bookingService, "stateMachine",
+            new com.skbingegalaxy.booking.service.statemachine.BookingStateMachine(
+                bookingRepository, eventLogService));
                 lenient().when(loyaltyService.redeemPoints(anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
                         .thenReturn(new LoyaltyService.RedemptionResult(0L, BigDecimal.ZERO));
 
@@ -275,6 +288,9 @@ class BookingCheckoutAndRevenueTest {
 
             when(bookingRepository.findByBookingRef("SKBG25123456"))
                     .thenReturn(Optional.of(checkedInBooking));
+            // SM transition reads booking.getBookingRef() off the saved
+            // entity, so save() must return the booking, not null.
+            when(bookingRepository.save(any())).thenReturn(checkedInBooking);
 
             bookingService.updatePaymentStatus("SKBG25123456", PaymentStatus.SUCCESS, "CARD");
 

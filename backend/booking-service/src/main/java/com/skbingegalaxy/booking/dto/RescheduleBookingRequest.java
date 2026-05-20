@@ -22,4 +22,8 @@ public class RescheduleBookingRequest {
     @Min(value = 30, message = "Duration must be at least 30 minutes")
     @Max(value = 720, message = "Duration cannot exceed 12 hours")
     private Integer newDurationMinutes;
+
+    /** Optional free-text reason for the reschedule. Captured in the audit trail. */
+    @Size(max = 1000, message = "Reason must be 1000 characters or fewer")
+    private String reason;
 }

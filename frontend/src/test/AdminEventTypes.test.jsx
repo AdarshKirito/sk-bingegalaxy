@@ -28,6 +28,7 @@ const { mockGetAllEventTypes, mockGetAllAddOns } = vi.hoisted(() => ({
   mockGetAllAddOns: vi.fn(),
 }));
 vi.mock('../services/endpoints', () => ({
+  toArray: (value) => Array.isArray(value) ? value : [],
   adminService: {
     getAllEventTypes: mockGetAllEventTypes,
     createEventType: vi.fn().mockResolvedValue({ data: {} }),

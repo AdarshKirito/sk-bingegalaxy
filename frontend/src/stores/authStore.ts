@@ -1,7 +1,19 @@
 import { create } from 'zustand';
-import { authService } from '../services/endpoints';
+import { authService, authorityService } from '../services/endpoints';
 import api from '../services/api';
 import type { User } from '../types';
+
+/**
+ * Snapshot of the user's effective authority right now (native role + Authority
+ * Handover delegation). Mirrors the auth-service `EffectiveAuthorityDto`.
+ */
+export interface EffectiveAuthority {
+  role: string;
+  superAdmin: boolean;
+  delegated: boolean;
+  scopes: string[];
+  nextExpiryAt?: string | null;
+}
 
 interface AuthState {
   user: User | null;
@@ -9,7 +21,9 @@ interface AuthState {
   isAuthenticated: boolean;
   isAdmin: boolean;
   isSuperAdmin: boolean;
+  effectiveAuthority: EffectiveAuthority | null;
   _setAuth: (userData: User, token?: string) => void;
+  refreshAuthority: () => Promise<void>;
   login: (credentials: { email: string; password: string; mfaCode?: string }) => Promise<{ user: User; mfaRequired?: boolean }>;
   adminLogin: (credentials: { email: string; password: string; mfaCode?: string }) => Promise<{ user: User; mfaRequired?: boolean }>;
   register: (data: Record<string, unknown>) => Promise<User>;
@@ -34,15 +48,17 @@ const useAuthStore = create<AuthState>((set, get) => {
       if (userData) {
         get()._setAuth(userData);
         set({ loading: false });
+        // Best-effort delegation refresh on cold-load. Non-fatal on failure.
+        get().refreshAuthority();
       } else {
         // Server rejected — clear stale local state
         localStorage.removeItem('user');
-        set({ user: null, isAuthenticated: false, isAdmin: false, isSuperAdmin: false, loading: false });
+        set({ user: null, isAuthenticated: false, isAdmin: false, isSuperAdmin: false, effectiveAuthority: null, loading: false });
       }
     }).catch(() => {
       // Token expired / invalid — clear stale local state
       localStorage.removeItem('user');
-      set({ user: null, isAuthenticated: false, isAdmin: false, isSuperAdmin: false, loading: false });
+      set({ user: null, isAuthenticated: false, isAdmin: false, isSuperAdmin: false, effectiveAuthority: null, loading: false });
     });
   }
 
@@ -54,6 +70,7 @@ const useAuthStore = create<AuthState>((set, get) => {
   isAuthenticated: !!storedUser,
   isAdmin: storedUser?.role === 'ADMIN' || storedUser?.role === 'SUPER_ADMIN' || false,
   isSuperAdmin: storedUser?.role === 'SUPER_ADMIN' || false,
+  effectiveAuthority: null,
 
   _setAuth: (userData: User, token?: string) => {
     // Tokens are stored in httpOnly cookies by the backend — only minimal user data goes to localStorage
@@ -73,6 +90,39 @@ const useAuthStore = create<AuthState>((set, get) => {
       isAdmin: userData.role === 'ADMIN' || userData.role === 'SUPER_ADMIN',
       isSuperAdmin: userData.role === 'SUPER_ADMIN',
     });
+    // Kick off authority lookup so the delegation banner / route guards render
+    // with up-to-date scopes immediately after login. Non-blocking.
+    void get().refreshAuthority();
+  },
+
+  /**
+   * Refresh the user's Authority Handover snapshot from the server. Safe to call
+   * any time; for unauthenticated users it clears the snapshot. Errors are
+   * swallowed because delegation is additive — failing here should never break
+   * the existing native auth flow.
+   */
+  refreshAuthority: async () => {
+    if (!get().isAuthenticated) {
+      set({ effectiveAuthority: null });
+      return;
+    }
+    try {
+      const res = await authorityService.getMyAuthority();
+      const data = res.data?.data;
+      if (data) {
+        set({
+          effectiveAuthority: {
+            role: data.role,
+            superAdmin: !!data.superAdmin,
+            delegated: !!data.delegated,
+            scopes: Array.isArray(data.scopes) ? data.scopes : [],
+            nextExpiryAt: data.nextExpiryAt ?? null,
+          },
+        });
+      }
+    } catch {
+      // Endpoint not yet deployed or transient error — leave snapshot alone.
+    }
   },
 
   login: async (credentials) => {
@@ -134,7 +184,7 @@ const useAuthStore = create<AuthState>((set, get) => {
     localStorage.removeItem('user');
     localStorage.removeItem('selectedBinge');
     localStorage.removeItem('token_exp');
-    set({ user: null, isAuthenticated: false, isAdmin: false, isSuperAdmin: false });
+    set({ user: null, isAuthenticated: false, isAdmin: false, isSuperAdmin: false, effectiveAuthority: null });
     // Clear httpOnly cookies via backend
     try { await api.post('/auth/logout'); } catch (_) { /* best-effort */ }
   },

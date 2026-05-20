@@ -135,6 +135,46 @@ public class CustomerFreezeService {
         }
     }
 
+    /**
+     * Records that the daily audit just flipped a booking to NO_SHOW. If the
+     * customer has crossed the binge's {@code maxNoShowsBeforeFreeze} threshold
+     * within the rolling window, applies a NO_SHOW_PATTERN freeze.
+     *
+     * <p>Best-effort: any exception is logged and swallowed so it never breaks
+     * the daily-audit scheduler. Runs in REQUIRES_NEW so a failure here doesn't
+     * roll back the no-show status update from the caller.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordNoShow(Long customerId, Long bingeId) {
+        try {
+            if (customerId == null || bingeId == null) return;
+            Binge binge = bingeRepository.findById(bingeId).orElse(null);
+            if (binge == null || !binge.isFreezePolicyEnabled()) return;
+            int threshold = binge.getMaxNoShowsBeforeFreeze();
+            int windowMin = binge.getFreezeDurationMinutes();
+            if (threshold <= 0 || windowMin <= 0) return;
+
+            // NO_SHOW windows are typically wider than cancel/timeout windows,
+            // but we reuse freezeDurationMinutes for operator simplicity. Ops
+            // can lengthen it per-binge if they want a longer rolling window.
+            LocalDateTime since = LocalDateTime.now().minusMinutes(windowMin);
+            // The just-flipped booking IS already committed by the time the
+            // daily audit publishes — runDailyAudit calls bookingRepository.save
+            // before invoking us. So we don't add 1 like the other triggers.
+            long count = bookingRepository.countNoShowsByBingeSince(customerId, bingeId, since);
+            log.debug("freeze-check no-shows customer={} binge={} count={} threshold={}",
+                customerId, bingeId, count, threshold);
+            if (count >= threshold) {
+                applyAutoFreeze(customerId, bingeId, binge,
+                    TriggerType.NO_SHOW_PATTERN,
+                    count + " no-show bookings within " + windowMin + " minutes");
+            }
+        } catch (Exception ex) {
+            log.warn("recordNoShow failed (customer={}, binge={}): {}",
+                customerId, bingeId, ex.getMessage());
+        }
+    }
+
     // ── Customer self-service ──────────────────────────────────────────────
 
     @Transactional(readOnly = true)

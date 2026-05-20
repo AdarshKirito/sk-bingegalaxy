@@ -68,6 +68,26 @@ public class BookingEventLog {
     @Column(columnDefinition = "jsonb")
     private String snapshot;
 
+    /**
+     * Free-text justification supplied by the actor (e.g. "guest no-show
+     * confirmed by venue"). Required for SLA-tracked admin actions like
+     * cancellation, refund, price override, manual confirmation.
+     */
+    @Column(name = "reason", length = 1000)
+    private String reason;
+
+    /** Source IP captured from the request (IPv4 or IPv6, max 45 chars). */
+    @Column(name = "ip_address", length = 45)
+    private String ipAddress;
+
+    /** Raw User-Agent header — useful for forensic device/browser triage. */
+    @Column(name = "user_agent", length = 500)
+    private String userAgent;
+
+    /** Tenant scope — copied from the booking at event time. */
+    @Column(name = "binge_id")
+    private Long bingeId;
+
     /** Schema version of this event (for forward-compatible deserialization) */
     @Builder.Default
     @Column(nullable = false)

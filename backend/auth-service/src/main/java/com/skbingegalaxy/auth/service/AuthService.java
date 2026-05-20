@@ -64,6 +64,7 @@ public class AuthService {
     private final PasswordHistoryService passwordHistoryService;
     private final EmailVerificationService emailVerificationService;
     private final TotpService totpService;
+    private final AuthorityService authorityService;
 
     @Value("${app.otp.expiration-minutes:10}")
     private int otpExpirationMinutes;
@@ -290,8 +291,9 @@ public class AuthService {
         // Mint fresh tokens and rotate the existing session row (so each device keeps a
         // stable session id across refreshes). Fall back to creating a new session if
         // no existing row was found (e.g. legacy token from before sessions shipped).
-        String newAccess = jwtProvider.generateToken(user);
-        String newRefresh = jwtProvider.generateRefreshToken(user);
+        TokenPair pair = mintTokenPair(user);
+        String newAccess = pair.access;
+        String newRefresh = pair.refresh;
         try {
             String newJti = jwtProvider.getJtiFromToken(newRefresh);
             java.time.LocalDateTime newExp = jwtProvider.getExpiryFromToken(newRefresh);
@@ -670,8 +672,9 @@ public class AuthService {
         user = userRepository.save(user);
         log.info("Profile completed for: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
         // Return fresh tokens so the JWT includes the phone claim
-        String token = jwtProvider.generateToken(user);
-        String refreshToken = jwtProvider.generateRefreshToken(user);
+        TokenPair pair = mintTokenPair(user);
+        String token = pair.access;
+        String refreshToken = pair.refresh;
         return AuthResponse.builder()
             .token(token)
             .refreshToken(refreshToken)
@@ -953,8 +956,9 @@ public class AuthService {
      * {@link #refreshToken(String)}.
      */
     private AuthResponse buildAuthResponse(User user) {
-        String accessToken = jwtProvider.generateToken(user);
-        String refreshToken = jwtProvider.generateRefreshToken(user);
+        TokenPair pair = mintTokenPair(user);
+        String accessToken = pair.access;
+        String refreshToken = pair.refresh;
         try {
             String jti = jwtProvider.getJtiFromToken(refreshToken);
             java.time.LocalDateTime exp = jwtProvider.getExpiryFromToken(refreshToken);
@@ -970,6 +974,43 @@ public class AuthService {
             .refreshToken(refreshToken)
             .user(toDto(user))
             .build();
+    }
+
+    /**
+     * Holder for an access+refresh pair so we can mint both with the same Authority
+     * Handover delegation snapshot in a single DB read.
+     */
+    private record TokenPair(String access, String refresh) {}
+
+    /**
+     * Mint an access+refresh JWT pair. If the user has any active Authority Handover
+     * grants, both tokens carry the union of granted scopes plus the earliest grant
+     * expiry as {@code delegationExpiresAt}. The native {@code role} claim is unchanged
+     * — the gateway is responsible for elevating {@code X-User-Role} on a per-path
+     * basis when the request matches a granted scope.
+     *
+     * <p>Looking up grants here (rather than in {@link JwtProvider}) keeps the JWT
+     * layer decoupled from authority persistence, makes the dependency direction
+     * one-way (auth-service → authority-service), and ensures refresh-token rotation
+     * picks up newly granted or revoked authority on the next refresh cycle.
+     */
+    private TokenPair mintTokenPair(User user) {
+        try {
+            java.util.Set<com.skbingegalaxy.common.enums.AuthorityScope> scopes =
+                authorityService.getActiveScopesForUser(user.getId());
+            if (scopes.isEmpty()) {
+                return new TokenPair(jwtProvider.generateToken(user), jwtProvider.generateRefreshToken(user));
+            }
+            long expiryMs = authorityService.getEarliestGrantExpiryEpochMillis(user.getId());
+            return new TokenPair(
+                jwtProvider.generateToken(user, scopes, expiryMs),
+                jwtProvider.generateRefreshToken(user, scopes, expiryMs)
+            );
+        } catch (Exception ex) {
+            // Authority lookup must NEVER break login. Fall back to non-delegated tokens.
+            log.warn("Authority lookup failed during token mint for userId={}: {}", user.getId(), ex.getMessage());
+            return new TokenPair(jwtProvider.generateToken(user), jwtProvider.generateRefreshToken(user));
+        }
     }
 
     /** Build an MFA challenge response (no tokens issued; caller must resubmit with code). */

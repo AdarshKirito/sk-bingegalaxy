@@ -16,7 +16,7 @@ import {
 } from '../services/aboutExperience';
 import { useBinge } from '../context/BingeContext';
 import { toast } from 'react-toastify';
-import { FiActivity, FiArrowRight, FiCompass, FiEdit2, FiMapPin, FiPlus, FiStar, FiToggleLeft, FiToggleRight, FiTrash2, FiUpload, FiX } from 'react-icons/fi';
+import { FiActivity, FiArrowRight, FiClock, FiCompass, FiEdit2, FiMapPin, FiPlus, FiStar, FiToggleLeft, FiToggleRight, FiTrash2, FiUpload, FiX } from 'react-icons/fi';
 import './AdminPages.css';
 import BingeLoyaltySection from '../components/admin/BingeLoyaltySection';
 import AddressFields, { EMPTY_ADDRESS, validateAddress } from '../components/form/AddressFields';
@@ -238,8 +238,14 @@ export default function BingeManagement() {
         await adminService.updateBinge(editId, payload);
         toast.success('Binge updated');
       } else {
-        await adminService.createBinge(payload);
-        toast.success('Binge created');
+        const res = await adminService.createBinge(payload);
+        const created = res?.data?.data;
+        const message = res?.data?.message;
+        if (created?.status === 'PENDING_APPROVAL') {
+          toast.info(message || 'Binge submitted for super-admin approval. It will be hidden from customers and cannot accept bookings until a super-admin approves it.', { autoClose: 8000 });
+        } else {
+          toast.success(message || 'Binge created');
+        }
       }
       resetForm();
       fetchBinges();
@@ -449,6 +455,13 @@ export default function BingeManagement() {
   };
 
   const handleSelect = (binge) => {
+    if (binge.status && binge.status !== 'APPROVED') {
+      const why = binge.status === 'REJECTED'
+        ? `This venue was rejected by a super-admin${binge.approvalRejectionReason ? `: ${binge.approvalRejectionReason}` : '.'}`
+        : 'This venue is awaiting super-admin approval. You cannot enter or take bookings for it yet.';
+      toast.error(why, { autoClose: 7000 });
+      return;
+    }
     selectBinge({
       id: binge.id,
       name: binge.name,
@@ -1127,13 +1140,24 @@ export default function BingeManagement() {
         </div>
       ) : (
         <div className="adm-venue-grid">
-          {binges.map((b) => (
-            <article key={b.id} className={`adm-venue-card${b.active ? '' : ' inactive'}`}>
+          {binges.map((b) => {
+            const isPending = b.status === 'PENDING_APPROVAL';
+            const isRejected = b.status === 'REJECTED';
+            const isApproved = !b.status || b.status === 'APPROVED';
+            const cardClass = `adm-venue-card${b.active && isApproved ? '' : ' inactive'}`;
+            return (
+            <article key={b.id} className={cardClass}>
               <div className="adm-venue-card-top">
                 <span className="adm-kicker">Venue option</span>
-                <span className={`adm-badge ${b.active ? 'adm-badge-active' : 'adm-badge-inactive'}`}>
-                  {b.active ? 'Active' : 'Inactive'}
-                </span>
+                {isPending ? (
+                  <span className="adm-badge adm-badge-warning">Pending approval</span>
+                ) : isRejected ? (
+                  <span className="adm-badge adm-badge-danger">Rejected</span>
+                ) : (
+                  <span className={`adm-badge ${b.active ? 'adm-badge-active' : 'adm-badge-inactive'}`}>
+                    {b.active ? 'Active' : 'Inactive'}
+                  </span>
+                )}
               </div>
 
               <div className="adm-venue-card-copy">
@@ -1145,15 +1169,27 @@ export default function BingeManagement() {
               </div>
 
               <p className="adm-venue-card-note">
-                {b.active
+                {isPending
+                  ? 'A super-admin must approve this venue before it appears to customers or accepts any bookings. You will be notified once a decision is made.'
+                  : isRejected
+                  ? (b.approvalRejectionReason
+                      ? `Super-admin rejected this venue: “${b.approvalRejectionReason}”. It will not be visible to customers.`
+                      : 'Super-admin rejected this venue. It will not be visible to customers.')
+                  : b.active
                   ? 'Dashboard, bookings, availability, and reporting tools are ready for this venue.'
                   : 'Reactivate this venue whenever you want it back in the live admin and booking rotation.'}
               </p>
 
               <div className="adm-venue-actions">
-                {b.active && (
+                {b.active && isApproved && (
                   <button type="button" className="btn btn-primary btn-sm" onClick={() => handleSelect(b)}>
                     Enter <FiArrowRight />
+                  </button>
+                )}
+                {isPending && (
+                  <button type="button" className="btn btn-secondary btn-sm" disabled
+                    title="Locked until a super-admin approves this venue">
+                    <FiClock style={{ marginRight: 3 }} /> Awaiting approval
                   </button>
                 )}
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleOpenDashboardEditor(b)}>
@@ -1171,19 +1207,22 @@ export default function BingeManagement() {
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleEdit(b)}>
                   <FiEdit2 style={{ marginRight: 3 }} /> Edit
                 </button>
-                <button type="button" className={`btn btn-sm ${b.active ? 'btn-danger' : ''}`}
-                  style={!b.active ? { background: 'var(--success)', color: '#fff' } : undefined}
-                  onClick={() => handleToggle(b.id)}>
-                  {b.active ? <><FiToggleLeft style={{ marginRight: 3 }} /> Deactivate</> : <><FiToggleRight style={{ marginRight: 3 }} /> Activate</>}
-                </button>
-                {!b.active && (
+                {isApproved && (
+                  <button type="button" className={`btn btn-sm ${b.active ? 'btn-danger' : ''}`}
+                    style={!b.active ? { background: 'var(--success)', color: '#fff' } : undefined}
+                    onClick={() => handleToggle(b.id)}>
+                    {b.active ? <><FiToggleLeft style={{ marginRight: 3 }} /> Deactivate</> : <><FiToggleRight style={{ marginRight: 3 }} /> Activate</>}
+                  </button>
+                )}
+                {!b.active && !isPending && (
                   <button type="button" className="btn adm-danger-btn btn-sm" onClick={() => handleDelete(b)}>
                     <FiTrash2 style={{ marginRight: 3 }} /> Delete
                   </button>
                 )}
               </div>
             </article>
-          ))}
+            );
+          })}
         </div>
       )}
 

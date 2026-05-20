@@ -41,7 +41,7 @@ public class AdminBookingController {
     private final com.skbingegalaxy.booking.service.BookingProjectionService projectionService;
     private final com.skbingegalaxy.booking.service.SagaOrchestrator sagaOrchestrator;
     private final com.skbingegalaxy.booking.service.PricingService pricingService;
-    private final com.skbingegalaxy.booking.service.LoyaltyService loyaltyService;
+    private final com.skbingegalaxy.booking.service.IdempotencyService idempotencyService;
 
     private static final int MAX_PAGE_SIZE = 100;
     private static final Set<String> ALLOWED_SORT_FIELDS = Set.of(
@@ -175,84 +175,146 @@ public class AdminBookingController {
     @PatchMapping("/{bookingRef}")
     public ResponseEntity<ApiResponse<BookingDto>> updateBooking(
             @PathVariable String bookingRef,
-            @Valid @RequestBody UpdateBookingRequest request) {
-        return ResponseEntity.ok(ApiResponse.ok("Booking updated", bookingService.updateBooking(bookingRef, request)));
+            @Valid @RequestBody UpdateBookingRequest request,
+            @RequestHeader(value = "X-User-Id", required = false) Long adminId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        BookingDto updated = idempotencyService.execute(
+            idempotencyKey, "PATCH", "/api/v1/bookings/admin/" + bookingRef, adminId,
+            request, BookingDto.class,
+            () -> bookingService.updateBooking(bookingRef, request));
+        return ResponseEntity.ok(ApiResponse.ok("Booking updated", updated));
     }
 
     @PostMapping("/{bookingRef}/cancel")
-    public ResponseEntity<ApiResponse<BookingDto>> cancelBooking(@PathVariable String bookingRef) {
-        return ResponseEntity.ok(ApiResponse.ok("Booking cancelled", bookingService.cancelBooking(bookingRef)));
+    public ResponseEntity<ApiResponse<BookingDto>> cancelBooking(
+            @PathVariable String bookingRef,
+            @RequestBody(required = false) java.util.Map<String, String> body,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        // Body is optional for backward compatibility; the support console
+        // posts {"reason": "..."} so the cancellation is self-documenting in
+        // the audit log and surfaced on the booking detail panel.
+        final String reason = body != null ? body.get("reason") : null;
+        BookingDto cancelled = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/bookings/admin/" + bookingRef + "/cancel", adminId,
+            java.util.Map.of("bookingRef", bookingRef, "reason", reason == null ? "" : reason),
+            BookingDto.class,
+            () -> bookingService.cancelBooking(bookingRef, reason));
+        return ResponseEntity.ok(ApiResponse.ok("Booking cancelled", cancelled));
     }
 
     @PostMapping("/{bookingRef}/confirm")
-    public ResponseEntity<ApiResponse<BookingDto>> confirmBooking(@PathVariable String bookingRef) {
+    public ResponseEntity<ApiResponse<BookingDto>> confirmBooking(
+            @PathVariable String bookingRef,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
         UpdateBookingRequest req = new UpdateBookingRequest();
         req.setStatus("CONFIRMED");
-        return ResponseEntity.ok(ApiResponse.ok("Booking confirmed", bookingService.updateBooking(bookingRef, req)));
+        BookingDto confirmed = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/bookings/admin/" + bookingRef + "/confirm", adminId,
+            java.util.Map.of("bookingRef", bookingRef), BookingDto.class,
+            () -> bookingService.updateBooking(bookingRef, req));
+        return ResponseEntity.ok(ApiResponse.ok("Booking confirmed", confirmed));
     }
 
     @PostMapping("/{bookingRef}/check-in")
     public ResponseEntity<ApiResponse<BookingDto>> checkIn(
             @PathVariable String bookingRef,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate) {
-        var booking = bookingService.getBookingEntity(bookingRef);
-        LocalDate opDate = systemSettingsService.getOperationalDate(BingeContext.getBingeId(), clientDate);
-        if (!booking.getBookingDate().equals(opDate)) {
-            throw new com.skbingegalaxy.common.exception.BusinessException(
-                "Can only check in bookings for the current operational day (" + opDate + "). This booking is for " + booking.getBookingDate());
-        }
-        if (booking.getStatus() != com.skbingegalaxy.common.enums.BookingStatus.CONFIRMED) {
-            throw new com.skbingegalaxy.common.exception.BusinessException(
-                "Cannot check in — booking must be CONFIRMED first. Current status: " + booking.getStatus());
-        }
-        // Warn (but allow) check-in when payment is not yet collected.
-        // Admin may have legitimate reasons (VIP, external payment, etc.)
-        var ps = booking.getPaymentStatus();
-        if (ps == com.skbingegalaxy.common.enums.PaymentStatus.PENDING
-                || ps == com.skbingegalaxy.common.enums.PaymentStatus.FAILED
-                || ps == com.skbingegalaxy.common.enums.PaymentStatus.INITIATED) {
-            log.warn("Check-in for {} with paymentStatus={} — payment not yet collected",
-                bookingRef, ps);
-        }
-        UpdateBookingRequest req = new UpdateBookingRequest();
-        req.setCheckedIn(true);
-        return ResponseEntity.ok(ApiResponse.ok("Check-in recorded", bookingService.updateBooking(bookingRef, req)));
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate,
+            @RequestHeader(value = "X-User-Id", required = false) Long adminId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        BookingDto result = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/bookings/admin/" + bookingRef + "/check-in", adminId,
+            java.util.Map.of("bookingRef", bookingRef, "clientDate", String.valueOf(clientDate)),
+            BookingDto.class,
+            () -> {
+                var booking = bookingService.getBookingEntity(bookingRef);
+                LocalDate opDate = systemSettingsService.getOperationalDate(BingeContext.getBingeId(), clientDate);
+                if (!booking.getBookingDate().equals(opDate)) {
+                    throw new com.skbingegalaxy.common.exception.BusinessException(
+                        "Can only check in bookings for the current operational day (" + opDate + "). This booking is for " + booking.getBookingDate());
+                }
+                if (booking.getStatus() != com.skbingegalaxy.common.enums.BookingStatus.CONFIRMED) {
+                    throw new com.skbingegalaxy.common.exception.BusinessException(
+                        "Cannot check in — booking must be CONFIRMED first. Current status: " + booking.getStatus());
+                }
+                var ps = booking.getPaymentStatus();
+                if (ps == com.skbingegalaxy.common.enums.PaymentStatus.PENDING
+                        || ps == com.skbingegalaxy.common.enums.PaymentStatus.FAILED
+                        || ps == com.skbingegalaxy.common.enums.PaymentStatus.INITIATED) {
+                    log.warn("Check-in for {} with paymentStatus={} — payment not yet collected",
+                        bookingRef, ps);
+                }
+                UpdateBookingRequest req = new UpdateBookingRequest();
+                req.setCheckedIn(true);
+                return bookingService.updateBooking(bookingRef, req);
+            });
+        return ResponseEntity.ok(ApiResponse.ok("Check-in recorded", result));
     }
 
     @PostMapping("/{bookingRef}/checkout")
     public ResponseEntity<ApiResponse<BookingDto>> checkout(
             @PathVariable String bookingRef,
+            @RequestHeader("X-User-Id") Long adminId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate,
-            @RequestParam(required = false) String clientTime) {
-        var booking = bookingService.getBookingEntity(bookingRef);
-        LocalDate opDate = systemSettingsService.getOperationalDate(BingeContext.getBingeId(), clientDate);
-        if (!booking.getBookingDate().equals(opDate)) {
-            throw new com.skbingegalaxy.common.exception.BusinessException(
-                "Can only checkout bookings for the current operational day (" + opDate + "). This booking is for " + booking.getBookingDate());
-        }
-        LocalDateTime clientNow = null;
-        if (clientDate != null && clientTime != null) {
-            try { clientNow = LocalDateTime.of(clientDate, LocalTime.parse(clientTime)); } catch (Exception e) {
-                log.warn("Failed to parse clientTime '{}' for checkout: {}", clientTime, e.getMessage());
-            }
-        }
-        return ResponseEntity.ok(ApiResponse.ok("Checkout completed", bookingService.earlyCheckout(bookingRef, clientNow)));
+            @RequestParam(required = false) String clientTime,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        BookingDto result = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/bookings/admin/" + bookingRef + "/checkout", adminId,
+            java.util.Map.of("bookingRef", bookingRef,
+                              "clientDate", String.valueOf(clientDate),
+                              "clientTime", String.valueOf(clientTime)),
+            BookingDto.class,
+            () -> {
+                var booking = bookingService.getBookingEntity(bookingRef);
+                LocalDate opDate = systemSettingsService.getOperationalDate(BingeContext.getBingeId(), clientDate);
+                if (!booking.getBookingDate().equals(opDate)) {
+                    throw new com.skbingegalaxy.common.exception.BusinessException(
+                        "Can only checkout bookings for the current operational day (" + opDate + "). This booking is for " + booking.getBookingDate());
+                }
+                LocalDateTime clientNow = null;
+                if (clientDate != null && clientTime != null) {
+                    try { clientNow = LocalDateTime.of(clientDate, LocalTime.parse(clientTime)); } catch (Exception e) {
+                        log.warn("Failed to parse clientTime '{}' for checkout: {}", clientTime, e.getMessage());
+                    }
+                }
+                return bookingService.earlyCheckout(bookingRef, clientNow);
+            });
+        return ResponseEntity.ok(ApiResponse.ok("Checkout completed", result));
     }
 
     @PostMapping("/{bookingRef}/undo-check-in")
     public ResponseEntity<ApiResponse<BookingDto>> undoCheckIn(
             @PathVariable String bookingRef,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate) {
-        var booking = bookingService.getBookingEntity(bookingRef);
-        LocalDate opDate = systemSettingsService.getOperationalDate(BingeContext.getBingeId(), clientDate);
-        if (!booking.getBookingDate().equals(opDate)) {
-            throw new com.skbingegalaxy.common.exception.BusinessException(
-                "Can only undo check-in for bookings on the current operational day (" + opDate + ").");
-        }
-        UpdateBookingRequest req = new UpdateBookingRequest();
-        req.setStatus("CONFIRMED");
-        req.setCheckedIn(false);
-        return ResponseEntity.ok(ApiResponse.ok("Check-in undone", bookingService.updateBooking(bookingRef, req)));
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate,
+            @RequestBody(required = false) java.util.Map<String, String> body,
+            @RequestHeader(value = "X-User-Id", required = false) Long adminId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        // Body is optional for backward compatibility; the support console
+        // posts {"reason": "..."} so the reversal is self-documenting in the
+        // audit timeline (CHECK_IN_REVERTED).
+        final String reason = body != null ? body.get("reason") : null;
+        BookingDto result = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/bookings/admin/" + bookingRef + "/undo-check-in", adminId,
+            java.util.Map.of(
+                "bookingRef", bookingRef,
+                "clientDate", String.valueOf(clientDate),
+                "reason", reason == null ? "" : reason),
+            BookingDto.class,
+            () -> {
+                // Operational-day guard — admins shouldn't be reversing
+                // yesterday's check-ins from today's console (those are
+                // closed by the nightly audit job).
+                var booking = bookingService.getBookingEntity(bookingRef);
+                LocalDate opDate = systemSettingsService.getOperationalDate(BingeContext.getBingeId(), clientDate);
+                if (!booking.getBookingDate().equals(opDate)) {
+                    throw new com.skbingegalaxy.common.exception.BusinessException(
+                        "Can only undo check-in for bookings on the current operational day ("
+                            + opDate + ").");
+                }
+                return bookingService.undoCheckIn(bookingRef, adminId, reason);
+            });
+        return ResponseEntity.ok(ApiResponse.ok("Check-in undone", result));
     }
 
     @GetMapping("/dashboard-stats")
@@ -297,6 +359,57 @@ public class AdminBookingController {
             .auditAvailable(available)
             .auditUnavailableReason(reason)
             .build()));
+    }
+
+    // ── Operational date: SUPER_ADMIN manual control ─────────
+    //
+    // These endpoints exist so a venue super-admin can recover from clock
+    // drift, cross a midnight boundary the audit window missed, or roll
+    // forward in non-prod environments without waiting for the 23:59 audit
+    // gate. Both endpoints require an explicitly-selected binge (multi-tenant
+    // safety) and SUPER_ADMIN role.
+
+    @PostMapping("/operational-date/advance")
+    public ResponseEntity<ApiResponse<OperationalDateDto>> advanceOperationalDate(
+            @RequestHeader("X-User-Role") String role,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate) {
+        requireSuperAdmin(role, "advance the operational date");
+        Long bid = BingeContext.getBingeId();
+        if (bid == null) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Select a venue before advancing its operational date.", HttpStatus.BAD_REQUEST);
+        }
+        LocalDate newOp = systemSettingsService.advanceOperationalDate(bid, clientDate);
+        log.info("[ops-audit] SUPER_ADMIN advanced operational date for binge {} to {}", bid, newOp);
+        return ResponseEntity.ok(ApiResponse.ok("Operational date advanced",
+            OperationalDateDto.builder()
+                .operationalDate(newOp)
+                .serverDateTime(LocalDateTime.now())
+                .auditAvailable(false)
+                .auditUnavailableReason(null)
+                .build()));
+    }
+
+    @PostMapping("/operational-date/set")
+    public ResponseEntity<ApiResponse<OperationalDateDto>> setOperationalDate(
+            @RequestHeader("X-User-Role") String role,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate,
+            @Valid @RequestBody SetOperationalDateRequest request) {
+        requireSuperAdmin(role, "override the operational date");
+        Long bid = BingeContext.getBingeId();
+        if (bid == null) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Select a venue before overriding its operational date.", HttpStatus.BAD_REQUEST);
+        }
+        LocalDate newOp = systemSettingsService.setOperationalDate(
+            bid, request.getOperationalDate(), clientDate);
+        return ResponseEntity.ok(ApiResponse.ok("Operational date updated",
+            OperationalDateDto.builder()
+                .operationalDate(newOp)
+                .serverDateTime(LocalDateTime.now())
+                .auditAvailable(false)
+                .auditUnavailableReason(null)
+                .build()));
     }
 
     // ── Event Type management ────────────────────────────────
@@ -409,9 +522,15 @@ public class AdminBookingController {
 
     @PostMapping("/create-booking")
     public ResponseEntity<ApiResponse<BookingDto>> adminCreateBooking(
-            @Valid @RequestBody AdminCreateBookingRequest request) {
+            @Valid @RequestBody AdminCreateBookingRequest request,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        BookingDto created = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/bookings/admin/create-booking", adminId,
+            request, BookingDto.class,
+            () -> bookingService.adminCreateBooking(request));
         return ResponseEntity.status(HttpStatus.CREATED)
-            .body(ApiResponse.ok("Booking created by admin", bookingService.adminCreateBooking(request)));
+            .body(ApiResponse.ok("Booking created by admin", created));
     }
 
     // ── Customer booking count ────────────────────────────────
@@ -474,6 +593,10 @@ public class AdminBookingController {
                 .triggeredByName(e.getTriggeredByName())
                 .description(e.getDescription())
                 .snapshot(e.getSnapshot())
+                .reason(e.getReason())
+                .ipAddress(e.getIpAddress())
+                .userAgent(e.getUserAgent())
+                .bingeId(e.getBingeId())
                 .eventVersion(e.getEventVersion())
                 .createdAt(e.getCreatedAt())
                 .build());
@@ -495,6 +618,59 @@ public class AdminBookingController {
         requireSuperAdmin(role, "replay all bookings");
         int count = projectionService.replayAll();
         return ResponseEntity.ok(ApiResponse.ok("Projection rebuilt for " + count + " bookings"));
+    }
+
+    // ── SUPER_ADMIN: state-machine override ──────────────────────────
+    /**
+     * Force a booking into a target status, bypassing the normal transition
+     * table. Restricted to SUPER_ADMIN; reason is mandatory and is captured
+     * in the audit trail tagged {@code MANUAL_REVIEW_FLAGGED}.
+     *
+     * <p>Allowed transitions (see {@code BookingStateMachine.OVERRIDE_TARGETS}):
+     * <ul>
+     *   <li>CANCELLED → CONFIRMED | PENDING (reinstate wrongly-cancelled)</li>
+     *   <li>NO_SHOW → CHECKED_IN | CONFIRMED (undo misapplied no-show)</li>
+     *   <li>COMPLETED → CHECKED_IN (revert premature checkout)</li>
+     * </ul>
+     *
+     * <p>Idempotency-Key supported so retries don't double-apply the override.
+     */
+    @PostMapping("/{bookingRef}/override-status")
+    public ResponseEntity<ApiResponse<BookingDto>> overrideStatus(
+            @PathVariable String bookingRef,
+            @RequestBody java.util.Map<String, String> body,
+            @RequestHeader("X-User-Role") String role,
+            @RequestHeader(value = "X-User-Id", required = false) Long superAdminId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        requireSuperAdmin(role, "override booking status");
+        if (body == null || body.get("targetStatus") == null || body.get("targetStatus").isBlank()) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "targetStatus is required", HttpStatus.BAD_REQUEST);
+        }
+        if (body.get("reason") == null || body.get("reason").isBlank()) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "reason is required for status override", HttpStatus.BAD_REQUEST);
+        }
+        final BookingStatus target;
+        try {
+            target = BookingStatus.valueOf(body.get("targetStatus").trim().toUpperCase());
+        } catch (IllegalArgumentException ex) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Invalid target status: " + body.get("targetStatus"), HttpStatus.BAD_REQUEST);
+        }
+        final String reason = body.get("reason").trim();
+        BookingDto result = idempotencyService.execute(
+            idempotencyKey, "POST",
+            "/api/v1/bookings/admin/" + bookingRef + "/override-status",
+            superAdminId,
+            java.util.Map.of(
+                "bookingRef", bookingRef,
+                "targetStatus", target.name(),
+                "reason", reason),
+            BookingDto.class,
+            () -> bookingService.adminOverrideStatus(bookingRef, target, superAdminId, reason));
+        return ResponseEntity.ok(ApiResponse.ok(
+            "Status overridden to " + target + " with audit trail", result));
     }
 
     // ── Saga monitoring ──────────────────────────────────────
@@ -596,29 +772,4 @@ public class AdminBookingController {
     //  LOYALTY MANAGEMENT
     // ═══════════════════════════════════════════════════════════
 
-    @GetMapping("/loyalty/{customerId}")
-    public ResponseEntity<ApiResponse<LoyaltyAccountDto>> getCustomerLoyalty(
-            @PathVariable Long customerId,
-            @RequestHeader("X-User-Role") String role) {
-        // Loyalty accounts are system-level (post-V17), so per-binge scoping
-        // cannot authorize access. Restrict customer-loyalty lookups to
-        // SUPER_ADMIN to prevent IDOR across binges.
-        requireSuperAdmin(role, "view customer loyalty accounts");
-        return ResponseEntity.ok(ApiResponse.ok(loyaltyService.getAccount(customerId)));
-    }
-
-    @PostMapping("/loyalty/{customerId}/adjust")
-    public ResponseEntity<ApiResponse<LoyaltyAccountDto>> adjustLoyaltyPoints(
-            @PathVariable Long customerId,
-            @RequestBody java.util.Map<String, Object> body,
-            @RequestHeader("X-User-Role") String role) {
-        requireSuperAdmin(role, "adjust customer loyalty points");
-        if (body == null || body.get("points") == null || !(body.get("points") instanceof Number)) {
-            throw new com.skbingegalaxy.common.exception.BusinessException(
-                "Request body must include numeric 'points'", HttpStatus.BAD_REQUEST);
-        }
-        long points = ((Number) body.get("points")).longValue();
-        String description = (String) body.getOrDefault("description", null);
-        return ResponseEntity.ok(ApiResponse.ok("Points adjusted", loyaltyService.adjustPoints(customerId, points, description, role)));
-    }
 }

@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { adminService, bookingService, paymentService, toArray } from '../services/endpoints';
+import { adminService, adminRiskService, bookingService, paymentService, toArray } from '../services/endpoints';
 import { formatTime12h, formatTimeRange12h } from '../utils/format';
 import { useAuth } from '../context/AuthContext';
+import { useConfirm } from '../components/ui/ConfirmProvider';
 import { toast } from 'react-toastify';
 import DOMPurify from 'dompurify';
 import Pagination from '../components/ui/Pagination';
@@ -63,6 +64,7 @@ export default function AdminBookings() {
   const [page, setPage] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(null); // 'csv' | 'pdf' | null
 
   // Filters
   const [search, setSearch] = useState('');
@@ -322,11 +324,37 @@ export default function AdminBookings() {
         <h1>Manage Bookings</h1>
         <p>Manage all reservations, check-ins, and payments</p>
         <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
-          <button className="btn btn-secondary btn-sm" onClick={() => bookings.length ? exportBookingsCSV(bookings) : toast.warn('No bookings to export')} title="Export CSV">
-            <FiDownload size={14} /> CSV
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={async () => {
+              if (!bookings.length) { toast.warn('No bookings to export'); return; }
+              if (exporting) return;
+              setExporting('csv');
+              try { await exportBookingsCSV(bookings); }
+              catch (e) { toast.error(e?.message || 'CSV export failed'); }
+              finally { setExporting(null); }
+            }}
+            disabled={!!exporting}
+            aria-busy={exporting === 'csv' ? 'true' : undefined}
+            title="Export CSV"
+          >
+            <FiDownload size={14} /> {exporting === 'csv' ? 'Exporting…' : 'CSV'}
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => bookings.length ? exportBookingsPDF(bookings, `${activeTab} bookings`) : toast.warn('No bookings to export')} title="Export PDF">
-            <FiDownload size={14} /> PDF
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={async () => {
+              if (!bookings.length) { toast.warn('No bookings to export'); return; }
+              if (exporting) return;
+              setExporting('pdf');
+              try { await exportBookingsPDF(bookings, `${activeTab} bookings`); }
+              catch (e) { toast.error(e?.message || 'PDF export failed'); }
+              finally { setExporting(null); }
+            }}
+            disabled={!!exporting}
+            aria-busy={exporting === 'pdf' ? 'true' : undefined}
+            title="Export PDF"
+          >
+            <FiDownload size={14} /> {exporting === 'pdf' ? 'Exporting…' : 'PDF'}
           </button>
         </div>
       </div>
@@ -436,7 +464,7 @@ export default function AdminBookings() {
                     <td>{b.bookingDate}</td>
                     <td>{formatTime12h(b.startTime)} ({(() => { const m = b.durationMinutes || (b.durationHours * 60); const h = Math.floor(m/60); const min = m%60; return h > 0 && min > 0 ? `${h}h ${min}m` : h > 0 ? `${h}h` : `${min}m`; })()})</td>
                     <td className="ab-amount">₹{b.totalAmount?.toLocaleString()}</td>
-                    <td><span className={`badge ${statusBadge(b.status)}`}>{b.status?.replace('_', ' ')}</span></td>
+                    <td><span className={`badge ${statusBadge(b.status)}`}>{b.status?.replace('_', ' ')}</span>{b.lateArrival && <span className="badge badge-warning" style={{ marginLeft: 4, fontSize: '0.65rem' }} title="Customer checked in after the scheduled start time">LATE</span>}</td>
                     <td>
                       <span className={`badge ${paymentBadge(b.paymentStatus)}`}>
                         {b.paymentStatus?.replace('_', ' ')}
@@ -512,6 +540,7 @@ export default function AdminBookings() {
 function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDate, onAction, onSaved, onReinstate, onEditReservation, onClose }) {
   const navigate = useNavigate();
   const { isSuperAdmin } = useAuth();
+  const confirm = useConfirm();
   const [tab, setTab] = useState('customer');
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -528,6 +557,13 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
   const [adminReviewForm, setAdminReviewForm] = useState({ rating: 5, comment: '' });
   const [actionLoading, setActionLoading] = useState(false);
   const [b, setB] = useState(initialBooking);
+  // ── QR / OTP check-in state ──
+  const [checkInOtp, setCheckInOtp] = useState({ code: '', expiresAt: null, issuing: false });
+  const [checkInQr, setCheckInQr]   = useState({ token: '', expiresAt: null, issuing: false });
+  const [otpInput, setOtpInput] = useState('');
+  const [qrInput, setQrInput] = useState('');
+  const [verifyingOtp, setVerifyingOtp] = useState(false);
+  const [verifyingQr, setVerifyingQr] = useState(false);
   // Check-in is only shown for bookings on the current operational date
   const isTodayBooking = b.bookingDate === (operationalDate || new Date().toISOString().slice(0, 10));
 
@@ -537,6 +573,12 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
   const [eventLogTotal, setEventLogTotal] = useState(0);
   const [eventLogLoading, setEventLogLoading] = useState(false);
   const [replaying, setReplaying] = useState(false);
+
+  // Risk flags for this booking (Item 23) — surfaced as a banner above
+  // the tabs so admins notice fraud / abuse / out-of-order signals before
+  // they take any action on the booking.
+  const [riskFlags, setRiskFlags] = useState([]);
+  const [riskFlagsLoading, setRiskFlagsLoading] = useState(false);
 
   // Cancel modal state
   const [cancelModal, setCancelModal] = useState({ open: false });
@@ -653,6 +695,46 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
         .finally(() => setEventLogLoading(false));
     }
   }, [tab, b.bookingRef, eventLogPage]);
+
+  // Load risk flags for this booking once when the modal mounts. Cheap
+  // call (single query, indexed) and gives admins instant visibility into
+  // any open fraud / manual-review / chargeback flags on the row.
+  useEffect(() => {
+    if (!b.bookingRef) return;
+    let cancelled = false;
+    setRiskFlagsLoading(true);
+    adminRiskService.listForBooking(b.bookingRef)
+      .then(res => {
+        if (cancelled) return;
+        const d = res.data?.data || res.data;
+        setRiskFlags(Array.isArray(d) ? d : []);
+      })
+      .catch(() => { if (!cancelled) setRiskFlags([]); })
+      .finally(() => { if (!cancelled) setRiskFlagsLoading(false); });
+    return () => { cancelled = true; };
+  }, [b.bookingRef]);
+
+  const acknowledgeRiskFlag = async (id) => {
+    const result = await confirm({
+      title: 'Acknowledge this risk flag?',
+      message: 'Acknowledging records that you reviewed this flag. The note (if provided) is visible in the audit log.',
+      confirmLabel: 'Acknowledge',
+      variant: 'primary',
+      withReason: true,
+      reasonRequired: false,
+      reasonLabel: 'Acknowledgement note (optional)',
+      reasonPlaceholder: 'Add an optional note for the audit log…',
+    });
+    if (!result) return;
+    const note = result.reason || '';
+    try {
+      await adminRiskService.acknowledge(id, note);
+      setRiskFlags(prev => prev.map(f => f.id === id ? { ...f, status: 'ACKNOWLEDGED', acknowledgedAt: new Date().toISOString() } : f));
+      toast.success('Flag acknowledged');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to acknowledge flag');
+    }
+  };
 
   useEffect(() => {
     if (tab !== 'reviews' || !b.bookingRef) return;
@@ -928,6 +1010,67 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
     setActionLoading(false);
   };
 
+  // ── QR / OTP handlers ──────────────────────────────────────────────────
+  const handleIssueOtp = async () => {
+    setCheckInOtp((s) => ({ ...s, issuing: true }));
+    try {
+      const res = await adminService.issueCheckInOtp(b.bookingRef);
+      const data = res.data?.data || res.data || {};
+      setCheckInOtp({ code: data.otp || '', expiresAt: data.expiresAt || null, issuing: false });
+      toast.success('OTP issued — code is also sent to the customer');
+    } catch (err) {
+      setCheckInOtp((s) => ({ ...s, issuing: false }));
+      toast.error(err.response?.data?.message || 'Failed to issue OTP');
+    }
+  };
+
+  const handleIssueQr = async () => {
+    setCheckInQr((s) => ({ ...s, issuing: true }));
+    try {
+      const res = await adminService.issueCheckInQr(b.bookingRef);
+      const data = res.data?.data || res.data || {};
+      setCheckInQr({ token: data.token || '', expiresAt: data.expiresAt || null, issuing: false });
+      toast.success('QR token issued — share with customer');
+    } catch (err) {
+      setCheckInQr((s) => ({ ...s, issuing: false }));
+      toast.error(err.response?.data?.message || 'Failed to issue QR token');
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    const otp = (otpInput || '').trim();
+    if (!/^\d{4,8}$/.test(otp)) { toast.error('Enter the 6-digit code'); return; }
+    setVerifyingOtp(true);
+    try {
+      const res = await adminService.verifyCheckIn({ bookingRef: b.bookingRef, otp });
+      const updated = res.data?.data || { ...b, status: 'CHECKED_IN', checkedIn: true };
+      setB(updated);
+      onAction(updated);
+      setOtpInput('');
+      toast.success('Checked in via OTP');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'OTP verification failed');
+    }
+    setVerifyingOtp(false);
+  };
+
+  const handleVerifyQr = async () => {
+    const token = (qrInput || '').trim();
+    if (!token) { toast.error('Paste or scan the QR token'); return; }
+    setVerifyingQr(true);
+    try {
+      const res = await adminService.verifyCheckIn({ token });
+      const updated = res.data?.data || { ...b, status: 'CHECKED_IN', checkedIn: true };
+      setB(updated);
+      onAction(updated);
+      setQrInput('');
+      toast.success('Checked in via QR');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'QR verification failed');
+    }
+    setVerifyingQr(false);
+  };
+
   // Feature 8: Cancel with/without refund
   const openCancelModal = () => {
     setCancelWithRefund(false);
@@ -1044,12 +1187,59 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
 
   return (
     <>
+      {/* Risk-flag banner (Item 23) — only when at least one OPEN flag
+          exists. Acknowledged flags stay invisible to keep the chrome
+          quiet once the operator has reviewed them. */}
+      {(() => {
+        const open = riskFlags.filter(f => (f.status || 'OPEN') === 'OPEN');
+        if (riskFlagsLoading || open.length === 0) return null;
+        const severityRank = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
+        const top = open.reduce((a, b2) =>
+          (severityRank[b2.severity] || 0) > (severityRank[a.severity] || 0) ? b2 : a, open[0]);
+        const sevColor = top.severity === 'CRITICAL' || top.severity === 'HIGH'
+          ? '#ef4444' : '#f59e0b';
+        return (
+          <div role="alert" style={{
+            margin: '0 0 0.75rem 0',
+            padding: '0.65rem 0.85rem',
+            borderRadius: 'var(--radius-sm)',
+            border: `1px solid ${sevColor}`,
+            background: `${sevColor}14`,
+            display: 'flex', alignItems: 'flex-start', gap: '0.75rem',
+            flexWrap: 'wrap',
+          }}>
+            <span style={{ color: sevColor, fontWeight: 700 }}>⚠ {open.length} risk flag{open.length === 1 ? '' : 's'}</span>
+            <div style={{ flex: 1, minWidth: 200, fontSize: '0.85rem' }}>
+              <div><strong>{top.severity}</strong> · {top.ruleCode || top.rule || 'rule'}</div>
+              {top.reason && <div style={{ color: 'var(--text-secondary)' }}>{top.reason}</div>}
+            </div>
+            {open.length > 0 && (
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => acknowledgeRiskFlag(top.id)}
+              >Acknowledge top flag</button>
+            )}
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => navigate(`/admin/risk-flags?ref=${encodeURIComponent(b.bookingRef)}`)}
+            >View all flags</button>
+          </div>
+        );
+      })()}
       <div className="ab-detail-tabs">
         <button className={tabBtnStyle(tab === 'customer')} onClick={() => setTab('customer')}>Customer</button>
         <button className={tabBtnStyle(tab === 'reservation')} onClick={() => setTab('reservation')}>Reservation</button>
         <button className={tabBtnStyle(tab === 'payment')} onClick={() => setTab('payment')}>Payment</button>
         <button className={tabBtnStyle(tab === 'reviews')} onClick={() => setTab('reviews')}>Reviews</button>
         <button className={tabBtnStyle(tab === 'eventLog')} onClick={() => setTab('eventLog')}>Event Log</button>
+        {/* Item 24/25 — deep-link to the support console (threaded notes,
+            escalation, goodwill, resend confirmation) for this booking. */}
+        <button
+          className="ab-detail-tab"
+          style={{ marginLeft: 'auto' }}
+          onClick={() => navigate(`/admin/support?ref=${encodeURIComponent(b.bookingRef)}`)}
+          title="Open in support console (notes, escalation, goodwill)"
+        >Support console ↗</button>
       </div>
 
       {tab === 'customer' && (
@@ -1102,10 +1292,89 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                     💵 Cash payment not recorded. Go to the <strong>Payment tab</strong> and click <strong>"Record Cash Payment"</strong> before checking in.
                   </div>
                 )}
+                {/*
+                  Check-In button is always visible for CONFIRMED bookings so
+                  staff can always see the action exists. When the booking is
+                  not on the current operational day we disable the button and
+                  surface a hint — backend still enforces the date guard.
+                */}
+                <button
+                  className="btn btn-primary"
+                  onClick={handleModalCheckIn}
+                  disabled={actionLoading || !isTodayBooking}
+                  title={isTodayBooking
+                    ? 'Mark this booking as checked in'
+                    : `Check-in is restricted to the current operational day (${operationalDate || 'today'}). This booking is for ${b.bookingDate}.`}
+                >
+                  {actionLoading ? 'Processing...' : 'Check In'}
+                </button>
+                {!isTodayBooking && (
+                  <div
+                    style={{
+                      width: '100%',
+                      marginTop: '0.4rem',
+                      padding: '0.5rem 0.75rem',
+                      background: 'rgba(245, 158, 11, 0.08)',
+                      border: '1px solid rgba(245, 158, 11, 0.4)',
+                      borderRadius: 'var(--radius-sm)',
+                      fontSize: '0.8rem',
+                      color: 'var(--text-secondary)'
+                    }}
+                  >
+                    <strong>Check-in disabled:</strong> booking date is <strong>{b.bookingDate}</strong>,
+                    operational day is <strong>{operationalDate || 'today'}</strong>. Run the daily audit
+                    or use the super-admin operational-date control on Reports to roll the day forward.
+                  </div>
+                )}
                 {isTodayBooking && (
-                  <button className="btn btn-primary" onClick={handleModalCheckIn} disabled={actionLoading}>
-                    {actionLoading ? 'Processing...' : 'Check In'}
-                  </button>
+                  <div style={{ width: '100%', marginTop: '0.5rem', padding: '0.75rem', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', background: 'rgba(0,0,0,0.02)' }}>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.4rem' }}>Verified check-in</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                      {/* OTP column */}
+                      <div>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>OTP (6-digit)</div>
+                        <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                          <button type="button" className="btn btn-secondary btn-sm" onClick={handleIssueOtp} disabled={checkInOtp.issuing}>
+                            {checkInOtp.issuing ? 'Issuing…' : 'Issue OTP'}
+                          </button>
+                          {checkInOtp.code && (
+                            <code style={{ fontSize: '1rem', letterSpacing: '0.15em', padding: '0.15rem 0.5rem', background: 'var(--bg-elevated, #fff)', border: '1px solid var(--border)', borderRadius: 4 }}>{checkInOtp.code}</code>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem' }}>
+                          <input type="text" inputMode="numeric" maxLength={8} placeholder="Enter OTP"
+                            value={otpInput} onChange={(e) => setOtpInput(e.target.value.replace(/[^0-9]/g, ''))}
+                            style={{ flex: 1, padding: '0.35rem 0.5rem', border: '1px solid var(--border)', borderRadius: 4, fontSize: '0.85rem' }} />
+                          <button type="button" className="btn btn-primary btn-sm" onClick={handleVerifyOtp} disabled={verifyingOtp}>
+                            {verifyingOtp ? '…' : 'Verify'}
+                          </button>
+                        </div>
+                      </div>
+                      {/* QR column */}
+                      <div>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>QR token</div>
+                        <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                          <button type="button" className="btn btn-secondary btn-sm" onClick={handleIssueQr} disabled={checkInQr.issuing}>
+                            {checkInQr.issuing ? 'Issuing…' : 'Issue QR'}
+                          </button>
+                          {checkInQr.token && (
+                            <code style={{ fontSize: '0.7rem', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '0.15rem 0.5rem', background: 'var(--bg-elevated, #fff)', border: '1px solid var(--border)', borderRadius: 4 }} title={checkInQr.token}>{checkInQr.token}</code>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem' }}>
+                          <input type="text" placeholder="Paste / scan token"
+                            value={qrInput} onChange={(e) => setQrInput(e.target.value)}
+                            style={{ flex: 1, padding: '0.35rem 0.5rem', border: '1px solid var(--border)', borderRadius: 4, fontSize: '0.85rem' }} />
+                          <button type="button" className="btn btn-primary btn-sm" onClick={handleVerifyQr} disabled={verifyingQr}>
+                            {verifyingQr ? '…' : 'Verify'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: '0.4rem', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      Tokens are single-use. OTP is valid for ~15 min, QR for 48 hours. Verification requires the booking to be within its check-in window.
+                    </div>
+                  </div>
                 )}
                 <button className="btn btn-danger" onClick={openCancelModal} disabled={actionLoading}>
                   Cancel Booking
@@ -1278,6 +1547,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
           <div style={rowStyle}>
             <span style={labelStyle}>Status</span>
             <span className={`badge ${statusBadge(b.status)}`}>{b.status?.replace('_', ' ')}</span>
+            {b.lateArrival && <span className="badge badge-warning" style={{ marginLeft: 6 }} title="Customer checked in after scheduled start">LATE ARRIVAL</span>}
           </div>
           <div style={rowStyle}>
             <span style={labelStyle}>Payment Status</span>
@@ -1557,12 +1827,57 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                     <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: '0.3rem' }}>
                       Refund History ({refundsByPayment[p.id].length})
                     </div>
-                    {refundsByPayment[p.id].map((r, ri) => (
-                      <div key={ri} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: 'var(--text-secondary)', padding: '0.2rem 0', borderBottom: '1px dotted var(--border)' }}>
-                        <span>₹{r.amount?.toLocaleString()} — {r.reason || 'No reason'}</span>
-                        <span style={{ color: 'var(--text-muted)' }}>{r.refundedAt ? new Date(r.refundedAt).toLocaleDateString() : ''} by {r.initiatedBy}</span>
-                      </div>
-                    ))}
+                    {refundsByPayment[p.id].map((r, ri) => {
+                      const isFailed = r.refundStatus === 'FAILED';
+                      const isSuperseded = r.refundStatus === 'SUPERSEDED';
+                      const statusColor = isFailed ? 'var(--danger, #e74c3c)'
+                        : isSuperseded ? 'var(--text-muted)'
+                        : r.refundStatus === 'SUCCEEDED' ? 'var(--success, #10b981)'
+                        : 'var(--text-secondary)';
+                      const onRetry = async () => {
+                        const ok = await confirm({
+                          title: `Retry failed refund #${r.id}?`,
+                          message: `Amount: ₹${r.amount}. If this exceeds the maker-checker threshold, an approval request will be created at /admin/approvals for another admin to review. Otherwise the gateway is charged again immediately.`,
+                          confirmLabel: 'Retry refund',
+                          variant: 'danger',
+                        });
+                        if (!ok) return;
+                        try {
+                          const res = await adminService.retryFailedRefund(r.id);
+                          if (res.status === 202) {
+                            toast.info(res.data?.message || 'Approval required — see /admin/approvals');
+                          } else {
+                            toast.success('Refund retry issued');
+                            await refreshPayments();
+                          }
+                        } catch (err) {
+                          // 4xx still throws via interceptor
+                          const msg = err.response?.data?.message || err.message;
+                          if (err.response?.status === 202) {
+                            toast.info(msg);
+                          } else {
+                            toast.error(msg || 'Refund retry failed');
+                          }
+                        }
+                      };
+                      return (
+                        <div key={ri} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem', color: 'var(--text-secondary)', padding: '0.2rem 0', borderBottom: '1px dotted var(--border)' }}>
+                          <span>
+                            ₹{r.amount?.toLocaleString()} — {r.reason || 'No reason'}
+                            {' '}<span style={{ color: statusColor, fontWeight: 600 }}>· {r.refundStatus || 'UNKNOWN'}</span>
+                          </span>
+                          <span style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center' }}>
+                            <span style={{ color: 'var(--text-muted)' }}>{r.refundedAt ? new Date(r.refundedAt).toLocaleDateString() : ''} by {r.initiatedBy}</span>
+                            {isFailed && (
+                              <button className="btn btn-sm btn-secondary" onClick={onRetry}
+                                title="Retry this failed refund. Above the maker-checker threshold a second admin must approve.">
+                                Retry
+                              </button>
+                            )}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1745,21 +2060,57 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                     BOOKING_COMPLETED: 'Booking Completed',
                     BOOKING_UPDATED: 'Booking Updated',
                     BOOKING_REINSTATED: 'Booking Reinstated',
+                    // Aliases for the actual enum names persisted by the
+                    // BookingEventLogService (BookingEventType.NAME .name()).
+                    CREATED: 'Booking Created',
+                    CONFIRMED: 'Booking Confirmed',
+                    CANCELLED: 'Booking Cancelled',
+                    CHECKED_IN: 'Customer Checked In',
+                    CHECKED_OUT: 'Customer Checked Out',
+                    COMPLETED: 'Booking Completed',
+                    MODIFIED: 'Booking Updated',
+                    REINSTATED: 'Booking Reinstated',
+                    RESCHEDULED: 'Booking Rescheduled',
+                    TRANSFERRED: 'Booking Transferred',
+                    SLOT_HELD: 'Slot Held',
                     PAYMENT_INITIATED: 'Payment Initiated',
                     PAYMENT_SUCCESS: 'Payment Successful',
+                    PAYMENT_SUCCEEDED: 'Payment Successful',
                     PAYMENT_FAILED: 'Payment Failed',
                     PAYMENT_REFUNDED: 'Payment Refunded',
                     PAYMENT_PARTIALLY_REFUNDED: 'Partial Refund Issued',
                     PAYMENT_METHOD_CHANGED: 'Payment Method Changed',
+                    PAYMENT_UPDATED: 'Payment Updated',
+                    REFUND_INITIATED: 'Refund Initiated',
+                    REFUND_COMPLETED: 'Refund Completed',
+                    REFUND_FAILED: 'Refund Failed',
                     CASH_PAYMENT_RECORDED: 'Cash Payment Recorded',
                     NO_SHOW: 'Marked as No-Show',
                     PRICE_ADJUSTED: 'Price Adjusted',
+                    PRICE_OVERRIDE: 'Price Override Applied',
                     UNDO_CHECK_IN: 'Check-In Undone',
+                    CHECK_IN_REVERTED: 'Check-In Reverted',
                     NOTIFICATION_SENT: 'Notification Sent',
                     NOTIFICATION_FAILED: 'Notification Failed',
+                    REMINDER_SENT: 'Reminder Sent',
+                    CONFIRMATION_RESENT: 'Confirmation Resent',
+                    // Item 26 \u2014 out-of-order / risk surface
+                    MANUAL_REVIEW_FLAGGED: '\u26A0 Manual Review Required',
+                    APPROVAL_REQUESTED: 'Approval Requested',
+                    APPROVAL_APPROVED: 'Approval Granted',
+                    APPROVAL_REJECTED: 'Approval Rejected',
+                    ESCALATED: 'Escalated to Support',
+                    DE_ESCALATED: 'De-escalated',
+                    GOODWILL_ISSUED: 'Goodwill Credit Issued',
                   };
                   return map[type] || type.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
                 })();
+
+                // Some events carry security/forensic weight (manual-review,
+                // approval-rejected, refund-failed, escalation). Render those
+                // with a leading red rail so they don't blend into the rest.
+                const isCritical = ['MANUAL_REVIEW_FLAGGED', 'REFUND_FAILED', 'APPROVAL_REJECTED', 'ESCALATED']
+                  .includes(evt.eventType);
 
                 // Build clear "who did what" message.  Real-world audit
                 // trails (Stripe, Linear, GitHub) always show the actor's
@@ -1804,7 +2155,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                 })();
 
                 return (
-                  <div key={idx} className="ab-event-log-entry">
+                  <div key={idx} className={`ab-event-log-entry${isCritical ? ' ab-event-log-entry--critical' : ''}`}>
                     <div className="ab-event-log-header">
                       <span className="ab-event-log-type">{eventAction}</span>
                       <span className="ab-event-log-time" title={evt.createdAt || ''}>
@@ -1822,6 +2173,17 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                       Modified by: <strong>{whoLine}</strong>
                       {evt.eventVersion ? ` · revision v${evt.eventVersion}` : ''}
                     </div>
+                    {(evt.reason || evt.ipAddress || evt.userAgent) && (
+                      <div className="ab-event-log-meta" style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                        {evt.reason && <div><strong>Reason:</strong> {DOMPurify.sanitize(evt.reason, { ALLOWED_TAGS: [] })}</div>}
+                        {evt.ipAddress && <span title={evt.userAgent || ''}>IP: <code>{evt.ipAddress}</code></span>}
+                        {evt.userAgent && (
+                          <span style={{ marginLeft: evt.ipAddress ? 8 : 0 }} title={evt.userAgent}>
+                            · UA: <code style={{ fontSize: '0.72rem' }}>{evt.userAgent.length > 60 ? evt.userAgent.slice(0, 60) + '…' : evt.userAgent}</code>
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}

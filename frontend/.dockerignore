@@ -9,8 +9,7 @@ dist
 .idea
 src/test
 coverage
-# Lockfile is intentionally excluded — the Dockerfile runs `npm install`
-# directly inside the Alpine container so it always resolves packages with
-# Docker's own npm/platform, avoiding version-mismatch failures that occur
-# when developers run npm install on Windows (npm v11) vs the container (npm v10).
+.tmp
+# Lockfile is intentionally included: the Dockerfile copies package-lock.json
+# before installing dependencies so container builds use the committed graph.
 # package-lock.json

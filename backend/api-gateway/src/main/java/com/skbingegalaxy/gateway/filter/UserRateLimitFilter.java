@@ -8,12 +8,17 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
+import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
+
+import java.nio.charset.StandardCharsets;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -107,7 +112,16 @@ public class UserRateLimitFilter implements GlobalFilter, Ordered {
         }
 
         String principal = resolvePrincipal(exchange);
-        String bucketKey = principal + ":" + rule.bucketName();
+        // Scope booking and payment buckets per binge (X-Binge-Id is sent by the frontend
+        // Axios interceptor on every request) so a customer hitting the limit at Binge A is
+        // never blocked from booking or paying at Binge B — the same pattern used by
+        // Airbnb, Booking.com and other multi-venue platforms.
+        boolean isBingeScoped = "booking-create".equals(rule.bucketName())
+                || "payment-initiate".equals(rule.bucketName());
+        String sanitizedBingeId = isBingeScoped
+                ? sanitizeBingeId(exchange.getRequest().getHeaders().getFirst("X-Binge-Id")) : null;
+        String bucketKey = principal + ":" + rule.bucketName()
+                + (sanitizedBingeId != null ? ":binge-" + sanitizedBingeId : "");
 
         if (redisTemplate != null) {
             return applyRedisRateLimit(exchange, chain, bucketKey, rule, path)
@@ -188,11 +202,49 @@ public class UserRateLimitFilter implements GlobalFilter, Ordered {
 
     private Mono<Void> rejectRequest(ServerWebExchange exchange, String path, String bucketKey, Rule rule) {
         log.warn("User rate limit exceeded bucket={} rule={} path={}", bucketKey, rule.bucketName(), path);
-        exchange.getResponse().setStatusCode(HttpStatus.TOO_MANY_REQUESTS);
-        String retryAfter = String.valueOf(rule.window().toSeconds());
-        exchange.getResponse().getHeaders().add("Retry-After", retryAfter);
-        exchange.getResponse().getHeaders().add("X-RateLimit-Retry-After", retryAfter);
-        return exchange.getResponse().setComplete();
+        ServerHttpResponse response = exchange.getResponse();
+        response.setStatusCode(HttpStatus.TOO_MANY_REQUESTS);
+        long retryAfterSecs = rule.window().toSeconds();
+        // Compute the exact epoch-second at which the current sliding window resets —
+        // consistent with resolveRedisCounterKey() so clients can back off precisely.
+        long resetEpoch = (Instant.now().getEpochSecond() / retryAfterSecs + 1) * retryAfterSecs;
+        response.getHeaders().add("Retry-After",          String.valueOf(retryAfterSecs));
+        response.getHeaders().add("X-RateLimit-Retry-After", String.valueOf(retryAfterSecs));
+        response.getHeaders().add("X-RateLimit-Limit",    String.valueOf(rule.limit()));
+        response.getHeaders().add("X-RateLimit-Reset",    String.valueOf(resetEpoch));
+        response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
+        String message = buildRateLimitMessage(rule.bucketName(), retryAfterSecs);
+        String body = "{\"status\":429,\"error\":\"Too Many Requests\",\"message\":\"" + message
+                + "\",\"retryAfterSeconds\":" + retryAfterSecs
+                + ",\"resetAt\":" + resetEpoch + "}";
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        DataBuffer buffer = response.bufferFactory().wrap(bytes);
+        return response.writeWith(Mono.just(buffer));
+    }
+
+    /**
+     * Sanitize a client-supplied binge ID before embedding it in a Redis key.
+     * Only numeric digits are accepted (binge IDs are database-generated longs),
+     * capped at 20 chars. Returns null for any other input so the bucket falls
+     * back to the global (non-scoped) key rather than polluting the key namespace.
+     */
+    private String sanitizeBingeId(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        String digits = raw.replaceAll("[^0-9]", "");
+        return digits.isEmpty() || digits.length() > 20 ? null : digits;
+    }
+
+    private String buildRateLimitMessage(String bucketName, long retryAfterSecs) {
+        String waitTime = retryAfterSecs >= 60
+                ? (retryAfterSecs / 60) + " minute" + (retryAfterSecs / 60 > 1 ? "s" : "")
+                : retryAfterSecs + " second" + (retryAfterSecs != 1 ? "s" : "");
+        return switch (bucketName) {
+            case "booking-create"   -> "You've made too many booking requests. Please wait " + waitTime + " and try again.";
+            case "payment-initiate" -> "Too many payment attempts for this venue. Please wait " + waitTime + " before retrying.";
+            case "forgot-password"  -> "Too many password reset requests. Please wait " + waitTime + " before retrying.";
+            case "verify-otp"       -> "Too many verification attempts. Please wait " + waitTime + " before retrying.";
+            default                 -> "Too many requests. Please wait " + waitTime + " before trying again.";
+        };
     }
 
     private String resolveRedisCounterKey(String bucketKey, Duration window) {

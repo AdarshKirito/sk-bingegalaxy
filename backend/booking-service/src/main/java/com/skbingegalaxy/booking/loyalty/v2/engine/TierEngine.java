@@ -207,7 +207,17 @@ public class TierEngine {
             if (t.getLifetimeCreditsRequired() != null) continue;           // lifetime checked above
             if (windowQc >= t.getQualificationCreditsRequired()) return t;
         }
-        return ladder.get(0);                                               // Bronze fallback
+        // No qualifying tier found — return the base tier (Bronze).
+        // This should only happen for brand-new members with zero credits.
+        // If the ladder is misconfigured (empty is caught above) and we
+        // reach here unexpectedly, log a warning for the on-call team.
+        LoyaltyTierDefinition base = ladder.get(0);
+        if (windowQc > 0 || lifetimeQc > 0) {
+            log.warn("[loyalty-v2] tier fallback to {} for membership {} — windowQc={} lifetimeQc={} "
+                    + "but no ladder rung satisfied; check tier threshold configuration",
+                    base.getCode(), m.getId(), windowQc, lifetimeQc);
+        }
+        return base;
     }
 
     private void promote(LoyaltyMembership m, LoyaltyTierDefinition target, LocalDateTime at) {
@@ -250,17 +260,27 @@ public class TierEngine {
         return LocalDate.of(targetYear, Month.DECEMBER, 31).atTime(23, 59, 59);
     }
 
-    private void recordEvent(LoyaltyMembership m, String type, String fromCode, String toCode, LocalDateTime at) {
+    private void recordEvent(LoyaltyMembership m, String type,
+                             String fromCode, String toCode, LocalDateTime at) {
+        String validUntil = m.getTierEffectiveUntil() == null
+                ? "null"
+                : "\"" + m.getTierEffectiveUntil() + "\"";
         membershipEventRepository.save(
                 LoyaltyMembershipEvent.builder()
                         .tenantId(m.getTenantId())
                         .membershipId(m.getId())
                         .eventType(type)
-                        .fromValueJson("{\"tier\":\"" + fromCode + "\"}")
-                        .toValueJson("{\"tier\":\"" + toCode + "\",\"validUntil\":\""
-                                + (m.getTierEffectiveUntil() == null ? "null" : m.getTierEffectiveUntil()) + "\"}")
+                        .fromValueJson("{\"tier\":\"" + escapeJson(fromCode) + "\"}")
+                        .toValueJson("{\"tier\":\"" + escapeJson(toCode)
+                                + "\",\"validUntil\":" + validUntil + "}")
                         .triggeredBy("SYSTEM")
                         .build()
         );
+    }
+
+    /** Escape a string for safe embedding inside a JSON string literal. */
+    private static String escapeJson(String value) {
+        if (value == null) return "";
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 }

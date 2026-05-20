@@ -17,6 +17,13 @@ public interface WaitlistRepository extends JpaRepository<WaitlistEntry, Long> {
     List<WaitlistEntry> findByBingeIdAndPreferredDateAndStatusOrderByPositionAsc(
             Long bingeId, LocalDate preferredDate, WaitlistStatus status);
 
+    /**
+     * Same as above but honours VIP/loyalty boost: higher priority offered first,
+     * FIFO within the same priority bucket. Used by the promotion path.
+     */
+    List<WaitlistEntry> findByBingeIdAndPreferredDateAndStatusOrderByPriorityDescPositionAsc(
+            Long bingeId, LocalDate preferredDate, WaitlistStatus status);
+
     /** Customer's active waitlist entries. */
     List<WaitlistEntry> findByCustomerIdAndStatusInOrderByCreatedAtDesc(
             Long customerId, List<WaitlistStatus> statuses);

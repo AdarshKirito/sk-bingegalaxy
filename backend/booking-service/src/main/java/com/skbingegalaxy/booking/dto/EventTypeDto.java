@@ -18,6 +18,10 @@ public class EventTypeDto {
     private BigDecimal pricePerGuest;
     private int minHours;
     private int maxHours;
+    /** Per-event-type minimum guest count (null = no lower bound). */
+    private Integer minGuests;
+    /** Per-event-type maximum guest count (null = no upper bound). */
+    private Integer maxGuests;
     private List<String> imageUrls;
     private boolean active;
 }

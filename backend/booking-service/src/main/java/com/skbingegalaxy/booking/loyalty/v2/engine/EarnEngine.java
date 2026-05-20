@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -38,8 +39,7 @@ import java.util.Optional;
  * <ul>
  *   <li>no binge binding exists or it's {@code DISABLED}</li>
  *   <li>binding is {@code ENABLED_LEGACY} + {@code legacyFrozen=true} —
- *       the legacy (v1) {@link com.skbingegalaxy.booking.service.LoyaltyService}
- *       stays authoritative for that binge during dual-write;</li>
+ *       the retired v1 loyalty facade stays authoritative for that binge during dual-write;</li>
  *   <li>no active earn rule matches (all universal + tier-specific
  *       rules filtered out by {@code effectiveFrom/To});</li>
  *   <li>booking amount is below {@code minBookingAmount}.</li>
@@ -61,6 +61,15 @@ public class EarnEngine {
 
     @Transactional
     public EarnResult earnForBooking(EarnRequest req) {
+        if (req == null) throw new IllegalArgumentException("Earn request is required");
+        if (req.membershipId() == null) throw new IllegalArgumentException("membershipId is required");
+        if (req.bingeId() == null) throw new IllegalArgumentException("bingeId is required");
+        if (req.bookingRef() == null || req.bookingRef().isBlank())
+            throw new IllegalArgumentException("bookingRef is required");
+        if (req.at() == null) throw new IllegalArgumentException("completedAt is required");
+        if (req.bookingAmount() == null || req.bookingAmount().signum() <= 0)
+            return EarnResult.skipped("INVALID_BOOKING_AMOUNT");
+
         LoyaltyMembership membership = membershipRepository.findById(req.membershipId())
                 .orElseThrow(() -> new IllegalStateException("Membership " + req.membershipId() + " not found"));
 
@@ -138,7 +147,7 @@ public class EarnEngine {
 
         LoyaltyQualificationEvent qcEvent = null;
         if (qualifyingCredits > 0) {
-            qcEvent = persistQualificationEvent(membership, binding, rule, req, qualifyingCredits, program);
+            qcEvent = persistQualificationEvent(membership, binding, req, qualifyingCredits, program);
         }
 
         // Recalc tier AFTER both writes commit (so sum sees them).  We are
@@ -177,7 +186,7 @@ public class EarnEngine {
 
     private LoyaltyQualificationEvent persistQualificationEvent(
             LoyaltyMembership membership, LoyaltyBingeBinding binding,
-            LoyaltyBingeEarningRule rule, EarnRequest req, long qc, LoyaltyProgram program) {
+            EarnRequest req, long qc, LoyaltyProgram program) {
 
         // Guard against double-write when event replays: our unique index
         // isn't there (qualification events are append-only and meant to
@@ -188,13 +197,7 @@ public class EarnEngine {
             return existing.get(0);
         }
 
-        LocalDateTime windowExpiry = req.at().plusDays(
-                rule.getEffectiveTo() != null
-                        ? Math.min(program.getPointsExpiryDays(), 365)
-                        : 365
-        );
-        // Default window = 365d (rolling 12-month).  Tier engine uses this
-        // to compute "credits earned in the last N days".
+        LocalDateTime windowExpiry = req.at().plusDays(resolveQualificationWindowDays(program, req.at()));
 
         return qcEventRepository.save(
                 LoyaltyQualificationEvent.builder()
@@ -208,6 +211,23 @@ public class EarnEngine {
                         .expiresFromWindowAt(windowExpiry)
                         .build()
         );
+    }
+
+    private int resolveQualificationWindowDays(LoyaltyProgram program, LocalDateTime at) {
+        try {
+            List<LoyaltyTierDefinition> ladder = configService.activeLadder(program.getId(), at);
+            if (ladder != null && !ladder.isEmpty()) {
+                return ladder.stream()
+                        .mapToInt(LoyaltyTierDefinition::getQualificationWindowDays)
+                        .filter(days -> days > 0)
+                        .max()
+                        .orElse(365);
+            }
+        } catch (RuntimeException ex) {
+            log.warn("[loyalty-v2] could not resolve tier qualification window, using 365d: {}",
+                    ex.getMessage());
+        }
+        return 365;
     }
 
     // ── DTOs ─────────────────────────────────────────────────────────────

@@ -51,7 +51,7 @@ public class LoyaltyV2AdminController {
     public ResponseEntity<ApiResponse<LoyaltyBingeBinding>> getBinding(
             @PathVariable Long bingeId) {
         LoyaltyProgram program = configService.requireDefaultProgram();
-        LoyaltyBingeBinding binding = configService.findActiveBinding(program.getId(), bingeId).orElse(null);
+        LoyaltyBingeBinding binding = bindingRepository.findByProgramIdAndBingeId(program.getId(), bingeId).orElse(null);
         return ResponseEntity.ok(ApiResponse.ok(binding));
     }
 

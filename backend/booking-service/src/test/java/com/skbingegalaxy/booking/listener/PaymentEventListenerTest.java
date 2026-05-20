@@ -3,6 +3,7 @@ package com.skbingegalaxy.booking.listener;
 import com.skbingegalaxy.booking.config.AdminEventBus;
 import com.skbingegalaxy.booking.entity.Booking;
 import com.skbingegalaxy.booking.repository.ProcessedEventRepository;
+import com.skbingegalaxy.booking.service.BookingEventLogService;
 import com.skbingegalaxy.booking.service.BookingService;
 import com.skbingegalaxy.booking.service.SagaOrchestrator;
 import com.skbingegalaxy.common.enums.BookingStatus;
@@ -31,6 +32,8 @@ class PaymentEventListenerTest {
     @Mock private ProcessedEventRepository processedEventRepository;
     @Mock private SagaOrchestrator sagaOrchestrator;
     @Mock private AdminEventBus adminEventBus;
+    @Mock private BookingEventLogService eventLogService;
+    @Mock private com.skbingegalaxy.booking.service.BookingAnalyticsMetrics analyticsMetrics;
 
     @InjectMocks private PaymentEventListener paymentEventListener;
 
@@ -80,7 +83,12 @@ class PaymentEventListenerTest {
         paymentEventListener.onPaymentSuccess(event);
 
         verify(bookingService).addToCollectedAmount("SKBG25123456", BigDecimal.valueOf(5000));
-        verify(bookingService).getBookingEntityForSystem("SKBG25123456");
+        // The system-path read happens three times: pre-check for terminal
+        // status, post-write re-read for status decisioning, and a final
+        // refresh for the timeline audit row. All three must use
+        // getBookingEntityForSystem so the binge-scope guard is bypassed for
+        // the saga consumer.
+        verify(bookingService, org.mockito.Mockito.times(3)).getBookingEntityForSystem("SKBG25123456");
         verify(bookingService).updatePaymentStatus("SKBG25123456", com.skbingegalaxy.common.enums.PaymentStatus.SUCCESS, "UPI");
     }
 }

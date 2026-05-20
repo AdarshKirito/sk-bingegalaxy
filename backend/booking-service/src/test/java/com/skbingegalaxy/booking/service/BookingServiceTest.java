@@ -58,6 +58,19 @@ class BookingServiceTest {
         @Mock private com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyMembershipRepository loyaltyMembershipRepository;
         @Mock private com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyConfigService loyaltyConfigService;
         @Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
+        @Mock private com.skbingegalaxy.booking.service.CustomerFreezeService customerFreezeService;
+        @Mock private com.skbingegalaxy.booking.repository.SlotHoldRepository slotHoldRepository;
+        // Pre-existing service field that was never mocked in this fixture —
+        // adding here so cancel / create flows can publish without NPE.
+        @Mock private com.skbingegalaxy.booking.service.BookingEventPublisher bookingEventPublisher;
+        @Mock private com.skbingegalaxy.booking.service.BookingAnalyticsMetrics analyticsMetrics;
+        @Mock private com.skbingegalaxy.booking.service.BookingRiskEvaluator bookingRiskEvaluator;
+        @Mock private com.skbingegalaxy.booking.repository.BookingTransferRepository bookingTransferRepository;
+        // Mocked so @InjectMocks satisfies the constructor; replaced in setUp()
+        // with a real instance wired against the same mocked dependencies so
+        // existing assertions on bookingRepository.save() / eventLogService
+        // continue to observe the SM's internal calls.
+        @Mock private com.skbingegalaxy.booking.service.statemachine.BookingStateMachine stateMachineMock;
 
     @InjectMocks private BookingService bookingService;
 
@@ -72,6 +85,13 @@ class BookingServiceTest {
         // because Lombok-generated constructors don't preserve parameter names.
         ReflectionTestUtils.setField(bookingService, "availabilityClient", availabilityClient);
         ReflectionTestUtils.setField(bookingService, "eventPublisher", eventPublisher);
+        // Replace the mocked state-machine with a real one wired to the same
+        // mocked repository + event log so existing tests can keep verifying
+        // bookingRepository.save() and eventLogService.logEventFull() calls
+        // — the SM forwards to those collaborators.
+        ReflectionTestUtils.setField(bookingService, "stateMachine",
+            new com.skbingegalaxy.booking.service.statemachine.BookingStateMachine(
+                bookingRepository, eventLogService));
         ReflectionTestUtils.setField(bookingService, "internalApiSecret", "test-internal-secret");
         ReflectionTestUtils.setField(bookingService, "refPrefix", "SKBG");
                 ReflectionTestUtils.setField(bookingService, "maxPendingPerCustomer", 2);
@@ -81,7 +101,8 @@ class BookingServiceTest {
                 ReflectionTestUtils.setField(bookingService, "defaultClosingHour", 23);
                 lenient().when(loyaltyService.redeemPoints(anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
                         .thenReturn(new LoyaltyService.RedemptionResult(0L, BigDecimal.ZERO));
-        lenient().when(bingeRepository.findById(anyLong())).thenReturn(Optional.empty());
+        lenient().when(bingeRepository.findById(anyLong())).thenAnswer(inv ->
+            Optional.of(Binge.builder().id((Long) inv.getArgument(0)).build()));
         lenient().when(cancellationTierRepository.findByBingeIdOrderByHoursBeforeStartDesc(anyLong())).thenReturn(List.of());
 
         eventType = EventType.builder()
@@ -262,13 +283,18 @@ class BookingServiceTest {
         assertThat(result.getStatus()).isEqualTo(BookingStatus.CANCELLED);
         verify(bookingRepository).findByBookingRef("SKBG25123456");
         verify(bookingRepository, never()).findByBookingRefAndBingeId(anyString(), anyLong());
-        verify(eventLogService).logEvent(
+        verify(eventLogService).logEventFull(
                 eq(testBooking),
                 eq(BookingEventType.CANCELLED),
                 eq("PENDING"),
                 isNull(),
                 eq("SYSTEM"),
-                eq("Booking auto-cancelled after payment failure"));
+                isNull(),
+                argThat(d -> d != null && d.contains("PENDING → CANCELLED")
+                                       && d.contains("Booking auto-cancelled after payment failure")),
+                eq("Booking auto-cancelled after payment failure"),
+                isNull(),
+                isNull());
     }
 
     // ── Update payment status ────────────────────────────
@@ -277,6 +303,7 @@ class BookingServiceTest {
     void updatePaymentStatus_success_confirmsBooking() {
         when(bookingRepository.findByBookingRef("SKBG25123456"))
                 .thenReturn(Optional.of(testBooking));
+        when(bookingRepository.save(any(Booking.class))).thenReturn(testBooking);
 
         bookingService.updatePaymentStatus("SKBG25123456", PaymentStatus.SUCCESS, "UPI");
 

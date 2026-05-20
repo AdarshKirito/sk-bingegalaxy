@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { authService, adminService } from '../services/endpoints';
 import SEO from '../components/SEO';
+import { useConfirm } from '../components/ui/ConfirmProvider';
 import { toast } from 'react-toastify';
 import DOMPurify from 'dompurify';
 import {
@@ -45,6 +46,7 @@ function StarRow({ value, max = 5 }) {
 
 export default function AdminAllUsers() {
   const { isSuperAdmin } = useAuth();
+  const confirm = useConfirm();
 
   /* ── Lists ────────────────────────────────────────── */
   const [customers, setCustomers] = useState([]);
@@ -147,10 +149,18 @@ export default function AdminAllUsers() {
   const handleBulk = async (kind) => {
     if (!selectedIds.size) return;
     const verb = kind === 'ban' ? 'Ban' : kind === 'unban' ? 'Unban' : 'Delete';
-    const msg = kind === 'delete'
-      ? `Permanently delete ${selectedIds.size} user(s)? This cannot be undone.`
-      : `${verb} ${selectedIds.size} user(s)?`;
-    if (!window.confirm(msg)) return;
+    const isDelete = kind === 'delete';
+    const ok = await confirm({
+      title: `${verb} ${selectedIds.size} user${selectedIds.size === 1 ? '' : 's'}?`,
+      message: isDelete
+        ? 'This permanently removes the selected accounts. The action is irreversible and audited.'
+        : kind === 'ban'
+          ? 'Banned users cannot log in. They will be signed out from any active sessions.'
+          : 'Unbanning restores login access. The users will be able to sign in again immediately.',
+      confirmLabel: verb,
+      variant: isDelete || kind === 'ban' ? 'danger' : 'primary',
+    });
+    if (!ok) return;
     setBulkBusy(true);
     try {
       const ids = [...selectedIds];
@@ -170,8 +180,16 @@ export default function AdminAllUsers() {
   /* ─── Single-user actions ───────────────────────────── */
   const handleToggleBan = async (u) => {
     const action = u.active ? 'ban' : 'unban';
-    const name = `${u.firstName || ''} ${u.lastName || ''}`.trim();
-    if (!window.confirm(`${action === 'ban' ? 'Ban' : 'Unban'} ${name}?`)) return;
+    const name = `${u.firstName || ''} ${u.lastName || ''}`.trim() || `user #${u.id}`;
+    const ok = await confirm({
+      title: `${action === 'ban' ? 'Ban' : 'Unban'} ${name}?`,
+      message: action === 'ban'
+        ? 'Banned users cannot log in. Active sessions will be revoked.'
+        : 'Unbanning restores login access immediately.',
+      confirmLabel: action === 'ban' ? 'Ban user' : 'Unban user',
+      variant: action === 'ban' ? 'danger' : 'primary',
+    });
+    if (!ok) return;
     try {
       if (action === 'ban') await authService.bulkBan([u.id]);
       else await authService.bulkUnban([u.id]);
@@ -184,8 +202,14 @@ export default function AdminAllUsers() {
   };
 
   const handleDelete = async (u) => {
-    const name = `${u.firstName || ''} ${u.lastName || ''}`.trim();
-    if (!window.confirm(`Delete ${name}? This cannot be undone.`)) return;
+    const name = `${u.firstName || ''} ${u.lastName || ''}`.trim() || `user #${u.id}`;
+    const ok = await confirm({
+      title: `Delete ${name}?`,
+      message: 'This permanently removes the account. The action is irreversible and audited.',
+      confirmLabel: 'Delete user',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
       await authService.deleteUser(u.id);
       toast.success('User deleted');

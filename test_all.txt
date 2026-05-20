@@ -1,0 +1,1120 @@
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by org.fusesource.jansi.internal.JansiLoader in an unnamed module (file:/C:/apache-maven-3.9.6/lib/jansi-2.4.0.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by com.google.common.util.concurrent.AbstractFuture$UnsafeAtomicHelper (file:/C:/apache-maven-3.9.6/lib/guava-32.0.1-jre.jar)
+WARNING: Please consider reporting this to the maintainers of class com.google.common.util.concurrent.AbstractFuture$UnsafeAtomicHelper
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+[INFO] Scanning for projects...
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Build Order:
+[INFO] 
+[INFO] SK Binge Galaxy                                                    [pom]
+[INFO] Common Library                                                     [jar]
+[INFO] API Gateway                                                        [jar]
+[INFO] Booking Service                                                    [jar]
+[INFO] Payment Service                                                    [jar]
+[INFO] 
+[INFO] -----------------< com.skbingegalaxy:sk-binge-galaxy >------------------
+[INFO] Building SK Binge Galaxy 1.0.0                                     [1/5]
+[INFO]   from pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+[INFO] 
+[INFO] --------------------< com.skbingegalaxy:common-lib >--------------------
+[INFO] Building Common Library 1.0.0                                      [2/5]
+[INFO]   from common-lib\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ common-lib ---
+[INFO] skip non existing resourceDirectory D:\sk-binge-galaxy\sk-binge-galaxy\backend\common-lib\src\main\resources
+[INFO] skip non existing resourceDirectory D:\sk-binge-galaxy\sk-binge-galaxy\backend\common-lib\src\main\resources
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ common-lib ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ common-lib ---
+[INFO] skip non existing resourceDirectory D:\sk-binge-galaxy\sk-binge-galaxy\backend\common-lib\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.13.0:testCompile (default-testCompile) @ common-lib ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.3:test (default-test) @ common-lib ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running com.skbingegalaxy.common.config.KafkaDlqErrorHandlerConfigTest
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build what is described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org/mockito/Mockito.html#0.3
+WARNING: A Java agent has been loaded dynamically (C:\Users\ADARS\.m2\repository\net\bytebuddy\byte-buddy-agent\1.15.10\byte-buddy-agent-1.15.10.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by net.bytebuddy.dynamic.loading.ClassInjector$UsingUnsafe$Dispatcher$CreationAction (file:/C:/Users/ADARS/.m2/repository/net/bytebuddy/byte-buddy/1.15.10/byte-buddy-1.15.10.jar)
+WARNING: Please consider reporting this to the maintainers of class net.bytebuddy.dynamic.loading.ClassInjector$UsingUnsafe$Dispatcher$CreationAction
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.019 s -- in com.skbingegalaxy.common.config.KafkaDlqErrorHandlerConfigTest
+[INFO] Running com.skbingegalaxy.common.context.BingeContextTest
+[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.079 s -- in com.skbingegalaxy.common.context.BingeContextTest
+[INFO] Running com.skbingegalaxy.common.dto.ApiResponseTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.030 s -- in com.skbingegalaxy.common.dto.ApiResponseTest
+[INFO] Running com.skbingegalaxy.common.exception.GlobalExceptionHandlerTest
+17:14:45.178 [main] WARN com.skbingegalaxy.common.exception.GlobalExceptionHandler -- Validation failed: {name=required, email=must not be blank}
+17:14:45.210 [main] ERROR com.skbingegalaxy.common.exception.GlobalExceptionHandler -- Unhandled exception: something broke
+[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.120 s -- in com.skbingegalaxy.common.exception.GlobalExceptionHandlerTest
+[INFO] Running com.skbingegalaxy.common.money.MoneyUtilTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.093 s -- in com.skbingegalaxy.common.money.MoneyUtilTest
+[INFO] Running com.skbingegalaxy.common.util.LogSanitizerTest
+[INFO] Running com.skbingegalaxy.common.util.LogSanitizerTest$MaskToken
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.015 s -- in com.skbingegalaxy.common.util.LogSanitizerTest$MaskToken
+[INFO] Running com.skbingegalaxy.common.util.LogSanitizerTest$MaskPhone
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.149 s -- in com.skbingegalaxy.common.util.LogSanitizerTest$MaskPhone
+[INFO] Running com.skbingegalaxy.common.util.LogSanitizerTest$MaskEmail
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.032 s -- in com.skbingegalaxy.common.util.LogSanitizerTest$MaskEmail
+[INFO] Tests run: 0, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.210 s -- in com.skbingegalaxy.common.util.LogSanitizerTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 50, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] 
+[INFO] -------------------< com.skbingegalaxy:api-gateway >--------------------
+[INFO] Building API Gateway 1.0.0                                         [3/5]
+[INFO]   from api-gateway\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ api-gateway ---
+[INFO] Copying 2 resources from src\main\resources to target\classes
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ api-gateway ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ api-gateway ---
+[INFO] skip non existing resourceDirectory D:\sk-binge-galaxy\sk-binge-galaxy\backend\api-gateway\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.13.0:testCompile (default-testCompile) @ api-gateway ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.3:test (default-test) @ api-gateway ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running com.skbingegalaxy.gateway.controller.FallbackControllerTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.707 s -- in com.skbingegalaxy.gateway.controller.FallbackControllerTest
+[INFO] Running com.skbingegalaxy.gateway.filter.ApiVersionHeaderFilterTest
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build what is described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org/mockito/Mockito.html#0.3
+WARNING: A Java agent has been loaded dynamically (C:\Users\ADARS\.m2\repository\net\bytebuddy\byte-buddy-agent\1.15.10\byte-buddy-agent-1.15.10.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by net.bytebuddy.dynamic.loading.ClassInjector$UsingUnsafe$Dispatcher$CreationAction (file:/C:/Users/ADARS/.m2/repository/net/bytebuddy/byte-buddy/1.15.10/byte-buddy-1.15.10.jar)
+WARNING: Please consider reporting this to the maintainers of class net.bytebuddy.dynamic.loading.ClassInjector$UsingUnsafe$Dispatcher$CreationAction
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.376 s -- in com.skbingegalaxy.gateway.filter.ApiVersionHeaderFilterTest
+[INFO] Running com.skbingegalaxy.gateway.filter.JwtAuthenticationFilterTest
+[INFO] Running com.skbingegalaxy.gateway.filter.JwtAuthenticationFilterTest$AdminAuthorizationTests
+17:14:50.907 [main] WARN com.skbingegalaxy.gateway.filter.JwtAuthenticationFilter -- Non-admin role 'CUSTOMER' accessing admin path /api/v1/bookings/admin/dashboard
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.339 s -- in com.skbingegalaxy.gateway.filter.JwtAuthenticationFilterTest$AdminAuthorizationTests
+[INFO] Running com.skbingegalaxy.gateway.filter.JwtAuthenticationFilterTest$AuthenticationTests
+17:14:50.981 [main] WARN com.skbingegalaxy.gateway.filter.JwtAuthenticationFilter -- JWT validation failed for path /api/v1/bookings/my: JWT expired 3600978 milliseconds ago at 2026-05-01T21:14:50.000Z. Current time: 2026-05-01T22:14:50.978Z. Allowed clock skew: 30000 milliseconds.
+17:14:50.985 [main] WARN com.skbingegalaxy.gateway.filter.JwtAuthenticationFilter -- No JWT token found for secured path /api/v1/bookings/my
+17:14:50.996 [main] WARN com.skbingegalaxy.gateway.filter.JwtAuthenticationFilter -- No JWT token found for secured path /api/v1/bookings/my
+17:14:51.001 [main] WARN com.skbingegalaxy.gateway.filter.JwtAuthenticationFilter -- JWT validation failed for path /api/v1/bookings/my: JWT signature does not match locally computed signature. JWT validity cannot be asserted and should not be trusted.
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.038 s -- in com.skbingegalaxy.gateway.filter.JwtAuthenticationFilterTest$AuthenticationTests
+[INFO] Running com.skbingegalaxy.gateway.filter.JwtAuthenticationFilterTest$IssuerAudienceTests
+17:14:51.021 [main] WARN com.skbingegalaxy.gateway.filter.JwtAuthenticationFilter -- JWT validation failed for path /api/v1/bookings/my: Unexpected token audience
+17:14:51.034 [main] WARN com.skbingegalaxy.gateway.filter.JwtAuthenticationFilter -- JWT validation failed for path /api/v1/bookings/my: Unexpected token issuer
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.028 s -- in com.skbingegalaxy.gateway.filter.JwtAuthenticationFilterTest$IssuerAudienceTests
+[INFO] Running com.skbingegalaxy.gateway.filter.JwtAuthenticationFilterTest$PublicPathTests
+17:14:51.064 [main] WARN com.skbingegalaxy.gateway.filter.JwtAuthenticationFilter -- No JWT token found for secured path /swagger-ui/index.html
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.041 s -- in com.skbingegalaxy.gateway.filter.JwtAuthenticationFilterTest$PublicPathTests
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.471 s -- in com.skbingegalaxy.gateway.filter.JwtAuthenticationFilterTest
+[INFO] Running com.skbingegalaxy.gateway.filter.RateLimitFilterTest
+17:14:51.201 [main] WARN com.skbingegalaxy.gateway.filter.RateLimitFilter -- Rate limit exceeded for 10.0.0.10 on path /api/test
+17:14:51.338 [main] WARN com.skbingegalaxy.gateway.filter.RateLimitFilter -- Rate limit exceeded for 10.0.0.99 on path /api/test
+17:14:51.344 [main] WARN com.skbingegalaxy.gateway.filter.RateLimitFilter -- Rate limit exceeded for 10.0.0.77:auth-sensitive on path /api/v1/auth/forgot-password
+17:14:51.430 [main] WARN com.skbingegalaxy.gateway.filter.RateLimitFilter -- Rate limit exceeded for 10.0.0.78:auth-sensitive on path /api/v1/auth/reset-password
+17:14:51.465 [main] WARN com.skbingegalaxy.gateway.filter.RateLimitFilter -- Rate limit exceeded for 198.51.100.1 on path /api/test
+17:14:51.477 [main] WARN com.skbingegalaxy.gateway.filter.RateLimitFilter -- Rate limit exceeded for 10.0.0.50:auth on path /api/v1/auth/login
+[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.402 s -- in com.skbingegalaxy.gateway.filter.RateLimitFilterTest
+[INFO] Running com.skbingegalaxy.gateway.filter.SecurityHeadersFilterTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.050 s -- in com.skbingegalaxy.gateway.filter.SecurityHeadersFilterTest
+[INFO] Running com.skbingegalaxy.gateway.filter.UserRateLimitFilterTest
+17:14:51.576 [main] WARN com.skbingegalaxy.gateway.filter.UserRateLimitFilter -- User rate limit exceeded bucket=user:99:booking-create rule=booking-create path=/api/v1/bookings
+17:14:51.600 [main] WARN com.skbingegalaxy.gateway.filter.UserRateLimitFilter -- User rate limit exceeded bucket=ip:198.51.100.5:forgot-password rule=forgot-password path=/api/v1/auth/forgot-password
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.066 s -- in com.skbingegalaxy.gateway.filter.UserRateLimitFilterTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 47, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] 
+[INFO] -----------------< com.skbingegalaxy:booking-service >------------------
+[INFO] Building Booking Service 1.0.0                                     [4/5]
+[INFO]   from booking-service\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ booking-service ---
+[INFO] Copying 2 resources from src\main\resources to target\classes
+[INFO] Copying 46 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ booking-service ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ booking-service ---
+[INFO] Copying 1 resource from src\test\resources to target\test-classes
+[INFO] 
+[INFO] --- compiler:3.13.0:testCompile (default-testCompile) @ booking-service ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.3:test (default-test) @ booking-service ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running com.skbingegalaxy.booking.BookingFlowIntegrationTest
+[WARNING] Tests run: 6, Failures: 0, Errors: 0, Skipped: 6, Time elapsed: 0.009 s -- in com.skbingegalaxy.booking.BookingFlowIntegrationTest
+[INFO] Running com.skbingegalaxy.booking.controller.BookingControllerAuthzTest
+17:14:54.446 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.skbingegalaxy.booking.controller.BookingControllerAuthzTest]: BookingControllerAuthzTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+17:14:54.834 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.skbingegalaxy.booking.BookingServiceApplication for test class com.skbingegalaxy.booking.controller.BookingControllerAuthzTest
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.4.5)
+
+2026-05-01T17:14:56.479-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.c.BookingControllerAuthzTest       : Starting BookingControllerAuthzTest using Java 24.0.2 with PID 26824 (started by ADARS in D:\sk-binge-galaxy\sk-binge-galaxy\backend\booking-service)
+2026-05-01T17:14:56.484-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.c.BookingControllerAuthzTest       : No active profile set, falling back to 1 default profile: "default"
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build what is described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org/mockito/Mockito.html#0.3
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+WARNING: A Java agent has been loaded dynamically (C:\Users\ADARS\.m2\repository\net\bytebuddy\byte-buddy-agent\1.15.10\byte-buddy-agent-1.15.10.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by net.bytebuddy.dynamic.loading.ClassInjector$UsingUnsafe$Dispatcher$CreationAction (file:/C:/Users/ADARS/.m2/repository/net/bytebuddy/byte-buddy/1.15.10/byte-buddy-1.15.10.jar)
+WARNING: Please consider reporting this to the maintainers of class net.bytebuddy.dynamic.loading.ClassInjector$UsingUnsafe$Dispatcher$CreationAction
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+2026-05-01T17:15:04.922-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] o.s.b.t.m.w.SpringBootMockServletContext : Initializing Spring TestDispatcherServlet ''
+2026-05-01T17:15:04.922-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-05-01T17:15:04.925-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 2 ms
+2026-05-01T17:15:05.043-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.c.BookingControllerAuthzTest       : Started BookingControllerAuthzTest in 9.772 seconds (process running for 12.638)
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 12.07 s -- in com.skbingegalaxy.booking.controller.BookingControllerAuthzTest
+[INFO] Running com.skbingegalaxy.booking.controller.MediaControllerTest
+[INFO] Running com.skbingegalaxy.booking.controller.MediaControllerTest$ServeTests
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.482 s -- in com.skbingegalaxy.booking.controller.MediaControllerTest$ServeTests
+[INFO] Running com.skbingegalaxy.booking.controller.MediaControllerTest$UploadTests
+2026-05-01T17:15:06.740-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.controller.MediaController   : Image uploaded: /api/v1/bookings/media/1bf22691-82b1-49ae-96df-ddd433252479.jpg
+2026-05-01T17:15:06.755-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.controller.MediaController   : Image uploaded: /api/v1/bookings/media/31a55568-16e4-4211-bc5c-4ad99efd014f.png
+2026-05-01T17:15:06.771-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.controller.MediaController   : Image uploaded: /api/v1/bookings/media/0a7c30df-9119-4bd7-9665-e42d657f7026.jpg
+2026-05-01T17:15:06.778-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.controller.MediaController   : Image uploaded: /api/v1/bookings/media/6aed660d-ab2a-4d41-b8bb-2f756b66038a.jpg
+2026-05-01T17:15:06.784-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.controller.MediaController   : Image uploaded: /api/v1/bookings/media/c6bc3d08-3e47-4af6-859c-709a63db56fb.jpg
+2026-05-01T17:15:06.790-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.controller.MediaController   : Image uploaded: /api/v1/bookings/media/9e53210e-4276-436c-be24-9c398ac87e9f.webp
+2026-05-01T17:15:06.814-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.controller.MediaController   : Image uploaded: /api/v1/bookings/media/c5ed44be-4e2a-40e9-988a-01a6f9af631f.jpg
+2026-05-01T17:15:06.820-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.controller.MediaController   : Image uploaded: /api/v1/bookings/media/661b6ddf-93a9-467b-aa97-58cd8b3ab19f.jpg
+2026-05-01T17:15:06.834-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.controller.MediaController   : Image uploaded: /api/v1/bookings/media/8c837c11-cb0e-4cca-a98d-54b10b103594.jpg
+2026-05-01T17:15:06.835-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.controller.MediaController   : Image uploaded: /api/v1/bookings/media/3ec68a2f-c41c-4730-8f38-b6052310df6d.jpg
+[INFO] Tests run: 14, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.108 s -- in com.skbingegalaxy.booking.controller.MediaControllerTest$UploadTests
+[INFO] Tests run: 0, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.596 s -- in com.skbingegalaxy.booking.controller.MediaControllerTest
+[INFO] Running com.skbingegalaxy.booking.listener.PaymentEventListenerTest
+2026-05-01T17:15:07.379-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.listener.PaymentEventListener      : Payment failed event for booking: SKBG25123456
+2026-05-01T17:15:07.384-05:00 ERROR 26824 --- [booking-service] [           main] [                                                 ] c.s.b.listener.PaymentEventListener      : Saga compensation FAILED for booking SKBG25123456 after payment failure
+
+java.lang.RuntimeException: database unavailable
+	at com.skbingegalaxy.booking.service.BookingService.cancelBookingForSystem(BookingService.java:1597)
+	at com.skbingegalaxy.booking.listener.PaymentEventListener.onPaymentFailed(PaymentEventListener.java:122)
+	at com.skbingegalaxy.booking.listener.PaymentEventListenerTest.lambda$0(PaymentEventListenerTest.java:56)
+	at org.assertj.core.api.ThrowableAssert.catchThrowable(ThrowableAssert.java:63)
+	at org.assertj.core.api.AssertionsForClassTypes.catchThrowable(AssertionsForClassTypes.java:904)
+	at org.assertj.core.api.Assertions.catchThrowable(Assertions.java:1470)
+	at org.assertj.core.api.Assertions.assertThatThrownBy(Assertions.java:1313)
+	at com.skbingegalaxy.booking.listener.PaymentEventListenerTest.onPaymentFailed_doesNotMarkProcessedWhenCompensationFails(PaymentEventListenerTest.java:56)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at org.junit.platform.commons.util.ReflectionUtils.invokeMethod(ReflectionUtils.java:767)
+	at org.junit.jupiter.engine.execution.MethodInvocation.proceed(MethodInvocation.java:60)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$ValidatingInvocation.proceed(InvocationInterceptorChain.java:131)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.intercept(TimeoutExtension.java:156)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestableMethod(TimeoutExtension.java:147)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestMethod(TimeoutExtension.java:86)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker$ReflectiveInterceptorCall.lambda$ofVoidMethod$0(InterceptingExecutableInvoker.java:103)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.lambda$invoke$0(InterceptingExecutableInvoker.java:93)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$InterceptedInvocation.proceed(InvocationInterceptorChain.java:106)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.proceed(InvocationInterceptorChain.java:64)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.chainAndInvoke(InvocationInterceptorChain.java:45)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.invoke(InvocationInterceptorChain.java:37)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:92)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:86)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.lambda$invokeTestMethod$8(TestMethodTestDescriptor.java:217)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.invokeTestMethod(TestMethodTestDescriptor.java:213)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:138)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:68)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:156)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.submit(SameThreadHierarchicalTestExecutorService.java:35)
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestExecutor.execute(HierarchicalTestExecutor.java:57)
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestEngine.execute(HierarchicalTestEngine.java:54)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:198)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:169)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:93)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.lambda$execute$0(EngineExecutionOrchestrator.java:58)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.withInterceptedStreams(EngineExecutionOrchestrator.java:141)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:57)
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:103)
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:85)
+	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:47)
+	at org.apache.maven.surefire.junitplatform.LazyLauncher.execute(LazyLauncher.java:56)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.execute(JUnitPlatformProvider.java:194)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invokeAllTests(JUnitPlatformProvider.java:150)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invoke(JUnitPlatformProvider.java:124)
+	at org.apache.maven.surefire.booter.ForkedBooter.runSuitesInProcess(ForkedBooter.java:385)
+	at org.apache.maven.surefire.booter.ForkedBooter.execute(ForkedBooter.java:162)
+	at org.apache.maven.surefire.booter.ForkedBooter.run(ForkedBooter.java:507)
+	at org.apache.maven.surefire.booter.ForkedBooter.main(ForkedBooter.java:495)
+
+2026-05-01T17:15:07.420-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.listener.PaymentEventListener      : Payment success event for booking: SKBG25123456
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.580 s -- in com.skbingegalaxy.booking.listener.PaymentEventListenerTest
+[INFO] Running com.skbingegalaxy.booking.loyalty.v2.engine.EarnEngineTest
+2026-05-01T17:15:07.856-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.loyalty.v2.engine.EarnEngine       : [loyalty-v2] EARN booking=BK-2 membership=42 points=500 qc=10000 binding=500 rule=9000
+2026-05-01T17:15:07.864-05:00  WARN 26824 --- [booking-service] [           main] [                                                 ] c.s.b.loyalty.v2.engine.EarnEngine       : [loyalty-v2] earn skipped — no active binding for binge 7 (booking=BK-3)
+2026-05-01T17:15:07.874-05:00  WARN 26824 --- [booking-service] [           main] [                                                 ] c.s.b.loyalty.v2.engine.EarnEngine       : [loyalty-v2] earn skipped — binge 7 is ENABLED_LEGACY + frozen (booking=BK-4)
+2026-05-01T17:15:07.883-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.loyalty.v2.engine.EarnEngine       : [loyalty-v2] QC event already exists for booking BK-7 — skipping
+2026-05-01T17:15:07.884-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.loyalty.v2.engine.EarnEngine       : [loyalty-v2] EARN booking=BK-7 membership=42 points=10000 qc=10000 binding=500 rule=9000
+2026-05-01T17:15:07.889-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.loyalty.v2.engine.EarnEngine       : [loyalty-v2] earn skipped — no active earn rule for binding 500 tier GOLD
+2026-05-01T17:15:07.894-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.loyalty.v2.engine.EarnEngine       : [loyalty-v2] EARN booking=BK-1 membership=42 points=15000 qc=10000 binding=500 rule=9000
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.443 s -- in com.skbingegalaxy.booking.loyalty.v2.engine.EarnEngineTest
+[INFO] Running com.skbingegalaxy.booking.loyalty.v2.engine.ExpiryEngineTest
+2026-05-01T17:15:08.072-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.loyalty.v2.engine.ExpiryEngine     : [loyalty-v2] expiry engine: 2 lot(s) due at 2026-05-01T17:15:08.072031300
+2026-05-01T17:15:08.077-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.loyalty.v2.engine.ExpiryEngine     : [loyalty-v2] expiry engine finished: 2 expired / 2 due
+2026-05-01T17:15:08.081-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.loyalty.v2.engine.ExpiryEngine     : [loyalty-v2] expiry engine: 2 lot(s) due at 2026-05-01T17:15:08.081348200
+2026-05-01T17:15:08.082-05:00 ERROR 26824 --- [booking-service] [           main] [                                                 ] c.s.b.loyalty.v2.engine.ExpiryEngine     : [loyalty-v2] expiry failed for lot 10: Wallet 1 missing — cannot expire lot 10
+
+java.lang.IllegalStateException: Wallet 1 missing — cannot expire lot 10
+	at com.skbingegalaxy.booking.loyalty.v2.engine.ExpiryEngine.lambda$expireOneLot$1(ExpiryEngine.java:84)
+	at java.base/java.util.Optional.orElseThrow(Optional.java:403)
+	at com.skbingegalaxy.booking.loyalty.v2.engine.ExpiryEngine.expireOneLot(ExpiryEngine.java:83)
+	at com.skbingegalaxy.booking.loyalty.v2.engine.ExpiryEngine.expireAsOf(ExpiryEngine.java:65)
+	at com.skbingegalaxy.booking.loyalty.v2.engine.ExpiryEngineTest.expireAsOf_continues_when_single_lot_fails(ExpiryEngineTest.java:87)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at org.junit.platform.commons.util.ReflectionUtils.invokeMethod(ReflectionUtils.java:767)
+	at org.junit.jupiter.engine.execution.MethodInvocation.proceed(MethodInvocation.java:60)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$ValidatingInvocation.proceed(InvocationInterceptorChain.java:131)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.intercept(TimeoutExtension.java:156)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestableMethod(TimeoutExtension.java:147)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestMethod(TimeoutExtension.java:86)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker$ReflectiveInterceptorCall.lambda$ofVoidMethod$0(InterceptingExecutableInvoker.java:103)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.lambda$invoke$0(InterceptingExecutableInvoker.java:93)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$InterceptedInvocation.proceed(InvocationInterceptorChain.java:106)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.proceed(InvocationInterceptorChain.java:64)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.chainAndInvoke(InvocationInterceptorChain.java:45)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.invoke(InvocationInterceptorChain.java:37)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:92)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:86)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.lambda$invokeTestMethod$8(TestMethodTestDescriptor.java:217)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.invokeTestMethod(TestMethodTestDescriptor.java:213)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:138)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:68)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:156)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.submit(SameThreadHierarchicalTestExecutorService.java:35)
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestExecutor.execute(HierarchicalTestExecutor.java:57)
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestEngine.execute(HierarchicalTestEngine.java:54)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:198)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:169)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:93)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.lambda$execute$0(EngineExecutionOrchestrator.java:58)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.withInterceptedStreams(EngineExecutionOrchestrator.java:141)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:57)
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:103)
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:85)
+	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:47)
+	at org.apache.maven.surefire.junitplatform.LazyLauncher.execute(LazyLauncher.java:56)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.execute(JUnitPlatformProvider.java:194)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invokeAllTests(JUnitPlatformProvider.java:150)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invoke(JUnitPlatformProvider.java:124)
+	at org.apache.maven.surefire.booter.ForkedBooter.runSuitesInProcess(ForkedBooter.java:385)
+	at org.apache.maven.surefire.booter.ForkedBooter.execute(ForkedBooter.java:162)
+	at org.apache.maven.surefire.booter.ForkedBooter.run(ForkedBooter.java:507)
+	at org.apache.maven.surefire.booter.ForkedBooter.main(ForkedBooter.java:495)
+
+2026-05-01T17:15:08.086-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.loyalty.v2.engine.ExpiryEngine     : [loyalty-v2] expiry engine finished: 1 expired / 2 due
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.179 s -- in com.skbingegalaxy.booking.loyalty.v2.engine.ExpiryEngineTest
+[INFO] Running com.skbingegalaxy.booking.loyalty.v2.engine.RedeemEngineTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.157 s -- in com.skbingegalaxy.booking.loyalty.v2.engine.RedeemEngineTest
+[INFO] Running com.skbingegalaxy.booking.loyalty.v2.engine.TierEngineTest
+2026-05-01T17:15:08.438-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.loyalty.v2.engine.TierEngine       : [loyalty-v2] annual rollover: 1 candidate(s) at 2026-02-01T03:00
+2026-05-01T17:15:08.453-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.loyalty.v2.engine.TierEngine       : [loyalty-v2] TIER UP membership=42 GOLD → GOLD valid until 2027-12-31T23:59:59
+2026-05-01T17:15:08.455-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.loyalty.v2.engine.TierEngine       : [loyalty-v2] annual rollover done: 0 demoted
+2026-05-01T17:15:08.468-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.loyalty.v2.engine.TierEngine       : [loyalty-v2] TIER UP membership=42 BRONZE → GOLD valid until 2027-12-31T23:59:59
+2026-05-01T17:15:08.486-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.loyalty.v2.engine.TierEngine       : [loyalty-v2] annual rollover: 1 candidate(s) at 2026-02-01T03:00
+2026-05-01T17:15:08.491-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.loyalty.v2.engine.TierEngine       : [loyalty-v2] TIER DOWN membership=42 PLATINUM → GOLD (TIER_SOFT_LANDED)
+2026-05-01T17:15:08.492-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.loyalty.v2.engine.TierEngine       : [loyalty-v2] annual rollover done: 1 demoted
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.238 s -- in com.skbingegalaxy.booking.loyalty.v2.engine.TierEngineTest
+[INFO] Running com.skbingegalaxy.booking.loyalty.v2.service.GuestShadowServiceTest
+2026-05-01T17:15:08.713-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.l.v2.service.GuestShadowService    : [loyalty-v2] guest merge: customer=100 membership=42 +750 pts from 1 shadow(s)
+2026-05-01T17:15:08.720-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.l.v2.service.GuestShadowService    : [loyalty-v2] purged 2 expired guest shadow(s) at 2026-05-01T17:15:08.719207700
+2026-05-01T17:15:08.729-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.l.v2.service.GuestShadowService    : [loyalty-v2] guest shadow accrual: +200 pts +100 QC booking=BK-2 shadow=1 expires=2026-05-31T17:15:08.728447800
+2026-05-01T17:15:08.736-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.l.v2.service.GuestShadowService    : [loyalty-v2] guest shadow accrual: +500 pts +500 QC booking=BK-1 shadow=999 expires=2026-06-30T17:15:08.736965700
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.228 s -- in com.skbingegalaxy.booking.loyalty.v2.service.GuestShadowServiceTest
+[INFO] Running com.skbingegalaxy.booking.scheduler.OutboxPublisherTest
+2026-05-01T17:15:09.390-05:00  WARN 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.scheduler.OutboxPublisher    : Outbox: event 1 to booking.created failed attempt 1/10: java.lang.RuntimeException: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+2026-05-01T17:15:09.399-05:00 ERROR 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.scheduler.OutboxPublisher    : Outbox: event 1 to booking.created marked failedPermanent after 10 attempts: java.lang.RuntimeException: still broken
+2026-05-01T17:15:09.414-05:00  WARN 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.scheduler.OutboxPublisher    : Outbox: event 1 to booking.created failed attempt 1/10: java.lang.RuntimeException: broker down
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.672 s -- in com.skbingegalaxy.booking.scheduler.OutboxPublisherTest
+[INFO] Running com.skbingegalaxy.booking.scheduler.PendingBookingTimeoutSchedulerTest
+2026-05-01T17:15:09.681-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.s.PendingBookingTimeoutScheduler   : Saga timeout: found 1 stale PENDING bookings (older than 30 min)
+2026-05-01T17:15:09.682-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.b.s.PendingBookingTimeoutScheduler   : Saga timeout: auto-cancelled stale booking SKBG25123456 (created 2026-05-01T16:30:09.680270800)
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.250 s -- in com.skbingegalaxy.booking.scheduler.PendingBookingTimeoutSchedulerTest
+[INFO] Running com.skbingegalaxy.booking.service.AdminBingeScopeServiceTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.172 s -- in com.skbingegalaxy.booking.service.AdminBingeScopeServiceTest
+[INFO] Running com.skbingegalaxy.booking.service.BingeServiceTest
+2026-05-01T17:15:10.778-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BingeService         : Customer about experience updated for binge 7
+2026-05-01T17:15:10.852-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BingeService         : Customer dashboard experience updated for binge 7
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.982 s -- in com.skbingegalaxy.booking.service.BingeServiceTest
+[INFO] Running com.skbingegalaxy.booking.service.BookingCheckoutAndRevenueTest
+[INFO] Running com.skbingegalaxy.booking.service.BookingCheckoutAndRevenueTest$PaymentStatusTests
+2026-05-01T17:15:11.413-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Payment status updated for SKBG25123456: FAILED
+2026-05-01T17:15:11.420-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Payment status updated for SKBG25123456: SUCCESS
+2026-05-01T17:15:11.426-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Payment status updated for SKBG25123456: SUCCESS
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.553 s -- in com.skbingegalaxy.booking.service.BookingCheckoutAndRevenueTest$PaymentStatusTests
+[INFO] Running com.skbingegalaxy.booking.service.BookingCheckoutAndRevenueTest$CollectedAmountTests
+2026-05-01T17:15:11.439-05:00  WARN 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Payment mismatch for SKBG25123456: collectedAmount=9000 vs totalAmount=11000
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.033 s -- in com.skbingegalaxy.booking.service.BookingCheckoutAndRevenueTest$CollectedAmountTests
+[INFO] Running com.skbingegalaxy.booking.service.BookingCheckoutAndRevenueTest$EarlyCheckoutTests
+2026-05-01T17:15:11.505-05:00 ERROR 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Failed to publish loyalty earn event for booking SKBG25123456: Cannot invoke "org.springframework.context.ApplicationEventPublisher.publishEvent(Object)" because "this.eventPublisher" is null
+
+java.lang.NullPointerException: Cannot invoke "org.springframework.context.ApplicationEventPublisher.publishEvent(Object)" because "this.eventPublisher" is null
+	at com.skbingegalaxy.booking.service.BookingService.awardLoyaltyPoints(BookingService.java:2196)
+	at com.skbingegalaxy.booking.service.BookingService.earlyCheckout(BookingService.java:2323)
+	at com.skbingegalaxy.booking.service.BookingCheckoutAndRevenueTest$EarlyCheckoutTests.normalCheckout_setsCheckedInFalse(BookingCheckoutAndRevenueTest.java:119)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at org.junit.platform.commons.util.ReflectionUtils.invokeMethod(ReflectionUtils.java:767)
+	at org.junit.jupiter.engine.execution.MethodInvocation.proceed(MethodInvocation.java:60)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$ValidatingInvocation.proceed(InvocationInterceptorChain.java:131)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.intercept(TimeoutExtension.java:156)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestableMethod(TimeoutExtension.java:147)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestMethod(TimeoutExtension.java:86)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker$ReflectiveInterceptorCall.lambda$ofVoidMethod$0(InterceptingExecutableInvoker.java:103)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.lambda$invoke$0(InterceptingExecutableInvoker.java:93)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$InterceptedInvocation.proceed(InvocationInterceptorChain.java:106)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.proceed(InvocationInterceptorChain.java:64)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.chainAndInvoke(InvocationInterceptorChain.java:45)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.invoke(InvocationInterceptorChain.java:37)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:92)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:86)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.lambda$invokeTestMethod$8(TestMethodTestDescriptor.java:217)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.invokeTestMethod(TestMethodTestDescriptor.java:213)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:138)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:68)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:156)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.submit(SameThreadHierarchicalTestExecutorService.java:35)
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestExecutor.execute(HierarchicalTestExecutor.java:57)
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestEngine.execute(HierarchicalTestEngine.java:54)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:198)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:169)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:93)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.lambda$execute$0(EngineExecutionOrchestrator.java:58)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.withInterceptedStreams(EngineExecutionOrchestrator.java:141)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:57)
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:103)
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:85)
+	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:47)
+	at org.apache.maven.surefire.junitplatform.LazyLauncher.execute(LazyLauncher.java:56)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.execute(JUnitPlatformProvider.java:194)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invokeAllTests(JUnitPlatformProvider.java:150)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invoke(JUnitPlatformProvider.java:124)
+	at org.apache.maven.surefire.booter.ForkedBooter.runSuitesInProcess(ForkedBooter.java:385)
+	at org.apache.maven.surefire.booter.ForkedBooter.execute(ForkedBooter.java:162)
+	at org.apache.maven.surefire.booter.ForkedBooter.run(ForkedBooter.java:507)
+	at org.apache.maven.surefire.booter.ForkedBooter.main(ForkedBooter.java:495)
+
+2026-05-01T17:15:11.555-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Early checkout for SKBG25123456: Early checkout at 11:30 am (checked in 10:00 am). Used 1h 30m of 3h booked.
+2026-05-01T17:15:11.556-05:00 ERROR 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Failed to publish loyalty earn event for booking SKBG25123456: Cannot invoke "org.springframework.context.ApplicationEventPublisher.publishEvent(Object)" because "this.eventPublisher" is null
+
+java.lang.NullPointerException: Cannot invoke "org.springframework.context.ApplicationEventPublisher.publishEvent(Object)" because "this.eventPublisher" is null
+	at com.skbingegalaxy.booking.service.BookingService.awardLoyaltyPoints(BookingService.java:2196)
+	at com.skbingegalaxy.booking.service.BookingService.earlyCheckout(BookingService.java:2377)
+	at com.skbingegalaxy.booking.service.BookingCheckoutAndRevenueTest$EarlyCheckoutTests.earlyCheckout_setsCheckedInFalse(BookingCheckoutAndRevenueTest.java:137)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at org.junit.platform.commons.util.ReflectionUtils.invokeMethod(ReflectionUtils.java:767)
+	at org.junit.jupiter.engine.execution.MethodInvocation.proceed(MethodInvocation.java:60)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$ValidatingInvocation.proceed(InvocationInterceptorChain.java:131)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.intercept(TimeoutExtension.java:156)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestableMethod(TimeoutExtension.java:147)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestMethod(TimeoutExtension.java:86)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker$ReflectiveInterceptorCall.lambda$ofVoidMethod$0(InterceptingExecutableInvoker.java:103)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.lambda$invoke$0(InterceptingExecutableInvoker.java:93)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$InterceptedInvocation.proceed(InvocationInterceptorChain.java:106)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.proceed(InvocationInterceptorChain.java:64)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.chainAndInvoke(InvocationInterceptorChain.java:45)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.invoke(InvocationInterceptorChain.java:37)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:92)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:86)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.lambda$invokeTestMethod$8(TestMethodTestDescriptor.java:217)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.invokeTestMethod(TestMethodTestDescriptor.java:213)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:138)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:68)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:156)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.submit(SameThreadHierarchicalTestExecutorService.java:35)
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestExecutor.execute(HierarchicalTestExecutor.java:57)
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestEngine.execute(HierarchicalTestEngine.java:54)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:198)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:169)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:93)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.lambda$execute$0(EngineExecutionOrchestrator.java:58)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.withInterceptedStreams(EngineExecutionOrchestrator.java:141)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:57)
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:103)
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:85)
+	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:47)
+	at org.apache.maven.surefire.junitplatform.LazyLauncher.execute(LazyLauncher.java:56)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.execute(JUnitPlatformProvider.java:194)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invokeAllTests(JUnitPlatformProvider.java:150)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invoke(JUnitPlatformProvider.java:124)
+	at org.apache.maven.surefire.booter.ForkedBooter.runSuitesInProcess(ForkedBooter.java:385)
+	at org.apache.maven.surefire.booter.ForkedBooter.execute(ForkedBooter.java:162)
+	at org.apache.maven.surefire.booter.ForkedBooter.run(ForkedBooter.java:507)
+	at org.apache.maven.surefire.booter.ForkedBooter.main(ForkedBooter.java:495)
+
+2026-05-01T17:15:11.568-05:00 ERROR 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Failed to publish loyalty earn event for booking SKBG25123456: Cannot invoke "org.springframework.context.ApplicationEventPublisher.publishEvent(Object)" because "this.eventPublisher" is null
+
+java.lang.NullPointerException: Cannot invoke "org.springframework.context.ApplicationEventPublisher.publishEvent(Object)" because "this.eventPublisher" is null
+	at com.skbingegalaxy.booking.service.BookingService.awardLoyaltyPoints(BookingService.java:2196)
+	at com.skbingegalaxy.booking.service.BookingService.earlyCheckout(BookingService.java:2323)
+	at com.skbingegalaxy.booking.service.BookingCheckoutAndRevenueTest$EarlyCheckoutTests.checkout_verifyPersistedState(BookingCheckoutAndRevenueTest.java:190)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at org.junit.platform.commons.util.ReflectionUtils.invokeMethod(ReflectionUtils.java:767)
+	at org.junit.jupiter.engine.execution.MethodInvocation.proceed(MethodInvocation.java:60)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$ValidatingInvocation.proceed(InvocationInterceptorChain.java:131)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.intercept(TimeoutExtension.java:156)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestableMethod(TimeoutExtension.java:147)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestMethod(TimeoutExtension.java:86)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker$ReflectiveInterceptorCall.lambda$ofVoidMethod$0(InterceptingExecutableInvoker.java:103)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.lambda$invoke$0(InterceptingExecutableInvoker.java:93)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$InterceptedInvocation.proceed(InvocationInterceptorChain.java:106)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.proceed(InvocationInterceptorChain.java:64)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.chainAndInvoke(InvocationInterceptorChain.java:45)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.invoke(InvocationInterceptorChain.java:37)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:92)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:86)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.lambda$invokeTestMethod$8(TestMethodTestDescriptor.java:217)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.invokeTestMethod(TestMethodTestDescriptor.java:213)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:138)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:68)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:156)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.submit(SameThreadHierarchicalTestExecutorService.java:35)
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestExecutor.execute(HierarchicalTestExecutor.java:57)
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestEngine.execute(HierarchicalTestEngine.java:54)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:198)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:169)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:93)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.lambda$execute$0(EngineExecutionOrchestrator.java:58)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.withInterceptedStreams(EngineExecutionOrchestrator.java:141)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:57)
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:103)
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:85)
+	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:47)
+	at org.apache.maven.surefire.junitplatform.LazyLauncher.execute(LazyLauncher.java:56)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.execute(JUnitPlatformProvider.java:194)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invokeAllTests(JUnitPlatformProvider.java:150)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invoke(JUnitPlatformProvider.java:124)
+	at org.apache.maven.surefire.booter.ForkedBooter.runSuitesInProcess(ForkedBooter.java:385)
+	at org.apache.maven.surefire.booter.ForkedBooter.execute(ForkedBooter.java:162)
+	at org.apache.maven.surefire.booter.ForkedBooter.run(ForkedBooter.java:507)
+	at org.apache.maven.surefire.booter.ForkedBooter.main(ForkedBooter.java:495)
+
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.108 s -- in com.skbingegalaxy.booking.service.BookingCheckoutAndRevenueTest$EarlyCheckoutTests
+[INFO] Tests run: 0, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.702 s -- in com.skbingegalaxy.booking.service.BookingCheckoutAndRevenueTest
+[INFO] Running com.skbingegalaxy.booking.service.BookingServiceEventTypeAddOnCrudTest
+[INFO] Running com.skbingegalaxy.booking.service.BookingServiceEventTypeAddOnCrudTest$ListingTests
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.470 s -- in com.skbingegalaxy.booking.service.BookingServiceEventTypeAddOnCrudTest$ListingTests
+[INFO] Running com.skbingegalaxy.booking.service.BookingServiceEventTypeAddOnCrudTest$DeleteAddOnTests
+2026-05-01T17:15:12.065-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Add-on deleted: 'Deletable' (ID: 5)
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.060 s -- in com.skbingegalaxy.booking.service.BookingServiceEventTypeAddOnCrudTest$DeleteAddOnTests
+[INFO] Running com.skbingegalaxy.booking.service.BookingServiceEventTypeAddOnCrudTest$CreateAddOnTests
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.024 s -- in com.skbingegalaxy.booking.service.BookingServiceEventTypeAddOnCrudTest$CreateAddOnTests
+[INFO] Running com.skbingegalaxy.booking.service.BookingServiceEventTypeAddOnCrudTest$DeactivateEventTypeTests
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.026 s -- in com.skbingegalaxy.booking.service.BookingServiceEventTypeAddOnCrudTest$DeactivateEventTypeTests
+[INFO] Running com.skbingegalaxy.booking.service.BookingServiceEventTypeAddOnCrudTest$DeleteEventTypeTests
+2026-05-01T17:15:12.190-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Event type deleted: 'Deletable' (ID: 1)
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.056 s -- in com.skbingegalaxy.booking.service.BookingServiceEventTypeAddOnCrudTest$DeleteEventTypeTests
+[INFO] Running com.skbingegalaxy.booking.service.BookingServiceEventTypeAddOnCrudTest$UpdateEventTypeTests
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.037 s -- in com.skbingegalaxy.booking.service.BookingServiceEventTypeAddOnCrudTest$UpdateEventTypeTests
+[INFO] Running com.skbingegalaxy.booking.service.BookingServiceEventTypeAddOnCrudTest$CreateEventTypeTests
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.048 s -- in com.skbingegalaxy.booking.service.BookingServiceEventTypeAddOnCrudTest$CreateEventTypeTests
+[INFO] Tests run: 0, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.745 s -- in com.skbingegalaxy.booking.service.BookingServiceEventTypeAddOnCrudTest
+[INFO] Running com.skbingegalaxy.booking.service.BookingServiceLifecycleTest
+[INFO] Running com.skbingegalaxy.booking.service.BookingServiceLifecycleTest$BingeContextTests
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.516 s -- in com.skbingegalaxy.booking.service.BookingServiceLifecycleTest$BingeContextTests
+[INFO] Running com.skbingegalaxy.booking.service.BookingServiceLifecycleTest$AvailabilityTests
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.075 s -- in com.skbingegalaxy.booking.service.BookingServiceLifecycleTest$AvailabilityTests
+[INFO] Running com.skbingegalaxy.booking.service.BookingServiceLifecycleTest$StateTransitionTests
+2026-05-01T17:15:12.956-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Booking SKBG25123456 price overridden by admin: 1000 → 1200 (reason: Duration extension)
+2026-05-01T17:15:12.957-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Booking SKBG25123456 paymentStatus adjusted SUCCESS?PARTIALLY_PAID after price change (collected=1000, newTotal=1200)
+2026-05-01T17:15:12.981-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Booking SKBG25123456 price overridden by admin: 1000 → 1100 (reason: Post-refund surcharge)
+2026-05-01T17:15:13.029-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Booking SKBG25123456 price overridden by admin: 1200 → 900 (reason: Applied discount)
+2026-05-01T17:15:13.029-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Booking SKBG25123456 paymentStatus adjusted PARTIALLY_PAID?SUCCESS after price change (collected=1000, newTotal=900)
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.107 s -- in com.skbingegalaxy.booking.service.BookingServiceLifecycleTest$StateTransitionTests
+[INFO] Running com.skbingegalaxy.booking.service.BookingServiceLifecycleTest$PaymentStatusTests
+2026-05-01T17:15:13.060-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Payment status updated for SKBG25123456: SUCCESS
+2026-05-01T17:15:13.073-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Payment status updated for SKBG25123456: FAILED
+2026-05-01T17:15:13.080-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Payment status updated for SKBG25123456: SUCCESS
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.047 s -- in com.skbingegalaxy.booking.service.BookingServiceLifecycleTest$PaymentStatusTests
+[INFO] Running com.skbingegalaxy.booking.service.BookingServiceLifecycleTest$EarlyCheckoutTests
+2026-05-01T17:15:13.186-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Early checkout for SKBG25123456: Early checkout at 03:00 pm (checked in 02:00 pm). Used 1h of 3h booked.
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.101 s -- in com.skbingegalaxy.booking.service.BookingServiceLifecycleTest$EarlyCheckoutTests
+[INFO] Running com.skbingegalaxy.booking.service.BookingServiceLifecycleTest$CancelTests
+2026-05-01T17:15:13.247-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Booking cancelled: SKBG25123456
+2026-05-01T17:15:13.267-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Booking cancelled: SKBG25123456
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.096 s -- in com.skbingegalaxy.booking.service.BookingServiceLifecycleTest$CancelTests
+[INFO] Running com.skbingegalaxy.booking.service.BookingServiceLifecycleTest$DurationTests
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.039 s -- in com.skbingegalaxy.booking.service.BookingServiceLifecycleTest$DurationTests
+[INFO] Running com.skbingegalaxy.booking.service.BookingServiceLifecycleTest$CooldownTests
+2026-05-01T17:15:13.360-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Booking created: SKBG2699846C54 for customer 1
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.026 s -- in com.skbingegalaxy.booking.service.BookingServiceLifecycleTest$CooldownTests
+[INFO] Running com.skbingegalaxy.booking.service.BookingServiceLifecycleTest$PendingLimitTests
+2026-05-01T17:15:13.372-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Booking created: SKBG268F54DC4B for customer 1
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.020 s -- in com.skbingegalaxy.booking.service.BookingServiceLifecycleTest$PendingLimitTests
+[INFO] Tests run: 0, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.061 s -- in com.skbingegalaxy.booking.service.BookingServiceLifecycleTest
+[INFO] Running com.skbingegalaxy.booking.service.BookingServiceTest
+2026-05-01T17:15:13.410-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Booking cancelled: SKBG25123456
+2026-05-01T17:15:13.468-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Booking created: SKBG2626845708 for customer 1
+2026-05-01T17:15:13.474-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Payment status updated for SKBG25123456: SUCCESS
+2026-05-01T17:15:13.543-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Booking cancelled: SKBG25123456
+[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.161 s -- in com.skbingegalaxy.booking.service.BookingServiceTest
+[INFO] Running com.skbingegalaxy.booking.service.DashboardStatsTest
+[INFO] Running com.skbingegalaxy.booking.service.DashboardStatsTest$AuditCheckedInResetTests
+2026-05-01T17:15:13.575-05:00 ERROR 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Failed to publish loyalty earn event for booking SKBG26100001: Cannot invoke "org.springframework.context.ApplicationEventPublisher.publishEvent(Object)" because "this.eventPublisher" is null
+
+java.lang.NullPointerException: Cannot invoke "org.springframework.context.ApplicationEventPublisher.publishEvent(Object)" because "this.eventPublisher" is null
+	at com.skbingegalaxy.booking.service.BookingService.awardLoyaltyPoints(BookingService.java:2196)
+	at com.skbingegalaxy.booking.service.BookingService.runAudit(BookingService.java:1806)
+	at com.skbingegalaxy.booking.service.DashboardStatsTest$AuditCheckedInResetTests.auditResetsCheckedIn(DashboardStatsTest.java:239)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at org.junit.platform.commons.util.ReflectionUtils.invokeMethod(ReflectionUtils.java:767)
+	at org.junit.jupiter.engine.execution.MethodInvocation.proceed(MethodInvocation.java:60)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$ValidatingInvocation.proceed(InvocationInterceptorChain.java:131)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.intercept(TimeoutExtension.java:156)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestableMethod(TimeoutExtension.java:147)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestMethod(TimeoutExtension.java:86)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker$ReflectiveInterceptorCall.lambda$ofVoidMethod$0(InterceptingExecutableInvoker.java:103)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.lambda$invoke$0(InterceptingExecutableInvoker.java:93)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$InterceptedInvocation.proceed(InvocationInterceptorChain.java:106)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.proceed(InvocationInterceptorChain.java:64)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.chainAndInvoke(InvocationInterceptorChain.java:45)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.invoke(InvocationInterceptorChain.java:37)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:92)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:86)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.lambda$invokeTestMethod$8(TestMethodTestDescriptor.java:217)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.invokeTestMethod(TestMethodTestDescriptor.java:213)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:138)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:68)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:156)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.submit(SameThreadHierarchicalTestExecutorService.java:35)
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestExecutor.execute(HierarchicalTestExecutor.java:57)
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestEngine.execute(HierarchicalTestEngine.java:54)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:198)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:169)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:93)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.lambda$execute$0(EngineExecutionOrchestrator.java:58)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.withInterceptedStreams(EngineExecutionOrchestrator.java:141)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:57)
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:103)
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:85)
+	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:47)
+	at org.apache.maven.surefire.junitplatform.LazyLauncher.execute(LazyLauncher.java:56)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.execute(JUnitPlatformProvider.java:194)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invokeAllTests(JUnitPlatformProvider.java:150)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invoke(JUnitPlatformProvider.java:124)
+	at org.apache.maven.surefire.booter.ForkedBooter.runSuitesInProcess(ForkedBooter.java:385)
+	at org.apache.maven.surefire.booter.ForkedBooter.execute(ForkedBooter.java:162)
+	at org.apache.maven.surefire.booter.ForkedBooter.run(ForkedBooter.java:507)
+	at org.apache.maven.surefire.booter.ForkedBooter.main(ForkedBooter.java:495)
+
+2026-05-01T17:15:13.578-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.BookingService       : Audit for binge 42 date 2026-04-02: 0 no-shows, 1 completed
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.029 s -- in com.skbingegalaxy.booking.service.DashboardStatsTest$AuditCheckedInResetTests
+[INFO] Running com.skbingegalaxy.booking.service.DashboardStatsTest$BingeScopedTests
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.025 s -- in com.skbingegalaxy.booking.service.DashboardStatsTest$BingeScopedTests
+[INFO] Running com.skbingegalaxy.booking.service.DashboardStatsTest$NoBingeTests
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.015 s -- in com.skbingegalaxy.booking.service.DashboardStatsTest$NoBingeTests
+[INFO] Tests run: 0, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.074 s -- in com.skbingegalaxy.booking.service.DashboardStatsTest
+[INFO] Running com.skbingegalaxy.booking.service.IdempotencyServiceTest
+2026-05-01T17:15:14.041-05:00  WARN 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.IdempotencyService   : Idempotency key reused with a different payload (method=POST, path=/api/v1/bookings, user=7)
+2026-05-01T17:15:14.055-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.IdempotencyService   : Idempotency key expired — re-running work
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.482 s -- in com.skbingegalaxy.booking.service.IdempotencyServiceTest
+[INFO] Running com.skbingegalaxy.booking.service.PricingServiceComprehensiveTest
+[INFO] Running com.skbingegalaxy.booking.service.PricingServiceComprehensiveTest$BingeScopingTests
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.113 s -- in com.skbingegalaxy.booking.service.PricingServiceComprehensiveTest$BingeScopingTests
+[INFO] Running com.skbingegalaxy.booking.service.PricingServiceComprehensiveTest$RateCodePricingResolutionTests
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.052 s -- in com.skbingegalaxy.booking.service.PricingServiceComprehensiveTest$RateCodePricingResolutionTests
+[INFO] Running com.skbingegalaxy.booking.service.PricingServiceComprehensiveTest$BulkAssignTests
+2026-05-01T17:15:14.324-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.PricingService       : Bulk rate code assignment: 2 customers -> rateCodeId=7
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.041 s -- in com.skbingegalaxy.booking.service.PricingServiceComprehensiveTest$BulkAssignTests
+[INFO] Running com.skbingegalaxy.booking.service.PricingServiceComprehensiveTest$CustomerPricingCrudTests
+2026-05-01T17:15:14.365-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.PricingService       : Updated member label for customer 2 to '   '
+2026-05-01T17:15:14.385-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.PricingService       : Customer pricing saved for customerId=2
+2026-05-01T17:15:14.397-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.PricingService       : Updated member label for customer 2 to 'Gold Member'
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.065 s -- in com.skbingegalaxy.booking.service.PricingServiceComprehensiveTest$CustomerPricingCrudTests
+[INFO] Running com.skbingegalaxy.booking.service.PricingServiceComprehensiveTest$ResolutionTests
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.057 s -- in com.skbingegalaxy.booking.service.PricingServiceComprehensiveTest$ResolutionTests
+[INFO] Running com.skbingegalaxy.booking.service.PricingServiceComprehensiveTest$RateCodeDeleteTests
+2026-05-01T17:15:14.472-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.PricingService       : Rate code deleted: VIP
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.017 s -- in com.skbingegalaxy.booking.service.PricingServiceComprehensiveTest$RateCodeDeleteTests
+[INFO] Running com.skbingegalaxy.booking.service.PricingServiceComprehensiveTest$RateCodeCrudTests
+2026-05-01T17:15:14.497-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.PricingService       : Rate code created: CORPORATE
+2026-05-01T17:15:14.505-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.PricingService       : Rate code VIP toggled to active=false
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.031 s -- in com.skbingegalaxy.booking.service.PricingServiceComprehensiveTest$RateCodeCrudTests
+[INFO] Tests run: 0, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.395 s -- in com.skbingegalaxy.booking.service.PricingServiceComprehensiveTest
+[INFO] Running com.skbingegalaxy.booking.service.PricingServiceCustomerDetailTest
+2026-05-01T17:15:14.659-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.PricingService       : Customer pricing saved for customerId=11
+2026-05-01T17:15:14.674-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.PricingService       : Customer pricing saved for customerId=9
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.166 s -- in com.skbingegalaxy.booking.service.PricingServiceCustomerDetailTest
+[INFO] Running com.skbingegalaxy.booking.service.PricingServiceScopedProfileTest
+2026-05-01T17:15:14.688-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.PricingService       : Customer pricing deleted for customerId=2 bingeId=11
+2026-05-01T17:15:14.705-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.PricingService       : Rate code created: VIP
+2026-05-01T17:15:14.714-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.PricingService       : Customer pricing saved for customerId=2
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.030 s -- in com.skbingegalaxy.booking.service.PricingServiceScopedProfileTest
+[INFO] Running com.skbingegalaxy.booking.service.RefundCalculationServiceTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.422 s -- in com.skbingegalaxy.booking.service.RefundCalculationServiceTest
+[INFO] Running com.skbingegalaxy.booking.service.SagaOrchestratorTest
+2026-05-01T17:15:15.363-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.SagaOrchestrator     : Saga SKBG002 advanced to CONFIRMED (step: BOOKING_CONFIRMED)
+2026-05-01T17:15:15.369-05:00 ERROR 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.SagaOrchestrator     : Saga SKBG001 BLOCKED from CONFIRMED — collected ₹1000 < total ₹5000; entering compensation
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.198 s -- in com.skbingegalaxy.booking.service.SagaOrchestratorTest
+[INFO] Running com.skbingegalaxy.booking.service.SystemSettingsServiceTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.136 s -- in com.skbingegalaxy.booking.service.SystemSettingsServiceTest
+[INFO] Running com.skbingegalaxy.booking.service.WaitlistServicePromotionRaceTest
+2026-05-01T17:15:15.680-05:00 ERROR 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.WaitlistService      : Failed to enqueue waitlist notification outbox row for entry 1
+
+java.lang.NullPointerException: Cannot invoke "com.skbingegalaxy.booking.entity.EventType.getName()" because the return value of "com.skbingegalaxy.booking.entity.WaitlistEntry.getEventType()" is null
+	at com.skbingegalaxy.booking.service.WaitlistService.sendWaitlistNotification(WaitlistService.java:314)
+	at com.skbingegalaxy.booking.service.WaitlistService.promoteWaitlistOnCancellation(WaitlistService.java:268)
+	at com.skbingegalaxy.booking.service.WaitlistServicePromotionRaceTest.promotesOnlyOneEvenWithMultipleEligible(WaitlistServicePromotionRaceTest.java:122)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at org.junit.platform.commons.util.ReflectionUtils.invokeMethod(ReflectionUtils.java:767)
+	at org.junit.jupiter.engine.execution.MethodInvocation.proceed(MethodInvocation.java:60)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$ValidatingInvocation.proceed(InvocationInterceptorChain.java:131)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.intercept(TimeoutExtension.java:156)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestableMethod(TimeoutExtension.java:147)
+	at org.junit.jupiter.engine.extension.TimeoutExtension.interceptTestMethod(TimeoutExtension.java:86)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker$ReflectiveInterceptorCall.lambda$ofVoidMethod$0(InterceptingExecutableInvoker.java:103)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.lambda$invoke$0(InterceptingExecutableInvoker.java:93)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain$InterceptedInvocation.proceed(InvocationInterceptorChain.java:106)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.proceed(InvocationInterceptorChain.java:64)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.chainAndInvoke(InvocationInterceptorChain.java:45)
+	at org.junit.jupiter.engine.execution.InvocationInterceptorChain.invoke(InvocationInterceptorChain.java:37)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:92)
+	at org.junit.jupiter.engine.execution.InterceptingExecutableInvoker.invoke(InterceptingExecutableInvoker.java:86)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.lambda$invokeTestMethod$8(TestMethodTestDescriptor.java:217)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.invokeTestMethod(TestMethodTestDescriptor.java:213)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:138)
+	at org.junit.jupiter.engine.descriptor.TestMethodTestDescriptor.execute(TestMethodTestDescriptor.java:68)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:156)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.invokeAll(SameThreadHierarchicalTestExecutorService.java:41)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$6(NodeTestTask.java:160)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$8(NodeTestTask.java:146)
+	at org.junit.platform.engine.support.hierarchical.Node.around(Node.java:137)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.lambda$executeRecursively$9(NodeTestTask.java:144)
+	at org.junit.platform.engine.support.hierarchical.ThrowableCollector.execute(ThrowableCollector.java:73)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.executeRecursively(NodeTestTask.java:143)
+	at org.junit.platform.engine.support.hierarchical.NodeTestTask.execute(NodeTestTask.java:100)
+	at org.junit.platform.engine.support.hierarchical.SameThreadHierarchicalTestExecutorService.submit(SameThreadHierarchicalTestExecutorService.java:35)
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestExecutor.execute(HierarchicalTestExecutor.java:57)
+	at org.junit.platform.engine.support.hierarchical.HierarchicalTestEngine.execute(HierarchicalTestEngine.java:54)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:198)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:169)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:93)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.lambda$execute$0(EngineExecutionOrchestrator.java:58)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.withInterceptedStreams(EngineExecutionOrchestrator.java:141)
+	at org.junit.platform.launcher.core.EngineExecutionOrchestrator.execute(EngineExecutionOrchestrator.java:57)
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:103)
+	at org.junit.platform.launcher.core.DefaultLauncher.execute(DefaultLauncher.java:85)
+	at org.junit.platform.launcher.core.DelegatingLauncher.execute(DelegatingLauncher.java:47)
+	at org.apache.maven.surefire.junitplatform.LazyLauncher.execute(LazyLauncher.java:56)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.execute(JUnitPlatformProvider.java:194)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invokeAllTests(JUnitPlatformProvider.java:150)
+	at org.apache.maven.surefire.junitplatform.JUnitPlatformProvider.invoke(JUnitPlatformProvider.java:124)
+	at org.apache.maven.surefire.booter.ForkedBooter.runSuitesInProcess(ForkedBooter.java:385)
+	at org.apache.maven.surefire.booter.ForkedBooter.execute(ForkedBooter.java:162)
+	at org.apache.maven.surefire.booter.ForkedBooter.run(ForkedBooter.java:507)
+	at org.apache.maven.surefire.booter.ForkedBooter.main(ForkedBooter.java:495)
+
+2026-05-01T17:15:15.683-05:00  INFO 26824 --- [booking-service] [           main] [                                                 ] c.s.booking.service.WaitlistService      : Offered waitlist slot to customer 101 (entry 1) for date 2026-05-01
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.212 s -- in com.skbingegalaxy.booking.service.WaitlistServicePromotionRaceTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[WARNING] Tests run: 240, Failures: 0, Errors: 0, Skipped: 6
+[INFO] 
+[INFO] 
+[INFO] -----------------< com.skbingegalaxy:payment-service >------------------
+[INFO] Building Payment Service 1.0.0                                     [5/5]
+[INFO]   from payment-service\pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ payment-service ---
+[INFO] Copying 2 resources from src\main\resources to target\classes
+[INFO] Copying 12 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ payment-service ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ payment-service ---
+[INFO] skip non existing resourceDirectory D:\sk-binge-galaxy\sk-binge-galaxy\backend\payment-service\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.13.0:testCompile (default-testCompile) @ payment-service ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.3:test (default-test) @ payment-service ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running com.skbingegalaxy.payment.controller.PaymentControllerAuthzTest
+17:15:18.838 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.skbingegalaxy.payment.controller.PaymentControllerAuthzTest]: PaymentControllerAuthzTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+17:15:19.276 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.skbingegalaxy.payment.PaymentServiceApplication for test class com.skbingegalaxy.payment.controller.PaymentControllerAuthzTest
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.4.5)
+
+2026-05-01T17:15:23.613-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.p.c.PaymentControllerAuthzTest       : Starting PaymentControllerAuthzTest using Java 24.0.2 with PID 24160 (started by ADARS in D:\sk-binge-galaxy\sk-binge-galaxy\backend\payment-service)
+2026-05-01T17:15:23.620-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.p.c.PaymentControllerAuthzTest       : No active profile set, falling back to 1 default profile: "default"
+2026-05-01T17:15:23.678-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Fetching config from server at : http://localhost:8888
+2026-05-01T17:15:23.678-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Exception on Url - http://localhost:8888:org.springframework.web.client.ResourceAccessException: I/O error on GET request for "http://localhost:8888/payment-service/default": Connection refused: getsockopt. Will be trying the next url if available
+2026-05-01T17:15:23.679-05:00  WARN 24160 --- [payment-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Could not locate PropertySource ([ConfigServerConfigDataResource@1b1f5012 uris = array<String>['http://localhost:8888'], optional = true, profiles = 'default']): I/O error on GET request for "http://localhost:8888/payment-service/default": Connection refused: getsockopt
+2026-05-01T17:15:23.679-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Fetching config from server at : http://localhost:8888
+2026-05-01T17:15:23.680-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Exception on Url - http://localhost:8888:org.springframework.web.client.ResourceAccessException: I/O error on GET request for "http://localhost:8888/payment-service/default": Connection refused: getsockopt. Will be trying the next url if available
+2026-05-01T17:15:23.680-05:00  WARN 24160 --- [payment-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Could not locate PropertySource ([ConfigServerConfigDataResource@4649d70a uris = array<String>['http://localhost:8888'], optional = true, profiles = 'default']): I/O error on GET request for "http://localhost:8888/payment-service/default": Connection refused: getsockopt
+2026-05-01T17:15:23.680-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Fetching config from server at : http://localhost:8888
+2026-05-01T17:15:23.680-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Exception on Url - http://localhost:8888:org.springframework.web.client.ResourceAccessException: I/O error on GET request for "http://localhost:8888/payment-service/default": Connection refused: getsockopt. Will be trying the next url if available
+2026-05-01T17:15:23.680-05:00  WARN 24160 --- [payment-service] [           main] [                                                 ] o.s.c.c.c.ConfigServerConfigDataLoader   : Could not locate PropertySource ([ConfigServerConfigDataResource@5d43409a uris = array<String>['http://localhost:8888'], optional = true, profiles = 'default']): I/O error on GET request for "http://localhost:8888/payment-service/default": Connection refused: getsockopt
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build what is described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org/mockito/Mockito.html#0.3
+WARNING: A Java agent has been loaded dynamically (C:\Users\ADARS\.m2\repository\net\bytebuddy\byte-buddy-agent\1.15.10\byte-buddy-agent-1.15.10.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by net.bytebuddy.dynamic.loading.ClassInjector$UsingUnsafe$Dispatcher$CreationAction (file:/C:/Users/ADARS/.m2/repository/net/bytebuddy/byte-buddy/1.15.10/byte-buddy-1.15.10.jar)
+WARNING: Please consider reporting this to the maintainers of class net.bytebuddy.dynamic.loading.ClassInjector$UsingUnsafe$Dispatcher$CreationAction
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+2026-05-01T17:15:31.774-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] o.s.b.t.m.w.SpringBootMockServletContext : Initializing Spring TestDispatcherServlet ''
+2026-05-01T17:15:31.775-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-05-01T17:15:31.778-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 1 ms
+2026-05-01T17:15:31.884-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.p.c.PaymentControllerAuthzTest       : Started PaymentControllerAuthzTest in 11.851 seconds (process running for 15.298)
+2026-05-01T17:15:32.736-05:00  WARN 24160 --- [payment-service] [           main] [                                                 ] ration$PageModule$WarningLoggingModifier : Serializing PageImpl instances as-is is not supported, meaning that there is no guarantee about the stability of the resulting JSON structure!
+	For a stable JSON structure, please use Spring Data's PagedModel (globally via @EnableSpringDataWebSupport(pageSerializationMode = VIA_DTO))
+	or Spring HATEOAS and Spring Data's PagedResourcesAssembler as documented in https://docs.spring.io/spring-data/commons/reference/repositories/core-extensions.html#core.web.pageables.
+
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 14.65 s -- in com.skbingegalaxy.payment.controller.PaymentControllerAuthzTest
+[INFO] Running com.skbingegalaxy.payment.scheduler.OutboxPublisherTest
+2026-05-01T17:15:33.693-05:00  WARN 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.scheduler.OutboxPublisher    : Outbox: event 1 to topicA failed on attempt 1/10. Will retry. Error: java.lang.RuntimeException: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+2026-05-01T17:15:33.757-05:00 ERROR 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.scheduler.OutboxPublisher    : Outbox: event 1 to topicA marked FAILED_PERMANENT after 10 attempts. Needs manual review. Last error: java.lang.RuntimeException: broker down
+2026-05-01T17:15:33.784-05:00  WARN 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.scheduler.OutboxPublisher    : Outbox: event 2 to topicA failed on attempt 1/10. Will retry. Error: java.lang.RuntimeException: kafka down
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.848 s -- in com.skbingegalaxy.payment.scheduler.OutboxPublisherTest
+[INFO] Running com.skbingegalaxy.payment.service.PaymentBingeScopeServiceTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.227 s -- in com.skbingegalaxy.payment.service.PaymentBingeScopeServiceTest
+[INFO] Running com.skbingegalaxy.payment.service.PaymentServiceTest
+2026-05-01T17:15:34.872-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Handling payment callback for gatewayOrderId: ORD-EFGH5678
+2026-05-01T17:15:34.880-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Payment successful: TXN-ABCD1234
+2026-05-01T17:15:34.952-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Handling payment callback for gatewayOrderId: ORD-EFGH5678
+2026-05-01T17:15:34.954-05:00  WARN 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Payment failed: TXN-ABCD1234 — Insufficient funds
+2026-05-01T17:15:34.970-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Handling payment callback for gatewayOrderId: INVALID
+2026-05-01T17:15:34.980-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Payment TXN-ABCD1234 cancelled by customer 1
+2026-05-01T17:15:34.987-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Simulated payment success for: TXN-ABCD1234
+2026-05-01T17:15:35.019-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Adding UPI payment of 3000 for booking SKBG25123456 by admin admin@test.com
+2026-05-01T17:15:35.021-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Additional payment UPI-369AD512-A5D recorded for booking SKBG25123456 by admin admin@test.com
+2026-05-01T17:15:35.096-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Handling payment callback for gatewayOrderId: ORD-EFGH5678
+2026-05-01T17:15:35.097-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Payment successful: TXN-ABCD1234
+2026-05-01T17:15:35.103-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Handling payment callback for gatewayOrderId: ORD-EFGH5678
+2026-05-01T17:15:35.104-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Callback ignored — payment already in terminal state: SUCCESS
+2026-05-01T17:15:35.138-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Adding CASH payment of 1000 for booking SKBG25123456 by admin admin@test.com
+2026-05-01T17:15:35.140-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Additional payment CASH-35B831D9-9AF recorded for booking SKBG25123456 by admin admin@test.com
+2026-05-01T17:15:35.162-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Refund RFD-5DF8C4E4-EC7 of ₹1000 by admin for payment TXN-ABCD1234 (booking: SKBG25123456)
+2026-05-01T17:15:35.193-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Initiating payment for booking: SKBG25123456, amount: 5000
+2026-05-01T17:15:35.202-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Refund RFD-E374C800-6F3 of ₹2000 by admin for payment TXN-ABCD1234 (booking: SKBG25123456)
+2026-05-01T17:15:35.209-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Simulated payment success for: TXN-ABCD1234
+2026-05-01T17:15:35.251-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Initiating payment for booking: SKBG25123456, amount: 5000
+2026-05-01T17:15:35.254-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Returning existing INITIATED payment TXN-ABCD1234 for booking SKBG25123456
+2026-05-01T17:15:35.269-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Initiating payment for booking: SKBG25123456, amount: 5000
+2026-05-01T17:15:35.273-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Payment initiated: TXN-337EF3D2-13F for booking SKBG25123456
+2026-05-01T17:15:35.318-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Recording cash payment for booking: SKBG25999999 by admin: admin@test.com
+2026-05-01T17:15:35.320-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Cash payment CASH-D2F58748-B44 recorded for booking SKBG25999999 by admin admin@test.com
+2026-05-01T17:15:35.394-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Initiating payment for booking: SKBG25123456, amount: 5000
+2026-05-01T17:15:35.396-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Payment initiated: TXN-39ABAFAD-368 for booking SKBG25123456
+2026-05-01T17:15:35.406-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Handling payment callback for gatewayOrderId: ORD-EFGH5678
+2026-05-01T17:15:35.407-05:00  WARN 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Rejected unsigned payment callback for gatewayOrderId: ORD-EFGH5678
+2026-05-01T17:15:35.415-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Recording cash payment for booking: SKBG25999999 by admin: admin@test.com
+2026-05-01T17:15:35.416-05:00  INFO 24160 --- [payment-service] [           main] [                                                 ] c.s.payment.service.PaymentService       : Cash payment already recorded for booking SKBG25999999
+[INFO] Tests run: 44, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.386 s -- in com.skbingegalaxy.payment.service.PaymentServiceTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 60, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Summary for SK Binge Galaxy 1.0.0:
+[INFO] 
+[INFO] SK Binge Galaxy .................................... SUCCESS [  0.004 s]
+[INFO] Common Library ..................................... SUCCESS [  5.517 s]
+[INFO] API Gateway ........................................ SUCCESS [  6.066 s]
+[INFO] Booking Service .................................... SUCCESS [ 24.238 s]
+[INFO] Payment Service .................................... SUCCESS [ 19.719 s]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  56.186 s
+[INFO] Finished at: 2026-05-01T17:15:35-05:00
+[INFO] ------------------------------------------------------------------------

@@ -4,7 +4,7 @@ export default function StepReview({
   fmtTime, fmtDuration,
   loading, onSubmit, onBack,
   capacityFull, onJoinWaitlist,
-  venueRooms, activeSurge, loyalty,
+  venueRooms, activeSurge, loyalty, loyaltyQuote,
 }) {
   const selectedRoom = venueRooms?.find(r => r.id === form.venueRoomId);
   const loyaltyDiscount = calculateLoyaltyDiscount ? calculateLoyaltyDiscount() : 0;
@@ -77,7 +77,7 @@ export default function StepReview({
         {!isAdmin && loyalty && loyalty.currentBalance > 0 && (
           <div className="loyalty-redeem-card">
             <div className="loyalty-redeem-header">
-              <strong className="loyalty-redeem-title">🎁 Loyalty Points</strong>
+              <strong className="loyalty-redeem-title">Loyalty Points</strong>
               <span className="loyalty-redeem-balance">
                 {loyalty.tierLevel} · {loyalty.currentBalance.toLocaleString()} pts available
               </span>
@@ -99,7 +99,12 @@ export default function StepReview({
             </div>
             {loyaltyDiscount > 0 && (
               <p className="loyalty-redeem-discount">
-                Discount: −₹{loyaltyDiscount.toLocaleString()} ({form.redeemLoyaltyPoints} pts × {loyalty.redemptionRate || 100} pts/₹)
+                Discount: -₹{loyaltyDiscount.toLocaleString()} ({(loyaltyQuote?.pointsToBurn || form.redeemLoyaltyPoints).toLocaleString()} pts)
+              </p>
+            )}
+            {form.redeemLoyaltyPoints > 0 && loyaltyQuote && !loyaltyQuote.eligible && (
+              <p className="loyalty-redeem-discount">
+                Points cannot be applied to this booking yet.
               </p>
             )}
           </div>

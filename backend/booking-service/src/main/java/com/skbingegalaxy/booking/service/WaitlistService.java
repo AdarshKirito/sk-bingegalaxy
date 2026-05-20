@@ -46,6 +46,13 @@ public class WaitlistService {
     // notification to eventually fire once the broker comes back.
     private final OutboxEventRepository outboxEventRepository;
     private final ObjectMapper objectMapper;
+    private final BookingEventPublisher bookingEventPublisher;
+    // Used to verify the slot is not admin-blocked before issuing an offer
+    // (Item 26 — out-of-order: cancellation arrives after admin block).
+    private final com.skbingegalaxy.booking.client.AvailabilityClient availabilityClient;
+
+    @Value("${internal.api.secret}")
+    private String internalApiSecret;
 
     @Value("${app.waitlist.offer-expiry-minutes:30}")
     private int offerExpiryMinutes;
@@ -202,6 +209,36 @@ public class WaitlistService {
         return toDto(entry);
     }
 
+    /**
+     * Set priority boost on a waitlist entry. Higher value is offered first;
+     * ties broken by FIFO position. Useful for VIP/loyalty escalation and
+     * ops overrides. Only entries in WAITING status can be re-prioritised
+     * (already-OFFERED entries are mid-flight and re-prioritisation would
+     * skip the implicit FIFO contract the customer was promised).
+     */
+    @Transactional
+    public WaitlistEntryDto adminSetPriority(Long entryId, int priority, Long adminId) {
+        Long bingeId = BingeContext.requireBingeId();
+        if (priority < 0 || priority > 1000) {
+            throw new BusinessException("Priority must be between 0 and 1000");
+        }
+        WaitlistEntry entry = waitlistRepository.findById(entryId)
+            .orElseThrow(() -> new ResourceNotFoundException("WaitlistEntry", "id", entryId));
+        if (!entry.getBingeId().equals(bingeId)) {
+            throw new BusinessException("Waitlist entry does not belong to the selected venue");
+        }
+        if (entry.getStatus() != WaitlistStatus.WAITING) {
+            throw new BusinessException(
+                "Only WAITING entries can be re-prioritised. Current: " + entry.getStatus());
+        }
+        int prevPriority = entry.getPriority();
+        entry.setPriority(priority);
+        waitlistRepository.save(entry);
+        log.info("Admin {} set priority of waitlist entry {} from {} -> {} (binge {})",
+            adminId, entryId, prevPriority, priority, bingeId);
+        return toDto(entry);
+    }
+
     // ── Promote: called when a booking is cancelled, check if waitlisted customers can be notified ──
     @Transactional
     public void promoteWaitlistOnCancellation(Long bingeId, LocalDate date) {
@@ -213,7 +250,7 @@ public class WaitlistService {
         bookingRepository.acquireSlotLock(BookingService.slotLockKeyFor(bingeId, date));
 
         List<WaitlistEntry> waiting = waitlistRepository
-            .findByBingeIdAndPreferredDateAndStatusOrderByPositionAsc(bingeId, date, WaitlistStatus.WAITING);
+            .findByBingeIdAndPreferredDateAndStatusOrderByPriorityDescPositionAsc(bingeId, date, WaitlistStatus.WAITING);
 
         if (waiting.isEmpty()) {
             return;
@@ -228,6 +265,29 @@ public class WaitlistService {
 
             boolean isFull = (boolean) capacity.get("isFull");
             if (!isFull) {
+                // Item 26 guard: between the cancellation that triggered this
+                // promotion and now, an admin may have BLOCKED the slot via
+                // availability-service. Capacity check above only counts
+                // existing bookings, not blocks — re-validate against the
+                // authoritative availability source before offering.
+                Boolean stillAvailable = false;
+                try {
+                    stillAvailable = availabilityClient.checkSlotAvailable(
+                        internalApiSecret,
+                        entry.getPreferredDate(),
+                        entry.getBingeId(),
+                        startMinute,
+                        entry.getDurationMinutes());
+                } catch (Exception e) {
+                    log.warn("Waitlist promotion: availability re-check failed for entry {} ({}); skipping",
+                        entry.getId(), e.getMessage());
+                    continue;
+                }
+                if (Boolean.FALSE.equals(stillAvailable)) {
+                    log.info("Waitlist promotion: slot is admin-blocked or unavailable; skipping entry {} for {}",
+                        entry.getId(), entry.getPreferredDate());
+                    continue;
+                }
                 // Offer the slot to this customer
                 entry.setStatus(WaitlistStatus.OFFERED);
                 entry.setNotifiedAt(LocalDateTime.now());
@@ -292,20 +352,33 @@ public class WaitlistService {
                     "startTime", entry.getPreferredStartTime().toString()
                 ))
                 .build();
-            String payload = objectMapper.writeValueAsString(event);
-            OutboxEvent outbox = OutboxEvent.builder()
-                .topic(KafkaTopics.NOTIFICATION_SEND)
-                // Key by waitlist entry id so repeated offers for the same entry land on
-                // the same partition and stay in order.
-                .aggregateKey("WL-" + entry.getId())
-                .payload(payload)
+            // Use the central publisher: stamps eventId/version/correlationId
+            // and persists in the same transaction. One key per waitlist entry
+            // keeps re-offers in partition order.
+            bookingEventPublisher.publish(KafkaTopics.NOTIFICATION_SEND, "WL-" + entry.getId(), event);
+
+            // Also emit a dedicated waitlist.promoted domain event so downstream
+            // consumers (analytics, external CRM) can react to the promotion
+            // without parsing notification payloads. Same envelope, new topic.
+            NotificationEvent promoted = NotificationEvent.builder()
+                .type("WAITLIST_PROMOTED")
+                .channel(NotificationChannel.EMAIL)
+                .recipientEmail(entry.getCustomerEmail())
+                .recipientName(entry.getCustomerName())
+                .metadata(Map.of(
+                    "waitlistEntryId", String.valueOf(entry.getId()),
+                    "bingeId", String.valueOf(entry.getBingeId()),
+                    "customerId", String.valueOf(entry.getCustomerId()),
+                    "eventTypeName", entry.getEventType().getName(),
+                    "preferredDate", entry.getPreferredDate().toString(),
+                    "preferredStartTime", entry.getPreferredStartTime().toString()
+                ))
                 .build();
-            outboxEventRepository.save(outbox);
-        } catch (JsonProcessingException e) {
-            // Serialization failure is a developer error (bad event shape) — never retryable.
-            // Log and swallow so the waitlist offer itself isn't rolled back.
-            log.error("Failed to serialize waitlist notification for entry {}", entry.getId(), e);
+            bookingEventPublisher.publish(KafkaTopics.WAITLIST_PROMOTED, "WL-" + entry.getId(), promoted);
         } catch (Exception e) {
+            // Publisher already wraps Jackson errors in IllegalStateException;
+            // swallow & log so a failed offer-notification doesn't roll back the
+            // promotion itself (the customer still has the slot held).
             log.error("Failed to enqueue waitlist notification outbox row for entry {}",
                 entry.getId(), e);
         }
@@ -331,6 +404,7 @@ public class WaitlistService {
             .numberOfGuests(e.getNumberOfGuests())
             .status(e.getStatus().name())
             .position(e.getPosition())
+            .priority(e.getPriority())
             .offerExpiresAt(e.getOfferExpiresAt())
             .notifiedAt(e.getNotifiedAt())
             .convertedBookingRef(e.getConvertedBookingRef())

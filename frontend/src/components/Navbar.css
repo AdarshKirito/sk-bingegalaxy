@@ -158,9 +158,17 @@
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;     /* allow long admin link rows to flow to a second line instead of overflowing */
+  row-gap: 0.4rem;
   min-width: 0;
   overflow: visible;
+}
+
+.nav-admin-entry .nav-link,
+.nav-admin-entry .nav-group-trigger {
+  /* keep individual pills on a single line — long labels never break mid-pill or shrink to nothing */
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .nav-admin-menu {
@@ -185,6 +193,8 @@
   flex: 1 1 0;
   min-width: 0;
   overflow: visible; /* dropdowns must escape */
+  flex-wrap: wrap;   /* prevent right-side controls from being pushed off-screen when many groups exist */
+  row-gap: 0.4rem;
 }
 
 /* ── NavDropdownGroup ─────────────────────────────────────── */
@@ -374,6 +384,15 @@
   flex: 1 1 0;
   min-width: 0;
   overflow: visible; /* dropdowns must escape */
+  flex-wrap: wrap;
+  row-gap: 0.4rem;
+}
+
+.nav-group-trigger,
+.nav-group .nav-link {
+  /* keep group labels on a single line — long labels never break mid-pill */
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .nav-admin-meta {
@@ -1133,5 +1152,228 @@
     background: transparent;
     box-shadow: none;
     padding: 0;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────
+   Admin platform shell — left sidebar (entrance level only)
+   Used when an admin is logged in but no binge is selected.
+   ───────────────────────────────────────────────────────── */
+.admin-sidebar {
+  position: fixed;
+  top: 70px;
+  left: 0;
+  bottom: 0;
+  width: 248px;
+  background: var(--bg-card);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  z-index: 90;
+  box-shadow: 1px 0 0 rgba(0, 0, 0, 0.02);
+  overflow: hidden;
+}
+
+.admin-sidebar-inner {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 1rem 0.6rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  scrollbar-width: thin;
+}
+
+.admin-sidebar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.admin-sidebar-heading {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  padding: 0.25rem 0.75rem 0.4rem;
+  opacity: 0.75;
+}
+
+.admin-sidebar .nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.92rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+  text-decoration: none;
+  transition: background-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+  position: relative;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.admin-sidebar .nav-link svg {
+  flex-shrink: 0;
+  width: 1.05rem;
+  height: 1.05rem;
+  opacity: 0.85;
+}
+
+.admin-sidebar .nav-link span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.admin-sidebar .nav-link:hover {
+  background: var(--primary-bg);
+  color: var(--text);
+}
+
+.admin-sidebar .nav-link.nav-link-active {
+  background: var(--primary-bg);
+  color: var(--primary);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+
+.admin-sidebar .nav-link.nav-link-active svg {
+  opacity: 1;
+}
+
+.admin-sidebar-footer {
+  border-top: 1px solid var(--border);
+  padding: 0.75rem 0.85rem;
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.admin-sidebar-footer .nav-user {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.admin-sidebar-footer .nav-user small {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+/* Venue switcher pill in the in-binge sidebar footer */
+.admin-sidebar-venue-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  font: inherit;
+  color: var(--text);
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.admin-sidebar-venue-btn:hover {
+  background: var(--primary-bg);
+  border-color: var(--primary);
+}
+
+.admin-sidebar-venue-btn .venue-details {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.admin-sidebar-venue-btn .venue-pill-label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.admin-sidebar-venue-btn .venue-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Anchor the navbar (and reserve content space) while admin shell is on.
+   Switching from `position: sticky` to `position: fixed` is a deliberate
+   call: sticky breaks if any ancestor introduces a containing block / overflow,
+   which has been the root cause of "top bar disappears" + "blank space at top
+   of sidebar after scrolling" reports. Fixed is bulletproof. ─────────────── */
+body.app-admin-shell .navbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+body.app-admin-shell main#main-content {
+  padding-top: calc(70px + 1.5rem);
+}
+
+/* Reserve space for the fixed sidebar so page content does not slide under it. */
+body.app-admin-shell main#main-content {
+  padding-left: 248px;
+}
+
+/* Non-admin pages: keep the historical 1.5rem top padding (the navbar is sticky
+   in the normal flow and doesn't overlap, so no extra navbar offset needed). */
+body:not(.app-admin-shell) main#main-content {
+  padding-top: 1.5rem;
+}
+
+/* In admin shell, the top bar is slim — sidebar owns primary navigation,
+   so collapse the legacy in-line entry rail and the in-binge horizontal console. */
+body.app-admin-shell .navbar-admin .nav-admin-entry,
+body.app-admin-shell .navbar-admin .nav-admin-console {
+  display: none;
+}
+
+/* Hide the now-redundant top-bar role pill (sidebar footer owns it). */
+body.app-admin-shell .navbar-admin .navbar-right .nav-admin-user.nav-desktop-only {
+  display: none;
+}
+
+/* Below 1320px, collapse the sidebar back into the existing hamburger drawer
+   (matches the rest of the navbar's mobile breakpoint). The fixed top bar still
+   applies — we just give back the horizontal space to mobile content. */
+@media (max-width: 1320px) {
+  .admin-sidebar {
+    display: none;
+  }
+
+  body.app-admin-shell main#main-content {
+    padding-left: 0;
+  }
+
+  /* Restore the in-binge horizontal console + entrance rail in the mobile drawer fallback. */
+  body.app-admin-shell .navbar-admin .nav-admin-console {
+    display: block;
+  }
+  body.app-admin-shell .navbar-admin .nav-admin-entry {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
   }
 }

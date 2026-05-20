@@ -132,8 +132,10 @@ export default function AccountCenter() {
           <div className="customer-hub-actions">
             <Link to={primaryLink} className="btn btn-primary">{primaryLabel}</Link>
             <Link to={secondaryLink} className="btn btn-secondary">{secondaryLabel}</Link>
+            <Link to="/settings" className="btn btn-secondary"><FiSettings /> Settings</Link>
             <Link to="/account/security/mfa" className="btn btn-secondary">Two-factor auth</Link>
             <Link to="/account/sessions" className="btn btn-secondary">Active sessions</Link>
+            <Link to="/account/notifications" className="btn btn-secondary"><FiBell /> Notifications</Link>
           </div>
         </div>
 

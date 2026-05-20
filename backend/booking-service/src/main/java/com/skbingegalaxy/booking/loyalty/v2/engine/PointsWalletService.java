@@ -137,7 +137,8 @@ public class PointsWalletService {
                 wallet.getId(), req.entryType(), req.idempotencyKey())) {
             log.info("[loyalty-v2] idempotent skip of debit ({}, {}, {}) for wallet {}",
                     req.entryType(), req.idempotencyKey(), req.points(), wallet.getId());
-            return ledgerRepository.findByBookingRef(req.bookingRef()); // best-effort for callers
+            return ledgerRepository.findByWalletIdAndEntryTypeAndIdempotencyKeyStartingWithOrderByIdAsc(
+                    wallet.getId(), req.entryType(), req.idempotencyKey() + "#lot=");
         }
 
         if (wallet.getCurrentBalance() < req.points()) {
@@ -305,17 +306,32 @@ public class PointsWalletService {
     }
 
     private void validateCreditRequest(CreditRequest r) {
+        if (r == null) throw new IllegalArgumentException("Credit request is required");
+        if (r.membershipId() == null) throw new IllegalArgumentException("membershipId is required");
         if (r.points() <= 0) throw new IllegalArgumentException("Credit points must be > 0");
+        if (r.entryType() == null || r.entryType().isBlank())
+            throw new IllegalArgumentException("entryType is required");
+        if (r.sourceType() == null || r.sourceType().isBlank())
+            throw new IllegalArgumentException("sourceType is required");
+        if (r.at() == null) throw new IllegalArgumentException("earnedAt is required");
         if (r.expiresAt() == null || !r.expiresAt().isAfter(r.at()))
             throw new IllegalArgumentException("Credit expiresAt must be after earnedAt");
         if (r.idempotencyKey() == null || r.idempotencyKey().isBlank())
             throw new IllegalArgumentException("idempotencyKey is required");
+        if (r.actorRole() == null || r.actorRole().isBlank())
+            throw new IllegalArgumentException("actorRole is required");
     }
 
     private void validateDebitRequest(DebitRequest r) {
+        if (r == null) throw new IllegalArgumentException("Debit request is required");
+        if (r.membershipId() == null) throw new IllegalArgumentException("membershipId is required");
         if (r.points() <= 0) throw new IllegalArgumentException("Debit points must be > 0");
+        if (r.entryType() == null || r.entryType().isBlank())
+            throw new IllegalArgumentException("entryType is required");
         if (r.idempotencyKey() == null || r.idempotencyKey().isBlank())
             throw new IllegalArgumentException("idempotencyKey is required");
+        if (r.actorRole() == null || r.actorRole().isBlank())
+            throw new IllegalArgumentException("actorRole is required");
     }
 
     // ── Request DTOs ─────────────────────────────────────────────────────

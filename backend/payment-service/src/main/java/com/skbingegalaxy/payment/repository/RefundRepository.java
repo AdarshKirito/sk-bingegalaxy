@@ -60,4 +60,24 @@ public interface RefundRepository extends JpaRepository<Refund, Long> {
     List<Object[]> countRefundsByPaymentIds(
             @Param("paymentIds") List<Long> paymentIds,
             @Param("statuses") List<PaymentStatus> statuses);
+
+    // ── Refund-lifecycle queries (V10) ─────────────────────────────────────
+
+    /** All refund attempts for a booking (customer-facing timeline + admin audit). */
+    @Query("SELECT r FROM Refund r WHERE r.payment.bookingRef = :bookingRef ORDER BY r.createdAt DESC")
+    List<Refund> findByBookingRefOrderByCreatedAtDesc(@Param("bookingRef") String bookingRef);
+
+    /** Same, but tenancy-scoped — production code must always pass the bingeId. */
+    @Query("SELECT r FROM Refund r WHERE r.payment.bookingRef = :bookingRef "
+         + "AND r.payment.bingeId = :bingeId ORDER BY r.createdAt DESC")
+    List<Refund> findByBookingRefAndBingeIdOrderByCreatedAtDesc(
+            @Param("bookingRef") String bookingRef,
+            @Param("bingeId") Long bingeId);
+
+    /** Admin failed-refund queue (paged). */
+    org.springframework.data.domain.Page<com.skbingegalaxy.payment.entity.Refund>
+        findByRefundStatusAndPayment_BingeIdOrderByCreatedAtDesc(
+            com.skbingegalaxy.payment.entity.RefundStatus refundStatus,
+            Long bingeId,
+            org.springframework.data.domain.Pageable pageable);
 }

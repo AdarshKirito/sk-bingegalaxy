@@ -129,6 +129,63 @@ public class PaymentController {
     }
 
     /**
+     * Customer-facing refund timeline for a booking. Returns refunds in any
+     * lifecycle state (CALCULATED → INITIATED → PROCESSING → SUCCEEDED/FAILED)
+     * so the UI can render a status timeline. Tenancy-scoped.
+     */
+    @GetMapping("/booking/{bookingRef}/refunds")
+    public ResponseEntity<ApiResponse<List<RefundDto>>> getRefundsForBooking(
+            @PathVariable String bookingRef) {
+        return ResponseEntity.ok(ApiResponse.ok(
+            "Refund timeline for booking",
+            paymentService.getRefundsForBooking(bookingRef)));
+    }
+
+    /**
+     * Admin failed-refund queue. Surfaces refunds whose own per-attempt
+     * lifecycle ended in FAILED so ops can triage / retry.
+     */
+    @GetMapping("/admin/refunds/failed")
+    public ResponseEntity<ApiResponse<org.springframework.data.domain.Page<RefundDto>>> getFailedRefunds(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestHeader("X-User-Role") String userRole) {
+        if (!"ADMIN".equalsIgnoreCase(userRole) && !"SUPER_ADMIN".equalsIgnoreCase(userRole)) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Only admins can view the failed-refund queue",
+                org.springframework.http.HttpStatus.FORBIDDEN);
+        }
+        if (size > 100) size = 100;
+        var pageable = org.springframework.data.domain.PageRequest.of(page, size);
+        return ResponseEntity.ok(ApiResponse.ok(
+            "Failed refunds",
+            paymentService.getFailedRefunds(pageable)));
+    }
+
+    /**
+     * Retry a FAILED refund. Marks the original as SUPERSEDED and creates a new
+     * INITIATED row that today (synchronous gateway path) settles to SUCCEEDED.
+     */
+    @PostMapping("/admin/refunds/{refundId}/retry")
+    public ResponseEntity<ApiResponse<RefundDto>> retryFailedRefund(
+            @PathVariable Long refundId,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Email") String adminEmail,
+            @RequestHeader("X-User-Role") String userRole,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        if (!"ADMIN".equalsIgnoreCase(userRole) && !"SUPER_ADMIN".equalsIgnoreCase(userRole)) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Only admins can retry refunds", org.springframework.http.HttpStatus.FORBIDDEN);
+        }
+        RefundDto refund = idempotencyService.execute(
+            idempotencyKey, "POST",
+            "/api/v1/payments/admin/refunds/" + refundId + "/retry",
+            adminId, java.util.Map.of("refundId", refundId), RefundDto.class,
+            () -> paymentService.retryFailedRefund(refundId, adminEmail));
+        return ResponseEntity.ok(ApiResponse.ok("Refund retry issued", refund));
+    }
+
+    /**
      * Cancel an INITIATED payment before it reaches the gateway.
      * Only the payment owner can cancel their own payment.
      */

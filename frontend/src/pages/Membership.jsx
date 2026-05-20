@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import {
   FiAward, FiTrendingUp, FiStar, FiGift, FiShield, FiClock,
@@ -20,18 +21,17 @@ import './Membership.css';
  * a pointsToNextTier field on this snapshot, so we derive it here.
  */
 
-const TIER_ORDER = ['BRONZE', 'SILVER', 'GOLD', 'PLATINUM', 'DIAMOND'];
+const TIER_ORDER = ['BRONZE', 'SILVER', 'GOLD', 'PLATINUM'];
 const TIER_THRESHOLDS = {
   BRONZE: 0,
   SILVER: 5_000,
-  GOLD: 15_000,
-  PLATINUM: 35_000,
-  DIAMOND: 75_000,
+  GOLD: 20_000,
+  PLATINUM: 50_000,
 };
 
 const TIER_BENEFITS = {
   BRONZE: [
-    { icon: <FiStar />,   title: '1x points per ₹100', body: 'Base earn rate on every booking.' },
+    { icon: <FiStar />,   title: '10 points per ₹1', body: 'Base earn rate on every booking.' },
     { icon: <FiGift />,   title: 'Birthday surprise',  body: 'A small gift in your booking month.' },
   ],
   SILVER: [
@@ -51,11 +51,11 @@ const TIER_BENEFITS = {
     { icon: <FiAward />,      title: 'Annual choice gift',  body: 'Pick one perk each anniversary year.' },
     { icon: <FiHeadphones />, title: 'Dedicated concierge', body: 'A named contact for planning any event.' },
   ],
-  DIAMOND: [
-    { icon: <FiStar />,       title: '3x points',           body: 'Top earn rate — triple points everywhere.' },
-    { icon: <FiAward />,      title: 'Guaranteed upgrade',  body: 'Pre-confirmed upgrade on every stay.' },
-    { icon: <FiGift />,       title: 'Invite-only events',  body: 'Access exclusive tastings & private screenings.' },
-    { icon: <FiShield />,     title: 'Waived fees',         body: 'No cancellation fees inside the flex window.' },
+  LIFETIME_PLATINUM: [
+    { icon: <FiStar />,       title: 'Lifetime Platinum perks', body: 'Platinum benefits without an expiry date.' },
+    { icon: <FiGift />,       title: 'Room upgrade',            body: 'Complimentary upgrade subject to availability.' },
+    { icon: <FiAward />,      title: 'Annual choice gift',      body: 'Pick one perk each anniversary year.' },
+    { icon: <FiHeadphones />, title: 'Dedicated concierge',     body: 'A named contact for planning any event.' },
   ],
 };
 
@@ -106,11 +106,18 @@ export default function Membership() {
   useEffect(() => { reload(); }, [reload]);
 
   const tierKey = (profile?.tierCode || 'BRONZE').toUpperCase();
-  const idx = Math.max(0, TIER_ORDER.indexOf(tierKey));
-  const nextTier = idx < TIER_ORDER.length - 1 ? TIER_ORDER[idx + 1] : null;
+  const isLifetimeTier = tierKey.startsWith('LIFETIME');
+  const idx = isLifetimeTier ? TIER_ORDER.length - 1 : Math.max(0, TIER_ORDER.indexOf(tierKey));
+  const nextTier = !isLifetimeTier && idx < TIER_ORDER.length - 1 ? TIER_ORDER[idx + 1] : null;
   const qc = Number(profile?.qualifyingCreditsWindow || 0);
-  const nextThreshold = nextTier ? TIER_THRESHOLDS[nextTier] : TIER_THRESHOLDS[tierKey];
+  // Use server-provided pointsToNextTier (authoritative — reflects actual tier thresholds
+  // from the DB, which may differ from the hardcoded display constants if an admin changed
+  // them). Fall back to the local TIER_THRESHOLDS only when the server value is absent.
+  const serverGap = profile?.pointsToNextTier != null ? Number(profile.pointsToNextTier) : null;
   const prevThreshold = TIER_THRESHOLDS[tierKey] || 0;
+  const nextThreshold = nextTier
+    ? (serverGap != null ? qc + serverGap : TIER_THRESHOLDS[nextTier])
+    : TIER_THRESHOLDS[tierKey];
   const progressPct = useMemo(() => {
     if (!nextTier) return 100;
     const span = Math.max(1, nextThreshold - prevThreshold);
@@ -163,7 +170,7 @@ export default function Membership() {
             booking — and comes with a welcome bonus.
           </p>
           <div className="join-perks">
-            <div className="join-perk"><strong>Earn on every stay</strong><span>Base 1x, up to 3x at Diamond.</span></div>
+            <div className="join-perk"><strong>Earn on every stay</strong><span>Base earn, with richer perks as you climb.</span></div>
             <div className="join-perk"><strong>Priority access</strong><span>See dates before anyone else.</span></div>
             <div className="join-perk"><strong>Milestone gifts</strong><span>Annual bonuses, birthday surprises.</span></div>
             <div className="join-perk"><strong>Status Match</strong><span>Already elite elsewhere? Bring it over.</span></div>
@@ -199,7 +206,7 @@ export default function Membership() {
               </div>
               <div className="membership-progress-meta">
                 <span>{qc.toLocaleString()} / {nextThreshold.toLocaleString()} qualifying credits</span>
-                <strong>{Math.max(0, nextThreshold - qc).toLocaleString()} to {nextTier}</strong>
+                <strong>{(serverGap != null ? serverGap : Math.max(0, nextThreshold - qc)).toLocaleString()} to {nextTier}</strong>
               </div>
             </>
           ) : (
@@ -307,9 +314,8 @@ export default function Membership() {
             <div className="how-ico"><FiStar /></div>
             <h3>1. Earn points on every booking</h3>
             <p>
-              You get <strong>1 point for every ₹100</strong> you spend on stays and
-              experiences. Your tier applies a <strong>multiplier</strong> on top —
-              e.g. Gold earns 1.5× and Platinum earns 2×.
+              You get <strong>10 points for every ₹1</strong> you spend on stays and
+              experiences. Some venues may add tier or campaign multipliers on top.
             </p>
           </div>
 
@@ -340,7 +346,7 @@ export default function Membership() {
             <h3>3. Redeem points at checkout</h3>
             <p>
               At booking, toggle <strong>"Use points"</strong> to apply your balance —
-              100 points is worth ₹10 off. Partial redemptions are fine, and we always
+              100 points is worth ₹1 off. Partial redemptions are fine, and we always
               spend your oldest points first so nothing is left on the table.
             </p>
           </div>
@@ -425,22 +431,47 @@ export default function Membership() {
 
         {statusMatches.length > 0 && (
           <ul className="sm-history">
-            {statusMatches.map((r) => (
-              <li key={r.id}>
-                <span className="sm-prog">
-                  {r.competitorProgramName} → {r.requestedTierCode}
-                </span>
-                <span className={`sm-status ${String(r.status).toLowerCase()}`}>{r.status}</span>
-                <span className="sm-date">
-                  {new Date(r.createdAt).toLocaleDateString()}
-                  {r.proofUrl && (
-                    <a href={r.proofUrl} target="_blank" rel="noreferrer" style={{ marginLeft: 8 }}>
-                      <FiExternalLink />
-                    </a>
-                  )}
-                </span>
-              </li>
-            ))}
+            {statusMatches.map((r) => {
+              const statusClass = String(r.status).toLowerCase().replace(/_/g, '-');
+              const isChallenge = r.status === 'CHALLENGE_ACTIVE';
+              const isRejected  = r.status === 'REJECTED';
+              return (
+                <li key={r.id}>
+                  <div className="sm-h-main">
+                    <div className="sm-prog-block">
+                      <span className="sm-prog">{r.competitorProgramName}</span>
+                      {r.competitorTierName && (
+                        <span className="sm-competitor-tier">{r.competitorTierName}</span>
+                      )}
+                    </div>
+                    <span className="sm-arrow">→</span>
+                    <span className="sm-requested-tier">{r.requestedTierCode}</span>
+                    <span className={`sm-status ${statusClass}`}>
+                      {r.status.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                  <div className="sm-h-meta">
+                    <span className="sm-date">{new Date(r.createdAt).toLocaleDateString()}</span>
+                    {isChallenge && r.challengeExpiresAt && (
+                      <span className="sm-challenge-hint">
+                        <FiClock style={{ verticalAlign: '-1px', marginRight: 3 }} />
+                        Challenge ends {new Date(r.challengeExpiresAt).toLocaleDateString()}
+                      </span>
+                    )}
+                    {isRejected && r.reviewNotes && (
+                      <span className="sm-review-notes">
+                        Reason: {r.reviewNotes}
+                      </span>
+                    )}
+                    {r.proofUrl && (
+                      <a href={r.proofUrl} target="_blank" rel="noreferrer" className="sm-proof-link">
+                        Proof <FiExternalLink style={{ verticalAlign: '-1px', marginLeft: 2 }} />
+                      </a>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
@@ -469,12 +500,19 @@ function LedgerRow({ entry }) {
   return (
     <li className="ledger-item">
       <div className={`ledger-icon ${tone}`}><IconComp /></div>
-      <div>
+      <div className="ledger-body">
         <div className="ledger-title">{reason}</div>
+        {entry.description && (
+          <div className="ledger-desc">{entry.description}</div>
+        )}
         <div className="ledger-sub">
           <span>{new Date(entry.createdAt).toLocaleString()}</span>
-          {entry.bookingRef && <span>· Booking {entry.bookingRef}</span>}
-          <span>· {entry.entryType}</span>
+          {entry.bookingRef && (
+            <Link to={`/booking/${entry.bookingRef}`} className="ledger-booking-link">
+              Booking {entry.bookingRef}
+              <FiExternalLink style={{ verticalAlign: '-1px', marginLeft: 3 }} />
+            </Link>
+          )}
         </div>
       </div>
       <div className={`ledger-points ${tone}`}>
@@ -488,14 +526,22 @@ function humanReason(code, type) {
   if (!code) return type || 'Activity';
   const map = {
     EARN_BOOKING:    'Earned on booking',
+    BOOKING_COMPLETED: 'Earned on booking',
     EARN_BONUS:      'Bonus points',
     EARN_WELCOME:    'Welcome bonus',
+    WELCOME_BONUS:   'Welcome bonus',
     EARN_BIRTHDAY:   'Birthday bonus',
     REDEEM_BOOKING:  'Redeemed on booking',
+    BOOKING_REDEMPTION: 'Redeemed on booking',
     REDEEM_REWARD:   'Redeemed reward',
     EXPIRE:          'Points expired',
+    LOT_EXPIRED:     'Points expired',
     ADJUST_ADMIN:    'Admin adjustment',
+    ADMIN_ADJUSTMENT: 'Admin adjustment',
     STATUS_MATCH:    'Status match bonus',
+    GUEST_MERGE:     'Guest activity credited',
+    REVERSE_REDEEM:  'Redemption refunded',
+    CANCELLATION:    'Booking cancellation reversal',
   };
   return map[code] || code.replace(/_/g, ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase());
 }

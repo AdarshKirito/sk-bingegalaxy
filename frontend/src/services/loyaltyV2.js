@@ -21,10 +21,54 @@ const v2 = axios.create({
 
 const unwrap = (r) => (r?.data?.data !== undefined ? r.data.data : r?.data);
 
+v2.interceptors.request.use((config) => {
+  const method = (config.method || 'get').toLowerCase();
+  if (['post', 'put', 'patch', 'delete'].includes(method)) {
+    config.headers = config.headers || {};
+    if (!config.headers['Idempotency-Key'] && !config.headers['idempotency-key']) {
+      config.headers['Idempotency-Key'] = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `idem-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+    }
+  }
+  return config;
+});
+
+/**
+ * Map a v2 membership snapshot onto the legacy-shaped account object that
+ * older UI components (pre-v2 migration) expect.  Field names are explicit
+ * — no spread operator so internal v2 fields don't leak into consumer code.
+ */
+export function toLegacyAccount(profile) {
+  if (!profile || profile.enrolled === false) return null;
+  return {
+    id: profile.membershipId,
+    membershipId: profile.membershipId,
+    customerId: profile.customerId,
+    memberNumber: profile.memberNumber,
+    totalPointsEarned: profile.pointsEarnedLifetime ?? 0,
+    currentBalance: profile.pointsBalance ?? 0,
+    tierLevel: profile.tierCode ?? 'BRONZE',
+    pointsToNextTier: profile.pointsToNextTier ?? null,
+    nextTierLevel: profile.nextTierCode ?? null,
+    redemptionRate: profile.redemptionRate ?? 100,
+    tierEffectiveFrom: profile.tierEffectiveFrom ?? null,
+    tierEffectiveUntil: profile.tierEffectiveUntil ?? null,
+    qualifyingCreditsWindow: profile.qualifyingCreditsWindow ?? 0,
+    lifetimeCredits: profile.lifetimeCredits ?? 0,
+    enrolledAt: profile.enrolledAt ?? null,
+    recentTransactions: [],
+  };
+}
+
 // ── Customer ────────────────────────────────────────────────────────────
 
 export async function getMyMembership() {
   return unwrap(await v2.get('/me'));
+}
+
+export async function getMyLegacyAccount() {
+  return toLegacyAccount(await getMyMembership());
 }
 
 export async function getMyLedger({ page = 0, size = 25 } = {}) {
@@ -79,6 +123,23 @@ export async function rejectStatusMatch(requestId, body) {
   return unwrap(await v2.post(`/admin/status-match/${requestId}/reject`, body));
 }
 
+export async function getCustomerAccount(customerId) {
+  return unwrap(await v2.get(`/super-admin/customers/${customerId}`));
+}
+
+export async function adjustCustomerPoints(customerId, body) {
+  return unwrap(await v2.post(`/super-admin/customers/${customerId}/adjust`, body));
+}
+
+export async function getCustomerLedger(customerId, { page = 0, size = 50 } = {}) {
+  return unwrap(await v2.get(`/super-admin/customers/${customerId}/ledger`, { params: { page, size } }));
+}
+
+export async function listTierPerks(tierId) {
+  const params = tierId != null ? { tierId } : {};
+  return unwrap(await v2.get('/super-admin/tier-perks', { params }));
+}
+
 // ── Super-admin (program-wide) ──────────────────────────────────────────
 
 export async function getProgram() {
@@ -114,16 +175,14 @@ export async function listBindings() {
 export async function bulkSetBindingStatus(bindingIds, status) {
   return unwrap(await v2.post('/super-admin/bindings/bulk', { bindingIds, status }));
 }
-export async function runParityNow() {
-  return unwrap(await v2.post('/super-admin/parity/run'));
-}
-
 export default {
-  getMyMembership, getMyLedger, getRedeemQuote, listMyStatusMatches, submitStatusMatch,
+  getMyMembership, getMyLegacyAccount, toLegacyAccount,
+  getMyLedger, getRedeemQuote, listMyStatusMatches, submitStatusMatch,
   getBinding, enableBinding, disableBinding, listEarnRules, upsertEarnRule,
   getRedeemRule, upsertRedeemRule, upsertPerkOverride,
   listPendingStatusMatches, approveStatusMatch, rejectStatusMatch,
+  getCustomerAccount, adjustCustomerPoints, getCustomerLedger,
   getProgram, updateProgram, listTiers, upsertTier, retireTier,
-  listPerks, savePerk, assignPerkToTier, removePerkFromTier,
-  listBindings, bulkSetBindingStatus, runParityNow,
+  listPerks, savePerk, assignPerkToTier, removePerkFromTier, listTierPerks,
+  listBindings, bulkSetBindingStatus,
 };

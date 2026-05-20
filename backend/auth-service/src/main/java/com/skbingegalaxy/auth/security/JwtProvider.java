@@ -1,6 +1,7 @@
 package com.skbingegalaxy.auth.security;
 
 import com.skbingegalaxy.auth.entity.User;
+import com.skbingegalaxy.common.enums.AuthorityScope;
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
@@ -9,10 +10,13 @@ import org.springframework.stereotype.Component;
 
 import jakarta.annotation.PostConstruct;
 import javax.crypto.SecretKey;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Component
 public class JwtProvider {
@@ -53,14 +57,40 @@ public class JwtProvider {
     private long refreshExpirationMs;
 
     public String generateToken(User user) {
-        return buildToken(user, jwtExpirationMs, "access");
+        return buildToken(user, jwtExpirationMs, "access", Collections.emptySet());
     }
 
     public String generateRefreshToken(User user) {
-        return buildToken(user, refreshExpirationMs, "refresh");
+        return buildToken(user, refreshExpirationMs, "refresh", Collections.emptySet());
     }
 
-    private String buildToken(User user, long expirationMs, String tokenType) {
+    /**
+     * Generate a JWT that additionally carries an Authority Handover delegation. When
+     * {@code delegatedScopes} is non-empty, the token includes:
+     * <ul>
+     *   <li>{@code delegatedScopes} — comma-joined scope codes (e.g. "CURRENCIES,LOYALTY")</li>
+     *   <li>{@code delegationExpiresAt} — epoch millis after which gateway must ignore the
+     *       delegation even if the JWT is still otherwise valid (defence-in-depth in case
+     *       a grant is revoked but token-revocation list propagation is delayed)</li>
+     * </ul>
+     * The native {@code role} claim is NOT modified. The gateway is responsible for
+     * rewriting {@code X-User-Role} on a per-path basis when delegation grants the
+     * relevant scope. This keeps the JWT truthful about the user's native role.
+     */
+    public String generateToken(User user, Set<AuthorityScope> delegatedScopes, long delegationExpiresAtMillis) {
+        return buildToken(user, jwtExpirationMs, "access", delegatedScopes, delegationExpiresAtMillis);
+    }
+
+    public String generateRefreshToken(User user, Set<AuthorityScope> delegatedScopes, long delegationExpiresAtMillis) {
+        return buildToken(user, refreshExpirationMs, "refresh", delegatedScopes, delegationExpiresAtMillis);
+    }
+
+    private String buildToken(User user, long expirationMs, String tokenType, Set<AuthorityScope> delegatedScopes) {
+        return buildToken(user, expirationMs, tokenType, delegatedScopes, 0L);
+    }
+
+    private String buildToken(User user, long expirationMs, String tokenType,
+                              Set<AuthorityScope> delegatedScopes, long delegationExpiresAtMillis) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("email", user.getEmail());
         claims.put("role", user.getRole().name());
@@ -68,6 +98,17 @@ public class JwtProvider {
         claims.put("phone", user.getPhone());
         claims.put("phoneCountryCode", user.getPhoneCountryCode());
         claims.put("token_type", tokenType);
+
+        if (delegatedScopes != null && !delegatedScopes.isEmpty()) {
+            // Comma-joined string keeps JWT compact and avoids Jackson List<Enum> quirks
+            // when parsed by gateway code that uses raw jjwt without the auth-service
+            // class path.
+            claims.put("delegatedScopes",
+                delegatedScopes.stream().map(Enum::name).sorted().collect(Collectors.joining(",")));
+            if (delegationExpiresAtMillis > 0) {
+                claims.put("delegationExpiresAt", delegationExpiresAtMillis);
+            }
+        }
 
         return Jwts.builder()
             .claims(claims)

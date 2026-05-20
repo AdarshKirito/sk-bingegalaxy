@@ -28,12 +28,14 @@ vi.mock('../context/BingeContext', () => ({
   }),
 }));
 
-const { mockGetByRef } = vi.hoisted(() => ({
+const { mockGetByRef, mockGetMyTimeline } = vi.hoisted(() => ({
   mockGetByRef: vi.fn(),
+  mockGetMyTimeline: vi.fn(),
 }));
 vi.mock('../services/endpoints', () => ({
   bookingService: {
     getByRef: mockGetByRef,
+    getMyTimeline: mockGetMyTimeline,
   },
 }));
 
@@ -54,6 +56,7 @@ function renderConfirmation(ref = 'BK-001') {
 describe('BookingConfirmation Page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetMyTimeline.mockResolvedValue({ data: { data: [] } });
   });
 
   it('shows loading indicator initially', () => {

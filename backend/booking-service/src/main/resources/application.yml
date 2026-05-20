@@ -28,6 +28,12 @@ spring:
       retries: 5
       properties:
         enable.idempotence: true
+        # Don't write Jackson type headers. Consumers use @KafkaListener
+        # parameter types (BookingEvent / NotificationEvent), so the headers
+        # are noise and cause grief when the producer sends a heterogeneous
+        # set of payloads (typed POJOs vs JsonNode for non-booking topics
+        # routed through the shared outbox).
+        spring.json.add.type.headers: false
     consumer:
       group-id: booking-group
       enable-auto-commit: false

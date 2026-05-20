@@ -29,7 +29,7 @@ public class PricingService {
     private final RateCodeChangeLogRepository rateCodeChangeLogRepository;
     private final BookingRepository bookingRepository;
     private final SurgePricingRuleRepository surgePricingRuleRepository;
-    private final LoyaltyService loyaltyService;
+    private final com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyMemberService loyaltyMemberService;
     private final BookingReviewRepository bookingReviewRepository;
 
     /** Thread-local admin ID for audit logging (set by controllers). */
@@ -1013,9 +1013,9 @@ public class PricingService {
             .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         // ── Loyalty / membership snapshot ──
-        LoyaltyAccountDto loyalty = null;
+        com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyMemberService.MemberProfile loyalty = null;
         try {
-            loyalty = loyaltyService.getAccount(customerId);
+            loyalty = loyaltyMemberService.getMemberProfile(customerId);
         } catch (Exception ex) {
             log.warn("Loyalty lookup failed for customer {}: {}", customerId, ex.getMessage());
         }
@@ -1064,7 +1064,7 @@ public class PricingService {
             ? Math.round(weightedAdminAvg * 10.0) / 10.0
             : null;
         double reviewWeight = computeReviewWeight(
-            loyalty != null ? loyalty.getTierLevel() : "BRONZE",
+            loyalty != null ? loyalty.tierCode() : "BRONZE",
             weightedAdminAvg,
             adminReviewCount);
 
@@ -1076,12 +1076,12 @@ public class PricingService {
             .rateCodeChanges(changeList)
             .totalReservations(bookings.size())
             .reservations(reservations)
-            .memberTier(loyalty != null ? loyalty.getTierLevel() : null)
-            .loyaltyPoints(loyalty != null ? loyalty.getCurrentBalance() : null)
-            .lifetimePointsEarned(loyalty != null ? loyalty.getTotalPointsEarned() : null)
-            .pointsToNextTier(loyalty != null ? loyalty.getPointsToNextTier() : null)
-            .nextTierLevel(loyalty != null ? loyalty.getNextTierLevel() : null)
-            .memberSince(loyalty != null ? loyalty.getCreatedAt() : null)
+            .memberTier(loyalty != null ? loyalty.tierCode() : null)
+            .loyaltyPoints(loyalty != null ? loyalty.pointsBalance() : null)
+            .lifetimePointsEarned(loyalty != null ? loyalty.pointsEarnedLifetime() : null)
+            .pointsToNextTier(loyalty != null ? loyalty.pointsToNextTier() : null)
+            .nextTierLevel(loyalty != null ? loyalty.nextTierCode() : null)
+            .memberSince(loyalty != null ? loyalty.enrolledAt() : null)
             .avgAdminRating(avgAdminRating)
             .adminReviewCount(adminReviewCount)
             .customerReviewCount(customerReviewCount)

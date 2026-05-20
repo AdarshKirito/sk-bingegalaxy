@@ -16,10 +16,19 @@ public class TemplateController {
 
     private final TemplateService templateService;
 
+    /**
+     * List notification template versions.
+     *
+     * <p>Both filters are optional so the admin UI can render an inventory grid
+     * on first load (no name selected yet) without throwing 400. Empty filters
+     * return every version of every template, ordered newest-first; supplying
+     * just {@code name} narrows to that template's channels; supplying both
+     * returns the full version history for one (name, channel) pair.
+     */
     @GetMapping
     public ResponseEntity<ApiResponse<List<NotificationTemplateDto>>> listVersions(
-            @RequestParam String name,
-            @RequestParam String channel) {
+            @RequestParam(required = false) String name,
+            @RequestParam(required = false) String channel) {
         return ResponseEntity.ok(ApiResponse.ok(
                 "Template versions",
                 templateService.listVersions(name, channel)));

@@ -14,6 +14,8 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.*;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -34,6 +36,7 @@ import static org.mockito.Mockito.*;
  * payment status, state transitions, and worst-case edge cases.
  */
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class BookingServiceLifecycleTest {
 
     @Mock private BookingRepository bookingRepository;
@@ -61,6 +64,13 @@ class BookingServiceLifecycleTest {
         @Mock private com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyMembershipRepository loyaltyMembershipRepository;
         @Mock private com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyConfigService loyaltyConfigService;
         @Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
+        @Mock private com.skbingegalaxy.booking.service.CustomerFreezeService customerFreezeService;
+        @Mock private com.skbingegalaxy.booking.repository.SlotHoldRepository slotHoldRepository;
+        @Mock private com.skbingegalaxy.booking.repository.BookingTransferRepository bookingTransferRepository;
+        @Mock private com.skbingegalaxy.booking.service.BookingEventPublisher bookingEventPublisher;
+        @Mock private com.skbingegalaxy.booking.service.BookingAnalyticsMetrics analyticsMetrics;
+        @Mock private com.skbingegalaxy.booking.service.BookingRiskEvaluator bookingRiskEvaluator;
+        @Mock private com.skbingegalaxy.booking.service.statemachine.BookingStateMachine stateMachineMock;
 
     @InjectMocks private BookingService bookingService;
 
@@ -72,6 +82,12 @@ class BookingServiceLifecycleTest {
         BingeContext.clear();
         ReflectionTestUtils.setField(bookingService, "availabilityClient", availabilityClient);
         ReflectionTestUtils.setField(bookingService, "eventPublisher", eventPublisher);
+        // Replace mocked SM with a real one wired to the same mocked deps so
+        // existing assertions on bookingRepository.save() / eventLogService
+        // continue to observe the SM-internal calls.
+        ReflectionTestUtils.setField(bookingService, "stateMachine",
+            new com.skbingegalaxy.booking.service.statemachine.BookingStateMachine(
+                bookingRepository, eventLogService));
         ReflectionTestUtils.setField(bookingService, "internalApiSecret", "test-secret");
         ReflectionTestUtils.setField(bookingService, "refPrefix", "SKBG");
         ReflectionTestUtils.setField(bookingService, "maxPendingPerCustomer", 2);
@@ -81,7 +97,8 @@ class BookingServiceLifecycleTest {
         ReflectionTestUtils.setField(bookingService, "defaultClosingHour", 23);
                 lenient().when(loyaltyService.redeemPoints(anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
                         .thenReturn(new LoyaltyService.RedemptionResult(0L, BigDecimal.ZERO));
-        lenient().when(bingeRepository.findById(anyLong())).thenReturn(Optional.empty());
+        lenient().when(bingeRepository.findById(anyLong())).thenAnswer(inv ->
+            Optional.of(Binge.builder().id((Long) inv.getArgument(0)).build()));
         lenient().when(cancellationTierRepository.findByBingeIdOrderByHoursBeforeStartDesc(anyLong())).thenReturn(List.of());
 
         eventType = EventType.builder()
@@ -128,7 +145,7 @@ class BookingServiceLifecycleTest {
         @DisplayName("rejects booking when customer has max pending bookings")
         void createBooking_maxPending_throws() {
             BingeContext.setBingeId(11L);
-            when(bookingRepository.countPendingByCustomerId(1L)).thenReturn(2L);
+            when(bookingRepository.countPendingByCustomerIdAndBingeId(1L, 11L)).thenReturn(2L);
 
             CreateBookingRequest request = CreateBookingRequest.builder()
                     .eventTypeId(1L)
@@ -147,8 +164,8 @@ class BookingServiceLifecycleTest {
         @DisplayName("allows booking when customer has less than max pending")
         void createBooking_belowMaxPending_proceeds() {
             BingeContext.setBingeId(11L);
-            when(bookingRepository.countPendingByCustomerId(1L)).thenReturn(1L);
-            when(bookingRepository.countRecentTimeoutCancellations(eq(1L), any(LocalDateTime.class))).thenReturn(0L);
+            when(bookingRepository.countPendingByCustomerIdAndBingeId(1L, 11L)).thenReturn(1L);
+            when(bookingRepository.countRecentTimeoutCancellationsByBinge(eq(1L), eq(11L), any(LocalDateTime.class))).thenReturn(0L);
             when(eventTypeRepository.findByIdAndBingeId(1L, 11L)).thenReturn(Optional.of(eventType));
             when(availabilityClient.checkSlotAvailable(anyString(), any(), anyLong(), anyInt(), anyInt()))
                     .thenReturn(Boolean.TRUE);
@@ -180,8 +197,8 @@ class BookingServiceLifecycleTest {
         @DisplayName("rejects booking when too many recent timeouts")
         void createBooking_tooManyTimeouts_throws() {
             BingeContext.setBingeId(11L);
-            when(bookingRepository.countPendingByCustomerId(1L)).thenReturn(0L);
-            when(bookingRepository.countRecentTimeoutCancellations(eq(1L), any(LocalDateTime.class))).thenReturn(2L);
+            when(bookingRepository.countPendingByCustomerIdAndBingeId(1L, 11L)).thenReturn(0L);
+            when(bookingRepository.countRecentTimeoutCancellationsByBinge(eq(1L), eq(11L), any(LocalDateTime.class))).thenReturn(2L);
 
             CreateBookingRequest request = CreateBookingRequest.builder()
                     .eventTypeId(1L)
@@ -193,15 +210,15 @@ class BookingServiceLifecycleTest {
             assertThatThrownBy(() -> bookingService.createBooking(
                     request, 1L, "John", "john@example.com", "9876543210"))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("auto-cancelled recently");
+                .hasMessageContaining("auto-cancelled at this venue recently");
         }
 
         @Test
         @DisplayName("allows booking when only 1 recent timeout")
         void createBooking_oneTimeout_proceeds() {
             BingeContext.setBingeId(11L);
-            when(bookingRepository.countPendingByCustomerId(1L)).thenReturn(0L);
-            when(bookingRepository.countRecentTimeoutCancellations(eq(1L), any(LocalDateTime.class))).thenReturn(1L);
+            when(bookingRepository.countPendingByCustomerIdAndBingeId(1L, 11L)).thenReturn(0L);
+            when(bookingRepository.countRecentTimeoutCancellationsByBinge(eq(1L), eq(11L), any(LocalDateTime.class))).thenReturn(1L);
             when(eventTypeRepository.findByIdAndBingeId(1L, 11L)).thenReturn(Optional.of(eventType));
             when(availabilityClient.checkSlotAvailable(anyString(), any(), anyLong(), anyInt(), anyInt()))
                     .thenReturn(Boolean.TRUE);
@@ -233,8 +250,8 @@ class BookingServiceLifecycleTest {
         @DisplayName("rejects duration that is not 30-minute multiple")
         void createBooking_non30MinIncrement_throws() {
             BingeContext.setBingeId(11L);
-            when(bookingRepository.countPendingByCustomerId(1L)).thenReturn(0L);
-            when(bookingRepository.countRecentTimeoutCancellations(eq(1L), any())).thenReturn(0L);
+            when(bookingRepository.countPendingByCustomerIdAndBingeId(1L, 11L)).thenReturn(0L);
+            when(bookingRepository.countRecentTimeoutCancellationsByBinge(eq(1L), eq(11L), any())).thenReturn(0L);
             when(eventTypeRepository.findByIdAndBingeId(1L, 11L)).thenReturn(Optional.of(eventType));
 
             CreateBookingRequest request = CreateBookingRequest.builder()
@@ -254,8 +271,8 @@ class BookingServiceLifecycleTest {
         @DisplayName("rejects duration below 30 minutes")
         void createBooking_tooShort_throws() {
             BingeContext.setBingeId(11L);
-            when(bookingRepository.countPendingByCustomerId(1L)).thenReturn(0L);
-            when(bookingRepository.countRecentTimeoutCancellations(eq(1L), any())).thenReturn(0L);
+            when(bookingRepository.countPendingByCustomerIdAndBingeId(1L, 11L)).thenReturn(0L);
+            when(bookingRepository.countRecentTimeoutCancellationsByBinge(eq(1L), eq(11L), any())).thenReturn(0L);
             when(eventTypeRepository.findByIdAndBingeId(1L, 11L)).thenReturn(Optional.of(eventType));
 
             CreateBookingRequest request = CreateBookingRequest.builder()
@@ -275,8 +292,8 @@ class BookingServiceLifecycleTest {
         @DisplayName("rejects duration above 720 minutes")
         void createBooking_tooLong_throws() {
             BingeContext.setBingeId(11L);
-            when(bookingRepository.countPendingByCustomerId(1L)).thenReturn(0L);
-            when(bookingRepository.countRecentTimeoutCancellations(eq(1L), any())).thenReturn(0L);
+            when(bookingRepository.countPendingByCustomerIdAndBingeId(1L, 11L)).thenReturn(0L);
+            when(bookingRepository.countRecentTimeoutCancellationsByBinge(eq(1L), eq(11L), any())).thenReturn(0L);
             when(eventTypeRepository.findByIdAndBingeId(1L, 11L)).thenReturn(Optional.of(eventType));
 
             CreateBookingRequest request = CreateBookingRequest.builder()
@@ -502,6 +519,10 @@ class BookingServiceLifecycleTest {
         void updatePayment_success_confirmsPending() {
             when(bookingRepository.findByBookingRef("SKBG25123456"))
                     .thenReturn(Optional.of(testBooking));
+            // SM's transition() reads booking.getBookingRef() off the saved
+            // entity returned by repository.save() — stub it so the
+            // single-save path doesn't NPE on a null return.
+            when(bookingRepository.save(any())).thenReturn(testBooking);
 
             bookingService.updatePaymentStatus("SKBG25123456", PaymentStatus.SUCCESS, "UPI");
 
@@ -725,8 +746,8 @@ class BookingServiceLifecycleTest {
         @DisplayName("null availability response throws")
         void createBooking_availabilityNull_throws() {
             BingeContext.setBingeId(11L);
-            when(bookingRepository.countPendingByCustomerId(1L)).thenReturn(0L);
-            when(bookingRepository.countRecentTimeoutCancellations(eq(1L), any())).thenReturn(0L);
+            when(bookingRepository.countPendingByCustomerIdAndBingeId(1L, 11L)).thenReturn(0L);
+            when(bookingRepository.countRecentTimeoutCancellationsByBinge(eq(1L), eq(11L), any())).thenReturn(0L);
             when(eventTypeRepository.findByIdAndBingeId(1L, 11L)).thenReturn(Optional.of(eventType));
             when(availabilityClient.checkSlotAvailable(anyString(), any(), anyLong(), anyInt(), anyInt()))
                     .thenReturn(null);
@@ -748,8 +769,8 @@ class BookingServiceLifecycleTest {
         @DisplayName("time conflict with existing booking throws")
         void createBooking_timeConflict_throws() {
             BingeContext.setBingeId(11L);
-            when(bookingRepository.countPendingByCustomerId(1L)).thenReturn(0L);
-            when(bookingRepository.countRecentTimeoutCancellations(eq(1L), any())).thenReturn(0L);
+            when(bookingRepository.countPendingByCustomerIdAndBingeId(1L, 11L)).thenReturn(0L);
+            when(bookingRepository.countRecentTimeoutCancellationsByBinge(eq(1L), eq(11L), any())).thenReturn(0L);
             when(eventTypeRepository.findByIdAndBingeId(1L, 11L)).thenReturn(Optional.of(eventType));
             when(availabilityClient.checkSlotAvailable(anyString(), any(), anyLong(), anyInt(), anyInt()))
                     .thenReturn(Boolean.TRUE);

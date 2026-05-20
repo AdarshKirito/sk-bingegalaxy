@@ -49,4 +49,23 @@ public class NotificationController {
         notificationService.retryFailedNotifications();
         return ResponseEntity.ok(ApiResponse.ok("Failed notifications retried", null));
     }
+
+    /**
+     * Per-row retry. Item 24 — the support console exposes a "Retry" button
+     * on each notification in the booking timeline so an operator can
+     * force-redispatch a single message (e.g. after the customer corrected
+     * their email).
+     */
+    @PostMapping("/admin/{id}/retry")
+    public ResponseEntity<ApiResponse<NotificationDto>> retryOne(
+            @PathVariable String id,
+            @RequestHeader(value = "X-User-Id", required = false) Long adminId,
+            @RequestHeader(value = "X-User-Role", defaultValue = "") String role) {
+        if (!"ADMIN".equalsIgnoreCase(role) && !"SUPER_ADMIN".equalsIgnoreCase(role)) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Only admins can retry notifications", org.springframework.http.HttpStatus.FORBIDDEN);
+        }
+        return ResponseEntity.ok(ApiResponse.ok("Notification retried",
+            notificationService.retryById(id, adminId)));
+    }
 }

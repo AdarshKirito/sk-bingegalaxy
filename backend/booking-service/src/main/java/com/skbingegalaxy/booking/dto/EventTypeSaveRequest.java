@@ -36,5 +36,13 @@ public class EventTypeSaveRequest {
     @Max(value = 24, message = "Maximum hours cannot exceed 24")
     private int maxHours = 8;
 
+    /** Optional per-event minimum guest count. NULL = no constraint. */
+    @Min(value = 1, message = "Minimum guests must be at least 1")
+    private Integer minGuests;
+
+    /** Optional per-event maximum guest count. NULL = no constraint. */
+    @Min(value = 1, message = "Maximum guests must be at least 1")
+    private Integer maxGuests;
+
     private List<String> imageUrls;
 }

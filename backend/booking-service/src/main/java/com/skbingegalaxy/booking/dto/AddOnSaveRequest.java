@@ -27,4 +27,12 @@ public class AddOnSaveRequest {
     private String category;
 
     private List<String> imageUrls;
+
+    /** Daily inventory cap. NULL = unlimited. Negative values rejected by DB CHECK. */
+    @Min(value = 0, message = "Stock per day cannot be negative")
+    private Integer stockPerDay;
+
+    /** Minimum advance-notice minutes before booking start. NULL = none. */
+    @Min(value = 0, message = "Advance notice cannot be negative")
+    private Integer advanceNoticeMinutes;
 }

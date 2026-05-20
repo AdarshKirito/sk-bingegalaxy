@@ -13,4 +13,6 @@ public interface BookingReminderRepository extends MongoRepository<BookingRemind
     List<BookingReminder> findByFiredFalseAndCancelledFalseAndFireAtBefore(LocalDateTime cutoff);
 
     List<BookingReminder> findByBookingRef(String bookingRef);
+
+    List<BookingReminder> findByBookingRefAndReminderType(String bookingRef, String reminderType);
 }

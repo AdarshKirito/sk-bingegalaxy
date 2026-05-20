@@ -83,11 +83,17 @@ app:
   saga:
     pending-timeout-minutes: 15
     check-interval-ms: 300000
-  loyalty:
-    enabled: ${LOYALTY_ENABLED:true}
-    points-per-rupee: ${LOYALTY_POINTS_PER_RUPEE:10}
-    redemption-rate: ${LOYALTY_REDEMPTION_RATE:100}
-
+  checkin:
+    window-early-minutes: ${CHECKIN_WINDOW_EARLY_MINUTES:30}
+    window-late-minutes:  ${CHECKIN_WINDOW_LATE_MINUTES:60}
+    otp-ttl-minutes:      ${CHECKIN_OTP_TTL_MINUTES:15}
+    qr-ttl-hours:         ${CHECKIN_QR_TTL_HOURS:48}
+    otp-max-attempts:     ${CHECKIN_OTP_MAX_ATTEMPTS:5}
+    return-otp-in-response: ${CHECKIN_RETURN_OTP_IN_RESPONSE:true}
+  no-show:
+    enabled:              ${NO_SHOW_AUTOMATION_ENABLED:true}
+    grace-minutes:        ${NO_SHOW_GRACE_MINUTES:30}
+    check-interval-ms:    ${NO_SHOW_CHECK_INTERVAL_MS:900000}
 springdoc:
   api-docs:
     enabled: ${SPRINGDOC_ENABLED:true}

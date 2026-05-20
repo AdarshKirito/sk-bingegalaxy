@@ -7,6 +7,10 @@ import com.skbingegalaxy.booking.entity.*;
 import com.skbingegalaxy.booking.repository.*;
 import com.skbingegalaxy.common.constants.KafkaTopics;
 import com.skbingegalaxy.common.context.BingeContext;
+import com.skbingegalaxy.booking.service.statemachine.BookingStateMachine;
+import com.skbingegalaxy.booking.service.statemachine.BookingTransitionEvent;
+import com.skbingegalaxy.booking.service.statemachine.TransitionActor;
+import com.skbingegalaxy.booking.web.RequestContext;
 import com.skbingegalaxy.common.enums.BookingStatus;
 import com.skbingegalaxy.common.enums.PaymentStatus;
 import com.skbingegalaxy.common.event.BookingEvent;
@@ -60,11 +64,17 @@ public class BookingService {
     private final BookingEventLogService eventLogService;
     private final SagaOrchestrator sagaOrchestrator;
     private final VenueRoomRepository venueRoomRepository;
-    private final LoyaltyService loyaltyService;
+    private final com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyMemberService loyaltyMemberService;
     private final com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyMembershipRepository loyaltyMembershipRepository;
     private final com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyConfigService loyaltyConfigService;
     private final ApplicationEventPublisher eventPublisher;                 // Loyalty v2 — in-process events
     private final CustomerFreezeService customerFreezeService;              // Anti-abuse freeze policy
+    private final com.skbingegalaxy.booking.repository.SlotHoldRepository slotHoldRepository;
+    private final com.skbingegalaxy.booking.repository.BookingTransferRepository bookingTransferRepository;
+    private final BookingEventPublisher bookingEventPublisher;              // Envelope-aware Kafka outbox writer (V46)
+    private final BookingRiskEvaluator bookingRiskEvaluator;                // Item 23 — fraud / abuse rule engine
+    private final BookingAnalyticsMetrics analyticsMetrics;                 // Item 27 — funnel/lifecycle counters
+    private final BookingStateMachine stateMachine;                         // Centralized status-transition engine
 
     @Value("${internal.api.secret}")
     private String internalApiSecret;
@@ -126,6 +136,12 @@ public class BookingService {
                                     String customerPhoneCountryCode) {
 
         Long bingeId = BingeContext.requireBingeId();
+
+        // Approval / activation guard — reject bookings against any binge that
+        // has not been approved by a super-admin or has been deactivated. The
+        // customer-visible listing already filters these out, but a leaked or
+        // guessed bingeId in the X-Binge-Id header would otherwise slip through.
+        assertBingeBookable(bingeId);
 
         // Anti-abuse: limit concurrent PENDING bookings per customer **per binge**.
         // Per-binge scope prevents a customer with pending payments at venue A from
@@ -234,9 +250,15 @@ public class BookingService {
         BigDecimal addOnTotal = BigDecimal.ZERO;
 
         if (request.getAddOns() != null) {
+            java.time.LocalDateTime bookingStartDt =
+                java.time.LocalDateTime.of(request.getBookingDate(), request.getStartTime());
             for (AddOnSelection sel : request.getAddOns()) {
                 AddOn addOn = findBookableAddOn(sel.getAddOnId());
                 int qty = Math.max(sel.getQuantity(), 1);
+
+                // Inventory + advance-notice guards (skipped for null limits).
+                enforceAddOnAvailability(addOn, qty, request.getBookingDate(), bookingStartDt, null);
+
                 PricingService.ResolvedAddonPrice addonPrice = pricingService.resolveAddonPrice(customerId, sel.getAddOnId());
                 BigDecimal linePrice = addonPrice.price().multiply(BigDecimal.valueOf(qty));
                 addOnTotal = addOnTotal.add(linePrice);
@@ -251,6 +273,7 @@ public class BookingService {
 
         // Guest charge with resolved pricing
         int guests = Math.max(request.getNumberOfGuests(), 1);
+        enforceEventTypeGuestRange(eventType, guests);
         BigDecimal guestAmount = eventPrice.pricePerGuest()
             .multiply(BigDecimal.valueOf(Math.max(guests - 1, 0)));
 
@@ -295,9 +318,10 @@ public class BookingService {
         BigDecimal loyaltyDiscountAmount = BigDecimal.ZERO;
         if (request.getRedeemLoyaltyPoints() != null && request.getRedeemLoyaltyPoints() > 0) {
             try {
-                LoyaltyService.RedemptionResult redemption = loyaltyService.redeemPoints(
-                    customerId, bingeId, bookingRef,
-                    request.getRedeemLoyaltyPoints(), totalAmount);
+                com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyMemberService.RedemptionResult redemption =
+                    loyaltyMemberService.redeemForBooking(
+                        customerId, bingeId, bookingRef,
+                        request.getRedeemLoyaltyPoints(), totalAmount);
                 loyaltyPointsRedeemed = redemption.pointsRedeemed();
                 loyaltyDiscountAmount = redemption.discountAmount();
                 totalAmount = totalAmount.subtract(loyaltyDiscountAmount);
@@ -330,6 +354,11 @@ public class BookingService {
             .addOnAmount(addOnTotal)
             .guestAmount(guestAmount)
             .totalAmount(totalAmount)
+            // Pre-tax subtotal (V38 schema). No tax is applied at create time —
+            // tax computation runs later via the tax provider on confirmation —
+            // so subtotal == total here, matching the V38 backfill semantics
+            // (UPDATE bookings SET subtotal_amount = total_amount).
+            .subtotalAmount(totalAmount)
             .pricingSource(pricingSource)
             .rateCodeName(rateCodeName)
             .venueRoomId(venueRoomId)
@@ -358,13 +387,50 @@ public class BookingService {
         // Publish Kafka event
         publishBookingEvent(saved, KafkaTopics.BOOKING_CREATED);
 
+        // Item 23 — risk / abuse evaluation. Runs in REQUIRES_NEW so any failure
+        // here can never roll back the booking creation; flags are purely
+        // informational for the operator queue.
+        bookingRiskEvaluator.evaluate(saved);
+
         return toDto(saved);
     }
 
-    // â”€â”€ Get booking by ref â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Get booking by ref ─────────────────────────────────
     @Transactional(readOnly = true)
     public BookingDto getByRef(String bookingRef) {
         return toDto(findScopedBookingByRef(bookingRef));
+    }
+
+    /**
+     * Customer-facing timeline. Returns curated milestones (status changes,
+     * payment success, refund completion, notifications) with admin-only
+     * fields stripped — IPs, user-agents, internal actor IDs, and the raw
+     * snapshot are never exposed to customers.
+     *
+     * <p>Filtering happens in-memory because the event-log table is small
+     * per booking (~10–20 rows) and the alternative — a per-customer JPQL
+     * filter passing an {@code IN} clause of enum values — would obscure
+     * the privacy-policy decision in the controller.
+     */
+    @Transactional(readOnly = true)
+    public java.util.List<java.util.Map<String, Object>> getCustomerTimeline(
+            String bookingRef,
+            java.util.Set<com.skbingegalaxy.booking.entity.BookingEventType> visibleTypes) {
+        // Re-scope; getByRef would already 403 mismatched binge.
+        findScopedBookingByRef(bookingRef);
+        java.util.List<com.skbingegalaxy.booking.entity.BookingEventLog> all =
+            eventLogService.getEventHistory(bookingRef);
+        return all.stream()
+            .filter(e -> visibleTypes.contains(e.getEventType()))
+            .map(e -> {
+                java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
+                row.put("eventType", e.getEventType().name());
+                row.put("status", e.getNewStatus());
+                row.put("description", e.getDescription());
+                row.put("at", e.getCreatedAt());
+                return row;
+            })
+            .toList();
     }
 
     // â”€â”€ Customer: my bookings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -485,6 +551,11 @@ public class BookingService {
         Booking booking = findScopedBookingByRef(bookingRef);
         String previousStatus = booking.getStatus().name();
 
+        // ── Status field — routed through the central state machine. ──────
+        // Only CONFIRMED / CANCELLED / CHECKED_IN are reachable via the
+        // admin PATCH path. Reaching NO_SHOW or COMPLETED requires the
+        // appropriate dedicated flow (audit sweeper, checkout) or the
+        // super-admin override endpoint.
         if (request.getStatus() != null) {
             BookingStatus newStatus;
             try {
@@ -492,21 +563,56 @@ public class BookingService {
             } catch (IllegalArgumentException e) {
                 throw new BusinessException("Invalid booking status: " + request.getStatus());
             }
-            if (!isValidTransition(booking.getStatus(), newStatus)) {
-                throw new BusinessException("Cannot transition from " + booking.getStatus() + " to " + newStatus);
-            }
-            booking.setStatus(newStatus);
-            if (newStatus == BookingStatus.CONFIRMED) {
+            BookingTransitionEvent evt = switch (newStatus) {
+                case CONFIRMED  -> BookingTransitionEvent.ADMIN_CONFIRM;
+                case CANCELLED  -> BookingTransitionEvent.ADMIN_CANCEL;
+                case CHECKED_IN -> BookingTransitionEvent.CHECK_IN;
+                default -> throw new BusinessException(
+                    "Cannot transition booking to " + newStatus
+                        + " via admin update — use the dedicated workflow"
+                        + " (checkout/no-show/audit) or super-admin override.");
+            };
+            TransitionActor actor = adminActorFromContext();
+            booking = stateMachine.transition(booking, evt, actor, /*reason*/ null);
+            if (booking.getStatus() == BookingStatus.CONFIRMED) {
                 publishBookingEvent(booking, KafkaTopics.BOOKING_CONFIRMED);
             }
         }
         if (request.getCheckedIn() != null) {
-            booking.setCheckedIn(request.getCheckedIn());
+            boolean wasCheckedInBefore = booking.isCheckedIn();
             if (request.getCheckedIn()) {
-                booking.setStatus(BookingStatus.CHECKED_IN);
+                if (booking.getStatus() != BookingStatus.CHECKED_IN) {
+                    booking = stateMachine.transition(
+                        booking, BookingTransitionEvent.CHECK_IN,
+                        adminActorFromContext(), /*reason*/ null);
+                }
+                booking.setCheckedIn(true);
                 if (booking.getActualCheckInTime() == null) {
                     booking.setActualCheckInTime(LocalDateTime.now());
                 }
+                // Late-arrival flag — set when the operational check-in time is
+                // after the scheduled start. Both QR/OTP and manual admin
+                // check-in funnel through this method, so the flag is set
+                // consistently regardless of channel.
+                LocalDateTime scheduledStart = LocalDateTime.of(
+                    booking.getBookingDate(), booking.getStartTime());
+                if (LocalDateTime.now().isAfter(scheduledStart) && !booking.isLateArrival()) {
+                    booking.setLateArrival(true);
+                }
+                // Emit booking.checked-in only on the transition (avoid double
+                // publishes if an admin re-saves the same booking). Status was
+                // just flipped to CHECKED_IN above, so the event payload
+                // reflects the new state.
+                if (!wasCheckedInBefore) {
+                    publishBookingEvent(booking, KafkaTopics.BOOKING_CHECKED_IN);
+                }
+            } else {
+                // Reverting a check-in (admin "undo") clears the late flag too.
+                // Status reversion itself is owned by undoCheckIn(); this path
+                // only flips the boolean flag for legacy callers that send
+                // checkedIn=false without going through the dedicated endpoint.
+                booking.setCheckedIn(false);
+                booking.setLateArrival(false);
             }
         }
         if (request.getAdminNotes() != null) {
@@ -591,12 +697,23 @@ public class BookingService {
         // Guest count change
         if (request.getNumberOfGuests() != null
                 && request.getNumberOfGuests() != booking.getNumberOfGuests()) {
+            enforceEventTypeGuestRange(booking.getEventType(), request.getNumberOfGuests());
             booking.setNumberOfGuests(request.getNumberOfGuests());
             pricingChanged = true;
         }
 
         // Add-on changes
         if (request.getAddOns() != null) {
+            java.time.LocalDateTime bookingStartDt =
+                java.time.LocalDateTime.of(booking.getBookingDate(), booking.getStartTime());
+            for (AddOnSelection sel : request.getAddOns()) {
+                AddOn addOn = findBookableAddOn(sel.getAddOnId());
+                int qty = Math.max(sel.getQuantity(), 1);
+                // Re-validate availability — exclude this booking's own existing
+                // quantity from the count so editing the same booking doesn't
+                // collide with itself.
+                enforceAddOnAvailability(addOn, qty, booking.getBookingDate(), bookingStartDt, booking.getId());
+            }
             pricingChanged = true;
         }
 
@@ -757,14 +874,16 @@ public class BookingService {
             awardLoyaltyPoints(updated);
         }
 
-        BookingEventType eventType = booking.getStatus().name().equals(previousStatus)
-            ? BookingEventType.MODIFIED
-            : BookingEventType.valueOf(booking.getStatus().name());
-        String eventDesc = directPriceOverride
-            ? "Price adjusted by admin: " + (request.getPriceAdjustmentReason() != null && !request.getPriceAdjustmentReason().isBlank()
-                ? request.getPriceAdjustmentReason() : "Admin price adjustment")
-            : "Booking updated by admin";
-        eventLogService.logEvent(updated, eventType, previousStatus, null, "ADMIN", eventDesc);
+        // Status-change audit rows are already emitted by BookingStateMachine
+        // when a transition fires; here we only log a "MODIFIED" row for
+        // non-status edits (price overrides, notes, contact details, etc.).
+        if (booking.getStatus().name().equals(previousStatus)) {
+            String eventDesc = directPriceOverride
+                ? "Price adjusted by admin: " + (request.getPriceAdjustmentReason() != null && !request.getPriceAdjustmentReason().isBlank()
+                    ? request.getPriceAdjustmentReason() : "Admin price adjustment")
+                : "Booking updated by admin";
+            eventLogService.logEvent(updated, BookingEventType.MODIFIED, previousStatus, null, "ADMIN", eventDesc);
+        }
         return toDto(updated);
     }
 
@@ -778,10 +897,28 @@ public class BookingService {
         return findBookingByRef(bookingRef);
     }
 
-    // â”€â”€ Admin: cancel booking â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Admin: cancel booking ─────────────────────────────────────────────
     @Transactional
     public BookingDto cancelBooking(String bookingRef) {
-        return cancelBooking(findScopedBookingByRef(bookingRef), "ADMIN", "Booking cancelled by admin", 100);
+        return cancelBooking(bookingRef, null);
+    }
+
+    /**
+     * Admin cancellation with optional operator-supplied reason. Item 24 —
+     * the reason is persisted on the booking and stitched into the audit log
+     * description so the support timeline is self-explanatory.
+     */
+    @Transactional
+    public BookingDto cancelBooking(String bookingRef, String reason) {
+        Booking booking = findScopedBookingByRef(bookingRef);
+        String description = (reason != null && !reason.isBlank())
+            ? "Booking cancelled by admin — " + reason.trim()
+            : "Booking cancelled by admin";
+        if (reason != null && !reason.isBlank()) {
+            booking.setCancellationReason(reason.trim().length() > 500
+                ? reason.trim().substring(0, 500) : reason.trim());
+        }
+        return cancelBooking(booking, "ADMIN", description, 100);
     }
 
     // â”€â”€ Customer: cancel own PENDING booking â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -797,6 +934,18 @@ public class BookingService {
             throw new BusinessException(
                 "Only PENDING bookings can be cancelled by the customer. Current status: " + booking.getStatus());
         }
+        // Production-grade: a PENDING outbound transfer offer locks the booking
+        // against owner-side cancellation. The customer must revoke the transfer
+        // first — otherwise we'd be racing with the recipient's accept click.
+        bookingTransferRepository.findFirstByBookingRefAndStatus(
+                bookingRef,
+                com.skbingegalaxy.booking.entity.BookingTransfer.Status.PENDING)
+            .ifPresent(t -> {
+                throw new BusinessException(
+                    "A transfer offer is pending for this booking. Revoke the transfer "
+                        + "before cancelling.",
+                    org.springframework.http.HttpStatus.CONFLICT);
+            });
         CancellationPolicyDecision decision = evaluateCustomerCancellation(booking);
         if (!decision.allowed()) {
             throw new BusinessException(decision.message());
@@ -839,6 +988,19 @@ public class BookingService {
             throw new BusinessException(
                 "Only PENDING or CONFIRMED bookings can be rescheduled. Current status: " + booking.getStatus());
         }
+
+        // Production-grade: a PENDING transfer offer locks the booking against
+        // reschedule. The recipient is mid-decision against a specific date/time;
+        // changing it underneath them creates a stale offer they'd accept blind.
+        bookingTransferRepository.findFirstByBookingRefAndStatus(
+                bookingRef,
+                com.skbingegalaxy.booking.entity.BookingTransfer.Status.PENDING)
+            .ifPresent(t -> {
+                throw new BusinessException(
+                    "A transfer offer is pending for this booking. Revoke the transfer "
+                        + "before rescheduling.",
+                    org.springframework.http.HttpStatus.CONFLICT);
+            });
 
         // Anti-abuse: max reschedule limit
         if (booking.getRescheduleCount() >= maxReschedulesPerBooking) {
@@ -984,8 +1146,12 @@ public class BookingService {
 
         String newDetails = String.format("Date: %s, Time: %s, Duration: %d min",
             saved.getBookingDate(), saved.getStartTime(), newDurMin);
-        eventLogService.logEvent(saved, BookingEventType.RESCHEDULED, oldDetails, customerId,
-            "CUSTOMER", "Rescheduled (attempt #" + saved.getRescheduleCount() + "): " + oldDetails + " ? " + newDetails);
+        String reschedDesc = "Rescheduled (attempt #" + saved.getRescheduleCount() + "): "
+            + oldDetails + " -> " + newDetails;
+        eventLogService.logEventFull(saved, BookingEventType.RESCHEDULED, oldDetails, customerId,
+            "CUSTOMER", null, reschedDesc, request.getReason(),
+            com.skbingegalaxy.booking.web.RequestContext.currentIp(),
+            com.skbingegalaxy.booking.web.RequestContext.currentUserAgent());
         publishBookingEvent(saved, KafkaTopics.BOOKING_RESCHEDULED);
         log.info("Booking rescheduled: {} (attempt #{})", bookingRef, saved.getRescheduleCount());
 
@@ -1066,6 +1232,7 @@ public class BookingService {
                                                           String customerEmail, String customerPhone,
                                                           String customerPhoneCountryCode) {
         Long bingeId = BingeContext.requireBingeId();
+        assertBingeBookable(bingeId);
 
         // Anti-abuse: same limits as single booking creation
         long pendingCount = bookingRepository.countPendingByCustomerId(customerId);
@@ -1214,6 +1381,9 @@ public class BookingService {
                     .addOnAmount(addOnTotal)
                     .guestAmount(guestAmount)
                     .totalAmount(totalAmount)
+                    // Pre-tax subtotal (V38 schema). Tax is applied later;
+                    // subtotal == total at create time.
+                    .subtotalAmount(totalAmount)
                     .surgeMultiplier(surgeMultiplier)
                     .surgeLabel(surgeLabel)
                     .pricingSource(eventPrice.source())
@@ -1235,6 +1405,7 @@ public class BookingService {
                     "CUSTOMER", "Recurring booking created (group: " + groupId + ")");
                 sagaOrchestrator.startSaga(saved.getBookingRef());
                 publishBookingEvent(saved, KafkaTopics.BOOKING_CREATED);
+                bookingRiskEvaluator.evaluate(saved);
                 createdBookings.add(toDto(saved));
 
             } catch (BusinessException e) {
@@ -1547,17 +1718,39 @@ public class BookingService {
     private BookingDto cancelBooking(Booking booking, String actorRole, String description, int refundPercentage) {
         String bookingRef = booking.getBookingRef();
 
+        // The state machine enforces "already CANCELLED" / "terminal" rules,
+        // but we keep an explicit early-return for the idempotent path so
+        // saga retries don't roll back side-effects below (loyalty reversal,
+        // collected-amount adjustment). The other terminal states get a
+        // friendlier API-facing message than the SM's generic 409 detail.
         if (booking.getStatus() == BookingStatus.CANCELLED) {
             throw new BusinessException("Booking is already cancelled");
         }
-        if (booking.getStatus() == BookingStatus.COMPLETED || booking.getStatus() == BookingStatus.NO_SHOW) {
-            throw new BusinessException("Cannot cancel a " + booking.getStatus() + " booking");
+        if (booking.getStatus() == BookingStatus.COMPLETED) {
+            throw new BusinessException("Cannot cancel a COMPLETED booking");
+        }
+        if (booking.getStatus() == BookingStatus.NO_SHOW) {
+            throw new BusinessException("Cannot cancel a NO_SHOW booking");
         }
 
-        String prevStatus = booking.getStatus().name();
-        booking.setStatus(BookingStatus.CANCELLED);
+        BookingTransitionEvent evt = switch (actorRole == null ? "" : actorRole.toUpperCase()) {
+            case "CUSTOMER"     -> BookingTransitionEvent.CUSTOMER_CANCEL;
+            case "ADMIN",
+                 "SUPER_ADMIN"  -> BookingTransitionEvent.ADMIN_CANCEL;
+            default              -> BookingTransitionEvent.SYSTEM_AUTO_CANCEL;
+        };
+        TransitionActor actor = switch (actorRole == null ? "" : actorRole.toUpperCase()) {
+            case "CUSTOMER"    -> TransitionActor.customer(
+                                    booking.getCustomerId(), booking.getCustomerName());
+            case "ADMIN"       -> TransitionActor.admin(
+                                    RequestContext.currentUserId(), RequestContext.currentUserName());
+            case "SUPER_ADMIN" -> TransitionActor.superAdmin(
+                                    RequestContext.currentUserId(), RequestContext.currentUserName());
+            default            -> TransitionActor.system();
+        };
+
         booking.setCancellationActor(actorRole);
-        Booking saved = bookingRepository.save(booking);
+        Booking saved = stateMachine.transition(booking, evt, actor, description);
 
         // Loyalty v2 (M6) — shadow event for the v2 cancellation listener.
         // Refund amount is approximated as (totalAmount ? refundPercentage / 100);
@@ -1592,11 +1785,9 @@ public class BookingService {
         // proportionally by LoyaltyV2BookingListener.onBookingCancelled, which
         // fires AFTER_COMMIT against the v2 wallet ledger.  Nothing to do here.
 
-        String eventDescription = StringUtils.hasText(description)
-            ? description
-            : ("SYSTEM".equals(actorRole) ? "Booking cancelled by system" : "Booking cancelled by admin");
-        eventLogService.logEvent(saved, BookingEventType.CANCELLED, prevStatus, null, actorRole,
-            eventDescription);
+        // Cancellation audit row was emitted by BookingStateMachine.transition
+        // above (with reason / IP / User-Agent). Here we only publish the
+        // outbound Kafka event so notification-service can react.
         publishBookingEvent(saved, KafkaTopics.BOOKING_CANCELLED);
         log.info("Booking cancelled: {}", bookingRef);
 
@@ -1613,12 +1804,21 @@ public class BookingService {
         if (paymentMethod != null && !paymentMethod.isBlank()) {
             booking.setPaymentMethod(paymentMethod);
         }
-        // Only auto-confirm PENDING bookings; don't overwrite CHECKED_IN or COMPLETED
+
+        // PENDING → CONFIRMED is owned by the central state machine and only
+        // fires on full SUCCESS so partial / failed payments don't auto-confirm.
+        // The transition saves the entity (capturing paymentStatus + method
+        // changes above in the same write). Otherwise we save here directly
+        // so the new payment fields are persisted regardless of state.
         if (paymentStatus == PaymentStatus.SUCCESS
                 && booking.getStatus() == BookingStatus.PENDING) {
-            booking.setStatus(BookingStatus.CONFIRMED);
+            booking = stateMachine.transition(
+                booking, BookingTransitionEvent.PAYMENT_SUCCEEDED,
+                TransitionActor.system(),
+                "Payment captured — auto-confirmed");
+        } else {
+            booking = bookingRepository.save(booking);
         }
-        bookingRepository.save(booking);
         eventLogService.logEvent(booking, BookingEventType.PAYMENT_UPDATED, prevStatus, null, "SYSTEM",
             "Payment status changed to " + paymentStatus.name());
         log.info("Payment status updated for {}: {}", bookingRef, paymentStatus);
@@ -1725,22 +1925,35 @@ public class BookingService {
 
         for (Booking b : pastBookings) {
             if (b.getStatus() == BookingStatus.CONFIRMED || b.getStatus() == BookingStatus.PENDING) {
-                String prev = b.getStatus().name();
-                b.setStatus(BookingStatus.NO_SHOW);
-                bookingRepository.save(b);
-                eventLogService.logEvent(b, BookingEventType.NO_SHOW, prev, null, "SYSTEM",
+                Booking marked = stateMachine.transition(
+                    b, BookingTransitionEvent.MARK_NO_SHOW,
+                    TransitionActor.system(),
                     "Marked no-show by end-of-day audit");
+                // Publish a BOOKING_CANCELLED-topic event so notification-service
+                // cancels any pending reminders (POST_VISIT_REVIEW, etc) for the
+                // no-show booking. The event's status field is "NO_SHOW", which
+                // the listener uses to suppress the user-facing "your booking was
+                // cancelled" email — only the reminder-cancellation side-effect
+                // runs.
+                publishBookingEvent(marked, KafkaTopics.BOOKING_CANCELLED);
+                // Anti-abuse: count NO_SHOW toward the per-binge freeze threshold.
+                // REQUIRES_NEW inside the service ensures this counter update
+                // doesn't roll back if a later booking in the loop fails.
+                customerFreezeService.recordNoShow(marked.getCustomerId(), marked.getBingeId());
                 markedNoShow++;
-                affectedRefs.add(b.getBookingRef());
+                affectedRefs.add(marked.getBookingRef());
             } else if (b.getStatus() == BookingStatus.CHECKED_IN) {
-                b.setStatus(BookingStatus.COMPLETED);
                 b.setCheckedIn(false);
-                bookingRepository.save(b);
-                eventLogService.logEvent(b, BookingEventType.COMPLETED, "CHECKED_IN", null, "SYSTEM",
+                Booking completed = stateMachine.transition(
+                    b, BookingTransitionEvent.CHECK_OUT,
+                    TransitionActor.system(),
                     "Auto-completed by end-of-day audit");
-                awardLoyaltyPoints(b);
+                // Emit booking.completed so downstream services (analytics,
+                // post-visit reviews, loyalty external integrations) can react.
+                publishBookingEvent(completed, KafkaTopics.BOOKING_COMPLETED);
+                awardLoyaltyPoints(completed);
                 markedCompleted++;
-                affectedRefs.add(b.getBookingRef());
+                affectedRefs.add(completed.getBookingRef());
             }
         }
 
@@ -1857,6 +2070,93 @@ public class BookingService {
     @Transactional(readOnly = true)
     public boolean hasTimeConflict(LocalDate date, int startMinute, int durationMinutes) {
         return hasTimeConflict(date, startMinute, durationMinutes, null);
+    }
+
+    /**
+     * Slot-availability rules for {@link com.skbingegalaxy.booking.service.SlotHoldService}
+     * pre-payment holds. Mirrors the booking-creation flow so a hold sees the
+     * exact same world a confirmed booking would: operating hours, remote
+     * availability check, time conflicts vs. existing active bookings,
+     * capacity ceiling, and conflicts vs. other live holds.
+     *
+     * <p>Throws {@link BusinessException} with a customer-readable message
+     * when the slot is unavailable.</p>
+     *
+     * @param bingeId            current binge
+     * @param date               requested date
+     * @param startMinute        minutes-since-midnight start
+     * @param durationMinutes    requested duration
+     * @param venueRoomId        optional room (currently informational; remote
+     *                           availability check enforces room-level rules)
+     * @param excludeHoldToken   when re-checking an existing hold, exclude
+     *                           this hold from the conflict count; {@code null}
+     *                           for new holds
+     */
+    @Transactional
+    public void assertSlotAvailableForHold(Long bingeId,
+                                            LocalDate date,
+                                            int startMinute,
+                                            int durationMinutes,
+                                            Long venueRoomId,
+                                            String excludeHoldToken) {
+        if (bingeId == null) {
+            throw new BusinessException("No binge selected for slot hold");
+        }
+        if (date == null) {
+            throw new BusinessException("Slot hold date is required");
+        }
+        if (durationMinutes <= 0 || durationMinutes % 30 != 0) {
+            throw new BusinessException("Duration must be a positive 30-minute multiple");
+        }
+        if (startMinute < 0 || startMinute >= 24 * 60) {
+            throw new BusinessException("Start time is out of range");
+        }
+
+        LocalTime startTime = LocalTime.of(startMinute / 60, startMinute % 60);
+        validateWithinOperatingHours(bingeId, startTime, durationMinutes);
+
+        Boolean available = availabilityClient.checkSlotAvailable(
+            internalApiSecret, date, bingeId, startMinute, durationMinutes);
+        if (available != null) {
+            availabilityFallback.cacheResult(date, startMinute, durationMinutes, available);
+        }
+        if (available == null) {
+            throw new BusinessException("Availability service is temporarily unavailable. Please try again.");
+        }
+        if (Boolean.FALSE.equals(available)) {
+            throw new BusinessException("Selected date/time slot is not available");
+        }
+
+        if (hasTimeConflict(date, startMinute, durationMinutes)) {
+            throw new BusinessException("Selected time slot conflicts with an existing booking");
+        }
+
+        Binge binge = bingeRepository.findById(bingeId).orElse(null);
+        Integer maxConcurrent = binge != null ? binge.getMaxConcurrentBookings() : null;
+        int existingBookings = countOverlappingBookings(date, startMinute, durationMinutes);
+
+        int liveHoldOverlap = 0;
+        try {
+            java.time.LocalDateTime now = java.time.LocalDateTime.now();
+            int newEnd = startMinute + durationMinutes;
+            for (com.skbingegalaxy.booking.entity.SlotHold h :
+                    slotHoldRepository.findLiveHoldsByBingeAndDate(bingeId, date, now)) {
+                if (excludeHoldToken != null && excludeHoldToken.equals(h.getHoldToken())) continue;
+                int hStart = h.getStartTime().getHour() * 60 + h.getStartTime().getMinute();
+                int hEnd = hStart + Math.max(h.getDurationMinutes(), 0);
+                if (startMinute < hEnd && newEnd > hStart) {
+                    liveHoldOverlap++;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Slot-hold overlap check failed for binge={} date={}: {}", bingeId, date, e.getMessage());
+        }
+
+        if (maxConcurrent != null && (existingBookings + liveHoldOverlap) >= maxConcurrent) {
+            throw new BusinessException(
+                "CAPACITY_FULL:This time slot has reached maximum capacity ("
+                    + maxConcurrent + " bookings). Try a different time or join the waitlist.");
+        }
     }
 
     /**
@@ -2107,6 +2407,26 @@ public class BookingService {
         return (durationMinutes != null && durationMinutes > 0) ? durationMinutes : durationHours * 60;
     }
 
+    /**
+     * Defence-in-depth: refuse to create or modify reservations against a binge
+     * that hasn't been approved by a super-admin, has been rejected, or has been
+     * deactivated. Customer-visible listings already filter these out
+     * ({@link com.skbingegalaxy.booking.repository.BingeRepository#findCustomerVisibleBinges()}),
+     * but the booking-write APIs trust an {@code X-Binge-Id} header that an
+     * authenticated client can spoof, so we re-check at the write boundary.
+     */
+    private void assertBingeBookable(Long bingeId) {
+        Binge binge = bingeRepository.findById(bingeId)
+            .orElseThrow(() -> new ResourceNotFoundException("Binge", "id", bingeId));
+        if (binge.getStatus() != null && binge.getStatus() != BingeApprovalStatus.APPROVED) {
+            throw new BusinessException(
+                "This venue is not currently accepting bookings (awaiting super-admin approval).");
+        }
+        if (!binge.isActive()) {
+            throw new BusinessException("This venue is currently inactive and not accepting bookings.");
+        }
+    }
+
     private static final java.util.Map<BookingStatus, java.util.Set<BookingStatus>> VALID_TRANSITIONS = java.util.Map.of(
         BookingStatus.PENDING, java.util.Set.of(BookingStatus.CONFIRMED, BookingStatus.CANCELLED),
         BookingStatus.CONFIRMED, java.util.Set.of(BookingStatus.CHECKED_IN, BookingStatus.CANCELLED, BookingStatus.NO_SHOW),
@@ -2116,8 +2436,34 @@ public class BookingService {
         BookingStatus.NO_SHOW, java.util.Set.of()
     );
 
+    @SuppressWarnings("unused") // retained as documentation of legacy table; canonical rules live in BookingStateMachine
     private static boolean isValidTransition(BookingStatus from, BookingStatus to) {
         return VALID_TRANSITIONS.getOrDefault(from, java.util.Set.of()).contains(to);
+    }
+
+    /**
+     * Build a {@link TransitionActor} for the current admin/super-admin
+     * request, falling back to {@code SYSTEM} when called outside a
+     * request scope. Used by the {@link #updateBooking} PATCH path.
+     */
+    /**
+     * Build a {@link TransitionActor} from the current request headers. ALL
+     * callers of this helper are admin-only entry points (updateBooking,
+     * earlyCheckout, undoCheckIn) so when the gateway headers are absent —
+     * e.g. unit tests, internal cron jobs that re-enter via the admin
+     * surface — we default to {@code ADMIN} role rather than SYSTEM. The
+     * SM's role allow-list rejects SYSTEM for ADMIN_CONFIRM / CHECK_IN /
+     * UNDO_CHECK_IN, so a SYSTEM fallback would 409 every test and any
+     * legitimate admin call that lost its X-User-Role header on the way in.
+     */
+    private static TransitionActor adminActorFromContext() {
+        String role = RequestContext.currentRole();
+        if (role == null || role.isBlank()) {
+            return TransitionActor.admin(
+                RequestContext.currentUserId(), RequestContext.currentUserName());
+        }
+        return TransitionActor.from(role,
+            RequestContext.currentUserId(), RequestContext.currentUserName());
     }
 
     // â”€â”€ Admin: early checkout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -2163,11 +2509,13 @@ public class BookingService {
             // Not early — do a normal checkout, but still record actual session duration
             long fullSessionMinutes = java.time.Duration.between(sessionStart, now).toMinutes();
             if (fullSessionMinutes < 0) fullSessionMinutes = 0;
-            booking.setStatus(BookingStatus.COMPLETED);
             booking.setCheckedIn(false);
             booking.setActualCheckoutTime(now);
             booking.setActualUsedMinutes((int) fullSessionMinutes);
-            Booking completed = bookingRepository.save(booking);
+            Booking completed = stateMachine.transition(
+                booking, BookingTransitionEvent.CHECK_OUT,
+                adminActorFromContext(),
+                "Scheduled checkout");
             awardLoyaltyPoints(completed);
             return toDto(completed);
         }
@@ -2207,7 +2555,6 @@ public class BookingService {
             now.toLocalTime().format(timeFmt), checkInDisplay,
             usedStr, bookedStr);
 
-        booking.setStatus(BookingStatus.COMPLETED);
         booking.setCheckedIn(false);
         booking.setActualCheckoutTime(now);
         booking.setActualUsedMinutes((int) usedMinutes);
@@ -2217,13 +2564,120 @@ public class BookingService {
         String existing = booking.getAdminNotes() != null ? booking.getAdminNotes() + " | " : "";
         booking.setAdminNotes(existing + note);
 
-        Booking saved = bookingRepository.save(booking);
-        eventLogService.logEvent(saved, BookingEventType.CHECKED_OUT, "CHECKED_IN", null, "ADMIN",
+        // CHECKED_IN → COMPLETED is owned by the central state machine; the
+        // emitted audit row carries the early-checkout note as the reason.
+        Booking saved = stateMachine.transition(
+            booking, BookingTransitionEvent.CHECK_OUT,
+            adminActorFromContext(),
             note);
         log.info("Early checkout for {}: {}", bookingRef, note);
 
         awardLoyaltyPoints(saved);
 
+        return toDto(saved);
+    }
+
+    // ── Admin: undo check-in ──────────────────────────────────────────────
+    /**
+     * Reverts an in-progress check-in back to CONFIRMED. This is a deliberate,
+     * audited reverse-transition that bypasses the forward-only state machine
+     * (CHECKED_IN → CONFIRMED is not in {@code VALID_TRANSITIONS} by design,
+     * so admin "undo" must not flow through {@link #updateBooking}).
+     *
+     * <p>Production-grade behaviour:
+     * <ul>
+     *   <li>Idempotent: re-invoking on an already-CONFIRMED booking is a no-op
+     *       (returns the current state) — paired with the controller's
+     *       Idempotency-Key handling, double-clicks never error.</li>
+     *   <li>Refuses to undo once the session has been checked out — that
+     *       transition is COMPLETED and would corrupt revenue/used-minutes.</li>
+     *   <li>Clears side-effects of check-in: {@code actualCheckInTime} and the
+     *       {@code lateArrival} flag, so a follow-up legitimate check-in is
+     *       scored fresh.</li>
+     *   <li>Emits a {@code CHECK_IN_REVERTED} audit event with previous status,
+     *       actor, reason, and request-context (IP / User-Agent) for forensic
+     *       review.</li>
+     * </ul>
+     */
+    @Transactional
+    public BookingDto undoCheckIn(String bookingRef, Long adminId, String reason) {
+        Booking booking = findScopedBookingByRef(bookingRef);
+
+        // Idempotent no-op — already reverted (e.g. retried request).
+        if (booking.getStatus() == BookingStatus.CONFIRMED && !booking.isCheckedIn()) {
+            return toDto(booking);
+        }
+
+        if (booking.getStatus() != BookingStatus.CHECKED_IN) {
+            throw new BusinessException(
+                "Undo check-in requires the booking to be CHECKED_IN. Current status: "
+                    + booking.getStatus(),
+                org.springframework.http.HttpStatus.CONFLICT);
+        }
+
+        // Defence-in-depth: a checked-out session cannot be unwound here.
+        // (Status guard above already covers this, but the explicit check
+        // documents intent and survives future state-machine edits.)
+        if (booking.getActualCheckoutTime() != null) {
+            throw new BusinessException(
+                "Cannot undo check-in — session has already been checked out.",
+                org.springframework.http.HttpStatus.CONFLICT);
+        }
+
+        // Pre-clear check-in side-effects so the audit row reflects a clean
+        // CONFIRMED state. The state-machine save below persists everything
+        // atomically and emits the CHECK_IN_REVERTED audit event.
+        String previousStatus = booking.getStatus().name();
+        booking.setCheckedIn(false);
+        booking.setActualCheckInTime(null);
+        booking.setLateArrival(false);
+
+        TransitionActor actor = adminActorFromContext();
+        Booking saved = stateMachine.transition(
+            booking, BookingTransitionEvent.UNDO_CHECK_IN, actor,
+            (reason != null && !reason.isBlank()) ? reason.trim() : "Check-in reverted by admin");
+
+        log.info("Check-in reverted for {} by admin {} (was {})",
+            bookingRef, adminId, previousStatus);
+
+        return toDto(saved);
+    }
+
+    // ── SUPER_ADMIN: state-machine override ──────────────────────────────
+    /**
+     * Force a booking into {@code targetStatus}, bypassing the normal
+     * transition table. Reserved for operational recovery scenarios such as:
+     *
+     * <ul>
+     *   <li>Reinstating a wrongfully-cancelled booking (CANCELLED → CONFIRMED)
+     *       — e.g. after a payment-gateway false-negative was reconciled.</li>
+     *   <li>Undoing a misapplied no-show (NO_SHOW → CHECKED_IN) — e.g. the
+     *       customer arrived but the front-desk forgot to scan their QR.</li>
+     *   <li>Reverting a premature COMPLETED → CHECKED_IN when checkout fired
+     *       in error.</li>
+     * </ul>
+     *
+     * <p>Caller must hold the SUPER_ADMIN role; the audit row is tagged
+     * {@link BookingEventType#MANUAL_REVIEW_FLAGGED} so the timeline clearly
+     * shows the override. Reason is mandatory and recorded in full.
+     *
+     * @throws com.skbingegalaxy.booking.service.statemachine.InvalidTransitionException
+     *         when the actor is not super-admin, the reason is blank, or the
+     *         (current → target) pair is not in the override allow-list.
+     */
+    @Transactional
+    public BookingDto adminOverrideStatus(String bookingRef, BookingStatus targetStatus,
+                                          Long superAdminId, String reason) {
+        Booking booking = findScopedBookingByRef(bookingRef);
+        // Capture BEFORE the SM mutates the entity in place — otherwise the
+        // info log below would read "target → target" because override()
+        // updates booking.status before returning.
+        BookingStatus previousStatus = booking.getStatus();
+        TransitionActor actor = TransitionActor.superAdmin(
+            superAdminId, RequestContext.currentUserName());
+        Booking saved = stateMachine.override(booking, targetStatus, actor, reason);
+        log.warn("ADMIN_OVERRIDE applied to {}: {} → {} by SUPER_ADMIN id={} reason='{}'",
+            bookingRef, previousStatus, targetStatus, superAdminId, reason);
         return toDto(saved);
     }
 
@@ -2356,6 +2810,8 @@ public class BookingService {
                 .addOnAmount(addOnTotal)
                 .guestAmount(guestAmount)
                 .totalAmount(totalAmount)
+                // Admin override path: subtotal == total (no tax applied yet).
+                .subtotalAmount(totalAmount)
                 .pricingSource(pricingSource)
                 .rateCodeName(rateCodeName)
                 .status(status)
@@ -2374,6 +2830,7 @@ public class BookingService {
             if (autoConfirm) {
                 publishBookingEvent(saved, KafkaTopics.BOOKING_CONFIRMED);
             }
+            bookingRiskEvaluator.evaluate(saved);
             return toDto(saved);
         }
 
@@ -2405,6 +2862,8 @@ public class BookingService {
             .addOnAmount(addOnTotal)
             .guestAmount(guestAmount)
             .totalAmount(totalAmount)
+            // Admin standard path: subtotal == total (no tax applied yet).
+            .subtotalAmount(totalAmount)
             .pricingSource(pricingSource)
             .rateCodeName(rateCodeName)
             .status(status)
@@ -2426,6 +2885,7 @@ public class BookingService {
         if (autoConfirm) {
             publishBookingEvent(saved, KafkaTopics.BOOKING_CONFIRMED);
         }
+        bookingRiskEvaluator.evaluate(saved);
 
         return toDto(saved);
     }
@@ -2470,6 +2930,7 @@ public class BookingService {
     @org.springframework.cache.annotation.CacheEvict(value = "eventTypes", allEntries = true)
     public EventTypeDto createEventType(EventTypeSaveRequest req) {
         Long bid = requireSelectedBinge("creating an event type");
+        validateGuestRange(req.getMinGuests(), req.getMaxGuests());
         EventType et = EventType.builder()
             .name(req.getName())
             .description(req.getDescription())
@@ -2478,6 +2939,8 @@ public class BookingService {
             .pricePerGuest(req.getPricePerGuest() != null ? req.getPricePerGuest() : BigDecimal.ZERO)
             .minHours(req.getMinHours())
             .maxHours(req.getMaxHours())
+            .minGuests(req.getMinGuests())
+            .maxGuests(req.getMaxGuests())
             .imageUrls(req.getImageUrls() != null ? req.getImageUrls() : new ArrayList<>())
             .active(true)
             .bingeId(bid)
@@ -2501,6 +2964,7 @@ public class BookingService {
     @org.springframework.cache.annotation.CacheEvict(value = "eventTypes", allEntries = true)
     public EventTypeDto updateEventType(Long id, EventTypeSaveRequest req) {
         EventType et = findManagedEventType(id);
+        validateGuestRange(req.getMinGuests(), req.getMaxGuests());
         et.setName(req.getName());
         et.setDescription(req.getDescription());
         et.setBasePrice(req.getBasePrice());
@@ -2508,9 +2972,79 @@ public class BookingService {
         et.setPricePerGuest(req.getPricePerGuest() != null ? req.getPricePerGuest() : BigDecimal.ZERO);
         et.setMinHours(req.getMinHours());
         et.setMaxHours(req.getMaxHours());
+        et.setMinGuests(req.getMinGuests());
+        et.setMaxGuests(req.getMaxGuests());
         et.getImageUrls().clear();
         if (req.getImageUrls() != null) et.getImageUrls().addAll(req.getImageUrls());
         return toEventTypeDto(eventTypeRepository.save(et));
+    }
+
+    private void validateGuestRange(Integer min, Integer max) {
+        if (min != null && max != null && min > max) {
+            throw new BusinessException("Minimum guests (" + min + ") cannot exceed maximum guests (" + max + ")");
+        }
+    }
+
+    /**
+     * Enforces per-event-type guest range. NULL bounds are treated as
+     * "no constraint" so existing event types continue to behave unchanged.
+     */
+    private void enforceEventTypeGuestRange(EventType eventType, int guests) {
+        if (eventType == null) return;
+        Integer min = eventType.getMinGuests();
+        Integer max = eventType.getMaxGuests();
+        if (min != null && guests < min) {
+            throw new BusinessException(
+                "This event type requires at least " + min + " guests (you selected " + guests + ")");
+        }
+        if (max != null && guests > max) {
+            throw new BusinessException(
+                "This event type allows at most " + max + " guests (you selected " + guests + ")");
+        }
+    }
+
+    /**
+     * Enforces add-on inventory ({@code stockPerDay}) and advance-notice
+     * ({@code advanceNoticeMinutes}) constraints. Both null fields skip the
+     * corresponding check so existing add-ons keep working.
+     *
+     * @param excludeBookingId set when re-validating an existing booking
+     *                         during update so that booking's own quantity is
+     *                         not double-counted; null on creation.
+     */
+    private void enforceAddOnAvailability(AddOn addOn,
+                                          int requestedQty,
+                                          java.time.LocalDate bookingDate,
+                                          java.time.LocalDateTime bookingStart,
+                                          Long excludeBookingId) {
+        if (addOn == null) return;
+        // Advance-notice check
+        Integer notice = addOn.getAdvanceNoticeMinutes();
+        if (notice != null && notice > 0 && bookingStart != null) {
+            long minutesUntilStart = java.time.Duration.between(java.time.LocalDateTime.now(), bookingStart).toMinutes();
+            if (minutesUntilStart < notice) {
+                throw new BusinessException("Add-on '" + addOn.getName() + "' requires at least "
+                    + notice + " minutes advance notice before the booking start time");
+            }
+        }
+        // Inventory check
+        Integer stock = addOn.getStockPerDay();
+        if (stock != null && stock >= 0 && bookingDate != null) {
+            long alreadyBooked = bookingAddOnRepository.sumQuantityForAddOnOnDate(
+                addOn.getId(), bookingDate,
+                java.util.List.of(
+                    com.skbingegalaxy.common.enums.BookingStatus.PENDING,
+                    com.skbingegalaxy.common.enums.BookingStatus.CONFIRMED,
+                    com.skbingegalaxy.common.enums.BookingStatus.CHECKED_IN,
+                    com.skbingegalaxy.common.enums.BookingStatus.COMPLETED),
+                excludeBookingId);
+            long remaining = stock - alreadyBooked;
+            if (requestedQty > remaining) {
+                throw new BusinessException("Add-on '" + addOn.getName()
+                    + "' is sold out for " + bookingDate + " (only "
+                    + Math.max(remaining, 0) + " of " + stock + " remaining)");
+            }
+        }
     }
 
     @Transactional
@@ -2562,6 +3096,8 @@ public class BookingService {
             .imageUrls(req.getImageUrls() != null ? req.getImageUrls() : new ArrayList<>())
             .active(true)
             .bingeId(bid)
+            .stockPerDay(req.getStockPerDay())
+            .advanceNoticeMinutes(req.getAdvanceNoticeMinutes())
             .build();
         return toAddOnDto(addOnRepository.save(a));
     }
@@ -2574,6 +3110,8 @@ public class BookingService {
         a.setDescription(req.getDescription());
         a.setPrice(req.getPrice());
         a.setCategory(req.getCategory().toUpperCase());
+        a.setStockPerDay(req.getStockPerDay());
+        a.setAdvanceNoticeMinutes(req.getAdvanceNoticeMinutes());
         a.getImageUrls().clear();
         if (req.getImageUrls() != null) a.getImageUrls().addAll(req.getImageUrls());
         return toAddOnDto(addOnRepository.save(a));
@@ -2792,38 +3330,128 @@ public class BookingService {
         return refPrefix + year + random;
     }
 
-    private void publishBookingEvent(Booking b, String topic) {
-        try {
-            BookingEvent event = BookingEvent.builder()
-                .bookingRef(b.getBookingRef())
-                .bingeId(b.getBingeId())
-                .customerId(b.getCustomerId())
-                .customerName(b.getCustomerName())
-                .customerEmail(b.getCustomerEmail())
-                .customerPhone(b.getCustomerPhone())
-                .customerPhoneCountryCode(b.getCustomerPhoneCountryCode())
-                .eventTypeName(b.getEventType().getName())
-                .bookingDate(b.getBookingDate())
-                .startTime(b.getStartTime())
-                .durationHours(b.getDurationHours())
-                .durationMinutes(resolveDurationMinutes(b.getDurationMinutes(), b.getDurationHours()))
-                .totalAmount(b.getTotalAmount())
-                .status(b.getStatus().name())
-                .specialNotes(b.getSpecialNotes())
-                .build();
+    // ── Item 24 — support console actions ───────────────────────────────────
 
-            // Write to outbox table (same DB transaction) instead of directly to Kafka.
-            // The OutboxPublisher scheduler picks these up and actually sends them.
-            OutboxEvent outbox = OutboxEvent.builder()
-                .topic(topic)
-                .aggregateKey(b.getBookingRef())
-                .payload(objectMapper.writeValueAsString(event))
-                .build();
-            outboxEventRepository.save(outbox);
-        } catch (Exception e) {
-            log.error("Failed to write outbox event for topic {} and booking {}", topic, b.getBookingRef(), e);
-            throw new IllegalStateException(
-                "Failed to persist outbox event for topic " + topic + " and booking " + b.getBookingRef(), e);
+    /**
+     * Re-emit the BOOKING_CONFIRMED event with a fresh envelope (new eventId)
+     * so notification-service treats it as a new dispatch. Used when a
+     * customer reports "I never got the confirmation email" — the operator
+     * triggers a re-send from the support console.
+     *
+     * <p>The booking must currently be CONFIRMED. Sending a confirmation for
+     * a cancelled / pending booking would be misleading.
+     */
+    @Transactional
+    public BookingDto resendConfirmation(String bookingRef, Long adminId) {
+        Booking b = findScopedBookingByRef(bookingRef);
+        if (b.getStatus() != BookingStatus.CONFIRMED) {
+            throw new BusinessException(
+                "Resend confirmation requires status=CONFIRMED. Current: " + b.getStatus());
+        }
+        publishBookingEvent(b, KafkaTopics.BOOKING_CONFIRMED);
+        eventLogService.logEvent(b, BookingEventType.CONFIRMATION_RESENT,
+            b.getStatus().name(), adminId, "ADMIN",
+            "Confirmation re-sent by admin " + adminId);
+        log.info("support-console resend-confirmation bookingRef={} adminId={}", bookingRef, adminId);
+        return toDto(b);
+    }
+
+    /**
+     * Set or clear an escalation level on a booking. Pure metadata — no Kafka
+     * side-effects beyond the event-log entry — so the support team can
+     * filter "L2+ active escalations" in the console.
+     */
+    @Transactional
+    public BookingDto setEscalation(String bookingRef, String level, String reason, Long adminId) {
+        Booking b = findScopedBookingByRef(bookingRef);
+        // Defensive: clamp to known levels so a typo doesn't poison the column.
+        String normalized = level == null ? "NONE" : level.trim().toUpperCase();
+        if (!java.util.Set.of("NONE", "L1", "L2", "L3").contains(normalized)) {
+            throw new BusinessException("Invalid escalation level. Use NONE, L1, L2, or L3.");
+        }
+        b.setEscalationLevel(normalized);
+        b.setEscalationReason(reason != null && reason.length() > 500
+            ? reason.substring(0, 500) : reason);
+        Booking saved = bookingRepository.save(b);
+        BookingEventType evt = "NONE".equals(normalized) ? BookingEventType.DE_ESCALATED : BookingEventType.ESCALATED;
+        eventLogService.logEvent(saved, evt, saved.getStatus().name(), adminId, "ADMIN",
+            "Escalation set to " + normalized
+                + (reason != null && !reason.isBlank() ? " — " + reason : ""));
+        return toDto(saved);
+    }
+
+    /**
+     * Issue goodwill credit to a booking. Stored on the booking row plus a
+     * pinned customer-visible note pointing to it. Loyalty points are NOT
+     * adjusted here — currency/points conversion is policy-dependent and
+     * better handled via a separate compensating action.
+     */
+    @Transactional
+    public BookingDto issueGoodwill(String bookingRef, java.math.BigDecimal amount,
+                                    String reason, Long adminId) {
+        if (amount == null || amount.signum() <= 0) {
+            throw new BusinessException("Goodwill amount must be positive");
+        }
+        // Cap to a sensible operational ceiling so a misclick can't comp lakhs.
+        if (amount.compareTo(new java.math.BigDecimal("10000")) > 0) {
+            throw new BusinessException("Goodwill exceeds operational ceiling (₹10,000). Escalate to super-admin.");
+        }
+        Booking b = findScopedBookingByRef(bookingRef);
+        java.math.BigDecimal existing = b.getGoodwillCredit() == null
+            ? java.math.BigDecimal.ZERO : b.getGoodwillCredit();
+        b.setGoodwillCredit(existing.add(amount));
+        b.setGoodwillReason(reason != null && reason.length() > 500
+            ? reason.substring(0, 500) : reason);
+        b.setGoodwillIssuedByAdminId(adminId);
+        b.setGoodwillIssuedAt(java.time.LocalDateTime.now());
+        Booking saved = bookingRepository.save(b);
+        eventLogService.logEvent(saved, BookingEventType.GOODWILL_ISSUED,
+            saved.getStatus().name(), adminId, "ADMIN",
+            "Goodwill credit ₹" + amount + " issued by admin " + adminId
+                + (reason != null && !reason.isBlank() ? " — " + reason : ""));
+        log.info("support-console goodwill bookingRef={} amount={} adminId={}", bookingRef, amount, adminId);
+        return toDto(saved);
+    }
+
+    private void publishBookingEvent(Booking b, String topic) {
+        // Envelope (eventId/version/correlationId/occurredAt) is filled by
+        // BookingEventPublisher — see V46 outbox migration. Keeping the
+        // builder here means concrete domain fields stay close to the call
+        // site for grep-ability.
+        BookingEvent event = BookingEvent.builder()
+            .bookingRef(b.getBookingRef())
+            .bingeId(b.getBingeId())
+            .customerId(b.getCustomerId())
+            .customerName(b.getCustomerName())
+            .customerEmail(b.getCustomerEmail())
+            .customerPhone(b.getCustomerPhone())
+            .customerPhoneCountryCode(b.getCustomerPhoneCountryCode())
+            .eventTypeName(b.getEventType().getName())
+            .bookingDate(b.getBookingDate())
+            .startTime(b.getStartTime())
+            .durationHours(b.getDurationHours())
+            .durationMinutes(resolveDurationMinutes(b.getDurationMinutes(), b.getDurationHours()))
+            .totalAmount(b.getTotalAmount())
+            .status(b.getStatus().name())
+            .specialNotes(b.getSpecialNotes())
+            .customerCancellationCutoffMinutes(
+                bingeRepository.findById(b.getBingeId())
+                    .map(com.skbingegalaxy.booking.entity.Binge::getCustomerCancellationCutoffMinutes)
+                    .orElse(null))
+            .build();
+
+        bookingEventPublisher.publish(topic, b.getBookingRef(), event);
+
+        // Item 27 — funnel / lifecycle counters. Counted from the publish site
+        // because every successful state transition publishes through here, so
+        // the metric stays consistent with what consumers actually see.
+        switch (topic) {
+            case KafkaTopics.BOOKING_CREATED     -> analyticsMetrics.funnelCreated();
+            case KafkaTopics.BOOKING_CONFIRMED   -> analyticsMetrics.lifecycleConfirmed();
+            case KafkaTopics.BOOKING_CANCELLED   -> analyticsMetrics.lifecycleCancelled();
+            case KafkaTopics.BOOKING_RESCHEDULED -> analyticsMetrics.lifecycleRescheduled();
+            case KafkaTopics.BOOKING_COMPLETED   -> analyticsMetrics.lifecycleCompleted();
+            default -> { /* check-in / waitlist-promoted not part of the spec funnel */ }
         }
     }
 
@@ -2864,6 +3492,7 @@ public class BookingService {
             .paymentStatus(b.getPaymentStatus())
             .paymentMethod(b.getPaymentMethod())
             .checkedIn(b.isCheckedIn())
+            .lateArrival(b.isLateArrival())
             .actualCheckInTime(b.getActualCheckInTime())
             .actualCheckoutTime(b.getActualCheckoutTime())
             .actualUsedMinutes(b.getActualUsedMinutes())
@@ -3040,6 +3669,8 @@ public class BookingService {
             .pricePerGuest(et.getPricePerGuest())
             .minHours(et.getMinHours())
             .maxHours(et.getMaxHours())
+            .minGuests(et.getMinGuests())
+            .maxGuests(et.getMaxGuests())
             // Copy into a plain ArrayList so no Hibernate PersistentBag reference
             // leaks outside the transaction (would cause LazyInitializationException
             // when Jackson serializes the response after the session is closed).
@@ -3058,6 +3689,8 @@ public class BookingService {
             .category(a.getCategory())
             .imageUrls(a.getImageUrls() != null ? new ArrayList<>(a.getImageUrls()) : new ArrayList<>())
             .active(a.isActive())
+            .stockPerDay(a.getStockPerDay())
+            .advanceNoticeMinutes(a.getAdvanceNoticeMinutes())
             .build();
     }
 }

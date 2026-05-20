@@ -2,10 +2,13 @@ package com.skbingegalaxy.booking.listener;
 
 import com.skbingegalaxy.booking.config.AdminEventBus;
 import com.skbingegalaxy.booking.entity.Booking;
+import com.skbingegalaxy.booking.entity.BookingEventType;
 import com.skbingegalaxy.booking.entity.ProcessedEvent;
 import com.skbingegalaxy.booking.entity.SagaState;
 import com.skbingegalaxy.booking.repository.ProcessedEventRepository;
+import com.skbingegalaxy.booking.service.BookingEventLogService;
 import com.skbingegalaxy.booking.service.BookingService;
+import com.skbingegalaxy.booking.service.BookingAnalyticsMetrics;
 import com.skbingegalaxy.booking.service.SagaOrchestrator;
 import com.skbingegalaxy.common.constants.KafkaTopics;
 import com.skbingegalaxy.common.enums.BookingStatus;
@@ -30,6 +33,8 @@ public class PaymentEventListener {
     private final ProcessedEventRepository processedEventRepository;
     private final SagaOrchestrator sagaOrchestrator;
     private final AdminEventBus adminEventBus;
+    private final BookingEventLogService eventLogService;
+    private final BookingAnalyticsMetrics analyticsMetrics;
 
     @KafkaListener(topics = KafkaTopics.PAYMENT_SUCCESS, groupId = "booking-group")
     @Transactional
@@ -38,6 +43,20 @@ public class PaymentEventListener {
         if (isDuplicate(key)) return;
 
         log.info("Payment success event for booking: {}", event.getBookingRef());
+
+        // ── Out-of-order guard (Item 26) ───────────────────────────────────
+        // payment.success can legitimately arrive AFTER the booking has
+        // already been cancelled (pending-timeout scheduler raced the user's
+        // payment) or marked NO_SHOW/COMPLETED via the daily audit. Recording
+        // the money still has to happen — refusing the event would leave the
+        // ledger out of sync with the gateway — but we MUST NOT advance the
+        // saga (already compensated) and we MUST flag the row for ops to
+        // initiate a refund. The processed-event dedup at the top still
+        // protects against duplicate deliveries.
+        Booking pre = bookingService.getBookingEntityForSystem(event.getBookingRef());
+        boolean terminal = pre.getStatus() == BookingStatus.CANCELLED
+                        || pre.getStatus() == BookingStatus.NO_SHOW
+                        || pre.getStatus() == BookingStatus.COMPLETED;
 
         // Add the amount atomically first, then re-read to make the status decision.
         // This avoids the stale-read race where two concurrent payment events both read
@@ -50,6 +69,43 @@ public class PaymentEventListener {
         java.math.BigDecimal collected = booking.getCollectedAmount() != null
             ? booking.getCollectedAmount() : java.math.BigDecimal.ZERO;
 
+        if (terminal) {
+            log.warn("PAYMENT_AFTER_TERMINAL: booking {} is {} but received payment {} (txn {}). "
+                + "Operator review required for refund.",
+                event.getBookingRef(), pre.getStatus(), event.getAmount(), event.getTransactionId());
+            // Reflect that money was received but DO NOT touch the lifecycle
+            // status. Use PARTIALLY_PAID/SUCCESS strictly to make the ledger
+            // queryable; saga is intentionally NOT advanced.
+            PaymentStatus reconciled = booking.getTotalAmount() != null
+                && collected.compareTo(booking.getTotalAmount()) < 0
+                    ? PaymentStatus.PARTIALLY_PAID
+                    : PaymentStatus.SUCCESS;
+            bookingService.updatePaymentStatus(event.getBookingRef(), reconciled, event.getPaymentMethod());
+            try {
+                Booking refreshed = bookingService.getBookingEntityForSystem(event.getBookingRef());
+                eventLogService.logEvent(refreshed, BookingEventType.PAYMENT_SUCCEEDED,
+                    refreshed.getStatus().name(), null, "SYSTEM",
+                    String.format("Payment %s received AFTER booking entered %s (txn %s) — refund required",
+                        event.getAmount(), pre.getStatus(), event.getTransactionId()));
+                eventLogService.logEvent(refreshed, BookingEventType.MANUAL_REVIEW_FLAGGED,
+                    refreshed.getStatus().name(), null, "SYSTEM",
+                    "PAYMENT_AFTER_TERMINAL: out-of-order payment.success after " + pre.getStatus());
+            } catch (Exception ex) {
+                log.warn("Timeline log for PAYMENT_AFTER_TERMINAL failed for {}: {}",
+                    event.getBookingRef(), ex.getMessage());
+            }
+            adminEventBus.publish(booking.getBingeId(), "booking", java.util.Map.of(
+                "type", "payment.after-terminal",
+                "ref", event.getBookingRef(),
+                "prevStatus", pre.getStatus().name(),
+                "ts", System.currentTimeMillis()));
+            // Count the gateway-side success regardless of saga state — the
+            // metric measures "money received", not "saga progressed".
+            analyticsMetrics.paymentSuccess();
+            markProcessed(key);
+            return;
+        }
+
         if (booking.getTotalAmount() != null
                 && collected.compareTo(booking.getTotalAmount()) < 0) {
             log.info("Partial payment for {}: collected={} of {}",
@@ -61,8 +117,26 @@ public class PaymentEventListener {
 
         sagaOrchestrator.advanceTo(event.getBookingRef(),
             SagaState.SagaStatus.PAYMENT_RECEIVED, "PAYMENT_SUCCESS");
+        analyticsMetrics.paymentSuccess();
         adminEventBus.publish(booking.getBingeId(), "booking", java.util.Map.of(
             "type", "payment.success", "ref", event.getBookingRef(), "ts", System.currentTimeMillis()));
+
+        // Timeline event for customer + admin views. We log AFTER the booking
+        // is mutated so newStatus reflects the post-payment state. Failures
+        // here MUST NOT roll back the saga progression — the audit logger
+        // already runs in REQUIRES_NEW so swallow only fatal callback issues.
+        try {
+            Booking refreshed = bookingService.getBookingEntityForSystem(event.getBookingRef());
+            String desc = String.format("Payment %s received via %s (txn %s)",
+                event.getAmount(),
+                event.getPaymentMethod() != null ? event.getPaymentMethod() : "UNKNOWN",
+                event.getTransactionId());
+            eventLogService.logEvent(refreshed, BookingEventType.PAYMENT_SUCCEEDED,
+                refreshed.getStatus().name(), null, "SYSTEM", desc);
+        } catch (Exception ex) {
+            log.warn("Timeline log for PAYMENT_SUCCEEDED failed for {}: {}",
+                event.getBookingRef(), ex.getMessage());
+        }
         markProcessed(key);
     }
 
@@ -74,6 +148,19 @@ public class PaymentEventListener {
 
         log.info("Payment failed event for booking: {}", event.getBookingRef());
         bookingService.updatePaymentStatus(event.getBookingRef(), PaymentStatus.FAILED, null);
+        analyticsMetrics.paymentFailed();
+
+        try {
+            Booking refreshed = bookingService.getBookingEntityForSystem(event.getBookingRef());
+            String reason = event.getStatus() != null ? event.getStatus() : "Gateway reported failure";
+            eventLogService.logEvent(refreshed, BookingEventType.PAYMENT_FAILED,
+                refreshed.getStatus().name(), null, "SYSTEM",
+                "Payment failed: " + reason
+                    + (event.getTransactionId() != null ? " (txn " + event.getTransactionId() + ")" : ""));
+        } catch (Exception ex) {
+            log.warn("Timeline log for PAYMENT_FAILED failed for {}: {}",
+                event.getBookingRef(), ex.getMessage());
+        }
 
         try {
             Booking booking = bookingService.getBookingEntityForSystem(event.getBookingRef());
@@ -118,6 +205,19 @@ public class PaymentEventListener {
             : PaymentStatus.REFUNDED;
         bookingService.updatePaymentStatus(event.getBookingRef(), status, null);
         bookingService.subtractFromCollectedAmount(event.getBookingRef(), event.getRefundAmount());
+
+        try {
+            Booking refreshed = bookingService.getBookingEntityForSystem(event.getBookingRef());
+            String desc = String.format("Refund %s processed (refund id %s, status %s)",
+                event.getRefundAmount(),
+                event.getRefundId() != null ? event.getRefundId() : "-",
+                status.name());
+            eventLogService.logEvent(refreshed, BookingEventType.REFUND_COMPLETED,
+                refreshed.getStatus().name(), null, "SYSTEM", desc);
+        } catch (Exception ex) {
+            log.warn("Timeline log for REFUND_COMPLETED failed for {}: {}",
+                event.getBookingRef(), ex.getMessage());
+        }
         markProcessed(key);
     }
 

@@ -44,6 +44,9 @@ class BookingServiceEventTypeAddOnCrudTest {
     @Mock private com.skbingegalaxy.booking.client.AvailabilityClient availabilityClient;
     @Spy  private com.skbingegalaxy.booking.client.AvailabilityClientFallback availabilityFallback;
     @Mock private org.springframework.kafka.core.KafkaTemplate<String, Object> kafkaTemplate;
+    @Mock private com.skbingegalaxy.booking.repository.BingeRepository bingeRepository;
+    @Mock private com.skbingegalaxy.booking.service.CustomerFreezeService customerFreezeService;
+    @Mock private com.skbingegalaxy.booking.repository.SlotHoldRepository slotHoldRepository;
 
     @InjectMocks private BookingService bookingService;
 

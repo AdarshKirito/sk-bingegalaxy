@@ -4,9 +4,11 @@ import com.skbingegalaxy.booking.entity.Binge;
 import com.skbingegalaxy.booking.loyalty.v2.LoyaltyV2Constants;
 import com.skbingegalaxy.booking.loyalty.v2.entity.LoyaltyBingeBinding;
 import com.skbingegalaxy.booking.loyalty.v2.entity.LoyaltyBingeEarningRule;
+import com.skbingegalaxy.booking.loyalty.v2.entity.LoyaltyBingeRedemptionRule;
 import com.skbingegalaxy.booking.loyalty.v2.entity.LoyaltyProgram;
 import com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyBingeBindingRepository;
 import com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyBingeEarningRuleRepository;
+import com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyBingeRedemptionRuleRepository;
 import com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyConfigService;
 import com.skbingegalaxy.booking.repository.BingeRepository;
 import lombok.RequiredArgsConstructor;
@@ -50,14 +52,18 @@ import java.util.List;
 @Order(50) // run after Flyway and other schema init
 public class LoyaltyBindingAutoSeeder implements ApplicationRunner {
 
-    /** Default rate matches the legacy v1 LOYALTY_POINTS_PER_RUPEE config. */
+    /** Chain-default earn rate for new binges. */
     private static final long DEFAULT_POINTS_NUMERATOR = 10L;
     private static final BigDecimal DEFAULT_AMOUNT_DENOMINATOR = new BigDecimal("1.00");
+    private static final long DEFAULT_POINTS_PER_CURRENCY_UNIT = 100L;
+    private static final long DEFAULT_MIN_REDEMPTION_POINTS = 100L;
+    private static final BigDecimal DEFAULT_MAX_REDEMPTION_PERCENT = new BigDecimal("50.00");
 
     private final BingeRepository bingeRepository;
     private final LoyaltyConfigService configService;
     private final LoyaltyBingeBindingRepository bindingRepository;
     private final LoyaltyBingeEarningRuleRepository earningRuleRepository;
+    private final LoyaltyBingeRedemptionRuleRepository redemptionRuleRepository;
 
     @Override
     @Transactional
@@ -75,6 +81,8 @@ public class LoyaltyBindingAutoSeeder implements ApplicationRunner {
         LocalDateTime now = LocalDateTime.now();
         int seededBindings = 0;
         int seededRules = 0;
+        int seededRedemptionRules = 0;
+        int thawedLegacyBindings = 0;
 
         for (Binge binge : binges) {
             if (binge.getId() == null) continue;
@@ -96,6 +104,15 @@ public class LoyaltyBindingAutoSeeder implements ApplicationRunner {
                 binding = bindingRepository.save(binding);
                 seededBindings++;
                 log.info("[loyalty-v2] auto-seeded ENABLED binding for binge {} ({})",
+                        binge.getId(), binge.getName());
+            } else if (binding.isLegacyFrozen()
+                    && LoyaltyV2Constants.BINDING_ENABLED_LEGACY.equals(binding.getStatus())) {
+                binding.setStatus(LoyaltyV2Constants.BINDING_ENABLED);
+                binding.setLegacyFrozen(false);
+                binding.setEnrolledAt(binding.getEnrolledAt() == null ? now : binding.getEnrolledAt());
+                binding = bindingRepository.save(binding);
+                thawedLegacyBindings++;
+                log.info("[loyalty-v2] thawed legacy binding for binge {} ({}) after v1 cutover",
                         binge.getId(), binge.getName());
             }
 
@@ -121,13 +138,30 @@ public class LoyaltyBindingAutoSeeder implements ApplicationRunner {
                 log.info("[loyalty-v2] auto-seeded universal earn rule for binding {} (binge {})",
                         binding.getId(), binge.getId());
             }
+
+            if (redemptionRuleRepository.findActive(binding.getId(), now).isEmpty()) {
+                LoyaltyBingeRedemptionRule redeemRule = LoyaltyBingeRedemptionRule.builder()
+                        .bindingId(binding.getId())
+                        .tenantId(program.getTenantId())
+                        .pointsPerCurrencyUnit(DEFAULT_POINTS_PER_CURRENCY_UNIT)
+                        .minRedemptionPoints(DEFAULT_MIN_REDEMPTION_POINTS)
+                        .maxRedemptionPercent(DEFAULT_MAX_REDEMPTION_PERCENT)
+                        .effectiveFrom(now)
+                        .build();
+                redemptionRuleRepository.save(redeemRule);
+                seededRedemptionRules++;
+                log.info("[loyalty-v2] auto-seeded redemption rule for binding {} (binge {})",
+                        binding.getId(), binge.getId());
+            }
         }
 
-        if (seededBindings > 0 || seededRules > 0) {
+        if (seededBindings > 0 || seededRules > 0 || seededRedemptionRules > 0 || thawedLegacyBindings > 0) {
             log.info("[loyalty-v2] auto-seed complete — bindings={} rules={} (over {} binges)",
                     seededBindings, seededRules, binges.size());
+            log.info("[loyalty-v2] auto-seed details: thawedLegacyBindings={} redemptionRules={}",
+                    thawedLegacyBindings, seededRedemptionRules);
         } else {
-            log.debug("[loyalty-v2] auto-seed: every binge already has binding + universal rule");
+            log.debug("[loyalty-v2] auto-seed: every binge already has binding + universal earn/redeem rules");
         }
     }
 }

@@ -39,7 +39,7 @@ class PricingServiceCustomerDetailTest {
     @Mock private RateCodeChangeLogRepository rateCodeChangeLogRepository;
     @Mock private BookingRepository bookingRepository;
     @Mock private com.skbingegalaxy.booking.repository.SurgePricingRuleRepository surgePricingRuleRepository;
-    @Mock private com.skbingegalaxy.booking.service.LoyaltyService loyaltyService;
+    @Mock private com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyMemberService loyaltyMemberService;
     @Mock private com.skbingegalaxy.booking.repository.BookingReviewRepository bookingReviewRepository;
 
     @InjectMocks private PricingService pricingService;

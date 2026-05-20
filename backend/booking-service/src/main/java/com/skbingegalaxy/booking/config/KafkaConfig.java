@@ -27,6 +27,21 @@ public class KafkaConfig {
     }
 
     @Bean
+    public NewTopic bookingCheckedInTopic() {
+        return TopicBuilder.name(KafkaTopics.BOOKING_CHECKED_IN).partitions(3).replicas(1).build();
+    }
+
+    @Bean
+    public NewTopic bookingCompletedTopic() {
+        return TopicBuilder.name(KafkaTopics.BOOKING_COMPLETED).partitions(3).replicas(1).build();
+    }
+
+    @Bean
+    public NewTopic waitlistPromotedTopic() {
+        return TopicBuilder.name(KafkaTopics.WAITLIST_PROMOTED).partitions(3).replicas(1).build();
+    }
+
+    @Bean
     public NewTopic paymentSuccessDltTopic() {
         return deadLetterTopic(KafkaTopics.PAYMENT_SUCCESS);
     }

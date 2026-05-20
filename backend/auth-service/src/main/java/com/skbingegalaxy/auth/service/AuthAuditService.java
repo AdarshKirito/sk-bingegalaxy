@@ -53,7 +53,13 @@ public class AuthAuditService {
         ROLE_PROMOTED,
         ROLE_DEMOTED,
         SESSION_REVOKED,
-        SESSION_REVOKED_ALL
+        SESSION_REVOKED_ALL,
+        // ── Authority Handover (V13) ───────────────────────────
+        AUTHORITY_GRANTED,
+        AUTHORITY_REVOKED,
+        AUTHORITY_EXPIRED,
+        RESOURCE_LOCKED,
+        RESOURCE_UNLOCKED
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)

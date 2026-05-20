@@ -4,6 +4,7 @@ import { toast } from 'react-toastify';
 import { FiArrowLeft, FiPlus, FiSave, FiTrash2, FiUpload, FiEye, FiRotateCcw } from 'react-icons/fi';
 import SEO from '../components/SEO';
 import { siteContentService } from '../services/endpoints';
+import { useConfirm } from '../components/ui/ConfirmProvider';
 import { HOME_CMS_SLUG, defaultHomeContent, mergeHomeContent } from '../content/homeDefaults';
 import './AdminHomeEditor.css';
 
@@ -38,6 +39,7 @@ function setPath(obj, path, value) {
 }
 
 export default function AdminHomeEditor() {
+  const confirm = useConfirm();
   const [content, setContent] = useState(defaultHomeContent);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -75,8 +77,14 @@ export default function AdminHomeEditor() {
     }
   };
 
-  const onResetDefaults = () => {
-    if (!window.confirm('Replace ALL fields with the bundled defaults? Your existing edits will be cleared.')) return;
+  const onResetDefaults = async () => {
+    const ok = await confirm({
+      title: 'Reset home content to bundled defaults?',
+      message: 'All hero, sections and gallery fields will be replaced with the shipped defaults. Your unsaved edits will be lost. You still need to click Save to publish the reset.',
+      confirmLabel: 'Reset to defaults',
+      variant: 'danger',
+    });
+    if (!ok) return;
     setContent(structuredClone(defaultHomeContent));
     toast.info('Reverted to defaults — remember to Save to publish.');
   };

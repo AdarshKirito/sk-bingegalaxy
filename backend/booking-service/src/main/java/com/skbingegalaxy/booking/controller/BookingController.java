@@ -125,8 +125,12 @@ public class BookingController {
     @PostMapping("/{bookingRef}/cancel")
     public ResponseEntity<ApiResponse<BookingDto>> cancelMyBooking(
             @PathVariable String bookingRef,
-            @RequestHeader("X-User-Id") Long userId) {
-        BookingDto cancelled = bookingService.cancelBookingByCustomer(bookingRef, userId);
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        BookingDto cancelled = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/bookings/" + bookingRef + "/cancel", userId,
+            java.util.Map.of("bookingRef", bookingRef), BookingDto.class,
+            () -> bookingService.cancelBookingByCustomer(bookingRef, userId));
         return ResponseEntity.ok(ApiResponse.ok("Booking cancelled", cancelled));
     }
 
@@ -134,11 +138,15 @@ public class BookingController {
     public ResponseEntity<ApiResponse<BookingDto>> rescheduleMyBooking(
             @PathVariable String bookingRef,
             @RequestHeader("X-User-Id") Long userId,
-            @RequestBody RescheduleBookingRequest request) {
+            @RequestBody RescheduleBookingRequest request,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
         // Note: @Valid intentionally omitted. The service performs ownership check
         // FIRST and then validates body fields, so probing for resources you don't
         // own returns 403 instead of leaking field-shape via 400.
-        BookingDto rescheduled = bookingService.rescheduleBooking(bookingRef, userId, request);
+        BookingDto rescheduled = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/bookings/" + bookingRef + "/reschedule", userId,
+            request, BookingDto.class,
+            () -> bookingService.rescheduleBooking(bookingRef, userId, request));
         return ResponseEntity.ok(ApiResponse.ok("Booking rescheduled successfully", rescheduled));
     }
 
@@ -146,8 +154,12 @@ public class BookingController {
     public ResponseEntity<ApiResponse<BookingDto>> transferMyBooking(
             @PathVariable String bookingRef,
             @RequestHeader("X-User-Id") Long userId,
-            @Valid @RequestBody TransferBookingRequest request) {
-        BookingDto transferred = bookingService.transferBooking(bookingRef, userId, request);
+            @Valid @RequestBody TransferBookingRequest request,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        BookingDto transferred = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/bookings/" + bookingRef + "/transfer", userId,
+            request, BookingDto.class,
+            () -> bookingService.transferBooking(bookingRef, userId, request));
         return ResponseEntity.ok(ApiResponse.ok("Booking transferred successfully", transferred));
     }
 
@@ -158,8 +170,12 @@ public class BookingController {
             @RequestHeader("X-User-Email") String email,
             @RequestHeader(value = "X-User-Name", defaultValue = "Customer") String name,
             @RequestHeader(value = "X-User-Phone", defaultValue = "") String phone,
-            @RequestHeader(value = "X-User-Phone-Country-Code", defaultValue = "") String phoneCountryCode) {
-        RecurringBookingResult result = bookingService.createRecurringBookings(request, userId, name, email, phone, phoneCountryCode);
+            @RequestHeader(value = "X-User-Phone-Country-Code", defaultValue = "") String phoneCountryCode,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        RecurringBookingResult result = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/bookings/recurring", userId,
+            request, RecurringBookingResult.class,
+            () -> bookingService.createRecurringBookings(request, userId, name, email, phone, phoneCountryCode));
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(ApiResponse.ok("Recurring bookings created", result));
     }
@@ -231,5 +247,46 @@ public class BookingController {
     @GetMapping("/surge-rules")
     public ResponseEntity<ApiResponse<java.util.List<SurgePricingRuleDto>>> getActiveSurgeRules() {
         return ResponseEntity.ok(ApiResponse.ok(pricingService.getActiveSurgeRules()));
+    }
+
+    // ── Customer-facing timeline ─────────────────────────────
+    // Returns a curated milestone list — only events the customer should see,
+    // and with admin-only fields stripped (snapshot, IP, User-Agent, internal
+    // actor IDs). Mirrors the admin /events endpoint but is privacy-aware.
+
+    private static final java.util.Set<com.skbingegalaxy.booking.entity.BookingEventType>
+        CUSTOMER_VISIBLE_EVENTS = java.util.EnumSet.of(
+            com.skbingegalaxy.booking.entity.BookingEventType.SLOT_HELD,
+            com.skbingegalaxy.booking.entity.BookingEventType.CREATED,
+            com.skbingegalaxy.booking.entity.BookingEventType.PAYMENT_INITIATED,
+            com.skbingegalaxy.booking.entity.BookingEventType.PAYMENT_SUCCEEDED,
+            com.skbingegalaxy.booking.entity.BookingEventType.PAYMENT_FAILED,
+            com.skbingegalaxy.booking.entity.BookingEventType.CONFIRMED,
+            com.skbingegalaxy.booking.entity.BookingEventType.NOTIFICATION_SENT,
+            com.skbingegalaxy.booking.entity.BookingEventType.REMINDER_SENT,
+            com.skbingegalaxy.booking.entity.BookingEventType.RESCHEDULED,
+            com.skbingegalaxy.booking.entity.BookingEventType.TRANSFERRED,
+            com.skbingegalaxy.booking.entity.BookingEventType.CHECKED_IN,
+            com.skbingegalaxy.booking.entity.BookingEventType.CHECKED_OUT,
+            com.skbingegalaxy.booking.entity.BookingEventType.COMPLETED,
+            com.skbingegalaxy.booking.entity.BookingEventType.CANCELLED,
+            com.skbingegalaxy.booking.entity.BookingEventType.NO_SHOW,
+            com.skbingegalaxy.booking.entity.BookingEventType.REFUND_INITIATED,
+            com.skbingegalaxy.booking.entity.BookingEventType.REFUND_COMPLETED);
+
+    @GetMapping("/{bookingRef}/timeline")
+    public ResponseEntity<ApiResponse<java.util.List<java.util.Map<String, Object>>>> getCustomerTimeline(
+            @PathVariable String bookingRef,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String userRole) {
+        BookingDto booking = bookingService.getByRef(bookingRef);
+        boolean isAdmin = "ADMIN".equalsIgnoreCase(userRole) || "SUPER_ADMIN".equalsIgnoreCase(userRole);
+        if (!isAdmin && !userId.equals(booking.getCustomerId())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(ApiResponse.error("Not authorized to view this booking timeline"));
+        }
+        java.util.List<java.util.Map<String, Object>> rows = bookingService.getCustomerTimeline(
+            bookingRef, CUSTOMER_VISIBLE_EVENTS);
+        return ResponseEntity.ok(ApiResponse.ok(rows));
     }
 }

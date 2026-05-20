@@ -1,4 +1,4 @@
-﻿package com.skbingegalaxy.payment.service;
+package com.skbingegalaxy.payment.service;
 
 import com.skbingegalaxy.common.context.BingeContext;
 import com.skbingegalaxy.common.enums.PaymentMethod;
@@ -53,6 +53,7 @@ class PaymentServiceTest {
     @Mock private WebhookDedupService webhookDedupService;
     @Mock private AuditLogService auditLogService;
     @Mock private PaymentMetrics metrics;
+    @Mock private AdminApprovalService approvalService;
 
     @InjectMocks private PaymentService paymentService;
 

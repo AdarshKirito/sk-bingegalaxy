@@ -9,6 +9,8 @@ import PWAUpdatePrompt from './components/PWAUpdatePrompt';
 import { trackPageView } from './services/analytics';
 
 import Navbar from './components/Navbar';
+import DelegationBanner from './components/authority/DelegationBanner';
+import { ConfirmProvider } from './components/ui/ConfirmProvider';
 import './pages/AdminExperience.css';
 
 // Lazy-loaded pages — each becomes a separate chunk
@@ -30,6 +32,7 @@ const PaymentPage = lazy(() => import('./pages/PaymentPage'));
 const AboutBinge = lazy(() => import('./pages/AboutBinge'));
 const AdminLogin = lazy(() => import('./pages/AdminLogin'));
 const SuperAdminDashboard = lazy(() => import('./pages/SuperAdminDashboard'));
+const AuthorityHandover = lazy(() => import('./pages/AuthorityHandover'));
 const AdminHomeEditor = lazy(() => import('./pages/AdminHomeEditor'));
 const MySessions = lazy(() => import('./pages/MySessions'));
 const MfaSetup = lazy(() => import('./pages/MfaSetup'));
@@ -49,6 +52,17 @@ const AdminVenueRooms = lazy(() => import('./pages/AdminVenueRooms'));
 const AdminSurgeRules = lazy(() => import('./pages/AdminSurgeRules'));
 const AdminWaitlist = lazy(() => import('./pages/AdminWaitlist'));
 const AdminCustomerFreezes = lazy(() => import('./pages/AdminCustomerFreezes'));
+const AdminRiskFlags = lazy(() => import('./pages/AdminRiskFlags'));
+const AdminSupportConsole = lazy(() => import('./pages/AdminSupportConsole'));
+const AdminRecoveryQueues = lazy(() => import('./pages/AdminRecoveryQueues'));
+const AdminApprovals = lazy(() => import('./pages/AdminApprovals'));
+const AdminSlotHolds = lazy(() => import('./pages/AdminSlotHolds'));
+const AdminTaxes = lazy(() => import('./pages/AdminTaxes'));
+const AdminCurrencies = lazy(() => import('./pages/AdminCurrencies'));
+const AdminAccountPageEditor = lazy(() => import('./pages/AdminAccountPageEditor'));
+const AdminNotificationTemplates = lazy(() => import('./pages/AdminNotificationTemplates'));
+const AdminOps = lazy(() => import('./pages/AdminOps'));
+const CustomerNotifications = lazy(() => import('./pages/CustomerNotifications'));
 const BingeManagement = lazy(() => import('./pages/BingeManagement'));
 const BingeSelector = lazy(() => import('./pages/BingeSelector'));
 const PlatformDashboard = lazy(() => import('./pages/PlatformDashboard'));
@@ -111,13 +125,31 @@ function AdminRoute({ children }) {
   return children;
 }
 
-function SuperAdminRoute({ children }) {
-  const { isAuthenticated, isAdmin, isSuperAdmin, loading } = useAuth();
+/**
+ * Gate for routes that historically required {@code role === SUPER_ADMIN}.
+ *
+ * Now also admits ADMINs who have an active Authority Handover delegation that
+ * includes the supplied {@code scope}. When no scope is provided, the gate is
+ * native-super-admin-only (used for the Authority Handover page itself, since
+ * delegated admins must never be able to grant authority to themselves).
+ *
+ * Server-side enforcement is performed by the API gateway (it elevates
+ * X-User-Role to SUPER_ADMIN only for paths matching the granted scope) and by
+ * each downstream controller's existing role check. The frontend gate is for UX
+ * only \u2014 a stale/forged client cannot bypass the gateway.
+ */
+function SuperAdminRoute({ children, scope }) {
+  const { isAuthenticated, isAdmin, isSuperAdmin, effectiveAuthority, loading } = useAuth();
   if (loading) return <PageLoader />;
   if (!isAuthenticated) return <Navigate to="/admin/login" replace />;
   if (!isAdmin) return <Navigate to="/" replace />;
-  if (!isSuperAdmin) return <Navigate to="/admin/platform" replace />;
-  return children;
+  if (isSuperAdmin) return children;
+  // Delegated admin path: only admit if the requested scope is in the active grant.
+  if (scope && effectiveAuthority?.delegated && Array.isArray(effectiveAuthority.scopes)
+      && effectiveAuthority.scopes.includes(scope)) {
+    return children;
+  }
+  return <Navigate to="/admin/platform" replace />;
 }
 
 /* Requires binge selected — redirects to selector if not */
@@ -147,13 +179,14 @@ function AppFrame() {
     <>
       <a href="#main-content" className="skip-link">Skip to main content</a>
       <Navbar />
+      {isAdminRoute && <DelegationBanner />}
       <PWAUpdatePrompt />
       <ErrorBoundary>
       <main
         id="main-content"
         role="main"
         className={isAdminRoute ? 'app-main-admin' : undefined}
-        style={{ minHeight: 'calc(100vh - 70px)', paddingTop: '1.5rem', paddingBottom: '3rem' }}
+        style={{ minHeight: 'calc(100vh - 70px)', paddingBottom: '3rem' }}
       >
         <Suspense fallback={<PageLoader />}>
         <Routes>
@@ -175,19 +208,23 @@ function AppFrame() {
           <Route path="/payments" element={<BingeRequired><CustomerPayments /></BingeRequired>} />
           <Route path="/about" element={<BingeRequired><AboutBinge /></BingeRequired>} />
           <Route path="/account" element={<ProtectedRoute><AccountCenter /></ProtectedRoute>} />
+          <Route path="/account/notifications" element={<ProtectedRoute><CustomerNotifications /></ProtectedRoute>} />
+          <Route path="/account/sessions" element={<ProtectedRoute><MySessions /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><CustomerSettings /></ProtectedRoute>} />
           <Route path="/account/sessions" element={<ProtectedRoute><MySessions /></ProtectedRoute>} />
           <Route path="/account/security/mfa" element={<ProtectedRoute><MfaSetup /></ProtectedRoute>} />
           <Route path="/payment/:ref" element={<BingeRequired><PaymentPage /></BingeRequired>} />
 
-          <Route path="/admin/login" element={<AdminLogin />} />
-          <Route path="/admin/register" element={<SuperAdminRoute><AdminRegister /></SuperAdminRoute>} />
+          <Route path="/admin/login" element={<PublicOnlyRoute><AdminLogin /></PublicOnlyRoute>} />
+          <Route path="/admin/register" element={<SuperAdminRoute scope="ADMIN_REGISTER"><AdminRegister /></SuperAdminRoute>} />
           <Route path="/admin/platform" element={<AdminRoute><AdminEntranceDashboard /></AdminRoute>} />
           <Route path="/admin/account" element={<AdminRoute><AdminAccount /></AdminRoute>} />
-          <Route path="/admin/all-users" element={<SuperAdminRoute><AdminAllUsers /></SuperAdminRoute>} />
-          <Route path="/admin/customers/:id/edit" element={<SuperAdminRoute><AdminCustomerEdit /></SuperAdminRoute>} />
-          <Route path="/admin/super" element={<SuperAdminRoute><SuperAdminDashboard /></SuperAdminRoute>} />
-          <Route path="/admin/home-editor" element={<SuperAdminRoute><AdminHomeEditor /></SuperAdminRoute>} />
+          <Route path="/admin/all-users" element={<SuperAdminRoute scope="ALL_USERS"><AdminAllUsers /></SuperAdminRoute>} />
+          <Route path="/admin/customers/:id/edit" element={<SuperAdminRoute scope="CUSTOMER_EDIT"><AdminCustomerEdit /></SuperAdminRoute>} />
+          <Route path="/admin/super" element={<SuperAdminRoute scope="SUPER_DASHBOARD"><SuperAdminDashboard /></SuperAdminRoute>} />
+          {/* Authority Handover — native super-admin only (delegated admins must never grant authority to themselves) */}
+          <Route path="/admin/super/authority" element={<SuperAdminRoute><AuthorityHandover /></SuperAdminRoute>} />
+          <Route path="/admin/home-editor" element={<SuperAdminRoute scope="HOME_CMS"><AdminHomeEditor /></SuperAdminRoute>} />
           <Route path="/admin/sessions" element={<AdminRoute><MySessions /></AdminRoute>} />
           <Route path="/admin/security/mfa" element={<AdminRoute><MfaSetup /></AdminRoute>} />
           <Route path="/admin/binges" element={<AdminRoute><BingeManagement /></AdminRoute>} />
@@ -196,12 +233,23 @@ function AppFrame() {
           <Route path="/admin/blocked-dates" element={<AdminBingeRequired><AdminBlockedDates /></AdminBingeRequired>} />
           <Route path="/admin/event-types" element={<AdminBingeRequired><AdminEventTypes /></AdminBingeRequired>} />
           <Route path="/admin/rate-codes" element={<AdminBingeRequired><AdminRateCodes /></AdminBingeRequired>} />
-          <Route path="/admin/loyalty-center" element={<SuperAdminRoute><AdminLoyaltyCenter /></SuperAdminRoute>} />
+          <Route path="/admin/loyalty-center" element={<SuperAdminRoute scope="LOYALTY"><AdminLoyaltyCenter /></SuperAdminRoute>} />
           <Route path="/admin/customer-pricing" element={<AdminBingeRequired><AdminCustomerPricing /></AdminBingeRequired>} />
           <Route path="/admin/venue-rooms" element={<AdminBingeRequired><AdminVenueRooms /></AdminBingeRequired>} />
           <Route path="/admin/surge-rules" element={<AdminBingeRequired><AdminSurgeRules /></AdminBingeRequired>} />
           <Route path="/admin/waitlist" element={<AdminBingeRequired><AdminWaitlist /></AdminBingeRequired>} />
           <Route path="/admin/customer-freezes" element={<AdminBingeRequired><AdminCustomerFreezes /></AdminBingeRequired>} />
+          <Route path="/admin/risk-flags" element={<AdminBingeRequired><AdminRiskFlags /></AdminBingeRequired>} />
+          <Route path="/admin/support" element={<AdminRoute><AdminSupportConsole /></AdminRoute>} />
+          <Route path="/admin/recovery" element={<AdminBingeRequired><AdminRecoveryQueues /></AdminBingeRequired>} />
+          <Route path="/admin/approvals" element={<AdminBingeRequired><AdminApprovals /></AdminBingeRequired>} />
+          <Route path="/admin/slot-holds" element={<AdminBingeRequired><AdminSlotHolds /></AdminBingeRequired>} />
+          <Route path="/admin/taxes" element={<AdminBingeRequired><AdminTaxes /></AdminBingeRequired>} />
+          <Route path="/admin/currencies" element={<SuperAdminRoute scope="CURRENCIES"><AdminCurrencies /></SuperAdminRoute>} />
+          <Route path="/admin/account-page-editor" element={<SuperAdminRoute scope="ACCOUNT_CMS"><AdminAccountPageEditor /></SuperAdminRoute>} />
+          <Route path="/admin/binges/:bingeId/account-page-editor" element={<AdminRoute><AdminAccountPageEditor /></AdminRoute>} />
+          <Route path="/admin/notification-templates" element={<SuperAdminRoute scope="NOTIFICATIONS"><AdminNotificationTemplates /></SuperAdminRoute>} />
+          <Route path="/admin/ops" element={<SuperAdminRoute scope="OPS"><AdminOps /></SuperAdminRoute>} />
           <Route path="/admin/reports" element={<AdminBingeRequired><AdminReports /></AdminBingeRequired>} />
           <Route path="/admin/book" element={<AdminBingeRequired><AdminBookingCreate /></AdminBingeRequired>} />
           <Route path="/admin/users-config" element={<AdminBingeRequired><AdminUsersConfig /></AdminBingeRequired>} />
@@ -222,7 +270,9 @@ export function AppContent() {
     <ErrorBoundary>
       <AuthProvider>
         <BingeProvider>
-          <AppFrame />
+          <ConfirmProvider>
+            <AppFrame />
+          </ConfirmProvider>
         </BingeProvider>
       </AuthProvider>
     </ErrorBoundary>

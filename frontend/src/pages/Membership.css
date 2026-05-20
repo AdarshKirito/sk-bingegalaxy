@@ -446,3 +446,104 @@
 .tier-chip-gold     { background: linear-gradient(135deg, #f59e0b, #b45309); }
 .tier-chip-platinum { background: linear-gradient(135deg, #64748b, #0f172a); }
 .tier-chip-diamond  { background: linear-gradient(135deg, #22d3ee, #3b82f6); }
+
+/* ── Ledger body (wraps title + desc + sub-line) ─────────────── */
+.ledger-body {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Description line — admin notes, cancellation context, etc. */
+.ledger-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 1px;
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 480px;
+}
+
+/* Booking reference — clickable link to the reservation detail */
+.ledger-booking-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--primary);
+  font-weight: 600;
+  text-decoration: none;
+  transition: opacity 140ms ease;
+}
+.ledger-booking-link:hover {
+  opacity: 0.72;
+  text-decoration: underline;
+}
+
+/* ── Status match history — richer layout ────────────────────── */
+.sm-history li {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.sm-h-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+.sm-prog-block {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.sm-prog { font-weight: 700; font-size: 14px; }
+.sm-competitor-tier {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.sm-arrow { color: var(--text-muted); font-size: 16px; }
+.sm-requested-tier {
+  font-weight: 700;
+  font-size: 13px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+.sm-h-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  width: 100%;
+}
+.sm-challenge-hint {
+  color: var(--primary);
+  font-weight: 600;
+}
+.sm-review-notes {
+  font-style: italic;
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #b91c1c;
+}
+.sm-proof-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 600;
+}
+.sm-proof-link:hover { opacity: 0.75; text-decoration: underline; }
+
+/* Additional status badge variants */
+.sm-status.challenge-active  { background: rgba(99, 102, 241, 0.15); color: #4f46e5; }
+.sm-status.challenge-expired { background: rgba(100, 116, 139, 0.15); color: #475569; }

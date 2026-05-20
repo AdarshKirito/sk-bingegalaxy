@@ -1,6 +1,7 @@
 package com.skbingegalaxy.payment.dto;
 
 import com.skbingegalaxy.common.enums.PaymentStatus;
+import com.skbingegalaxy.payment.entity.RefundStatus;
 import lombok.*;
 
 import java.math.BigDecimal;
@@ -18,6 +19,11 @@ public class RefundDto {
     private String reason;
     private String gatewayRefundId;
     private PaymentStatus status;
+    /** Per-attempt refund lifecycle. */
+    private RefundStatus refundStatus;
+    /** If this is a retry, the original attempt id. */
+    private Long retryOfId;
+    private int retryCount;
     private String failureReason;
     private String initiatedBy;
     private LocalDateTime refundedAt;

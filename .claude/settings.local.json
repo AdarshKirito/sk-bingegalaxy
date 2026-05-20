@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Remove-Item \"d:\\\\sk-binge-galaxy\\\\sk-binge-galaxy\\\\backend\\\\booking-service\\\\src\\\\main\\\\java\\\\com\\\\skbingegalaxy\\\\booking\\\\service\\\\LoyaltyService.java\")",
+      "Bash(Remove-Item \"d:\\\\sk-binge-galaxy\\\\sk-binge-galaxy\\\\backend\\\\booking-service\\\\src\\\\main\\\\java\\\\com\\\\skbingegalaxy\\\\booking\\\\dto\\\\LoyaltyAccountDto.java\")",
+      "Bash(Remove-Item \"d:\\\\sk-binge-galaxy\\\\sk-binge-galaxy\\\\backend\\\\booking-service\\\\src\\\\main\\\\java\\\\com\\\\skbingegalaxy\\\\booking\\\\dto\\\\LoyaltyTransactionDto.java\")",
+      "Bash(Write-Host \"Deleted old loyalty files\")"
+    ]
+  }
+}

@@ -10,6 +10,21 @@ const api = axios.create({
 });
 
 api.interceptors.request.use(async (config) => {
+  // Auto-attach Idempotency-Key for state-mutating verbs (Stripe-style request dedupe).
+  // Caller-supplied keys (e.g. via useIdempotencyKey hook) are preserved so they survive
+  // user-level retries; otherwise generate a fresh UUID per axios call so axios-internal
+  // retries (timeouts, network blips) hit the same server-side slot.
+  const method = (config.method || 'get').toLowerCase();
+  if (['post', 'put', 'patch', 'delete'].includes(method)) {
+    config.headers = config.headers || {};
+    if (!config.headers['Idempotency-Key'] && !config.headers['idempotency-key']) {
+      const uuid = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `idem-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+      config.headers['Idempotency-Key'] = uuid;
+    }
+  }
+
   // Auto-attach selected binge for multi-tenancy
   const binge = localStorage.getItem('selectedBinge');
   if (binge) {
@@ -203,7 +218,28 @@ api.interceptors.response.use(
     } else if (err.response?.status === 403) {
       toast.error('You do not have permission to perform this action.');
     } else if (err.response?.status === 429) {
-      toast.error('Too many attempts. Please wait a moment and try again.');
+      const retryAfter = parseInt(
+        err.response?.headers?.['retry-after'] ||
+        err.response?.data?.retryAfterSeconds ||
+        '60',
+        10
+      );
+      // x-ratelimit-reset is the epoch-second when the window resets (set by the gateway).
+      // Use it for a precise countdown; fall back to retryAfter from now.
+      const resetAt = parseInt(err.response?.headers?.['x-ratelimit-reset'] || '0', 10);
+      const nowSec = Math.floor(Date.now() / 1000);
+      const preciseRetryAfter = resetAt > nowSec ? resetAt - nowSec : retryAfter;
+      const serverMsg = err.response?.data?.message;
+      const waitTime = preciseRetryAfter >= 60
+        ? `${Math.ceil(preciseRetryAfter / 60)} minute${Math.ceil(preciseRetryAfter / 60) > 1 ? 's' : ''}`
+        : `${preciseRetryAfter} second${preciseRetryAfter !== 1 ? 's' : ''}`;
+      const displayMsg = serverMsg || `Too many requests. Please wait ${waitTime} before trying again.`;
+      toast.error(displayMsg, { autoClose: 8000 });
+      err.retryAfterSeconds = preciseRetryAfter;
+      err.resetAtEpoch = resetAt || (nowSec + retryAfter);
+      // Override extractErrorMessage with the richer wait-time message
+      err.userMessage = displayMsg;
+      return Promise.reject(err);
     } else if (err.response?.status >= 500) {
       toast.error('Server error. Please try again later.');
     } else if (!err.response) {

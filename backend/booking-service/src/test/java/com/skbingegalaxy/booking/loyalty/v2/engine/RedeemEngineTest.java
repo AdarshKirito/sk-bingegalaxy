@@ -2,6 +2,7 @@ package com.skbingegalaxy.booking.loyalty.v2.engine;
 
 import com.skbingegalaxy.booking.loyalty.v2.entity.*;
 import com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyMembershipRepository;
+import com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyPointsWalletRepository;
 import com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyConfigService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +29,7 @@ class RedeemEngineTest {
     private LoyaltyConfigService configService;
     private PointsWalletService walletService;
     private LoyaltyMembershipRepository membershipRepository;
+    private LoyaltyPointsWalletRepository walletRepository;
     private TierEngine tierEngine;
 
     private RedeemEngine engine;
@@ -41,9 +43,10 @@ class RedeemEngineTest {
         configService = mock(LoyaltyConfigService.class);
         walletService = mock(PointsWalletService.class);
         membershipRepository = mock(LoyaltyMembershipRepository.class);
+        walletRepository = mock(LoyaltyPointsWalletRepository.class);
         tierEngine = mock(TierEngine.class);
 
-        engine = new RedeemEngine(configService, walletService, membershipRepository, tierEngine);
+        engine = new RedeemEngine(configService, walletService, membershipRepository, walletRepository, tierEngine);
 
         member = LoyaltyMembership.builder()
                 .id(42L).tenantId(1L).programId(1L).customerId(100L)
@@ -54,6 +57,8 @@ class RedeemEngineTest {
                 .status("ENABLED").legacyFrozen(false).build();
 
         when(membershipRepository.findById(42L)).thenReturn(Optional.of(member));
+        when(walletRepository.findByMembershipId(42L)).thenReturn(Optional.of(
+                LoyaltyPointsWallet.builder().id(1000L).membershipId(42L).currentBalance(100_000L).build()));
         when(configService.requireDefaultProgram()).thenReturn(program);
         when(configService.findActiveBinding(1L, 7L)).thenReturn(Optional.of(binding));
     }
@@ -98,6 +103,20 @@ class RedeemEngineTest {
         assertThat(q.note()).isEqualTo("CAPPED_BY_BOOKING_PCT");
         // Points scaled down to what's actually redeemable.
         assertThat(q.pointsToBurn()).isLessThan(20_000L);
+    }
+
+    @Test
+    void quote_rejects_when_wallet_balance_cannot_cover_effective_points() {
+        LoyaltyBingeRedemptionRule rule = rule(100L, 0L, new BigDecimal("100.00"), null);
+        when(configService.resolveRedemptionRule(eq(500L), any())).thenReturn(Optional.of(rule));
+        when(walletRepository.findByMembershipId(42L)).thenReturn(Optional.of(
+                LoyaltyPointsWallet.builder().id(1000L).membershipId(42L).currentBalance(999L).build()));
+
+        var q = engine.quote(new RedeemEngine.QuoteRequest(
+                42L, 7L, 1_000L, new BigDecimal("500.00"), LocalDateTime.now()));
+
+        assertThat(q.eligible()).isFalse();
+        assertThat(q.rejectReason()).isEqualTo("INSUFFICIENT_POINTS");
     }
 
     @Test
@@ -147,6 +166,26 @@ class RedeemEngineTest {
         assertThat(cap.getValue().idempotencyKey()).contains("BK-9").contains("10000");
 
         verify(tierEngine).recalculateTier(42L, now);
+    }
+
+    @Test
+    void burn_debits_only_the_capped_quote_points() {
+        LoyaltyBingeRedemptionRule rule = rule(100L, 0L, new BigDecimal("50.00"), null);
+        when(configService.resolveRedemptionRule(eq(500L), any())).thenReturn(Optional.of(rule));
+
+        LocalDateTime now = LocalDateTime.now();
+        var res = engine.burn(new RedeemEngine.BurnRequest(
+                42L, 7L, "BK-CAP", 20_000L, new BigDecimal("100.00"), now, "corr"));
+
+        assertThat(res.accepted()).isTrue();
+        assertThat(res.currencyApplied()).isEqualByComparingTo(new BigDecimal("50.00"));
+        assertThat(res.pointsBurned()).isEqualTo(5_000L);
+
+        ArgumentCaptor<PointsWalletService.DebitRequest> cap =
+                ArgumentCaptor.forClass(PointsWalletService.DebitRequest.class);
+        verify(walletService).debit(cap.capture());
+        assertThat(cap.getValue().points()).isEqualTo(5_000L);
+        assertThat(cap.getValue().idempotencyKey()).contains("BK-CAP").contains("5000");
     }
 
     @Test

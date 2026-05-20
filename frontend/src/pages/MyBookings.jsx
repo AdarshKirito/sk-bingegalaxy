@@ -37,9 +37,46 @@ import {
   FiSend,
   FiShield,
   FiStar,
+  FiFileText,
   FiX,
 } from 'react-icons/fi';
 import './CustomerHub.css';
+
+/**
+ * Trigger a browser download for the server-side-rendered invoice PDF.
+ *
+ * The booking-service /bookings/{ref}/invoice endpoint returns a binary
+ * application/pdf body; axios is configured with responseType:'blob' on
+ * this call (see endpoints.js -> bookingService.downloadInvoice). We wrap
+ * the blob in an object URL and synthesise a temporary anchor click so
+ * the user gets a normal "save file" experience without leaving the page.
+ */
+async function triggerInvoiceDownload(bookingRef) {
+  try {
+    const res = await bookingService.downloadInvoice(bookingRef);
+    const blob = res.data instanceof Blob ? res.data : new Blob([res.data], { type: 'application/pdf' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `invoice-${bookingRef}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Free the object URL on the next tick so Safari/Edge actually start
+    // the download before we revoke it.
+    setTimeout(() => window.URL.revokeObjectURL(url), 1500);
+    toast.success('Invoice downloaded');
+  } catch (err) {
+    const status = err.response?.status;
+    if (status === 404) {
+      toast.info('No invoice available for this booking yet');
+    } else if (status === 402 || status === 409) {
+      toast.warn('Invoice will be available once payment is confirmed');
+    } else {
+      toast.error(err.response?.data?.message || 'Failed to download invoice');
+    }
+  }
+}
 
 export default function MyBookings() {
   const { user } = useAuth();
@@ -828,6 +865,13 @@ export default function MyBookings() {
                   <button type="button" className="btn btn-secondary btn-sm" onClick={() => downloadBookingSummary(booking, { customerName, venueName: selectedBinge?.name })}>
                     <FiDownload /> Download Summary
                   </button>
+                  {(booking.paymentStatus === 'PAID' || booking.paymentStatus === 'PARTIALLY_REFUNDED' || booking.paymentStatus === 'REFUNDED') && (
+                    <button type="button" className="btn btn-secondary btn-sm"
+                            onClick={() => triggerInvoiceDownload(booking.bookingRef)}
+                            title="Download the official PDF invoice for this booking">
+                      <FiFileText /> Invoice (PDF)
+                    </button>
+                  )}
                   {support.email && <a href={buildSupportEmailHref({ supportContact: support, bookingRef: booking.bookingRef, customerName, topic: 'Booking help' })} className="btn btn-secondary btn-sm">
                     <FiMail /> Email Support
                   </a>}

@@ -4,6 +4,7 @@ import { toast } from 'react-toastify';
 import { format, addDays } from 'date-fns';
 import { trackBookingStarted, trackBookingStepCompleted } from '../../services/analytics';
 import { useBinge } from '../../context/BingeContext';
+import loyaltyV2 from '../../services/loyaltyV2';
 
 import ImagePopup from './ImagePopup';
 import StepCustomer from './StepCustomer';
@@ -55,6 +56,8 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
   const [capacityFull, setCapacityFull] = useState(false);
   const [freeze, setFreeze] = useState(null); // { freezeUntil, reason, message }
   const [freezeNow, setFreezeNow] = useState(Date.now());
+  const [rateLimitUntil, setRateLimitUntil] = useState(0); // epoch ms when booking rate-limit expires
+  const [rateLimitNow, setRateLimitNow] = useState(Date.now());
 
   // ── Customer-only: detect existing booking-flow freeze on mount ───────────
   // Admins create bookings on behalf and aren't subject to this lock.
@@ -95,10 +98,24 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
       setFreeze(null);
     }
   }, [freeze, freezeNow]);
+
+  // Tick the rate-limit cooldown banner once a second
+  useEffect(() => {
+    if (!rateLimitUntil) return undefined;
+    const t = setInterval(() => {
+      setRateLimitNow(Date.now());
+      if (Date.now() >= rateLimitUntil) {
+        clearInterval(t);
+        setRateLimitUntil(0);
+      }
+    }, 1000);
+    return () => clearInterval(t);
+  }, [rateLimitUntil]);
   const [venueRooms, setVenueRooms] = useState([]);
   const [availableRoomIds, setAvailableRoomIds] = useState(null); // null = not yet fetched
   const [surgeRules, setSurgeRules] = useState([]);
   const [loyalty, setLoyalty] = useState(null);
+  const [loyaltyQuote, setLoyaltyQuote] = useState(null);
   const [activeSurge, setActiveSurge] = useState(null);
 
   const [form, setForm] = useState({
@@ -250,8 +267,8 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
   // Load loyalty (customer only)
   useEffect(() => {
     if (!isAdmin) {
-      bookingService.getMyLoyalty()
-        .then(res => setLoyalty(res.data.data || null))
+      loyaltyV2.getMyLegacyAccount()
+        .then(data => setLoyalty(data || null))
         .catch(() => setLoyalty(null));
     }
   }, [isAdmin]);
@@ -364,9 +381,41 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
 
   const calculateLoyaltyDiscount = () => {
     if (!loyalty || !form.redeemLoyaltyPoints || form.redeemLoyaltyPoints <= 0) return 0;
-    const redemptionRate = loyalty.redemptionRate || 100;
-    return Math.min(form.redeemLoyaltyPoints / redemptionRate, calculateTotal());
+    if (!loyaltyQuote?.eligible) return 0;
+    return Math.min(Number(loyaltyQuote.currencyValue || 0), calculateTotal());
   };
+
+  useEffect(() => {
+    if (isAdmin || !loyalty || !selectedBinge?.id || !form.redeemLoyaltyPoints || form.redeemLoyaltyPoints <= 0) {
+      setLoyaltyQuote(null);
+      return;
+    }
+    const bookingAmount = calculateTotal();
+    if (!bookingAmount || bookingAmount <= 0) {
+      setLoyaltyQuote(null);
+      return;
+    }
+    let cancelled = false;
+    loyaltyV2.getRedeemQuote({
+      bingeId: selectedBinge.id,
+      bookingAmount,
+      points: Math.min(Number(form.redeemLoyaltyPoints) || 0, loyalty.currentBalance || 0),
+    })
+      .then((quote) => { if (!cancelled) setLoyaltyQuote(quote); })
+      .catch(() => { if (!cancelled) setLoyaltyQuote(null); });
+    return () => { cancelled = true; };
+  }, [
+    isAdmin,
+    loyalty,
+    selectedBinge?.id,
+    form.redeemLoyaltyPoints,
+    form.eventTypeId,
+    form.durationMinutes,
+    form.numberOfGuests,
+    form.addOns,
+    activeSurge,
+    resolvedPricing,
+  ]);
 
   const toggleAddOn = (addon) => {
     const exists = form.addOns.find(a => a.addOnId === addon.id);
@@ -412,6 +461,11 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
     // Block customer submissions while a booking-flow freeze is active
     if (!isAdmin && freeze && new Date(freeze.freezeUntil).getTime() > Date.now()) {
       toast.error('Your booking flow is temporarily frozen. Please contact support.');
+      return;
+    }
+    if (!isAdmin && rateLimitUntil > Date.now()) {
+      const secsLeft = Math.ceil((rateLimitUntil - Date.now()) / 1000);
+      toast.error(`Booking limit active. Please wait ${secsLeft} more second${secsLeft !== 1 ? 's' : ''} before trying again.`);
       return;
     }
     if (isAdmin && !selectedCustomer) { toast.error('Please select a customer before confirming'); return; }
@@ -493,6 +547,29 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
         setCapacityFull(true);
         setError(msg.replace('CAPACITY_FULL:', ''));
         toast.error(msg.replace('CAPACITY_FULL:', ''));
+      } else if (/slot\s+is\s+not\s+available/i.test(msg)) {
+        // The slot was claimed between availability-check and create-booking
+        // (race) — drop the user back to step 2 so the SmartSuggestionsPanel
+        // can offer alternatives without forcing a wizard restart.
+        setCapacityFull(false);
+        setForm(f => ({ ...f, startTime: '' }));
+        setError(msg);
+        toast.error(`${msg}. See alternatives below.`);
+        setStep(2);
+      } else if (err.response?.status === 429) {
+        // Gateway rate-limit: the api.js interceptor already showed a toast.
+        // Show an inline countdown banner so the user knows exactly when they can retry.
+        const nowMs = Date.now();
+        const resetAtMs = err.resetAtEpoch ? err.resetAtEpoch * 1000 : null;
+        const retryAfterSecs = err.retryAfterSeconds ||
+          parseInt(err.response?.headers?.['retry-after'] || '60', 10);
+        const until = resetAtMs && resetAtMs > nowMs
+          ? resetAtMs
+          : nowMs + retryAfterSecs * 1000;
+        setRateLimitUntil(until);
+        setRateLimitNow(nowMs);
+        setCapacityFull(false);
+        setError('');
       } else {
         setCapacityFull(false);
         setError(msg);
@@ -603,6 +680,40 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
 
       {error && <div className="error-message" role="alert">{error}</div>}
 
+      {rateLimitUntil > rateLimitNow && (() => {
+        const remaining = Math.max(0, rateLimitUntil - rateLimitNow);
+        const totalSec = Math.ceil(remaining / 1000);
+        const m = Math.floor(totalSec / 60);
+        const s = totalSec % 60;
+        return (
+          <div
+            role="alert"
+            style={{
+              border: '1px solid var(--warning, #d97706)',
+              background: 'rgba(217,119,6,0.08)',
+              padding: '1rem 1.25rem',
+              borderRadius: '8px',
+              marginBottom: '1rem',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+              <div>
+                <strong>⏱ Booking request limit reached</strong>
+                <div style={{ marginTop: '0.25rem' }}>
+                  You've made too many booking requests in a short time. Your booking form will re-enable automatically — no need to refresh the page.
+                </div>
+                <div style={{ marginTop: '0.25rem', fontSize: '0.9em', color: 'var(--text-secondary)' }}>
+                  This limit is specific to this venue and resets automatically.
+                </div>
+              </div>
+              <div style={{ fontFamily: 'monospace', fontSize: '1.5em', fontWeight: 600, minWidth: '70px', textAlign: 'right' }}>
+                {String(m).padStart(2, '0')}:{String(s).padStart(2, '0')}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       <ImagePopup imagePopup={imagePopup} setImagePopup={setImagePopup} />
 
       {isAdmin && step === 0 && (
@@ -637,6 +748,7 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
           availability={availability} resolvedPricing={resolvedPricing}
           venueRooms={venueRooms} activeSurge={activeSurge}
           availableRoomIds={availableRoomIds}
+          surgeRules={surgeRules} editBookingRef={editBookingData?.bookingRef}
           fmtTime={fmtTime} fmtDuration={fmtDuration}
           onNext={() => {
             if (!form.bookingDate) { toast.error('Please select a date before proceeding'); return; }
@@ -667,6 +779,7 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
           loading={loading} onSubmit={handleSubmit} onBack={() => setStep(3)}
           capacityFull={capacityFull} onJoinWaitlist={handleJoinWaitlist}
           venueRooms={venueRooms} activeSurge={activeSurge} loyalty={loyalty}
+          loyaltyQuote={loyaltyQuote}
         />
       )}
     </div>

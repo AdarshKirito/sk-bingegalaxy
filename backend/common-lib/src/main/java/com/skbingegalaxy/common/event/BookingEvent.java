@@ -1,16 +1,21 @@
 package com.skbingegalaxy.common.event;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.*;
-import java.io.Serializable;
+import lombok.experimental.SuperBuilder;
+
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalTime;
 
-@Data
+@Getter
+@Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
-public class BookingEvent implements Serializable {
+@SuperBuilder(toBuilder = true)
+@ToString(callSuper = true)
+@JsonIgnoreProperties(ignoreUnknown = true)
+public class BookingEvent extends EventEnvelope {
     private String bookingRef;
     private Long bingeId;
     private Long customerId;
@@ -27,4 +32,11 @@ public class BookingEvent implements Serializable {
     private BigDecimal totalAmount;
     private String status;
     private String specialNotes;
+    /**
+     * Per-binge customer-cancellation cutoff (minutes before start time) at the
+     * moment this event was emitted. Consumers (e.g. notification-service)
+     * use this to schedule a "deadline approaching" reminder ahead of the
+     * cut-off. Nullable for backward compatibility with old events on the wire.
+     */
+    private Integer customerCancellationCutoffMinutes;
 }

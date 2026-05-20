@@ -1,4 +1,5 @@
 import api from './api';
+import loyaltyV2 from './loyaltyV2';
 
 /**
  * Safely coerce an API response value to an array.
@@ -7,6 +8,8 @@ import api from './api';
  * Use: toArray(res.data?.data) instead of (res.data.data || [])
  */
 export const toArray = (val) => Array.isArray(val) ? val : [];
+
+const asApiResponse = (data) => ({ data: { data } });
 
 // Helper: returns the local date (YYYY-MM-DD) and time (HH:MM) from the browser
 const clientDate = () => {
@@ -19,11 +22,15 @@ const clientTime = () => {
 };
 
 export const authService = {
-  register: (data) => api.post('/auth/register', data),
-  login: (data) => api.post('/auth/login', data),
-  googleLogin: (data) => api.post('/auth/google', data),
-  adminLogin: (data) => api.post('/auth/admin/login', data),
-  adminRegister: (data) => api.post('/auth/admin/register', data),
+  // Registration writes a user, fires Kafka events, sends a welcome email and
+  // touches multiple downstream consumers — first-call cold paths can occasionally
+  // exceed the global 15s ceiling. Give it a longer timeout so a slow-but-successful
+  // response doesn't surface as a (false-negative) "timeout" toast.
+  register: (data) => api.post('/auth/register', data, { timeout: 45000 }),
+  login: (data) => api.post('/auth/login', data, { timeout: 30000 }),
+  googleLogin: (data) => api.post('/auth/google', data, { timeout: 30000 }),
+  adminLogin: (data) => api.post('/auth/admin/login', data, { timeout: 30000 }),
+  adminRegister: (data) => api.post('/auth/admin/register', data, { timeout: 45000 }),
   getProfile: () => api.get('/auth/profile'),
   updateAccountPreferences: (data) => api.put('/auth/profile/preferences', data),
   getSupportContact: () => api.get('/auth/support-contact'),
@@ -66,6 +73,32 @@ export const authService = {
   getSuperAdminStats: () => api.get('/auth/admin/super-admin/stats'),
 };
 
+/**
+ * Authority Handover (delegated super-admin powers + per-record locks).
+ * Backed by the auth-service AuthorityController at /api/v1/auth/authority.
+ *
+ * - Native super-admins use this surface to grant temporary super-admin authority
+ *   to an admin (scoped to one or more pages, capped to 24h, audit-logged).
+ * - Anyone authenticated can call getMyAuthority() and lookupLock() so the UI
+ *   can render the delegation banner and lock badges.
+ * - Lock placement / release / list endpoints are super-admin only (or lock owner
+ *   for release) and enforced server-side.
+ */
+export const authorityService = {
+  // Self
+  getMyAuthority: () => api.get('/auth/authority/me'),
+  // Grants
+  listGrants: (params = {}) => api.get('/auth/authority/grants', { params }),
+  listGrantsForUser: (userId) => api.get(`/auth/authority/grants/by-user/${userId}`),
+  createGrant: (data) => api.post('/auth/authority/grants', data),
+  revokeGrant: (id, reason) => api.delete(`/auth/authority/grants/${id}`, { params: { reason } }),
+  // Locks
+  lookupLock: (type, id) => api.get('/auth/authority/locks/lookup', { params: { type, id } }),
+  listLocks: (params = {}) => api.get('/auth/authority/locks', { params }),
+  createLock: (data) => api.post('/auth/authority/locks', data),
+  releaseLock: (id, reason) => api.delete(`/auth/authority/locks/${id}`, { params: { reason } }),
+};
+
 export const bookingService = {
   getEventTypes: () => api.get('/bookings/event-types'),
   getAddOns: () => api.get('/bookings/add-ons'),
@@ -79,6 +112,11 @@ export const bookingService = {
   cancelBooking: (ref) => api.post(`/bookings/${ref}/cancel`),
   rescheduleBooking: (ref, data) => api.post(`/bookings/${ref}/reschedule`, data),
   transferBooking: (ref, data) => api.post(`/bookings/${ref}/transfer`, data),
+  // Customer-safe lifecycle timeline (privacy-filtered, no internal IDs)
+  getMyTimeline: (ref) => api.get(`/bookings/${ref}/timeline`),
+  // Invoice PDF download — server returns application/pdf, so we ask axios
+  // for a Blob and the caller drives the file-save / preview UX.
+  downloadInvoice: (ref) => api.get(`/bookings/${ref}/invoice`, { responseType: 'blob' }),
   createRecurringBookings: (data) => api.post('/bookings/recurring', data),
   getRecurringGroup: (groupId) => api.get(`/bookings/recurring/${groupId}`),
   getCustomerReview: (ref) => api.get(`/bookings/${ref}/reviews/customer`),
@@ -101,12 +139,84 @@ export const bookingService = {
   getVenueRooms: () => api.get('/bookings/venue-rooms'),
   getAvailableRooms: (date, startMinute, durationMinutes) => api.get('/bookings/venue-rooms/available', { params: { date, startMinute, durationMinutes } }),
   // Loyalty (customer)
-  getMyLoyalty: () => api.get('/bookings/loyalty'),
+  getMyLoyalty: async () => asApiResponse(await loyaltyV2.getMyLegacyAccount()),
   // Surge rules (public)
   getActiveSurgeRules: () => api.get('/bookings/surge-rules'),
   // Customer freezes (booking-flow lock self-view)
   getMyFreezes: () => api.get('/bookings/freezes/me'),
   getMyFreezeForBinge: (bingeId) => api.get(`/bookings/freezes/me/binge/${bingeId}`),
+  // Per-binge CMS — venue-specific FAQ / offers / support overrides on the
+  // customer Account Center. Read is authenticated, write is admin-only.
+  getBingeSiteContent: (bingeId, slug) => api.get(`/bookings/binges/${bingeId}/site-content/${slug}`),
+  upsertBingeSiteContent: (bingeId, slug, contentJson) =>
+    api.put(`/bookings/admin/binges/${bingeId}/site-content/${slug}`, { contentJson }),
+  // Tax preview (public) — used by checkout to show breakdown before commit.
+  previewTaxes: (params = {}) => api.get('/bookings/taxes/preview', { params }),
+  // Active currencies (public) — used by CurrencyContext on app boot.
+  getActiveCurrencies: () => api.get('/bookings/currencies'),
+};
+
+// ── Slot holds (customer + admin) ─────────────────────────
+// Pre-booking holds (60s TTL) so customers don't lose a slot mid-checkout.
+export const slotHoldService = {
+  create: (data) => api.post('/bookings/slot-holds', data),
+  getByToken: (token) => api.get(`/bookings/slot-holds/${token}`),
+  release: (token, reason) => api.delete(`/bookings/slot-holds/${token}`, { params: reason ? { reason } : {} }),
+  myHolds: () => api.get('/bookings/slot-holds/my'),
+  // Admin: list active holds for current binge + force-release.
+  adminList: () => api.get('/bookings/slot-holds/admin'),
+  adminRelease: (token, reason) =>
+    api.delete(`/bookings/slot-holds/admin/${token}`, { params: reason ? { reason } : {} }),
+};
+
+// ── Tax rules (admin) ─────────────────────────────────────
+// Binge-scoped rules under /admin/taxes; super-admin global rules under /admin/taxes/global.
+export const taxService = {
+  list: () => api.get('/bookings/admin/taxes'),
+  create: (data) => api.post('/bookings/admin/taxes', data),
+  update: (id, data) => api.put(`/bookings/admin/taxes/${id}`, data),
+  remove: (id) => api.delete(`/bookings/admin/taxes/${id}`),
+  listGlobal: () => api.get('/bookings/admin/taxes/global'),
+  createGlobal: (data) => api.post('/bookings/admin/taxes/global', data),
+  // Public preview — same calc the checkout uses. Admins use it as a calculator
+  // to verify their rule set produces the expected breakdown.
+  preview: (params = {}) => api.get('/bookings/taxes/preview', { params }),
+};
+
+// ── Currencies / FX rates (super-admin write, public read) ─
+export const currencyService = {
+  // Public: only active currencies + their FX rates.
+  listActive: () => api.get('/bookings/currencies'),
+  // Admin: full list including inactive rows.
+  listAll: () => api.get('/bookings/admin/currencies'),
+  upsert: (data) => api.post('/bookings/admin/currencies', data),
+  toggle: (code) => api.post(`/bookings/admin/currencies/${code}/toggle`),
+  remove: (code) => api.delete(`/bookings/admin/currencies/${code}`),
+};
+
+// ── Notifications (customer + admin) ───────────────────────
+// Customer-facing endpoints rely on the X-User-Email header injected by the
+// gateway; admin/template endpoints require ROLE_ADMIN at the gateway.
+export const notificationService = {
+  // Customer
+  myNotifications: () => api.get('/notifications/my'),
+  byBooking: (ref) => api.get(`/notifications/booking/${ref}`),
+  // Preferences (per recipient email)
+  getPreferences: () => api.get('/notifications/preferences'),
+  updatePreferences: (data) => api.put('/notifications/preferences', data),
+  // Admin
+  retryFailed: () => api.post('/notifications/admin/retry-failed'),
+  // Email/SMS templates (versioned, channel-scoped)
+  listTemplates: (params = {}) => api.get('/notifications/admin/templates', { params }),
+  upsertTemplate: (data) => api.post('/notifications/admin/templates', data),
+  activateTemplate: (params) => api.post('/notifications/admin/templates/activate', null, { params }),
+  // WhatsApp content templates (Twilio Content SIDs)
+  listWhatsAppTemplates: (params = { page: 0, size: 50 }) =>
+    api.get('/notifications/admin/whatsapp-templates', { params }),
+  getWhatsAppTemplate: (id) => api.get(`/notifications/admin/whatsapp-templates/${id}`),
+  createWhatsAppTemplate: (data) => api.post('/notifications/admin/whatsapp-templates', data),
+  updateWhatsAppTemplate: (id, data) => api.put(`/notifications/admin/whatsapp-templates/${id}`, data),
+  deleteWhatsAppTemplate: (id) => api.delete(`/notifications/admin/whatsapp-templates/${id}`),
 };
 
 export const availabilityService = {
@@ -139,11 +249,18 @@ export const adminService = {
   getBookingsByStatus: (status, page, size) => api.get('/bookings/admin/by-status', { params: { status, page, size, clientDate: clientDate() } }),
   searchBookings: (keyword) => api.get('/bookings/admin/search', { params: { q: keyword, clientDate: clientDate() } }),
   updateBooking: (ref, data) => api.patch(`/bookings/admin/${ref}`, data),
-  cancelBooking: (ref, reason) => api.post(`/bookings/admin/${ref}/cancel`, null, { params: { reason } }),
+  cancelBooking: (ref, reason) => api.post(`/bookings/admin/${ref}/cancel`, { reason: reason || '' }),
   confirmBooking: (ref) => api.post(`/bookings/admin/${ref}/confirm`),
   checkIn: (ref) => api.post(`/bookings/admin/${ref}/check-in`, null, { params: { clientDate: clientDate() } }),
   checkout: (ref) => api.post(`/bookings/admin/${ref}/checkout`, null, { params: { clientDate: clientDate(), clientTime: clientTime() } }),
-  undoCheckIn: (ref) => api.post(`/bookings/admin/${ref}/undo-check-in`, null, { params: { clientDate: clientDate() } }),
+  undoCheckIn: (ref, reason) => api.post(`/bookings/admin/${ref}/undo-check-in`, { reason: reason || '' }, { params: { clientDate: clientDate() } }),
+  // ── QR / OTP check-in ──
+  issueCheckInQr: (ref) => api.post(`/bookings/admin/${ref}/check-in/qr/issue`),
+  issueCheckInOtp: (ref) => api.post(`/bookings/admin/${ref}/check-in/otp/issue`),
+  verifyCheckIn: (payload) => api.post(`/bookings/admin/check-in/verify`, {
+    ...payload,
+    clientDate: clientDate(),
+  }),
   getBlockedDates: () => api.get('/availability/admin/blocked-dates'),
   getBlockedSlots: () => api.get('/availability/admin/blocked-slots'),
   blockDate: (data) => api.post('/availability/admin/block-date', data),
@@ -168,11 +285,19 @@ export const adminService = {
   updateAddOn: (id, data) => api.put(`/bookings/admin/add-ons/${id}`, data),
   toggleAddOn: (id) => api.patch(`/bookings/admin/add-ons/${id}/toggle-active`),
   deleteAddOn: (id) => api.delete(`/bookings/admin/add-ons/${id}`),
+  // Invoices (admin)
+  getAdminInvoices: () => api.get('/bookings/admin/invoices'),
+  resendInvoice: (ref) => api.post(`/bookings/admin/${ref}/invoice/resend`),
   // Reports
   getReport: (period) => api.get('/bookings/admin/reports', { params: { period, clientDate: clientDate() } }),
   getReportByDateRange: (from, to) => api.get('/bookings/admin/reports/date-range', { params: { from, to, clientDate: clientDate() } }),
   // Operational date (current business day driven by audit)
   getOperationalDate: () => api.get('/bookings/admin/operational-date', { params: { clientDate: clientDate(), clientTime: clientTime() } }),
+  // SUPER_ADMIN: advance operational date by one day (manual rollover for clock drift / late audit windows)
+  advanceOperationalDate: () => api.post('/bookings/admin/operational-date/advance', null, { params: { clientDate: clientDate() } }),
+  // SUPER_ADMIN: override the operational date to a specific value (90d back / 30d forward)
+  setOperationalDate: (operationalDate) =>
+    api.post('/bookings/admin/operational-date/set', { operationalDate }, { params: { clientDate: clientDate() } }),
   // Audit (no date picker — always audits the current operational date)
   runAudit: () => api.post('/bookings/admin/audit', null, { params: { clientDate: clientDate(), clientTime: clientTime() } }),
   // Admin create booking
@@ -188,11 +313,50 @@ export const adminService = {
   // CQRS projection replay
   replayBooking: (ref) => api.post(`/bookings/admin/${ref}/replay`),
   replayAll: () => api.post('/bookings/admin/replay-all'),
+  // Super-admin: force a booking into a target status, bypassing the
+  // normal transition table. Reason is mandatory and recorded as a
+  // MANUAL_REVIEW_FLAGGED audit row. Idempotency-Key prevents
+  // double-application on retries.
+  overrideBookingStatus: (ref, targetStatus, reason, idempotencyKey) =>
+    api.post(`/bookings/admin/${ref}/override-status`,
+      { targetStatus, reason },
+      idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {}),
   // Saga monitoring (super admin)
   getFailedSagas: () => api.get('/bookings/admin/sagas/failed'),
   getCompensatingSagas: () => api.get('/bookings/admin/sagas/compensating'),
   // Retry failed notifications
   retryFailedNotifications: () => api.post('/notifications/admin/retry-failed'),
+
+  // ── Recovery queues (admin) ─────────────────────────────
+  // Each endpoint returns { queue, page, size, total, rows }
+  getRecoveryStuckPending: (params = {}) => api.get('/bookings/admin/recovery/stuck-pending', { params }),
+  getRecoveryExpiredHolds: (params = {}) => api.get('/bookings/admin/recovery/expired-holds', { params }),
+  getRecoveryPaidNotConfirmed: (params = {}) => api.get('/bookings/admin/recovery/paid-not-confirmed', { params }),
+  getRecoveryNoShow: (params = {}) => api.get('/bookings/admin/recovery/no-show', { params }),
+  getRecoverySummary: () => api.get('/bookings/admin/recovery/summary'),
+  // Conversion / abandonment funnel for the selected binge.
+  // params: { from?: 'YYYY-MM-DD', to?: 'YYYY-MM-DD' } — defaults last 7 days.
+  getRecoveryFunnel: (params = {}) => api.get('/bookings/admin/recovery/funnel', { params }),
+  // Recovery actions — idempotent, audited
+  releaseStaleHold: (token, reason) => api.post(`/bookings/admin/recovery/expired-holds/${token}/release`, { reason }),
+  cancelStuckPending: (ref, reason) => api.post(`/bookings/admin/recovery/stuck-pending/${ref}/cancel`, { reason }),
+  replayPaidNotConfirmed: (ref) => api.post(`/bookings/admin/recovery/paid-not-confirmed/${ref}/replay`),
+
+  // ── Maker-checker approvals (payment-service) ───────────
+  // Risky actions above their configured threshold create an approval
+  // request that a *different* admin must approve. Currently wired:
+  // refund retry > ₹5000.
+  listApprovals: (params = {}) => api.get('/payments/admin/approvals', { params }),
+  getApproval: (id) => api.get(`/payments/admin/approvals/${id}`),
+  approveApproval: (id, reason) => api.post(`/payments/admin/approvals/${id}/approve`, { reason }),
+  rejectApproval: (id, reason) => api.post(`/payments/admin/approvals/${id}/reject`, { reason }),
+  cancelApproval: (id, reason) => api.post(`/payments/admin/approvals/${id}/cancel`, { reason }),
+  executeApprovedRefundRetry: (id) => api.post(`/payments/admin/approvals/${id}/execute-refund-retry`),
+  // Retry a FAILED refund. Below threshold: completes immediately. Above
+  // threshold: server creates an approval request and returns HTTP 202
+  // with the approval id in the message body — caller must inspect the
+  // response status / message and route the admin to /admin/approvals.
+  retryFailedRefund: (refundId) => api.post(`/payments/admin/refunds/${refundId}/retry`),
   // Pricing: Rate Codes
   getRateCodes: () => api.get('/bookings/admin/pricing/rate-codes'),
   getActiveRateCodes: () => api.get('/bookings/admin/pricing/rate-codes/active'),
@@ -255,6 +419,18 @@ export const adminService = {
   getWaitlistCount: (date) => api.get('/bookings/waitlist/admin/count', { params: { date } }),
   cancelWaitlistEntry: (entryId) => api.delete(`/bookings/waitlist/admin/${entryId}`),
   offerWaitlistEntry: (entryId) => api.post(`/bookings/waitlist/admin/${entryId}/offer`),
+  // priority: int (0=standard, 10=silver, 20=gold, 30=platinum, 100=ops override)
+  updateWaitlistPriority: (entryId, priority) =>
+    api.patch(`/bookings/waitlist/admin/${entryId}/priority`, null, { params: { priority } }),
+  // ── Admin Ops (super-admin maintenance) ────────────────────
+  // Replay poisoned messages from a dead-letter topic back to the live topic.
+  // sourceTopic must be in the server-side allow-list.
+  replayDlt: (sourceTopic, max = 100) =>
+    api.post('/bookings/admin/ops/replay-dlt', null, { params: { sourceTopic, max } }),
+  // Reset failedPermanent=false on a single outbox row (id provided) or all.
+  retryOutbox: (id) =>
+    api.post('/bookings/admin/ops/outbox/retry-failed', null, { params: id ? { id } : {} }),
+  getOpsHealth: () => api.get('/bookings/admin/ops/health'),
   // Media upload
   uploadMedia: (formData) => api.post('/bookings/admin/media/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
   // Venue rooms (admin)
@@ -270,9 +446,37 @@ export const adminService = {
   toggleSurgeRule: (id) => api.patch(`/bookings/admin/pricing/surge-rules/${id}/toggle-active`),
   deleteSurgeRule: (id) => api.delete(`/bookings/admin/pricing/surge-rules/${id}`),
   // Loyalty (admin)
-  getCustomerLoyalty: (customerId) => api.get(`/bookings/admin/loyalty/${customerId}`),
-  adjustLoyaltyPoints: (customerId, data) => api.post(`/bookings/admin/loyalty/${customerId}/adjust`, data),
+  getCustomerLoyalty: async (customerId) => asApiResponse(await loyaltyV2.getCustomerAccount(customerId)),
+  adjustLoyaltyPoints: async (customerId, data) => asApiResponse(await loyaltyV2.adjustCustomerPoints(customerId, data)),
   // Customer review assessment (admin-side)
   getCustomerReviewSummary: (customerId) => api.get(`/bookings/admin/customers/${customerId}/review-summary`),
   getCustomerAdminReviews: (customerId, page = 0, size = 10) => api.get(`/bookings/admin/customers/${customerId}/reviews`, { params: { page, size } }),
+};
+
+// ── Support console (Item 24) ───────────────────────────────────────────────
+export const adminSupportService = {
+  // Booking lookup (single ref, any date — unlike searchBookings which is today-only)
+  getByRef: (ref) => api.get(`/bookings/admin/support/${ref}`),
+  // Threaded notes
+  listNotes: (ref) => api.get(`/bookings/admin/support/${ref}/notes`),
+  addNote: (ref, payload) => api.post(`/bookings/admin/support/${ref}/notes`, payload),
+  editNote: (id, body) => api.patch(`/bookings/admin/support/notes/${id}`, { body }),
+  deleteNote: (id) => api.delete(`/bookings/admin/support/notes/${id}`),
+  pinNote: (id, pinned = true) => api.post(`/bookings/admin/support/notes/${id}/pin`, { pinned }),
+  // Operator actions
+  resendConfirmation: (ref) => api.post(`/bookings/admin/support/${ref}/resend-confirmation`),
+  escalate: (ref, level, reason) => api.post(`/bookings/admin/support/${ref}/escalate`, { level, reason }),
+  goodwill: (ref, amount, reason) => api.post(`/bookings/admin/support/${ref}/goodwill`, { amount, reason }),
+  // Per-row notification retry
+  retryNotification: (id) => api.post(`/notifications/admin/${id}/retry`),
+};
+
+// ── Risk flags (Item 23) ────────────────────────────────────────────────────
+export const adminRiskService = {
+  list: (bingeId, openOnly = true, page = 0, size = 50) =>
+    api.get('/bookings/admin/risk-flags', { params: { bingeId, openOnly, page, size } }),
+  listForBooking: (ref) => api.get(`/bookings/admin/risk-flags/booking/${ref}`),
+  acknowledge: (id, note) => api.post(`/bookings/admin/risk-flags/${id}/acknowledge`, { note }),
+  createManual: (ref, severity, reason) =>
+    api.post(`/bookings/admin/risk-flags/booking/${ref}/manual`, { severity, reason }),
 };

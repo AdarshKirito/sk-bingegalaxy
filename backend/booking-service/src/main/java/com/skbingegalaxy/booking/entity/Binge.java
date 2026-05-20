@@ -109,6 +109,16 @@ public class Binge {
     @Builder.Default
     private int maxPendingPaymentTimeoutsBeforeFreeze = 3;
 
+    /**
+     * Max NO_SHOW bookings (system marked by daily audit) within
+     * {@link #freezeDurationMinutes} before a NO_SHOW_PATTERN freeze is applied.
+     * Set to 0 to disable NO_SHOW-based freezes while keeping the other
+     * trigger types active. Default 3 mirrors the cancel/timeout knobs.
+     */
+    @Column(name = "max_no_shows_before_freeze", nullable = false)
+    @Builder.Default
+    private int maxNoShowsBeforeFreeze = 3;
+
     // ── Cancellation refund applicability ────────────────────────────────
     /** When TRUE, the configured tiered refund applies to bookings cancelled after a SUCCESSFUL payment. */
     @Column(name = "refund_on_successful_payment_cancel", nullable = false)

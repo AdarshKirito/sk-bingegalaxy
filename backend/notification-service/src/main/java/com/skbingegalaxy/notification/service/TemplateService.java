@@ -26,11 +26,29 @@ public class TemplateService {
     }
 
     /**
-     * List all versions of a template.
+     * List versions of templates with optional filters.
+     *
+     * <ul>
+     *   <li>name + channel  → version history for that exact (name, channel) pair.</li>
+     *   <li>name only       → every channel/version belonging to that template name.</li>
+     *   <li>channel only    → every template version for that channel (e.g. all EMAIL templates).</li>
+     *   <li>neither         → entire template inventory, newest-first by version then by name.</li>
+     * </ul>
      */
     public List<NotificationTemplateDto> listVersions(String name, String channel) {
-        return templateRepository.findByNameAndChannelOrderByVersionDesc(name, channel)
-                .stream().map(this::toDto).toList();
+        boolean hasName    = name    != null && !name.isBlank();
+        boolean hasChannel = channel != null && !channel.isBlank();
+        List<NotificationTemplate> rows;
+        if (hasName && hasChannel) {
+            rows = templateRepository.findByNameAndChannelOrderByVersionDesc(name, channel);
+        } else if (hasName) {
+            rows = templateRepository.findByNameOrderByVersionDesc(name);
+        } else if (hasChannel) {
+            rows = templateRepository.findByChannelOrderByNameAscVersionDesc(channel);
+        } else {
+            rows = templateRepository.findAllByOrderByNameAscVersionDesc();
+        }
+        return rows.stream().map(this::toDto).toList();
     }
 
     /**

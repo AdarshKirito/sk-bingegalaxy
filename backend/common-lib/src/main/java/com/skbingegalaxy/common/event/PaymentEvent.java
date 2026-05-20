@@ -1,15 +1,20 @@
 package com.skbingegalaxy.common.event;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.*;
-import java.io.Serializable;
+import lombok.experimental.SuperBuilder;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
-@Data
+@Getter
+@Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
-public class PaymentEvent implements Serializable {
+@SuperBuilder(toBuilder = true)
+@ToString(callSuper = true)
+@JsonIgnoreProperties(ignoreUnknown = true)
+public class PaymentEvent extends EventEnvelope {
     private String bookingRef;
     private String transactionId;
     private BigDecimal amount;

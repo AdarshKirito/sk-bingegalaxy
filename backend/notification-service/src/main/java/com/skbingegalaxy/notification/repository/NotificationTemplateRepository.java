@@ -16,5 +16,11 @@ public interface NotificationTemplateRepository extends MongoRepository<Notifica
 
     List<NotificationTemplate> findByNameOrderByVersionDesc(String name);
 
+    /** All template versions on a single channel (e.g. every EMAIL template), ordered for stable UI display. */
+    List<NotificationTemplate> findByChannelOrderByNameAscVersionDesc(String channel);
+
+    /** Full inventory, ordered for the admin grid: alphabetical by name, newest version first. */
+    List<NotificationTemplate> findAllByOrderByNameAscVersionDesc();
+
     Optional<NotificationTemplate> findByNameAndChannelAndVersion(String name, String channel, int version);
 }

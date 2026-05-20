@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { adminService, toArray } from '../services/endpoints';
+import { useConfirm } from '../components/ui/ConfirmProvider';
 import { toast } from 'react-toastify';
 import { format } from 'date-fns';
 import { FiCalendar, FiClock, FiSlash, FiTrash2 } from 'react-icons/fi';
@@ -18,6 +19,7 @@ const toMinutes = (v) => (v != null && v < 48) ? v * 60 : (v || 0);
 const ALL_TIMES = Array.from({ length: 48 }, (_, i) => i * 30);
 
 export default function AdminBlockedDates() {
+  const confirm = useConfirm();
   const [blockedDates, setBlockedDates] = useState([]);
   const [blockedSlots, setBlockedSlots] = useState([]);
   const [tab, setTab] = useState('dates');
@@ -95,7 +97,13 @@ export default function AdminBlockedDates() {
   };
 
   const handleUnblockDate = async (date) => {
-    if (!confirm(`Unblock ${date}?`)) return;
+    const ok = await confirm({
+      title: `Unblock ${date}?`,
+      message: 'The full date will become available for bookings again.',
+      confirmLabel: 'Unblock date',
+      variant: 'primary',
+    });
+    if (!ok) return;
     try {
       await adminService.unblockDate(date);
       toast.success('Date unblocked');
@@ -131,7 +139,13 @@ export default function AdminBlockedDates() {
   };
 
   const handleUnblockSlot = async (date, startMinute) => {
-    if (!window.confirm(`Unblock the ${fmtMin(startMinute)} slot on ${date}?`)) return;
+    const ok = await confirm({
+      title: `Unblock ${fmtMin(startMinute)} slot on ${date}?`,
+      message: 'The slot will become bookable again from this moment. Pending bookings (if any) are unaffected.',
+      confirmLabel: 'Unblock slot',
+      variant: 'primary',
+    });
+    if (!ok) return;
     try {
       await adminService.unblockSlot(date, startMinute);
       toast.success('Slot unblocked');

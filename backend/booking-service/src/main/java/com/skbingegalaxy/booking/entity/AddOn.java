@@ -41,4 +41,21 @@ public class AddOn {
     @Column(nullable = false)
     @Builder.Default
     private boolean active = true;
+
+    /**
+     * Daily inventory cap for this add-on (e.g. "only 5 cakes per day").
+     * NULL means unlimited. Enforced at booking creation/update by counting
+     * already-booked instances for the same booking date.
+     */
+    @Column(name = "stock_per_day")
+    private Integer stockPerDay;
+
+    /**
+     * Minimum advance-notice required for this add-on, in minutes
+     * (e.g. decoration setup needs 6 hours = 360). Enforced as
+     * {@code (bookingStart - now) >= advanceNoticeMinutes}.
+     * NULL means no advance-notice requirement.
+     */
+    @Column(name = "advance_notice_minutes")
+    private Integer advanceNoticeMinutes;
 }

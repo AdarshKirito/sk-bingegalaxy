@@ -88,11 +88,24 @@ public class EventListener {
     @KafkaListener(topics = KafkaTopics.BOOKING_CANCELLED, groupId = "notification-service")
     public void handleBookingCancelled(BookingEvent event) {
         try {
-            log.info("Booking cancelled event: {}", event.getBookingRef());
+            log.info("Booking cancelled event: {} (status={})", event.getBookingRef(), event.getStatus());
             if (event.getCustomerEmail() == null || event.getBookingRef() == null) {
                 log.warn("Skipping BOOKING_CANCELLED — missing required fields");
                 return;
             }
+
+            // Audit-driven NO_SHOW path: booking-service publishes here so we
+            // can cancel scheduled reminders (notably POST_VISIT_REVIEW) but
+            // we MUST NOT email the customer telling them their booking was
+            // cancelled — they simply didn't show up. Run the side-effect and
+            // exit early.
+            if ("NO_SHOW".equalsIgnoreCase(event.getStatus())) {
+                cancelReminders(event.getBookingRef());
+                log.info("NO_SHOW audit for {} — reminders cancelled, suppressing customer email",
+                    event.getBookingRef());
+                return;
+            }
+
             if (recentlySentForBooking(event.getBookingRef(), "BOOKING_CANCELLED")) {
                 log.info("Duplicate BOOKING_CANCELLED for {} — skipping (sent within TTL)", event.getBookingRef());
                 return;
@@ -149,6 +162,9 @@ public class EventListener {
                 event.getBookingRef(),
                 meta
             );
+
+            // Once payment succeeds, the PAYMENT_PENDING nudge is no longer relevant.
+            cancelRemindersOfType(event.getBookingRef(), "PAYMENT_PENDING");
         } catch (Exception e) {
             log.error("Failed to process PAYMENT_SUCCESS event for {}: {}", event.getBookingRef(), e.getMessage(), e);
             throw new RuntimeException("Failed to process PAYMENT_SUCCESS for " + event.getBookingRef(), e);
@@ -446,48 +462,89 @@ public class EventListener {
         }
         try {
             LocalDateTime bookingStart = LocalDateTime.of(event.getBookingDate(), event.getStartTime());
+            LocalDateTime now = LocalDateTime.now();
 
             // "Day before" reminder — fires at 10:00 the day before the booking
             LocalDateTime dayBefore = LocalDateTime.of(
                     event.getBookingDate().minusDays(1), LocalTime.of(10, 0));
-            if (dayBefore.isAfter(LocalDateTime.now())) {
-                bookingReminderRepository.save(BookingReminder.builder()
-                        .bookingRef(event.getBookingRef())
-                        .recipientEmail(event.getCustomerEmail())
-                        .recipientPhone(event.getCustomerPhone())
-                        .recipientPhoneCountryCode(event.getCustomerPhoneCountryCode())
-                        .recipientName(event.getCustomerName())
-                        .eventTypeName(event.getEventTypeName())
-                        .bookingDate(event.getBookingDate())
-                        .startTime(event.getStartTime())
-                        .durationHours(event.getDurationHours())
-                        .reminderType("DAY_BEFORE")
-                        .fireAt(dayBefore)
-                        .build());
-            }
+            saveReminder(event, "DAY_BEFORE", dayBefore, now);
 
-            // "1 hour before" reminder
+            // "Check-in instructions" — fires ~3 hours before start (venue, parking, dress code)
+            LocalDateTime checkInInstructions = bookingStart.minusHours(3);
+            saveReminder(event, "CHECK_IN_INSTRUCTIONS", checkInInstructions, now);
+
+            // "2 hours before" — primary heads-up reminder (replaces the previous 1-hour version)
+            LocalDateTime twoHoursBefore = bookingStart.minusHours(2);
+            saveReminder(event, "TWO_HOURS_BEFORE", twoHoursBefore, now);
+
+            // "1 hour before" — kept as a final nudge for last-minute guests
             LocalDateTime oneHourBefore = bookingStart.minusHours(1);
-            if (oneHourBefore.isAfter(LocalDateTime.now())) {
-                bookingReminderRepository.save(BookingReminder.builder()
-                        .bookingRef(event.getBookingRef())
-                        .recipientEmail(event.getCustomerEmail())
-                        .recipientPhone(event.getCustomerPhone())
-                        .recipientPhoneCountryCode(event.getCustomerPhoneCountryCode())
-                        .recipientName(event.getCustomerName())
-                        .eventTypeName(event.getEventTypeName())
-                        .bookingDate(event.getBookingDate())
-                        .startTime(event.getStartTime())
-                        .durationHours(event.getDurationHours())
-                        .reminderType("ONE_HOUR_BEFORE")
-                        .fireAt(oneHourBefore)
-                        .build());
+            saveReminder(event, "ONE_HOUR_BEFORE", oneHourBefore, now);
+
+            // "Cancellation deadline" — fires 6 hours before the per-binge
+            // cancellation cut-off. The cut-off is carried on the BookingEvent
+            // (in MINUTES, populated by booking-service from binge.customerCancellationCutoffMinutes).
+            // Falls back to the env override CANCELLATION_HOURS_BEFORE (legacy)
+            // and finally a 180-minute default to match the booking-service entity default.
+            int cutoffMinutes;
+            if (event.getCustomerCancellationCutoffMinutes() != null
+                    && event.getCustomerCancellationCutoffMinutes() > 0) {
+                cutoffMinutes = event.getCustomerCancellationCutoffMinutes();
+            } else {
+                int legacyHours = parseInt(System.getenv("CANCELLATION_HOURS_BEFORE"), 0);
+                cutoffMinutes = legacyHours > 0 ? legacyHours * 60 : 180;
             }
+            LocalDateTime deadline = bookingStart.minusMinutes(cutoffMinutes);
+            LocalDateTime deadlineReminder = deadline.minusHours(6);
+            saveReminder(event, "CANCELLATION_DEADLINE", deadlineReminder, now);
+
+            // "Payment pending" — fires 30 minutes after creation if the booking
+            // is still PENDING. The downstream PAYMENT_SUCCESS / BOOKING_CANCELLED
+            // listeners cancel this reminder if it becomes irrelevant.
+            saveReminder(event, "PAYMENT_PENDING", now.plusMinutes(30), now);
+
+            // "Post-visit review" — fires (booking end + 4h) by default. The
+            // post-visit window is configurable via the env var
+            // POST_VISIT_REVIEW_HOURS_AFTER (default 4). Cancelled if the
+            // booking ends up CANCELLED / NO_SHOW (handled by cancelReminders).
+            int reviewDelayHours = parseInt(System.getenv("POST_VISIT_REVIEW_HOURS_AFTER"), 4);
+            int durationMinutes = event.getDurationMinutes() != null
+                ? event.getDurationMinutes()
+                : event.getDurationHours() * 60;
+            LocalDateTime bookingEnd = bookingStart.plusMinutes(durationMinutes);
+            saveReminder(event, "POST_VISIT_REVIEW", bookingEnd.plusHours(reviewDelayHours), now);
 
             log.info("Scheduled reminders for booking {}", event.getBookingRef());
         } catch (Exception e) {
             log.error("Failed to schedule reminders for {}: {}", event.getBookingRef(), e.getMessage());
         }
+    }
+
+    private void saveReminder(BookingEvent event, String type, LocalDateTime fireAt, LocalDateTime now) {
+        if (!fireAt.isAfter(now)) return; // skip past-due
+        try {
+            bookingReminderRepository.save(BookingReminder.builder()
+                    .bookingRef(event.getBookingRef())
+                    .recipientEmail(event.getCustomerEmail())
+                    .recipientPhone(event.getCustomerPhone())
+                    .recipientPhoneCountryCode(event.getCustomerPhoneCountryCode())
+                    .recipientName(event.getCustomerName())
+                    .eventTypeName(event.getEventTypeName())
+                    .bookingDate(event.getBookingDate())
+                    .startTime(event.getStartTime())
+                    .durationHours(event.getDurationHours())
+                    .reminderType(type)
+                    .fireAt(fireAt)
+                    .build());
+        } catch (org.springframework.dao.DuplicateKeyException dup) {
+            // Idempotent: same (bookingRef, type) already scheduled — fine.
+            log.debug("Reminder {} for {} already exists — skipping", type, event.getBookingRef());
+        }
+    }
+
+    private static int parseInt(String s, int fallback) {
+        try { return s == null ? fallback : Integer.parseInt(s); }
+        catch (NumberFormatException e) { return fallback; }
     }
 
     private void cancelReminders(String bookingRef) {
@@ -501,6 +558,23 @@ public class EventListener {
             }
         } catch (Exception e) {
             log.error("Failed to cancel reminders for {}: {}", bookingRef, e.getMessage());
+        }
+    }
+
+    private void cancelRemindersOfType(String bookingRef, String reminderType) {
+        try {
+            var matched = bookingReminderRepository
+                .findByBookingRefAndReminderType(bookingRef, reminderType)
+                .stream().filter(r -> !r.isFired() && !r.isCancelled()).toList();
+            if (!matched.isEmpty()) {
+                matched.forEach(r -> r.setCancelled(true));
+                bookingReminderRepository.saveAll(matched);
+                log.info("Cancelled {} {} reminder(s) for booking {}",
+                    matched.size(), reminderType, bookingRef);
+            }
+        } catch (Exception e) {
+            log.error("Failed to cancel {} reminder for {}: {}",
+                reminderType, bookingRef, e.getMessage());
         }
     }
 }

@@ -18,6 +18,8 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.util.function.Supplier;
+
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -59,6 +61,10 @@ class BookingControllerAuthzTest {
         // BingeContextFilter is a servlet filter and doesn't run under addFilters=false,
         // so we populate the ThreadLocal that @ModelAttribute validateSelectedBinge reads.
         BingeContext.setBingeId(1L);
+        // Default: pass-through the wrapped supplier so controller-level
+        // exceptions still surface to the GlobalExceptionHandler.
+        when(idempotencyService.execute(any(), anyString(), anyString(), any(), any(), any(), any()))
+            .thenAnswer(inv -> ((Supplier<?>) inv.getArgument(6)).get());
         bookingOwnedBy42 = BookingDto.builder()
             .bookingRef("SKBG25000042")
             .customerId(42L)

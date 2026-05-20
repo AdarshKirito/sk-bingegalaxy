@@ -1,0 +1,185 @@
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by org.fusesource.jansi.internal.JansiLoader in an unnamed module (file:/C:/apache-maven-3.9.6/lib/jansi-2.4.0.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by com.google.common.util.concurrent.AbstractFuture$UnsafeAtomicHelper (file:/C:/apache-maven-3.9.6/lib/guava-32.0.1-jre.jar)
+WARNING: Please consider reporting this to the maintainers of class com.google.common.util.concurrent.AbstractFuture$UnsafeAtomicHelper
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -----------------< com.skbingegalaxy:booking-service >------------------
+[INFO] Building Booking Service 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ booking-service ---
+[INFO] Copying 2 resources from src\main\resources to target\classes
+[INFO] Copying 43 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ booking-service ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ booking-service ---
+[INFO] Copying 1 resource from src\test\resources to target\test-classes
+[INFO] 
+[INFO] --- compiler:3.13.0:testCompile (default-testCompile) @ booking-service ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- surefire:3.5.3:test (default-test) @ booking-service ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running com.skbingegalaxy.booking.service.BookingServiceTest
+Mockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build what is described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org/mockito/Mockito.html#0.3
+WARNING: A Java agent has been loaded dynamically (C:\Users\ADARS\.m2\repository\net\bytebuddy\byte-buddy-agent\1.15.10\byte-buddy-agent-1.15.10.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by net.bytebuddy.dynamic.loading.ClassInjector$UsingUnsafe$Dispatcher$CreationAction (file:/C:/Users/ADARS/.m2/repository/net/bytebuddy/byte-buddy/1.15.10/byte-buddy-1.15.10.jar)
+WARNING: Please consider reporting this to the maintainers of class net.bytebuddy.dynamic.loading.ClassInjector$UsingUnsafe$Dispatcher$CreationAction
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+15:57:45.682 [main] INFO com.skbingegalaxy.booking.service.BookingService -- Booking cancelled: SKBG25123456
+15:57:45.964 [main] INFO com.skbingegalaxy.booking.service.BookingService -- Payment status updated for SKBG25123456: SUCCESS
+15:57:46.109 [main] INFO com.skbingegalaxy.booking.service.BookingService -- Booking cancelled: SKBG25123456
+[ERROR] Tests run: 18, Failures: 4, Errors: 1, Skipped: 0, Time elapsed: 7.338 s <<< FAILURE! -- in com.skbingegalaxy.booking.service.BookingServiceTest
+[ERROR] com.skbingegalaxy.booking.service.BookingServiceTest.createBooking_slotNotAvailable_throwsException -- Time elapsed: 6.669 s <<< FAILURE!
+java.lang.AssertionError: 
+
+Expecting actual throwable to be an instance of:
+  com.skbingegalaxy.common.exception.BusinessException
+but was:
+  java.lang.NullPointerException: Cannot invoke "com.skbingegalaxy.booking.service.CustomerFreezeService.assertNotFrozen(java.lang.Long, java.lang.Long)" because "this.customerFreezeService" is null
+	at com.skbingegalaxy.booking.service.BookingService.createBooking(BookingService.java:148)
+	at com.skbingegalaxy.booking.service.BookingService.createBooking(BookingService.java:119)
+	at com.skbingegalaxy.booking.service.BookingServiceTest.lambda$1(BookingServiceTest.java:178)
+	...(74 remaining lines not displayed - this can be changed with Assertions.setMaxStackTraceElementsDisplayed)
+	at com.skbingegalaxy.booking.service.BookingServiceTest.createBooking_slotNotAvailable_throwsException(BookingServiceTest.java:180)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+
+[ERROR] com.skbingegalaxy.booking.service.BookingServiceTest.createBooking_eventTypeNotFound_throwsException -- Time elapsed: 0.045 s <<< FAILURE!
+java.lang.AssertionError: 
+
+Expecting actual throwable to be an instance of:
+  com.skbingegalaxy.common.exception.ResourceNotFoundException
+but was:
+  java.lang.NullPointerException: Cannot invoke "com.skbingegalaxy.booking.service.CustomerFreezeService.assertNotFrozen(java.lang.Long, java.lang.Long)" because "this.customerFreezeService" is null
+	at com.skbingegalaxy.booking.service.BookingService.createBooking(BookingService.java:148)
+	at com.skbingegalaxy.booking.service.BookingService.createBooking(BookingService.java:119)
+	at com.skbingegalaxy.booking.service.BookingServiceTest.lambda$2(BookingServiceTest.java:193)
+	...(74 remaining lines not displayed - this can be changed with Assertions.setMaxStackTraceElementsDisplayed)
+	at com.skbingegalaxy.booking.service.BookingServiceTest.createBooking_eventTypeNotFound_throwsException(BookingServiceTest.java:195)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+
+[ERROR] com.skbingegalaxy.booking.service.BookingServiceTest.createBooking_invalidDuration_throwsException -- Time elapsed: 0.024 s <<< FAILURE!
+java.lang.AssertionError: 
+
+Expecting actual throwable to be an instance of:
+  com.skbingegalaxy.common.exception.BusinessException
+but was:
+  java.lang.NullPointerException: Cannot invoke "com.skbingegalaxy.booking.service.CustomerFreezeService.assertNotFrozen(java.lang.Long, java.lang.Long)" because "this.customerFreezeService" is null
+	at com.skbingegalaxy.booking.service.BookingService.createBooking(BookingService.java:148)
+	at com.skbingegalaxy.booking.service.BookingService.createBooking(BookingService.java:119)
+	at com.skbingegalaxy.booking.service.BookingServiceTest.lambda$0(BookingServiceTest.java:157)
+	...(74 remaining lines not displayed - this can be changed with Assertions.setMaxStackTraceElementsDisplayed)
+	at com.skbingegalaxy.booking.service.BookingServiceTest.createBooking_invalidDuration_throwsException(BookingServiceTest.java:159)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+
+[ERROR] com.skbingegalaxy.booking.service.BookingServiceTest.createBooking_success -- Time elapsed: 0.025 s <<< ERROR!
+java.lang.NullPointerException: Cannot invoke "com.skbingegalaxy.booking.service.CustomerFreezeService.assertNotFrozen(java.lang.Long, java.lang.Long)" because "this.customerFreezeService" is null
+	at com.skbingegalaxy.booking.service.BookingService.createBooking(BookingService.java:148)
+	at com.skbingegalaxy.booking.service.BookingService.createBooking(BookingService.java:119)
+	at com.skbingegalaxy.booking.service.BookingServiceTest.createBooking_success(BookingServiceTest.java:136)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+
+[ERROR] com.skbingegalaxy.booking.service.BookingServiceTest.createBooking_rejectsForeignEventTypeWhenBingeSelected -- Time elapsed: 0.015 s <<< FAILURE!
+java.lang.AssertionError: 
+
+Expecting actual throwable to be an instance of:
+  com.skbingegalaxy.common.exception.ResourceNotFoundException
+but was:
+  java.lang.NullPointerException: Cannot invoke "com.skbingegalaxy.booking.service.CustomerFreezeService.assertNotFrozen(java.lang.Long, java.lang.Long)" because "this.customerFreezeService" is null
+	at com.skbingegalaxy.booking.service.BookingService.createBooking(BookingService.java:148)
+	at com.skbingegalaxy.booking.service.BookingService.createBooking(BookingService.java:119)
+	at com.skbingegalaxy.booking.service.BookingServiceTest.lambda$6(BookingServiceTest.java:344)
+	...(74 remaining lines not displayed - this can be changed with Assertions.setMaxStackTraceElementsDisplayed)
+	at com.skbingegalaxy.booking.service.BookingServiceTest.createBooking_rejectsForeignEventTypeWhenBingeSelected(BookingServiceTest.java:346)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+
+[INFO] 
+[INFO] Results:
+[INFO] 
+[ERROR] Failures: 
+[ERROR]   BookingServiceTest.createBooking_eventTypeNotFound_throwsException:195 
+Expecting actual throwable to be an instance of:
+  com.skbingegalaxy.common.exception.ResourceNotFoundException
+but was:
+  java.lang.NullPointerException: Cannot invoke "com.skbingegalaxy.booking.service.CustomerFreezeService.assertNotFrozen(java.lang.Long, java.lang.Long)" because "this.customerFreezeService" is null
+	at com.skbingegalaxy.booking.service.BookingService.createBooking(BookingService.java:148)
+	at com.skbingegalaxy.booking.service.BookingService.createBooking(BookingService.java:119)
+	at com.skbingegalaxy.booking.service.BookingServiceTest.lambda$2(BookingServiceTest.java:193)
+	...(74 remaining lines not displayed - this can be changed with Assertions.setMaxStackTraceElementsDisplayed)
+[ERROR]   BookingServiceTest.createBooking_invalidDuration_throwsException:159 
+Expecting actual throwable to be an instance of:
+  com.skbingegalaxy.common.exception.BusinessException
+but was:
+  java.lang.NullPointerException: Cannot invoke "com.skbingegalaxy.booking.service.CustomerFreezeService.assertNotFrozen(java.lang.Long, java.lang.Long)" because "this.customerFreezeService" is null
+	at com.skbingegalaxy.booking.service.BookingService.createBooking(BookingService.java:148)
+	at com.skbingegalaxy.booking.service.BookingService.createBooking(BookingService.java:119)
+	at com.skbingegalaxy.booking.service.BookingServiceTest.lambda$0(BookingServiceTest.java:157)
+	...(74 remaining lines not displayed - this can be changed with Assertions.setMaxStackTraceElementsDisplayed)
+[ERROR]   BookingServiceTest.createBooking_rejectsForeignEventTypeWhenBingeSelected:346 
+Expecting actual throwable to be an instance of:
+  com.skbingegalaxy.common.exception.ResourceNotFoundException
+but was:
+  java.lang.NullPointerException: Cannot invoke "com.skbingegalaxy.booking.service.CustomerFreezeService.assertNotFrozen(java.lang.Long, java.lang.Long)" because "this.customerFreezeService" is null
+	at com.skbingegalaxy.booking.service.BookingService.createBooking(BookingService.java:148)
+	at com.skbingegalaxy.booking.service.BookingService.createBooking(BookingService.java:119)
+	at com.skbingegalaxy.booking.service.BookingServiceTest.lambda$6(BookingServiceTest.java:344)
+	...(74 remaining lines not displayed - this can be changed with Assertions.setMaxStackTraceElementsDisplayed)
+[ERROR]   BookingServiceTest.createBooking_slotNotAvailable_throwsException:180 
+Expecting actual throwable to be an instance of:
+  com.skbingegalaxy.common.exception.BusinessException
+but was:
+  java.lang.NullPointerException: Cannot invoke "com.skbingegalaxy.booking.service.CustomerFreezeService.assertNotFrozen(java.lang.Long, java.lang.Long)" because "this.customerFreezeService" is null
+	at com.skbingegalaxy.booking.service.BookingService.createBooking(BookingService.java:148)
+	at com.skbingegalaxy.booking.service.BookingService.createBooking(BookingService.java:119)
+	at com.skbingegalaxy.booking.service.BookingServiceTest.lambda$1(BookingServiceTest.java:178)
+	...(74 remaining lines not displayed - this can be changed with Assertions.setMaxStackTraceElementsDisplayed)
+[ERROR] Errors: 
+[ERROR]   BookingServiceTest.createBooking_success:136 » NullPointer Cannot invoke "com.skbingegalaxy.booking.service.CustomerFreezeService.assertNotFrozen(java.lang.Long, java.lang.Long)" because "this.customerFreezeService" is null
+[INFO] 
+[ERROR] Tests run: 18, Failures: 4, Errors: 1, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  18.587 s
+[INFO] Finished at: 2026-05-01T15:57:46-05:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.5.3:test (default-test) on project booking-service: There are test failures.
+[ERROR] 
+[ERROR] See D:\sk-binge-galaxy\sk-binge-galaxy\backend\booking-service\target\surefire-reports for the individual test results.
+[ERROR] See dump files (if any exist) [date].dump, [date]-jvmRun[N].dump and [date].dumpstream.
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException

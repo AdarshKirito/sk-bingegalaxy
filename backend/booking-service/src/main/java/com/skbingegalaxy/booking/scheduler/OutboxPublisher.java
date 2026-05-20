@@ -135,10 +135,22 @@ public class OutboxPublisher {
     }
 
     private Object toKafkaPayload(OutboxEvent event) throws Exception {
+        // Booking-shaped topics are typed back to BookingEvent so the producer
+        // serializer writes a proper JSON object (not a JSON-quoted String).
+        // Item 25 — extended to cover BOOKING_CHECKED_IN / BOOKING_COMPLETED.
         if (KafkaTopics.BOOKING_CREATED.equals(event.getTopic())
                 || KafkaTopics.BOOKING_CONFIRMED.equals(event.getTopic())
-                || KafkaTopics.BOOKING_CANCELLED.equals(event.getTopic())) {
+                || KafkaTopics.BOOKING_CANCELLED.equals(event.getTopic())
+                || KafkaTopics.BOOKING_CHECKED_IN.equals(event.getTopic())
+                || KafkaTopics.BOOKING_COMPLETED.equals(event.getTopic())) {
             return objectMapper.readValue(event.getPayload(), BookingEvent.class);
+        }
+        // For every other topic, parse the JSON payload to a generic tree so
+        // JsonSerializer emits an object, not a quoted String. This was a
+        // pre-existing latent issue for NOTIFICATION_SEND etc. — fixing it
+        // here keeps consumers happy without per-topic class wiring.
+        if (event.getPayload() != null && !event.getPayload().isBlank()) {
+            return objectMapper.readTree(event.getPayload());
         }
         return event.getPayload();
     }

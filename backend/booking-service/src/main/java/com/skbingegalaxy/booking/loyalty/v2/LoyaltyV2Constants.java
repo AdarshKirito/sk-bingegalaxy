@@ -14,6 +14,9 @@ public final class LoyaltyV2Constants {
     /** Seed program code — matches V21__loyalty_v2_schema.sql. */
     public static final String DEFAULT_PROGRAM_CODE = "SK_MEMBERSHIP";
 
+    /** Conservative display fallback; real checkout redemption is rule-driven per binge. */
+    public static final int DEFAULT_REDEMPTION_RATE = 100;
+
     // ── Tier codes ────────────────────────────────────────────────────────
     public static final String TIER_BRONZE   = "BRONZE";
     public static final String TIER_SILVER   = "SILVER";

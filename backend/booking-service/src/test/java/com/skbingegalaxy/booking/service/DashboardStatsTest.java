@@ -35,6 +35,7 @@ import static org.mockito.Mockito.*;
 class DashboardStatsTest {
 
     @Mock private BookingRepository bookingRepository;
+    @Mock private com.skbingegalaxy.booking.repository.BingeRepository bingeRepository;
     @Mock private EventTypeRepository eventTypeRepository;
     @Mock private AddOnRepository addOnRepository;
     @Mock private AvailabilityClient availabilityClient;
@@ -47,6 +48,13 @@ class DashboardStatsTest {
     @Mock private BookingEventLogService eventLogService;
     @Mock private SagaOrchestrator sagaOrchestrator;
     @Mock private LoyaltyService loyaltyService;
+    @Mock private com.skbingegalaxy.booking.service.CustomerFreezeService customerFreezeService;
+    @Mock private com.skbingegalaxy.booking.repository.SlotHoldRepository slotHoldRepository;
+    @Mock private com.skbingegalaxy.booking.service.BookingEventPublisher bookingEventPublisher;
+    @Mock private com.skbingegalaxy.booking.service.BookingAnalyticsMetrics analyticsMetrics;
+    @Mock private com.skbingegalaxy.booking.service.BookingRiskEvaluator bookingRiskEvaluator;
+    @Mock private com.skbingegalaxy.booking.repository.BookingTransferRepository bookingTransferRepository;
+    @Mock private com.skbingegalaxy.booking.service.statemachine.BookingStateMachine stateMachineMock;
 
     @InjectMocks private BookingService bookingService;
 
@@ -56,6 +64,12 @@ class DashboardStatsTest {
     void initLoyaltyMocks() {
         lenient().when(loyaltyService.redeemPoints(anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
             .thenReturn(new LoyaltyService.RedemptionResult(0L, BigDecimal.ZERO));
+        // Replace the @Mock SM with a real one wired to the same mocked
+        // collaborators so the audit sweep transition() calls hit the real
+        // logic and we still observe save() / logEventFull() on the mocks.
+        org.springframework.test.util.ReflectionTestUtils.setField(bookingService, "stateMachine",
+            new com.skbingegalaxy.booking.service.statemachine.BookingStateMachine(
+                bookingRepository, eventLogService));
     }
 
     @AfterEach

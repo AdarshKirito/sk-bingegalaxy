@@ -47,6 +47,26 @@ public class BookingEventLogService {
     public void logEvent(Booking booking, BookingEventType eventType, String previousStatus,
                          Long triggeredBy, String triggeredByRole,
                          String triggeredByName, String description) {
+        logEventFull(booking, eventType, previousStatus, triggeredBy,
+            triggeredByRole, triggeredByName, description, null, null, null);
+    }
+
+    /**
+     * Full-fidelity audit logger. Captures reason, source IP, and User-Agent
+     * for forensic and compliance review of risky actions
+     * (cancel / refund / reschedule / transfer / check-in undo / price
+     * override / manual confirmation).
+     *
+     * <p>All four trailing fields are optional — pass {@code null} for
+     * automated/system events. The HTTP request capture lives in
+     * {@link com.skbingegalaxy.booking.web.RequestContext} so callers don't
+     * need {@code HttpServletRequest} on hand.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void logEventFull(Booking booking, BookingEventType eventType, String previousStatus,
+                             Long triggeredBy, String triggeredByRole,
+                             String triggeredByName, String description,
+                             String reason, String ipAddress, String userAgent) {
         try {
             String resolvedName = resolveActorName(booking, triggeredByRole, triggeredByName);
             BookingEventLog event = BookingEventLog.builder()
@@ -59,6 +79,10 @@ public class BookingEventLogService {
                 .triggeredByName(resolvedName)
                 .description(description)
                 .snapshot(buildSnapshot(booking))
+                .reason(trim(reason, 1000))
+                .ipAddress(trim(ipAddress, 45))
+                .userAgent(trim(userAgent, 500))
+                .bingeId(booking.getBingeId())
                 .build();
 
             eventLogRepository.save(event);
@@ -69,6 +93,13 @@ public class BookingEventLogService {
             log.warn("Failed to log booking event {} for {}: {}",
                      eventType, booking.getBookingRef(), e.getMessage());
         }
+    }
+
+    private static String trim(String s, int max) {
+        if (s == null) return null;
+        String t = s.trim();
+        if (t.isEmpty()) return null;
+        return t.length() > max ? t.substring(0, max) : t;
     }
 
     /**

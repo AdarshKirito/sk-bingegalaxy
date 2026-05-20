@@ -36,6 +36,7 @@ const { mockGetCurrentBookings, mockGetPastBookings, mockGetMyPricing, mockGetBi
   mockGetBingeDashboardExperience: vi.fn(),
 }));
 vi.mock('../services/endpoints', () => ({
+  toArray: (value) => Array.isArray(value) ? value : [],
   bookingService: {
     getCurrentBookings: mockGetCurrentBookings,
     getPastBookings: mockGetPastBookings,

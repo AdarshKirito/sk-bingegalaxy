@@ -44,6 +44,14 @@ public class EventType {
     @Builder.Default
     private int maxHours = 8;
 
+    /** Per-event-type minimum guest count. NULL = no lower bound. */
+    @Column(name = "min_guests")
+    private Integer minGuests;
+
+    /** Per-event-type maximum guest count. NULL = no upper bound. */
+    @Column(name = "max_guests")
+    private Integer maxGuests;
+
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "event_type_images", joinColumns = @JoinColumn(name = "event_type_id"))
     @Column(name = "image_url", columnDefinition = "TEXT")

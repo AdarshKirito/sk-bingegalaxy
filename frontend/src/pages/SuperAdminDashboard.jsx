@@ -145,6 +145,20 @@ function OverviewTab({ onJump }) {
       <div className="sec-card">
         <div className="sec-card-head">
           <div>
+            <h2><FiShield style={{ verticalAlign: 'middle', marginRight: 6 }} /> Authority Handover</h2>
+            <p>
+              Temporarily delegate per-page super-admin authority to an admin, capped
+              at 24 hours. Lock individual records so even delegated admins cannot
+              modify them. Every action audit-logged.
+            </p>
+          </div>
+          <a className="sec-btn" href="/admin/super/authority">Open console →</a>
+        </div>
+      </div>
+
+      <div className="sec-card">
+        <div className="sec-card-head">
+          <div>
             <h2><FiActivity style={{ verticalAlign: 'middle', marginRight: 6 }} /> Recent activity</h2>
             <p>The last 5 auth-sensitive events. Open the Audit log tab for full search.</p>
           </div>

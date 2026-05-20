@@ -68,6 +68,15 @@ public class WaitlistEntry {
     @Column(nullable = false)
     private int position;
 
+    /**
+     * Boost for VIP / loyalty / ops-override. Higher = offered first; ties broken
+     * by {@link #position} (FIFO). 0 = standard customer (default).
+     * Typical values: 10 SILVER, 20 GOLD, 30 PLATINUM, 100 OPS_OVERRIDE.
+     */
+    @Column(nullable = false)
+    @Builder.Default
+    private int priority = 0;
+
     /** When the offer expires (customer must book within this window). */
     private LocalDateTime offerExpiresAt;
 

@@ -1,0 +1,26 @@
+-- =============================================================================
+-- V53 — Drop NOT NULL on `invoices.discount_total`.
+--
+-- Background
+-- ----------
+-- V51 added `invoices.discount_total NUMERIC(14,4) NOT NULL DEFAULT 0`.
+-- The matching JPA field on `Invoice` (`discountTotal`) has no
+-- `@Builder.Default`, and `InvoiceService.issueInvoice()` does not set it.
+-- Hibernate therefore emits an explicit `discount_total = NULL` in its
+-- INSERT statement (entity-mapped columns are always emitted, regardless
+-- of DB-side defaults), and the database rejects it:
+--     null value in column "discount_total" violates not-null constraint
+--
+-- Fix
+-- ---
+-- Drop the NOT NULL constraint. Existing rows already carry `0` (V51
+-- backfill via the column default). Future rows may carry NULL, which
+-- downstream readers should treat as "no discount applied" — matching
+-- the implicit semantics of the JPA model.
+--
+-- This is the same pattern used in V52 for unmapped NOT-NULL columns;
+-- here the column IS mapped, but the entity does not always provide a
+-- non-null value.
+-- =============================================================================
+
+ALTER TABLE invoices ALTER COLUMN discount_total DROP NOT NULL;

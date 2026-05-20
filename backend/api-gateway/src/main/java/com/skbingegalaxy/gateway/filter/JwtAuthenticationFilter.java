@@ -44,8 +44,17 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         "/api/v1/bookings/event-types",
         "/api/v1/bookings/add-ons",
         "/api/v1/bookings/booked-slots",
+        // Funnel analytics ingest — guests can step through the wizard, so we
+        // accept anonymous metric pings. Server-side dedup is not needed: the
+        // counter is incremented per request and the cardinality is bounded
+        // by a fixed enum of stage names (Item 27).
+        "/api/v1/bookings/analytics/funnel",
         "/api/v1/payments/callback",
         "/api/v1/site-content/public",
+        // Booking-transfer recipient endpoints — token IS the bearer (magic-link
+        // pattern). Recipient may not yet have an account; the token proves the
+        // sender targeted that exact email address.
+        "/api/v1/booking-transfers/by-token/",
         "/actuator/health"
     );
 
@@ -85,7 +94,9 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         HttpHeaders inbound = request.getHeaders();
         if (inbound.containsKey("X-User-Id") || inbound.containsKey("X-User-Role")
                 || inbound.containsKey("X-User-Email") || inbound.containsKey("X-User-Name")
-                || inbound.containsKey("X-User-Phone") || inbound.containsKey("X-User-Phone-Country-Code")) {
+                || inbound.containsKey("X-User-Phone") || inbound.containsKey("X-User-Phone-Country-Code")
+                || inbound.containsKey("X-Authority-Delegated") || inbound.containsKey("X-Authority-Scope")
+                || inbound.containsKey("X-Authority-Native-Role")) {
             log.warn("auth.header.spoof.attempt path={} remote={} ua={}",
                 path,
                 request.getRemoteAddress() != null ? request.getRemoteAddress().getAddress().getHostAddress() : "unknown",
@@ -99,6 +110,14 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
                 h.remove("X-User-Name");
                 h.remove("X-User-Phone");
                 h.remove("X-User-Phone-Country-Code");
+                // Authority Handover headers are stamped by THIS filter on
+                // delegated requests. Strip any client-supplied values so an
+                // external caller cannot forge a delegation context (which
+                // would let them trip the lock-enforcer for self-DoS, or
+                // worse, mislead audit logging).
+                h.remove("X-Authority-Delegated");
+                h.remove("X-Authority-Scope");
+                h.remove("X-Authority-Native-Role");
             })
             .build();
         exchange = exchange.mutate().request(stripped).build();
@@ -128,9 +147,15 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
             }
 
             if (isSuperAdminPath(path) && !"SUPER_ADMIN".equals(role)) {
-                log.warn("Non super-admin role '{}' accessing super-admin path {}", role, path);
-                exchange.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
-                return exchange.getResponse().setComplete();
+                // Defer hard reject until after we've evaluated Authority Handover
+                // delegation claims below — a delegated admin with the matching scope
+                // is also entitled to access the path. We still pre-reject CUSTOMER
+                // tokens (they have no possible delegation path) for cheap fail-fast.
+                if ("CUSTOMER".equals(role)) {
+                    log.warn("Customer role accessing super-admin path {}", path);
+                    exchange.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
+                    return exchange.getResponse().setComplete();
+                }
             }
 
             if (isAdminPath(path) && !"ADMIN".equals(role) && !"SUPER_ADMIN".equals(role)) {
@@ -151,14 +176,57 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
                 return exchange.getResponse().setComplete();
             }
 
-            ServerHttpRequest mutatedRequest = request.mutate()
+            // ── Authority Handover: derive effective role from delegation claims ──
+            // The native role claim is never modified inside the JWT — that keeps the
+            // token truthful. Instead the gateway, which already owns the X-User-Role
+            // contract for downstream services, elevates the role on a per-path basis
+            // when delegation grants the matching scope.
+            String effectiveRole = role;
+            String matchedScope = null;
+            boolean delegated = false;
+            String delegatedScopesClaim = claims.get("delegatedScopes", String.class);
+            if (delegatedScopesClaim != null && !delegatedScopesClaim.isBlank() && "ADMIN".equals(role)) {
+                Long expiresAt = claims.get("delegationExpiresAt", Long.class);
+                long nowMs = System.currentTimeMillis();
+                if (expiresAt != null && expiresAt < nowMs) {
+                    log.debug("Delegation expired (expiresAt={} now={}); ignoring scopes", expiresAt, nowMs);
+                } else {
+                    java.util.Set<String> scopes = new java.util.HashSet<>(
+                        java.util.Arrays.asList(delegatedScopesClaim.split(",")));
+                    String required = scopeRequiredFor(path);
+                    if (required != null && scopes.contains(required)) {
+                        effectiveRole = "SUPER_ADMIN";
+                        matchedScope = required;
+                        delegated = true;
+                        log.info("authority.delegation.elevate userId={} scope={} path={}",
+                            subject, required, path);
+                    }
+                }
+            }
+
+            // Re-run super-admin gate against the *effective* role (so a delegated admin
+            // with the right scope passes). The earlier coarse check above only rejected
+            // tokens with no possible delegation; we still re-check here against the
+            // resolved role so the final decision is unambiguous.
+            if (isSuperAdminPath(path) && !"SUPER_ADMIN".equals(effectiveRole)) {
+                log.warn("Effective role '{}' insufficient for super-admin path {}", effectiveRole, path);
+                exchange.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
+                return exchange.getResponse().setComplete();
+            }
+
+            ServerHttpRequest.Builder mutator = request.mutate()
                 .header("X-User-Id", subject)
                 .header("X-User-Email", email != null ? email : "")
-                .header("X-User-Role", role)
+                .header("X-User-Role", effectiveRole)
                 .header("X-User-Name", firstName != null ? firstName : "Customer")
                 .header("X-User-Phone", phone != null ? phone : "")
-                .header("X-User-Phone-Country-Code", phoneCountryCode != null ? phoneCountryCode : "")
-                .build();
+                .header("X-User-Phone-Country-Code", phoneCountryCode != null ? phoneCountryCode : "");
+            if (delegated) {
+                mutator.header("X-Authority-Delegated", "true");
+                mutator.header("X-Authority-Scope", matchedScope);
+                mutator.header("X-Authority-Native-Role", role);
+            }
+            ServerHttpRequest mutatedRequest = mutator.build();
 
             return chain.filter(exchange.mutate().request(mutatedRequest).build());
         } catch (Exception e) {
@@ -214,6 +282,61 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         String normalized = java.net.URI.create(path).normalize().getPath();
         String[] segments = normalized.split("/");
         return segments.length >= 5 && "super-admin".equals(segments[4]);
+    }
+
+    /**
+     * Authority Handover scope mapping: returns the required {@link
+     * com.skbingegalaxy.common.enums.AuthorityScope} (as a string) for the given
+     * request path, or {@code null} if the path is not gated by any per-page scope.
+     *
+     * <p>The matcher is intentionally a flat ordered list rather than a regex tree —
+     * the set of super-admin pages is small (~10) and the path prefixes are stable.
+     * Order matters: more specific prefixes must precede more generic ones (e.g.
+     * the loyalty super-admin path before the loyalty admin path).
+     *
+     * <p>Native super-admins always pass without consulting this map; only delegated
+     * admins (role=ADMIN with delegatedScopes claim) are constrained by it.
+     */
+    private static final List<java.util.Map.Entry<String, String>> SCOPE_MAP = List.of(
+        // Currencies (booking-service)
+        java.util.Map.entry("/api/v1/bookings/admin/currencies", "CURRENCIES"),
+        // Notification templates (notification-service)
+        java.util.Map.entry("/api/v1/notifications/admin/templates", "NOTIFICATIONS"),
+        java.util.Map.entry("/api/v1/notifications/super-admin", "NOTIFICATIONS"),
+        // Loyalty (loyalty-v2 lives under booking-service)
+        java.util.Map.entry("/api/v1/bookings/super-admin/loyalty", "LOYALTY"),
+        java.util.Map.entry("/api/v1/bookings/admin/loyalty", "LOYALTY"),
+        java.util.Map.entry("/api/v1/loyalty/super-admin", "LOYALTY"),
+        java.util.Map.entry("/api/v1/loyalty/admin", "LOYALTY"),
+        // Operations (waitlist, cancellations, refunds dashboards)
+        java.util.Map.entry("/api/v1/bookings/admin/ops", "OPS"),
+        java.util.Map.entry("/api/v1/bookings/admin/operations", "OPS"),
+        // All-users / customer admin (auth-service)
+        java.util.Map.entry("/api/v1/auth/admin/customers", "CUSTOMER_EDIT"),
+        java.util.Map.entry("/api/v1/auth/admin/users", "ALL_USERS"),
+        java.util.Map.entry("/api/v1/auth/super-admin/users", "ALL_USERS"),
+        java.util.Map.entry("/api/v1/auth/admin/register", "ADMIN_REGISTER"),
+        // CMS (site-content-service via booking-service router or its own path)
+        java.util.Map.entry("/api/v1/site-content/admin/account", "ACCOUNT_CMS"),
+        java.util.Map.entry("/api/v1/site-content/super-admin/account", "ACCOUNT_CMS"),
+        java.util.Map.entry("/api/v1/site-content/admin/home", "HOME_CMS"),
+        java.util.Map.entry("/api/v1/site-content/super-admin/home", "HOME_CMS"),
+        java.util.Map.entry("/api/v1/site-content/admin", "HOME_CMS"),
+        // Super-admin dashboard widgets (audit log, sessions overview, etc.)
+        java.util.Map.entry("/api/v1/auth/super-admin/audit", "SUPER_DASHBOARD"),
+        java.util.Map.entry("/api/v1/auth/super-admin/sessions", "SUPER_DASHBOARD"),
+        java.util.Map.entry("/api/v1/auth/admin/sessions", "SUPER_DASHBOARD")
+    );
+
+    private String scopeRequiredFor(String path) {
+        if (path == null || path.isEmpty()) return null;
+        String normalized = java.net.URI.create(path).normalize().getPath();
+        for (java.util.Map.Entry<String, String> entry : SCOPE_MAP) {
+            if (normalized.startsWith(entry.getKey())) {
+                return entry.getValue();
+            }
+        }
+        return null;
     }
 
     private Claims validateToken(String token) {

@@ -32,6 +32,8 @@ public class CustomerBingeFreeze {
         CUSTOMER_CANCELLATIONS,
         /** Threshold of pending bookings auto-cancelled after payment timeout. */
         PAYMENT_TIMEOUTS,
+        /** Threshold of NO_SHOW bookings (system marked no-show by daily audit). */
+        NO_SHOW_PATTERN,
         /** Manually applied by an admin / super-admin. */
         MANUAL
     }

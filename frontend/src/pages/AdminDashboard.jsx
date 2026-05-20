@@ -31,6 +31,33 @@ export default function AdminDashboard() {
   // Real-time updates: auto-refresh stats when a booking/payment event arrives
   const { connected } = useRealtimeUpdates({
     onEvent: (event) => {
+      // Item 26 — out-of-order payment after the booking has already entered
+      // a terminal state (CANCELLED/NO_SHOW/COMPLETED). The money has hit
+      // the gateway but the saga did NOT advance, so an admin needs to
+      // initiate a refund. Surface this with an error toast that links to
+      // the recovery queue and stays on screen until dismissed.
+      if (event?.type === 'payment.after-terminal') {
+        toast.error(
+          ({ closeToast }) => (
+            <div>
+              <strong>Out-of-order payment received</strong>
+              <div style={{ fontSize: '0.85rem', marginTop: 4 }}>
+                {event.ref} was {String(event.prevStatus || '').toLowerCase().replace(/_/g, ' ') || 'terminal'} when the gateway confirmed payment. Refund required.
+              </div>
+              <Link
+                to={`/admin/bookings?ref=${encodeURIComponent(event.ref || '')}`}
+                onClick={closeToast}
+                style={{ display: 'inline-block', marginTop: 6, fontWeight: 600 }}
+              >
+                Open booking →
+              </Link>
+            </div>
+          ),
+          { autoClose: false, closeOnClick: false }
+        );
+        refreshStats();
+        return;
+      }
       toast.info(`Live: ${event?.type?.replace('.', ' ') || 'update'} — ${event?.ref || ''}`, { autoClose: 4000 });
       refreshStats();
     },

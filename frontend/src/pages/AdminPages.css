@@ -638,6 +638,18 @@
   border: 1px solid rgba(var(--primary-rgb), 0.15);
 }
 
+.adm-badge-warning {
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+}
+
+.adm-badge-danger {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--danger);
+  border: 1px solid rgba(239, 68, 68, 0.22);
+}
+
 /* ── Stat Card (for reports / dashboards) ──────────────── */
 .adm-stat {
   position: relative;
@@ -1302,6 +1314,53 @@
 .adm-row-inactive td {
   text-decoration: line-through;
   text-decoration-color: var(--text-muted);
+}
+
+/* ── Reusable form-grid (master/detail editors) ── */
+.adm-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem 1rem;
+}
+.adm-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+.adm-form-field > span {
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.adm-form-field input[type="text"],
+.adm-form-field input[type="number"],
+.adm-form-field input[type="email"],
+.adm-form-field input[type="search"],
+.adm-form-field select,
+.adm-form-field textarea {
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input, var(--bg-surface, transparent));
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+.adm-form-field input:focus,
+.adm-form-field select:focus,
+.adm-form-field textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+.adm-form-field input:disabled,
+.adm-form-field select:disabled,
+.adm-form-field textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .adm-empty.compact .adm-empty-icon {

@@ -6,6 +6,16 @@ server:
     max-http-form-post-size: 256KB
     max-swallow-size: 2MB
 
+internal:
+  api:
+    # Shared service-to-service secret used by InternalApiAuthFilter to
+    # gate /internal/** endpoints (currently the Authority Handover lock
+    # lookup that booking-service / notification-service consult before
+    # allowing a delegated admin to mutate a locked resource). No default
+    # — boot fails fast if not provided so we never silently run with a
+    # well-known placeholder.
+    secret: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET must be set}
+
 spring:
   servlet:
     multipart:
