@@ -2,6 +2,18 @@
 
 A production-grade, cloud-deployable microservices application for booking private theater experiences.
 
+## 📊 Verified Load-Test Results (k6 · 2026-05-20)
+
+| Test | Throughput | p95 | p99 | Errors | Checks |
+|------|-----------:|----:|----:|-------:|-------:|
+| Smoke (2 VU)            | 10.9 req/s  | 24 ms  | 37 ms  | **0 %** | 348 / 348 |
+| Spike (100 VU)          | 233 req/s   | 668 ms | 963 ms | **0 %** | 35 277 / 35 277 |
+| Soak — 15 min (10 VU)   | 28.9 req/s  | 17 ms  | 27 ms  | **0 %** (0 / 26 041) | 26 040 / 26 040 |
+| Spike — payments (50 VU)| 272 req/s   | 169 ms | 220 ms | 0 % legitimate · 100 % forged-HMAC rejected | 32 884 / 32 884 |
+
+Full report + raw k6 logs: **[`production-proof/load-testing/LOAD-TEST-EVIDENCE.md`](production-proof/load-testing/LOAD-TEST-EVIDENCE.md)**.  
+All 10 production-proof reports (booking race, Kafka outage, security scans, backup/restore, K8s rollback, …) are indexed in [`production-proof/README.md`](production-proof/README.md).
+
 ## Engineering Highlights
 
 | Area | Details |

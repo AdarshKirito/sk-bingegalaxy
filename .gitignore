@@ -14,6 +14,9 @@ yarn-error.log*
 *.log
 hs_err_pid*
 
+# but DO keep committed load-test evidence
+!production-proof/load-testing/raw/*.log
+
 ### IDE ###
 .idea/
 *.iml

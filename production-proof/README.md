@@ -28,6 +28,7 @@ of the proof reports below. Each report follows the same structure:
 | 8 | Deploy / rollback    | [k8s-rollback-proof.md](k8s-rollback-proof.md) |
 | 9 | Security             | [security-test-report.md](security-test-report.md) |
 | 10 | Launch readiness    | [launch-readiness-report.md](launch-readiness-report.md) |
+| 11 | Load tests (k6)     | [load-testing/LOAD-TEST-EVIDENCE.md](load-testing/LOAD-TEST-EVIDENCE.md) — smoke / spike / 15-min soak / spike-payments with raw k6 logs |
 
 ## Conventions
 
