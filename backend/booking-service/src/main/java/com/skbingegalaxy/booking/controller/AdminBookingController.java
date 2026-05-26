@@ -55,6 +55,8 @@ public class AdminBookingController {
     /** Returns true for endpoints that are accessible without a mandatory binge selection. */
     private static boolean isBingeOptional(String uri) {
         if (BINGE_OPTIONAL_SUFFIXES.stream().anyMatch(uri::endsWith)) return true;
+        // Super-admin global category management is cross-binge by design.
+        if (uri.contains("/event-categories/global") || uri.contains("/addon-categories/global")) return true;
         // Cross-customer review aggregation endpoints work across all binges
         return uri.contains("/admin/customers/")
             && (uri.endsWith("/reviews") || uri.endsWith("/review-summary"));
@@ -474,6 +476,178 @@ public class AdminBookingController {
         return ResponseEntity.ok(ApiResponse.ok("Add-on deleted", null));
     }
 
+    // ── Event-category management (V55) ──────────────────────
+    // Per-binge endpoints — open to any admin who owns the current binge.
+    @GetMapping("/event-categories")
+    public ResponseEntity<ApiResponse<java.util.List<CategoryDto>>> listEventCategories() {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.listManagedEventCategories()));
+    }
+
+    @PostMapping("/event-categories")
+    public ResponseEntity<ApiResponse<CategoryDto>> createEventCategory(
+            @RequestHeader(value = "X-User-Id", required = false) Long adminId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody CategorySaveRequest req) {
+        CategoryDto created = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/bookings/admin/event-categories", adminId,
+            req, CategoryDto.class,
+            () -> bookingService.createEventCategory(req, false));
+        return ResponseEntity.status(HttpStatus.CREATED)
+            .body(ApiResponse.ok("Event category created", created));
+    }
+
+    @PutMapping("/event-categories/{id}")
+    public ResponseEntity<ApiResponse<CategoryDto>> updateEventCategory(
+            @PathVariable Long id, @Valid @RequestBody CategorySaveRequest req) {
+        return ResponseEntity.ok(ApiResponse.ok("Event category updated",
+            bookingService.updateEventCategory(id, req, false)));
+    }
+
+    @PatchMapping("/event-categories/{id}/toggle-active")
+    public ResponseEntity<ApiResponse<CategoryDto>> toggleEventCategory(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.ok("Event category toggled",
+            bookingService.toggleEventCategory(id, false)));
+    }
+
+    @DeleteMapping("/event-categories/{id}")
+    public ResponseEntity<ApiResponse<Void>> deleteEventCategory(@PathVariable Long id) {
+        bookingService.deleteEventCategory(id, false);
+        return ResponseEntity.ok(ApiResponse.ok("Event category deleted", null));
+    }
+
+    // SUPER_ADMIN-only global event categories (visible to all binges)
+    @GetMapping("/event-categories/global")
+    public ResponseEntity<ApiResponse<java.util.List<CategoryDto>>> listGlobalEventCategories(
+            @RequestHeader("X-User-Role") String role) {
+        requireSuperAdmin(role, "list global event categories");
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.listGlobalEventCategories()));
+    }
+
+    @PostMapping("/event-categories/global")
+    public ResponseEntity<ApiResponse<CategoryDto>> createGlobalEventCategory(
+            @RequestHeader("X-User-Role") String role,
+            @RequestHeader(value = "X-User-Id", required = false) Long adminId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody CategorySaveRequest req) {
+        requireSuperAdmin(role, "create global event categories");
+        CategoryDto created = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/bookings/admin/event-categories/global", adminId,
+            req, CategoryDto.class,
+            () -> bookingService.createEventCategory(req, true));
+        return ResponseEntity.status(HttpStatus.CREATED)
+            .body(ApiResponse.ok("Global event category created", created));
+    }
+
+    @PutMapping("/event-categories/global/{id}")
+    public ResponseEntity<ApiResponse<CategoryDto>> updateGlobalEventCategory(
+            @RequestHeader("X-User-Role") String role,
+            @PathVariable Long id, @Valid @RequestBody CategorySaveRequest req) {
+        requireSuperAdmin(role, "edit global event categories");
+        return ResponseEntity.ok(ApiResponse.ok("Global event category updated",
+            bookingService.updateEventCategory(id, req, true)));
+    }
+
+    @PatchMapping("/event-categories/global/{id}/toggle-active")
+    public ResponseEntity<ApiResponse<CategoryDto>> toggleGlobalEventCategory(
+            @RequestHeader("X-User-Role") String role, @PathVariable Long id) {
+        requireSuperAdmin(role, "toggle global event categories");
+        return ResponseEntity.ok(ApiResponse.ok("Global event category toggled",
+            bookingService.toggleEventCategory(id, true)));
+    }
+
+    @DeleteMapping("/event-categories/global/{id}")
+    public ResponseEntity<ApiResponse<Void>> deleteGlobalEventCategory(
+            @RequestHeader("X-User-Role") String role, @PathVariable Long id) {
+        requireSuperAdmin(role, "delete global event categories");
+        bookingService.deleteEventCategory(id, true);
+        return ResponseEntity.ok(ApiResponse.ok("Global event category deleted", null));
+    }
+
+    // ── Add-on-category management ───────────────────────────
+    @GetMapping("/addon-categories")
+    public ResponseEntity<ApiResponse<java.util.List<CategoryDto>>> listAddOnCategories() {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.listManagedAddOnCategories()));
+    }
+
+    @PostMapping("/addon-categories")
+    public ResponseEntity<ApiResponse<CategoryDto>> createAddOnCategory(
+            @RequestHeader(value = "X-User-Id", required = false) Long adminId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody CategorySaveRequest req) {
+        CategoryDto created = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/bookings/admin/addon-categories", adminId,
+            req, CategoryDto.class,
+            () -> bookingService.createAddOnCategory(req, false));
+        return ResponseEntity.status(HttpStatus.CREATED)
+            .body(ApiResponse.ok("Add-on category created", created));
+    }
+
+    @PutMapping("/addon-categories/{id}")
+    public ResponseEntity<ApiResponse<CategoryDto>> updateAddOnCategory(
+            @PathVariable Long id, @Valid @RequestBody CategorySaveRequest req) {
+        return ResponseEntity.ok(ApiResponse.ok("Add-on category updated",
+            bookingService.updateAddOnCategory(id, req, false)));
+    }
+
+    @PatchMapping("/addon-categories/{id}/toggle-active")
+    public ResponseEntity<ApiResponse<CategoryDto>> toggleAddOnCategory(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.ok("Add-on category toggled",
+            bookingService.toggleAddOnCategory(id, false)));
+    }
+
+    @DeleteMapping("/addon-categories/{id}")
+    public ResponseEntity<ApiResponse<Void>> deleteAddOnCategory(@PathVariable Long id) {
+        bookingService.deleteAddOnCategory(id, false);
+        return ResponseEntity.ok(ApiResponse.ok("Add-on category deleted", null));
+    }
+
+    @GetMapping("/addon-categories/global")
+    public ResponseEntity<ApiResponse<java.util.List<CategoryDto>>> listGlobalAddOnCategories(
+            @RequestHeader("X-User-Role") String role) {
+        requireSuperAdmin(role, "list global add-on categories");
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.listGlobalAddOnCategories()));
+    }
+
+    @PostMapping("/addon-categories/global")
+    public ResponseEntity<ApiResponse<CategoryDto>> createGlobalAddOnCategory(
+            @RequestHeader("X-User-Role") String role,
+            @RequestHeader(value = "X-User-Id", required = false) Long adminId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody CategorySaveRequest req) {
+        requireSuperAdmin(role, "create global add-on categories");
+        CategoryDto created = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/bookings/admin/addon-categories/global", adminId,
+            req, CategoryDto.class,
+            () -> bookingService.createAddOnCategory(req, true));
+        return ResponseEntity.status(HttpStatus.CREATED)
+            .body(ApiResponse.ok("Global add-on category created", created));
+    }
+
+    @PutMapping("/addon-categories/global/{id}")
+    public ResponseEntity<ApiResponse<CategoryDto>> updateGlobalAddOnCategory(
+            @RequestHeader("X-User-Role") String role,
+            @PathVariable Long id, @Valid @RequestBody CategorySaveRequest req) {
+        requireSuperAdmin(role, "edit global add-on categories");
+        return ResponseEntity.ok(ApiResponse.ok("Global add-on category updated",
+            bookingService.updateAddOnCategory(id, req, true)));
+    }
+
+    @PatchMapping("/addon-categories/global/{id}/toggle-active")
+    public ResponseEntity<ApiResponse<CategoryDto>> toggleGlobalAddOnCategory(
+            @RequestHeader("X-User-Role") String role, @PathVariable Long id) {
+        requireSuperAdmin(role, "toggle global add-on categories");
+        return ResponseEntity.ok(ApiResponse.ok("Global add-on category toggled",
+            bookingService.toggleAddOnCategory(id, true)));
+    }
+
+    @DeleteMapping("/addon-categories/global/{id}")
+    public ResponseEntity<ApiResponse<Void>> deleteGlobalAddOnCategory(
+            @RequestHeader("X-User-Role") String role, @PathVariable Long id) {
+        requireSuperAdmin(role, "delete global add-on categories");
+        bookingService.deleteAddOnCategory(id, true);
+        return ResponseEntity.ok(ApiResponse.ok("Global add-on category deleted", null));
+    }
+
     // ── Reports ──────────────────────────────────────────────
 
     @GetMapping("/reports")
@@ -711,9 +885,19 @@ public class AdminBookingController {
 
     @PostMapping("/venue-rooms")
     public ResponseEntity<ApiResponse<VenueRoomDto>> createVenueRoom(
+            @RequestHeader("X-User-Role") String role,
+            @RequestHeader(value = "X-User-Id", required = false) Long adminId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody VenueRoomSaveRequest request) {
+        // V56: SUPER_ADMIN-created rooms are auto-APPROVED; ADMIN-created rooms
+        // start as PENDING_APPROVAL and need explicit approval.
+        boolean autoApprove = "SUPER_ADMIN".equalsIgnoreCase(role);
+        VenueRoomDto created = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/bookings/admin/venue-rooms", adminId,
+            request, VenueRoomDto.class,
+            () -> bookingService.createVenueRoom(request, autoApprove, adminId));
         return ResponseEntity.status(HttpStatus.CREATED)
-            .body(ApiResponse.ok("Room created", bookingService.createVenueRoom(request)));
+            .body(ApiResponse.ok("Room created", created));
     }
 
     @PutMapping("/venue-rooms/{id}")
@@ -732,6 +916,64 @@ public class AdminBookingController {
     public ResponseEntity<ApiResponse<Void>> deleteVenueRoom(@PathVariable Long id) {
         bookingService.deleteVenueRoom(id);
         return ResponseEntity.ok(ApiResponse.ok("Room deleted", null));
+    }
+
+    // V56: approval workflow. Only SUPER_ADMIN can approve/reject.
+    @PostMapping("/venue-rooms/{id}/approve")
+    public ResponseEntity<ApiResponse<VenueRoomDto>> approveVenueRoom(
+            @RequestHeader("X-User-Role") String role,
+            @RequestHeader(value = "X-User-Id", required = false) Long adminId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @PathVariable Long id) {
+        requireSuperAdmin(role, "approve venue rooms");
+        VenueRoomDto result = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/bookings/admin/venue-rooms/" + id + "/approve", adminId,
+            null, VenueRoomDto.class,
+            () -> bookingService.approveVenueRoom(id, adminId));
+        return ResponseEntity.ok(ApiResponse.ok("Room approved", result));
+    }
+
+    @PostMapping("/venue-rooms/{id}/reject")
+    public ResponseEntity<ApiResponse<VenueRoomDto>> rejectVenueRoom(
+            @RequestHeader("X-User-Role") String role,
+            @RequestHeader(value = "X-User-Id", required = false) Long adminId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @PathVariable Long id,
+            @RequestBody(required = false) java.util.Map<String, String> body) {
+        requireSuperAdmin(role, "reject venue rooms");
+        String reason = body != null ? body.get("reason") : null;
+        VenueRoomDto result = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/bookings/admin/venue-rooms/" + id + "/reject", adminId,
+            body, VenueRoomDto.class,
+            () -> bookingService.rejectVenueRoom(id, adminId, reason));
+        return ResponseEntity.ok(ApiResponse.ok("Room rejected", result));
+    }
+
+    // V57: room maintenance / hold windows. Tenant-scoped to the selected binge.
+    @GetMapping("/venue-rooms/{roomId}/blocks")
+    public ResponseEntity<ApiResponse<java.util.List<RoomBlockDto>>> listRoomBlocks(
+            @PathVariable Long roomId) {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.listRoomBlocks(roomId)));
+    }
+
+    @PostMapping("/venue-rooms/{roomId}/blocks")
+    public ResponseEntity<ApiResponse<RoomBlockDto>> createRoomBlock(
+            @RequestHeader(value = "X-User-Id", required = false) Long adminId,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @PathVariable Long roomId,
+            @Valid @RequestBody RoomBlockSaveRequest request) {
+        RoomBlockDto created = idempotencyService.execute(
+            idempotencyKey, "POST", "/api/v1/bookings/admin/venue-rooms/" + roomId + "/blocks", adminId,
+            request, RoomBlockDto.class,
+            () -> bookingService.createRoomBlock(roomId, request, adminId));
+        return ResponseEntity.status(HttpStatus.CREATED)
+            .body(ApiResponse.ok("Room block created", created));
+    }
+
+    @DeleteMapping("/venue-rooms/blocks/{blockId}")
+    public ResponseEntity<ApiResponse<Void>> deleteRoomBlock(@PathVariable Long blockId) {
+        bookingService.deleteRoomBlock(blockId);
+        return ResponseEntity.ok(ApiResponse.ok("Room block deleted", null));
     }
 
     // ═══════════════════════════════════════════════════════════

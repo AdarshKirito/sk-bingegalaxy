@@ -53,6 +53,15 @@ public class Binge {
     @Builder.Default
     private boolean active = true;
 
+    /**
+     * V56: when true, the customer must pick a venue room before
+     * progressing past the room step in the booking wizard. Defaults to
+     * false to preserve existing behaviour.
+     */
+    @Column(name = "room_selection_required", nullable = false)
+    @Builder.Default
+    private boolean roomSelectionRequired = false;
+
     /** Per-binge operational date – advances only after a successful audit */
     @Column
     private LocalDate operationalDate;

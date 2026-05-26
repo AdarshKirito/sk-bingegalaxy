@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import LazyImage from '../ui/LazyImage';
 
 export default function StepAddOns({
@@ -5,11 +6,40 @@ export default function StepAddOns({
   toggleAddOn, setImagePopup,
   onNext, onBack,
 }) {
+  // V58 — chip filter. The legacy free-text `category` string is gone;
+  // categorization is now keyed by `categoryId` with `categoryName` as the
+  // display label. Uncategorized add-ons surface only under the "All" tab.
+  const [activeCat, setActiveCat] = useState(null);
+  const chips = useMemo(() => {
+    const seen = new Map();
+    addOns.forEach(ao => {
+      if (ao.categoryId == null) return;
+      const key = `id:${ao.categoryId}`;
+      const label = ao.categoryName;
+      if (label && !seen.has(key)) seen.set(key, { key, label });
+    });
+    return Array.from(seen.values());
+  }, [addOns]);
+  const visible = activeCat == null ? addOns : addOns.filter(ao => {
+    if (ao.categoryId == null) return false;
+    return `id:${ao.categoryId}` === activeCat;
+  });
+
   return (
     <div className="booking-section">
       <h2>Choose Add-Ons</h2>
+      {chips.length > 1 && (
+        <div className="chip-row" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>
+          <button type="button" className={`chip${activeCat == null ? ' chip-active' : ''}`}
+            onClick={() => setActiveCat(null)}>All</button>
+          {chips.map(c => (
+            <button key={c.key} type="button" className={`chip${activeCat === c.key ? ' chip-active' : ''}`}
+              onClick={() => setActiveCat(c.key)}>{c.label}</button>
+          ))}
+        </div>
+      )}
       <div className="grid-3" role="group" aria-label="Available add-ons">
-        {addOns.map(ao => {
+        {visible.map(ao => {
           const selected = form.addOns.find(a => a.addOnId === ao.id);
           return (
             <div key={ao.id}

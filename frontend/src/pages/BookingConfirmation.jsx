@@ -180,6 +180,10 @@ export default function BookingConfirmation() {
     ...(booking.venueRoomName ? [{ icon: <FiMapPin />, label: 'Room', value: booking.venueRoomName }] : []),
   ];
   const summaryFacts = [
+    ...(booking.subtotalAmount && booking.taxAmount > 0 ? [
+      { label: 'Subtotal', value: formatAmount(booking.subtotalAmount) },
+      { label: 'Tax', value: formatAmount(booking.taxAmount) },
+    ] : []),
     { label: 'Total', value: formatAmount(booking.totalAmount) },
     { label: 'Payment', value: paymentStatusLabel },
     { label: 'Booking ref', value: booking.bookingRef, mono: true },

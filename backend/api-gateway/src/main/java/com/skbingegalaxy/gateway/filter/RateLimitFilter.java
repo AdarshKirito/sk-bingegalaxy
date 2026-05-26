@@ -5,6 +5,7 @@ import io.github.bucket4j.Bucket;
 import io.github.bucket4j.Refill;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
@@ -52,15 +53,23 @@ import java.util.concurrent.atomic.AtomicLong;
 public class RateLimitFilter implements GlobalFilter, Ordered {
 
     private static final int MAX_BUCKETS = 10_000;
-    private static final int STANDARD_RATE_LIMIT = 100;
-    private static final int AUTH_RATE_LIMIT = 30;
-    // Tighter cap for unauthenticated credential-recovery endpoints to
-    // curb account-enumeration / token-reset spam. 5 attempts/min/IP.
-    private static final int SENSITIVE_AUTH_RATE_LIMIT = 5;
+    // Default per-IP per-minute caps. Production values; can be overridden
+    // per-environment via:
+    //   APP_RATELIMIT_STANDARD   (default 100 — business APIs)
+    //   APP_RATELIMIT_AUTH       (default 30  — login / register / OAuth / OTP)
+    //   APP_RATELIMIT_SENSITIVE  (default 5   — forgot / reset / verify-email)
+    // Local-dev / k6 load runs raise the standard cap (see docker-compose.yml).
+    private static final int DEFAULT_STANDARD_RATE_LIMIT = 100;
+    private static final int DEFAULT_AUTH_RATE_LIMIT = 30;
+    private static final int DEFAULT_SENSITIVE_AUTH_RATE_LIMIT = 5;
     private static final Duration RATE_LIMIT_WINDOW = Duration.ofMinutes(1);
     private static final Duration REDIS_COUNTER_TTL = RATE_LIMIT_WINDOW.plusSeconds(5);
     private static final long REDIS_FALLBACK_LOG_WINDOW_MS = 60_000;
     private static final String RETRY_AFTER_SECONDS = "60";
+
+    private final int standardRateLimit;
+    private final int authRateLimit;
+    private final int sensitiveAuthRateLimit;
 
     @SuppressWarnings("serial")
     private final Map<String, Bucket> buckets = Collections.synchronizedMap(
@@ -76,12 +85,21 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
     private ReactiveStringRedisTemplate redisTemplate;
 
     public RateLimitFilter() {
-        this(null);
+        this(null,
+            DEFAULT_STANDARD_RATE_LIMIT,
+            DEFAULT_AUTH_RATE_LIMIT,
+            DEFAULT_SENSITIVE_AUTH_RATE_LIMIT);
     }
 
     @Autowired
-    public RateLimitFilter(@Autowired(required = false) ReactiveStringRedisTemplate redisTemplate) {
+    public RateLimitFilter(@Autowired(required = false) ReactiveStringRedisTemplate redisTemplate,
+                           @Value("${app.ratelimit.standard:" + DEFAULT_STANDARD_RATE_LIMIT + "}") int standardRateLimit,
+                           @Value("${app.ratelimit.auth:" + DEFAULT_AUTH_RATE_LIMIT + "}") int authRateLimit,
+                           @Value("${app.ratelimit.sensitive:" + DEFAULT_SENSITIVE_AUTH_RATE_LIMIT + "}") int sensitiveAuthRateLimit) {
         this.redisTemplate = redisTemplate;
+        this.standardRateLimit = standardRateLimit;
+        this.authRateLimit = authRateLimit;
+        this.sensitiveAuthRateLimit = sensitiveAuthRateLimit;
     }
 
     @Override
@@ -94,13 +112,13 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
         int limit;
         if (isSensitiveAuth) {
             bucketKey = clientIp + ":auth-sensitive";
-            limit = SENSITIVE_AUTH_RATE_LIMIT;
+            limit = sensitiveAuthRateLimit;
         } else if (isCredentialAuth) {
             bucketKey = clientIp + ":auth";
-            limit = AUTH_RATE_LIMIT;
+            limit = authRateLimit;
         } else {
             bucketKey = clientIp;
-            limit = STANDARD_RATE_LIMIT;
+            limit = standardRateLimit;
         }
 
         if (redisTemplate != null) {

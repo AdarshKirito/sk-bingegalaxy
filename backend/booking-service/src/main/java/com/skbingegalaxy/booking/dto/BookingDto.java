@@ -73,6 +73,9 @@ public class BookingDto {
     // ── Surge Pricing ───
     private BigDecimal surgeMultiplier;
     private String surgeLabel;
+    // ── Tax ───
+    private BigDecimal subtotalAmount;  // pre-tax subtotal
+    private BigDecimal taxAmount;       // exclusive tax charged on top of subtotal
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

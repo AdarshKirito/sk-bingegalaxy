@@ -14,7 +14,10 @@ public class AddOnDto {
     private String name;
     private String description;
     private BigDecimal price;
-    private String category;
+    /** FK to addon_categories. Authoritative since V58 dropped the legacy string. */
+    private Long categoryId;
+    /** Snapshotted category name (resolved from {@link #categoryId}). */
+    private String categoryName;
     private List<String> imageUrls;
     private boolean active;
     /** Daily inventory cap (null = unlimited). */

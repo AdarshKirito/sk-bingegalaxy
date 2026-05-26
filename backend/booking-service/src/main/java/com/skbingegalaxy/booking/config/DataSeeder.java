@@ -28,6 +28,7 @@ public class DataSeeder implements CommandLineRunner {
     private final BingeRepository bingeRepository;
     private final EventTypeRepository eventTypeRepository;
     private final AddOnRepository addOnRepository;
+    private final AddOnCategoryRepository addOnCategoryRepository;
     private final VenueRoomRepository venueRoomRepository;
     private final CancellationTierRepository cancellationTierRepository;
 
@@ -97,24 +98,48 @@ public class DataSeeder implements CommandLineRunner {
     private void seedAddOns(Long bingeId) {
         if (addOnRepository.existsByBingeId(bingeId)) return;
 
+        // V58: legacy free-text category column is gone — seed categories first
+        // and reference them by id. Helper resolves (creating if missing) by
+        // name so re-seeding into a partially-populated env stays idempotent.
+        java.util.Map<String, Long> catId = new java.util.HashMap<>();
+        java.util.function.Function<String, Long> cat = name ->
+            catId.computeIfAbsent(name, n -> resolveOrCreateAddOnCategory(bingeId, n));
+
         List<AddOn> addOns = List.of(
-            AddOn.builder().bingeId(bingeId).name("Basic Decoration").description("Balloons and ribbons").price(new BigDecimal("499")).category("DECORATION").build(),
-            AddOn.builder().bingeId(bingeId).name("Premium Decoration").description("Premium themed decoration with LED lights").price(new BigDecimal("1499")).category("DECORATION").build(),
-            AddOn.builder().bingeId(bingeId).name("Flower Decoration").description("Fresh flower arrangements").price(new BigDecimal("999")).category("DECORATION").build(),
-            AddOn.builder().bingeId(bingeId).name("Soft Drinks Pack").description("6 assorted cold drinks").price(new BigDecimal("299")).category("BEVERAGE").build(),
-            AddOn.builder().bingeId(bingeId).name("Premium Beverage Pack").description("Mocktails and fresh juices").price(new BigDecimal("599")).category("BEVERAGE").build(),
-            AddOn.builder().bingeId(bingeId).name("Photo Shoot (30 min)").description("Professional photography session").price(new BigDecimal("1999")).category("PHOTOGRAPHY").build(),
-            AddOn.builder().bingeId(bingeId).name("Photo + Video Shoot").description("Photos and cinematic video coverage").price(new BigDecimal("3999")).category("PHOTOGRAPHY").build(),
-            AddOn.builder().bingeId(bingeId).name("Fog Effect").description("Dramatic fog machine effects").price(new BigDecimal("799")).category("EFFECT").build(),
-            AddOn.builder().bingeId(bingeId).name("Red Carpet Entry").description("VIP red carpet welcome").price(new BigDecimal("999")).category("EFFECT").build(),
-            AddOn.builder().bingeId(bingeId).name("Confetti Blast").description("Confetti cannon celebration").price(new BigDecimal("499")).category("EFFECT").build(),
-            AddOn.builder().bingeId(bingeId).name("Birthday Cake (1 kg)").description("Custom designer cake").price(new BigDecimal("799")).category("FOOD").build(),
-            AddOn.builder().bingeId(bingeId).name("Premium Cake (2 kg)").description("Premium multi-tier designer cake").price(new BigDecimal("1499")).category("FOOD").build(),
-            AddOn.builder().bingeId(bingeId).name("Snacks Platter").description("Assorted finger food and snacks").price(new BigDecimal("699")).category("FOOD").build(),
-            AddOn.builder().bingeId(bingeId).name("Live Music (1 hour)").description("Acoustic live performance").price(new BigDecimal("2999")).category("EXPERIENCE").build()
+            AddOn.builder().bingeId(bingeId).name("Basic Decoration").description("Balloons and ribbons").price(new BigDecimal("499")).categoryId(cat.apply("DECORATION")).build(),
+            AddOn.builder().bingeId(bingeId).name("Premium Decoration").description("Premium themed decoration with LED lights").price(new BigDecimal("1499")).categoryId(cat.apply("DECORATION")).build(),
+            AddOn.builder().bingeId(bingeId).name("Flower Decoration").description("Fresh flower arrangements").price(new BigDecimal("999")).categoryId(cat.apply("DECORATION")).build(),
+            AddOn.builder().bingeId(bingeId).name("Soft Drinks Pack").description("6 assorted cold drinks").price(new BigDecimal("299")).categoryId(cat.apply("BEVERAGE")).build(),
+            AddOn.builder().bingeId(bingeId).name("Premium Beverage Pack").description("Mocktails and fresh juices").price(new BigDecimal("599")).categoryId(cat.apply("BEVERAGE")).build(),
+            AddOn.builder().bingeId(bingeId).name("Photo Shoot (30 min)").description("Professional photography session").price(new BigDecimal("1999")).categoryId(cat.apply("PHOTOGRAPHY")).build(),
+            AddOn.builder().bingeId(bingeId).name("Photo + Video Shoot").description("Photos and cinematic video coverage").price(new BigDecimal("3999")).categoryId(cat.apply("PHOTOGRAPHY")).build(),
+            AddOn.builder().bingeId(bingeId).name("Fog Effect").description("Dramatic fog machine effects").price(new BigDecimal("799")).categoryId(cat.apply("EFFECT")).build(),
+            AddOn.builder().bingeId(bingeId).name("Red Carpet Entry").description("VIP red carpet welcome").price(new BigDecimal("999")).categoryId(cat.apply("EFFECT")).build(),
+            AddOn.builder().bingeId(bingeId).name("Confetti Blast").description("Confetti cannon celebration").price(new BigDecimal("499")).categoryId(cat.apply("EFFECT")).build(),
+            AddOn.builder().bingeId(bingeId).name("Birthday Cake (1 kg)").description("Custom designer cake").price(new BigDecimal("799")).categoryId(cat.apply("FOOD")).build(),
+            AddOn.builder().bingeId(bingeId).name("Premium Cake (2 kg)").description("Premium multi-tier designer cake").price(new BigDecimal("1499")).categoryId(cat.apply("FOOD")).build(),
+            AddOn.builder().bingeId(bingeId).name("Snacks Platter").description("Assorted finger food and snacks").price(new BigDecimal("699")).categoryId(cat.apply("FOOD")).build(),
+            AddOn.builder().bingeId(bingeId).name("Live Music (1 hour)").description("Acoustic live performance").price(new BigDecimal("2999")).categoryId(cat.apply("EXPERIENCE")).build()
         );
         addOnRepository.saveAll(addOns);
         log.info("Seeded {} add-ons for binge {}", addOns.size(), bingeId);
+    }
+
+    /** Look up or create an addon_categories row scoped to this binge. */
+    private Long resolveOrCreateAddOnCategory(Long bingeId, String name) {
+        return addOnCategoryRepository.findByBingeId(bingeId).stream()
+            .filter(c -> name.equalsIgnoreCase(c.getName()))
+            .findFirst()
+            .map(AddOnCategory::getId)
+            .orElseGet(() -> {
+                AddOnCategory created = AddOnCategory.builder()
+                    .bingeId(bingeId)
+                    .name(name)
+                    .sortOrder(0)
+                    .active(true)
+                    .build();
+                return addOnCategoryRepository.save(created).getId();
+            });
     }
 
     /* ── Venue Rooms ───────────────────────────────────────── */

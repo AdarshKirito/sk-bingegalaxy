@@ -1,0 +1,202 @@
+{
+    "metrics": {
+        "http_req_duration": {
+            "avg": 10.442726166429878,
+            "min": 3.1791,
+            "med": 9.2493,
+            "p(90)": 14.5464,
+            "p(95)": 16.8708,
+            "p(99)": 27.170859999999937,
+            "max": 788.5789,
+            "count": 26041,
+            "thresholds": {
+                "p(95)<800": false,
+                "p(99)<1500": false
+            }
+        },
+        "iterations": {
+            "count": 8680,
+            "rate": 9.625643334141676
+        },
+        "http_req_duration{kind:authed-read}": {
+            "max": 97.7076,
+            "count": 8680,
+            "avg": 10.34811655529954,
+            "min": 3.8333,
+            "med": 9.460899999999999,
+            "p(90)": 14.75919,
+            "p(95)": 16.736964999999998,
+            "p(99)": 26.583406999999855,
+            "thresholds": {
+                "p(95)<800": false,
+                "p(99)<1500": false
+            }
+        },
+        "data_received": {
+            "count": 28036416,
+            "rate": 31090.845712398965
+        },
+        "http_req_waiting": {
+            "p(90)": 13.9837,
+            "p(95)": 16.0634,
+            "p(99)": 25.640559999999994,
+            "max": 788.5789,
+            "count": 26041,
+            "avg": 10.05909991935795,
+            "min": 3.1791,
+            "med": 8.9187
+        },
+        "http_req_duration{kind:payment-read}": {
+            "p(95)": 16.560604999999992,
+            "p(99)": 26.189047,
+            "max": 265.4419,
+            "count": 8680,
+            "avg": 9.934111048387097,
+            "min": 3.1791,
+            "med": 8.812000000000001,
+            "p(90)": 14.129480000000001,
+            "thresholds": {
+                "p(95)<1500": false,
+                "p(99)<3000": false
+            }
+        },
+        "http_req_connecting": {
+            "max": 4.25,
+            "count": 26041,
+            "avg": 0.0005113436503974501,
+            "min": 0,
+            "med": 0,
+            "p(90)": 0,
+            "p(95)": 0,
+            "p(99)": 0
+        },
+        "vus_max": {
+            "value": 10,
+            "min": 10,
+            "max": 10
+        },
+        "http_req_blocked": {
+            "avg": 0.009439599093736803,
+            "min": 0,
+            "med": 0,
+            "p(90)": 0,
+            "p(95)": 0,
+            "p(99)": 0.511419999999999,
+            "max": 26.2359,
+            "count": 26041
+        },
+        "http_req_receiving": {
+            "min": 0,
+            "med": 0,
+            "p(90)": 0.7797,
+            "p(95)": 1.1407,
+            "p(99)": 2.4190399999999985,
+            "max": 65.1099,
+            "count": 26041,
+            "avg": 0.3536668983525967
+        },
+        "checks": {
+            "passes": 26040,
+            "fails": 0,
+            "thresholds": {
+                "rate>0.99": false
+            },
+            "value": 1
+        },
+        "data_sent": {
+            "count": 17959332,
+            "rate": 19915.912943713975
+        },
+        "http_reqs": {
+            "count": 26041,
+            "rate": 28.878038947509605
+        },
+        "vus": {
+            "max": 10,
+            "value": 5,
+            "min": 5
+        },
+        "http_req_failed": {
+            "passes": 0,
+            "fails": 26041,
+            "thresholds": {
+                "rate<0.01": false
+            },
+            "value": 0
+        },
+        "http_req_duration{expected_response:true}": {
+            "p(95)": 16.8708,
+            "p(99)": 27.170859999999937,
+            "max": 788.5789,
+            "count": 26041,
+            "avg": 10.442726166429878,
+            "min": 3.1791,
+            "med": 9.2493,
+            "p(90)": 14.5464
+        },
+        "iteration_duration": {
+            "med": 1038.2242,
+            "p(90)": 1439.26833,
+            "p(95)": 1488.28484,
+            "p(99)": 1524.1391869999998,
+            "max": 2250.1482,
+            "count": 8680,
+            "avg": 1037.4564930645183,
+            "min": 521.9548
+        },
+        "http_req_tls_handshaking": {
+            "min": 0,
+            "med": 0,
+            "p(90)": 0,
+            "p(95)": 0,
+            "p(99)": 0,
+            "max": 0,
+            "count": 26041,
+            "avg": 0
+        },
+        "http_req_sending": {
+            "p(95)": 0,
+            "p(99)": 0.6970599999999999,
+            "max": 11.4794,
+            "count": 26041,
+            "avg": 0.029959348719327192,
+            "min": 0,
+            "med": 0,
+            "p(90)": 0
+        }
+    },
+    "setup_data": {
+        "email": "k6+df1fe565-2bf3-47d0-8f43-35b5a7079344@loadtest.skbingegalaxy.local",
+        "password": "LoadTest!2026#aA1",
+        "token": "eyJhbGciOiJIUzI1NiJ9.eyJmaXJzdE5hbWUiOiJMb2FkIiwicm9sZSI6IkNVU1RPTUVSIiwicGhvbmVDb3VudHJ5Q29kZSI6Iis5MSIsInBob25lIjoiMjU4NzcyNDA5NyIsInRva2VuX3R5cGUiOiJhY2Nlc3MiLCJlbWFpbCI6Ims2K2RmMWZlNTY1LTJiZjMtNDdkMC04ZjQzLTM1YjVhNzA3OTM0NEBsb2FkdGVzdC5za2JpbmdlZ2FsYXh5LmxvY2FsIiwianRpIjoiYmNhNzRiYmUtOWNlOS00ZGNjLWExYzItOTNjNjlhNDI5NTNhIiwic3ViIjoiMTMzIiwiaXNzIjoic2tiaW5nZWdhbGF4eS1hdXRoIiwiYXVkIjpbInNrYmluZ2VnYWxheHktd2ViIl0sImlhdCI6MTc3OTMwNDI2NywiZXhwIjoxNzc5MzA1MTY3fQ.EHxgLPlAXpQwm17UMq7ylHLqpXVvu0AQXjVCAUGThnE"
+    },
+    "root_group": {
+        "name": "",
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e",
+        "groups": {},
+        "checks": {
+                "booked-slots ok": {
+                    "passes": 8680,
+                    "fails": 0,
+                    "name": "booked-slots ok",
+                    "path": "::booked-slots ok",
+                    "id": "f9ff635c67c3f6df852f8fdabfee968f"
+                },
+                "my bookings ok": {
+                    "path": "::my bookings ok",
+                    "id": "847cbd6e8d7e7937e67968391b6f5277",
+                    "passes": 8680,
+                    "fails": 0,
+                    "name": "my bookings ok"
+                },
+                "my payments ok": {
+                    "passes": 8680,
+                    "fails": 0,
+                    "name": "my payments ok",
+                    "path": "::my payments ok",
+                    "id": "ddf1aae3e9714284dea9bf2943ea8cf5"
+                }
+            }
+    }
+}

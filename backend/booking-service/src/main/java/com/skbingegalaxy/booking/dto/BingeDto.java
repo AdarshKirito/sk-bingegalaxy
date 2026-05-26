@@ -35,6 +35,9 @@ public class BingeDto {
     private LocalTime closeTime;
     private LocalDateTime createdAt;
 
+    /** V56: when true, the customer must pick a venue room during booking. */
+    private boolean roomSelectionRequired;
+
     // ── Cancellation policy + freeze settings (binge-level) ──
     private boolean freezePolicyEnabled;
     private int freezeDurationMinutes;

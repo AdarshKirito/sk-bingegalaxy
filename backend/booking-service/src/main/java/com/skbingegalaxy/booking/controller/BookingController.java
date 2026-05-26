@@ -108,6 +108,18 @@ public class BookingController {
         return ResponseEntity.ok(ApiResponse.ok(bookingService.getActiveAddOns()));
     }
 
+    /** Customer-facing list of active event categories (globals ∪ binge-scoped). */
+    @GetMapping("/event-categories")
+    public ResponseEntity<ApiResponse<List<com.skbingegalaxy.booking.dto.CategoryDto>>> getEventCategories() {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.listVisibleEventCategories()));
+    }
+
+    /** Customer-facing list of active add-on categories. */
+    @GetMapping("/addon-categories")
+    public ResponseEntity<ApiResponse<List<com.skbingegalaxy.booking.dto.CategoryDto>>> getAddOnCategories() {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.listVisibleAddOnCategories()));
+    }
+
     @GetMapping("/booked-slots")
     public ResponseEntity<ApiResponse<List<BookedSlotDto>>> getBookedSlots(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) java.time.LocalDate date) {

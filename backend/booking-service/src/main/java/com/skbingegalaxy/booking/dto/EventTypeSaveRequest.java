@@ -44,5 +44,8 @@ public class EventTypeSaveRequest {
     @Min(value = 1, message = "Maximum guests must be at least 1")
     private Integer maxGuests;
 
+    /** Optional grouping category. NULL = uncategorized. */
+    private Long categoryId;
+
     private List<String> imageUrls;
 }

@@ -161,7 +161,8 @@ describe('response interceptor - error handling', () => {
     const err = { response: { status: 429 }, config: { url: '/bookings' } };
     await expect(responseErrorHandler(err)).rejects.toBe(err);
     expect(toastMock.error).toHaveBeenCalledWith(
-      expect.stringContaining('many attempts')
+      expect.stringContaining('Too many requests'),
+      expect.any(Object)
     );
   });
 

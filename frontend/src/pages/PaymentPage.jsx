@@ -263,6 +263,10 @@ export default function PaymentPage() {
   if ((booking.guestAmount || 0) > 0) {
     breakdownRows.push({ label: 'Guest charge', value: formatAmount(booking.guestAmount || 0) });
   }
+  if (booking.taxAmount > 0) {
+    breakdownRows.push({ label: 'Subtotal', value: formatAmount(booking.subtotalAmount || booking.totalAmount || 0) });
+    breakdownRows.push({ label: 'Tax', value: formatAmount(booking.taxAmount) });
+  }
   if (isBalanceDue) {
     breakdownRows.push({ label: 'Already paid', value: formatAmount(booking.collectedAmount || 0) });
     breakdownRows.push({ label: 'Balance due', value: balanceDueLabel });

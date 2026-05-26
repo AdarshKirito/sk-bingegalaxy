@@ -22,9 +22,13 @@ public class AddOnSaveRequest {
     @DecimalMin(value = "0.0", message = "Add-on price cannot be negative")
     private BigDecimal price;
 
-    @NotBlank(message = "Add-on category is required")
-    @Size(max = 50, message = "Category must be under 50 characters")
-    private String category;
+    /**
+     * FK to {@code addon_categories.id}. Required since V58. NULL is rejected
+     * by the validator below — admins must pick an existing category (global
+     * or binge-scoped) before saving.
+     */
+    @NotNull(message = "Add-on category is required")
+    private Long categoryId;
 
     private List<String> imageUrls;
 

@@ -4,29 +4,40 @@ import { toast } from 'react-toastify';
 import { FiPackage, FiPlus, FiEdit2, FiToggleLeft, FiToggleRight, FiTrash2, FiX, FiImage } from 'react-icons/fi';
 import './AdminPages.css';
 
-const ADDON_CATEGORIES = ['DECORATION', 'BEVERAGE', 'PHOTOGRAPHY', 'EFFECT', 'FOOD', 'EXPERIENCE'];
-
-const emptyEventType = { name: '', description: '', basePrice: '', hourlyRate: '', pricePerGuest: '', minHours: 1, maxHours: 8, minGuests: '', maxGuests: '', imageUrls: [''] };
-const emptyAddOn = { name: '', description: '', price: '', category: 'DECORATION', stockPerDay: '', advanceNoticeMinutes: '', imageUrls: [''] };
+const emptyEventType = { name: '', description: '', basePrice: '', hourlyRate: '', pricePerGuest: '', minHours: 1, maxHours: 8, minGuests: '', maxGuests: '', categoryId: '', imageUrls: [''] };
+const emptyAddOn = { name: '', description: '', price: '', categoryId: '', stockPerDay: '', advanceNoticeMinutes: '', imageUrls: [''] };
+const emptyCategory = { name: '', description: '', imageUrl: '', sortOrder: 0 };
 
 export default function AdminEventTypes() {
   const [tab, setTab] = useState('eventTypes');
   const [eventTypes, setEventTypes] = useState([]);
   const [addOns, setAddOns] = useState([]);
+  // V55 — category taxonomy. Loaded eagerly so dropdowns are populated
+  // whenever the user opens an event-type / add-on modal.
+  const [eventCategories, setEventCategories] = useState([]);
+  const [addOnCategories, setAddOnCategories] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Modal state
   const [modal, setModal] = useState({ open: false, mode: 'create', item: null });
   const [form, setForm] = useState(emptyEventType);
   const [addonForm, setAddonForm] = useState(emptyAddOn);
+  const [categoryForm, setCategoryForm] = useState(emptyCategory);
   const [saving, setSaving] = useState(false);
 
   const fetchAll = () => {
     setLoading(true);
-    Promise.all([adminService.getAllEventTypes(), adminService.getAllAddOns()])
-      .then(([etRes, aoRes]) => {
+    Promise.all([
+      adminService.getAllEventTypes(),
+      adminService.getAllAddOns(),
+      adminService.getEventCategories(),
+      adminService.getAddOnCategories(),
+    ])
+      .then(([etRes, aoRes, ecRes, acRes]) => {
         setEventTypes(toArray(etRes.data?.data));
         setAddOns(toArray(aoRes.data?.data));
+        setEventCategories(toArray(ecRes.data?.data));
+        setAddOnCategories(toArray(acRes.data?.data));
       })
       .catch(() => toast.error('Failed to load data'))
       .finally(() => setLoading(false));
@@ -52,6 +63,7 @@ export default function AdminEventTypes() {
       maxHours: et.maxHours,
       minGuests: et.minGuests ?? '',
       maxGuests: et.maxGuests ?? '',
+      categoryId: et.categoryId ?? '',
       imageUrls: et.imageUrls?.length ? [...et.imageUrls] : [''],
     });
     setModal({ open: true, mode: 'edit', item: et, type: 'et' });
@@ -79,6 +91,7 @@ export default function AdminEventTypes() {
         maxHours: Number(form.maxHours),
         minGuests: form.minGuests === '' ? null : Number(form.minGuests),
         maxGuests: form.maxGuests === '' ? null : Number(form.maxGuests),
+        categoryId: form.categoryId === '' ? null : Number(form.categoryId),
         imageUrls: form.imageUrls.filter(u => u.trim()),
       };
       if (modal.mode === 'create') {
@@ -136,7 +149,7 @@ export default function AdminEventTypes() {
       name: ao.name,
       description: ao.description || '',
       price: ao.price,
-      category: ao.category,
+      categoryId: ao.categoryId ?? '',
       stockPerDay: ao.stockPerDay ?? '',
       advanceNoticeMinutes: ao.advanceNoticeMinutes ?? '',
       imageUrls: ao.imageUrls?.length ? [...ao.imageUrls] : [''],
@@ -148,6 +161,7 @@ export default function AdminEventTypes() {
     e.preventDefault();
     if (!addonForm.name.trim()) { toast.error('Add-on name is required.'); return; }
     if (!addonForm.price || Number(addonForm.price) < 0) { toast.error('Price must be a positive number.'); return; }
+    if (addonForm.categoryId === '' || addonForm.categoryId == null) { toast.error('Please select a category.'); return; }
     setSaving(true);
     try {
       if (addonForm.stockPerDay !== '' && Number(addonForm.stockPerDay) < 0) { toast.error('Stock per day cannot be negative.'); setSaving(false); return; }
@@ -155,6 +169,7 @@ export default function AdminEventTypes() {
       const payload = {
         ...addonForm,
         price: Number(addonForm.price),
+        categoryId: addonForm.categoryId === '' ? null : Number(addonForm.categoryId),
         stockPerDay: addonForm.stockPerDay === '' ? null : Number(addonForm.stockPerDay),
         advanceNoticeMinutes: addonForm.advanceNoticeMinutes === '' ? null : Number(addonForm.advanceNoticeMinutes),
         imageUrls: addonForm.imageUrls.filter(u => u.trim()),
@@ -202,6 +217,82 @@ export default function AdminEventTypes() {
     }
   };
 
+  // ── Category handlers (V55) ──────────────────────────────
+  // `kind` is 'event' or 'addon'. Same CRUD shape on the backend so we
+  // route through a single openCreate/openEdit/handleSave pair to keep
+  // the page lean.
+  const catApi = (kind) => kind === 'event'
+    ? { create: adminService.createEventCategory, update: adminService.updateEventCategory,
+        toggle: adminService.toggleEventCategory, remove: adminService.deleteEventCategory }
+    : { create: adminService.createAddOnCategory, update: adminService.updateAddOnCategory,
+        toggle: adminService.toggleAddOnCategory, remove: adminService.deleteAddOnCategory };
+
+  const openCreateCategory = (kind) => {
+    setCategoryForm(emptyCategory);
+    setModal({ open: true, mode: 'create', item: null, type: 'cat', kind });
+  };
+
+  const openEditCategory = (c, kind) => {
+    setCategoryForm({
+      name: c.name,
+      description: c.description || '',
+      imageUrl: c.imageUrl || '',
+      sortOrder: c.sortOrder ?? 0,
+    });
+    setModal({ open: true, mode: 'edit', item: c, type: 'cat', kind });
+  };
+
+  const handleSaveCategory = async (e) => {
+    e.preventDefault();
+    if (!categoryForm.name.trim()) { toast.error('Category name is required.'); return; }
+    setSaving(true);
+    try {
+      const payload = {
+        name: categoryForm.name.trim(),
+        description: categoryForm.description?.trim() || null,
+        imageUrl: categoryForm.imageUrl?.trim() || null,
+        sortOrder: Number(categoryForm.sortOrder) || 0,
+      };
+      const api = catApi(modal.kind);
+      if (modal.mode === 'create') {
+        await api.create(payload);
+        toast.success('Category created');
+      } else {
+        await api.update(modal.item.id, payload);
+        toast.success('Category updated');
+      }
+      setModal({ open: false });
+      fetchAll();
+    } catch (err) {
+      toast.error(err.userMessage || err.response?.data?.message || 'Failed to save category.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleToggleCategory = async (c, kind) => {
+    if (!confirm(`${c.active ? 'Deactivate' : 'Activate'} category "${c.name}"?`)) return;
+    try {
+      await catApi(kind).toggle(c.id);
+      toast.success(`Category ${c.active ? 'deactivated' : 'activated'}`);
+      fetchAll();
+    } catch (err) {
+      toast.error(err.userMessage || err.response?.data?.message || 'Failed');
+    }
+  };
+
+  const handleDeleteCategory = async (c, kind) => {
+    if (c.active) { toast.error('Deactivate the category before deleting it'); return; }
+    if (!confirm(`Delete category "${c.name}" permanently? Existing items become uncategorized.`)) return;
+    try {
+      await catApi(kind).remove(c.id);
+      toast.success('Category deleted');
+      fetchAll();
+    } catch (err) {
+      toast.error(err.userMessage || err.response?.data?.message || 'Failed to delete category.');
+    }
+  };
+
   return (
     <div className="container adm-shell">
       <div className="adm-header">
@@ -219,11 +310,16 @@ export default function AdminEventTypes() {
             onClick={() => setTab('eventTypes')}>Event Types</button>
           <button className={`adm-tab${tab === 'addOns' ? ' active' : ''}`}
             onClick={() => setTab('addOns')}>Add-Ons</button>
+          <button className={`adm-tab${tab === 'eventCats' ? ' active' : ''}`}
+            onClick={() => setTab('eventCats')}>Event Categories</button>
+          <button className={`adm-tab${tab === 'addonCats' ? ' active' : ''}`}
+            onClick={() => setTab('addonCats')}>Add-On Categories</button>
         </div>
         <div className="adm-toolbar-right">
-          {tab === 'eventTypes'
-            ? <button className="btn btn-primary btn-sm" onClick={openCreateET}><FiPlus /> New Event Type</button>
-            : <button className="btn btn-primary btn-sm" onClick={openCreateAO}><FiPlus /> New Add-On</button>}
+          {tab === 'eventTypes' && <button className="btn btn-primary btn-sm" onClick={openCreateET}><FiPlus /> New Event Type</button>}
+          {tab === 'addOns'     && <button className="btn btn-primary btn-sm" onClick={openCreateAO}><FiPlus /> New Add-On</button>}
+          {tab === 'eventCats'  && <button className="btn btn-primary btn-sm" onClick={() => openCreateCategory('event')}><FiPlus /> New Event Category</button>}
+          {tab === 'addonCats'  && <button className="btn btn-primary btn-sm" onClick={() => openCreateCategory('addon')}><FiPlus /> New Add-On Category</button>}
         </div>
       </div>
 
@@ -248,7 +344,10 @@ export default function AdminEventTypes() {
                 )}
                 <div className="adm-item-body">
                   <span className="adm-item-name">{et.name}</span>
-                  {!et.active && <span className="adm-badge adm-badge-inactive">Inactive</span>}
+                  <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                    {et.categoryName && <span className="adm-badge adm-badge-info">{et.categoryName}</span>}
+                    {!et.active && <span className="adm-badge adm-badge-inactive">Inactive</span>}
+                  </div>
                   {et.description && <span className="adm-item-desc">{et.description}</span>}
                   <div className="adm-item-meta">
                     <span>Base: <strong>₹{Number(et.basePrice).toLocaleString()}</strong></span>
@@ -273,7 +372,7 @@ export default function AdminEventTypes() {
             ))}
           </div>
         )
-      ) : (
+      ) : tab === 'addOns' ? (
         addOns.length === 0 ? (
           <div className="adm-empty">
             <span className="adm-empty-icon"><FiPackage /></span>
@@ -293,7 +392,7 @@ export default function AdminEventTypes() {
                 <div className="adm-item-body">
                   <span className="adm-item-name">{ao.name}</span>
                   <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-                    <span className="adm-badge adm-badge-info">{ao.category}</span>
+                    <span className="adm-badge adm-badge-info">{ao.categoryName || '—'}</span>
                     {!ao.active && <span className="adm-badge adm-badge-inactive">Inactive</span>}
                   </div>
                   {ao.description && <span className="adm-item-desc">{ao.description}</span>}
@@ -315,6 +414,51 @@ export default function AdminEventTypes() {
             ))}
           </div>
         )
+      ) : (
+        // Categories tabs (event + add-on) — V55 taxonomy management.
+        // Same card UI as event types/add-ons for visual consistency.
+        (tab === 'eventCats' ? eventCategories : addOnCategories).length === 0 ? (
+          <div className="adm-empty">
+            <span className="adm-empty-icon"><FiPackage /></span>
+            <h3>No categories yet</h3>
+            <p>Categories drive the filter chips on the customer wizard. Globals (🌐) are managed by super-admins.</p>
+          </div>
+        ) : (
+          <div className="adm-grid-3">
+            {(tab === 'eventCats' ? eventCategories : addOnCategories).map(c => (
+              <div key={c.id} className={`adm-item${c.active ? '' : ' inactive'}`}>
+                {c.imageUrl && (
+                  <img src={c.imageUrl} alt={c.name} className="adm-item-img" style={{ height: 120 }} />
+                )}
+                <div className="adm-item-body">
+                  <span className="adm-item-name">{c.global ? '🌐 ' : ''}{c.name}</span>
+                  <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                    <span className="adm-badge adm-badge-info">sort {c.sortOrder}</span>
+                    {c.global && <span className="adm-badge adm-badge-info">global</span>}
+                    {!c.active && <span className="adm-badge adm-badge-inactive">Inactive</span>}
+                  </div>
+                  {c.description && <span className="adm-item-desc">{c.description}</span>}
+                </div>
+                <div className="adm-item-footer">
+                  {!c.global && (
+                    <button className="btn btn-sm btn-secondary" onClick={() => openEditCategory(c, tab === 'eventCats' ? 'event' : 'addon')}><FiEdit2 style={{ marginRight: 3 }} /> Edit</button>
+                  )}
+                  {!c.global && (
+                    <button className={`btn btn-sm ${c.active ? 'btn-danger' : 'btn-primary'}`}
+                      onClick={() => handleToggleCategory(c, tab === 'eventCats' ? 'event' : 'addon')}>
+                      {c.active ? <><FiToggleLeft style={{ marginRight: 3 }} /> Deactivate</> : <><FiToggleRight style={{ marginRight: 3 }} /> Activate</>}
+                    </button>
+                  )}
+                  {!c.global && !c.active && (
+                    <button className="btn adm-danger-btn btn-sm" onClick={() => handleDeleteCategory(c, tab === 'eventCats' ? 'event' : 'addon')}>
+                      <FiTrash2 style={{ marginRight: 3 }} /> Delete
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )
       )}
 
       {/* Modal */}
@@ -322,10 +466,53 @@ export default function AdminEventTypes() {
         <div className="adm-modal-overlay" onClick={(e) => e.target === e.currentTarget && setModal({ open: false })}>
           <div className="adm-modal">
             <h3>
-              {modal.mode === 'create' ? 'Create' : 'Edit'} {modal.type === 'et' ? 'Event Type' : 'Add-On'}
+              {modal.mode === 'create' ? 'Create' : 'Edit'}{' '}
+              {modal.type === 'et' ? 'Event Type' : modal.type === 'ao' ? 'Add-On'
+                : modal.type === 'cat' ? (modal.kind === 'event' ? 'Event Category' : 'Add-On Category')
+                : 'Item'}
             </h3>
 
-            {modal.type === 'et' ? (
+            {modal.type === 'cat' ? (
+              <form onSubmit={handleSaveCategory}>
+                <div className="input-group">
+                  <label>Name *</label>
+                  <input required value={categoryForm.name} maxLength={80}
+                    onChange={e => setCategoryForm({ ...categoryForm, name: e.target.value })}
+                    placeholder="e.g. Birthdays" />
+                </div>
+                <div className="input-group">
+                  <label>Description <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>({categoryForm.description.length}/500)</span></label>
+                  <textarea className="adm-textarea" value={categoryForm.description} maxLength={500}
+                    onChange={e => setCategoryForm({ ...categoryForm, description: e.target.value })}
+                    placeholder="Optional — shown as a tooltip on the wizard chip." rows={2} />
+                </div>
+                <div className="grid-2">
+                  <div className="input-group">
+                    <label>Sort order</label>
+                    <input type="number" min="0" value={categoryForm.sortOrder}
+                      onChange={e => setCategoryForm({ ...categoryForm, sortOrder: e.target.value })} />
+                    <span className="adm-hint">Lower = earlier in the chip row.</span>
+                  </div>
+                  <div className="input-group">
+                    <label>Image URL</label>
+                    <input value={categoryForm.imageUrl} maxLength={1000}
+                      onChange={e => setCategoryForm({ ...categoryForm, imageUrl: e.target.value })}
+                      placeholder="https://…" />
+                  </div>
+                </div>
+                {categoryForm.imageUrl?.trim() && (
+                  <div className="adm-img-previews">
+                    <img src={categoryForm.imageUrl} alt="Preview" />
+                  </div>
+                )}
+                <div className="adm-modal-actions">
+                  <button type="submit" className="btn btn-primary btn-sm" disabled={saving}>
+                    {saving ? 'Saving…' : 'Save'}
+                  </button>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setModal({ open: false })}>Cancel</button>
+                </div>
+              </form>
+            ) : modal.type === 'et' ? (
               <form onSubmit={handleSaveET}>
                 <div className="input-group">
                   <label>Name *</label>
@@ -381,6 +568,19 @@ export default function AdminEventTypes() {
                   </div>
                 </div>
                 <div className="input-group">
+                  <label>Category</label>
+                  <select value={form.categoryId}
+                    onChange={e => setForm({ ...form, categoryId: e.target.value })}>
+                    <option value="">— Uncategorized —</option>
+                    {eventCategories.filter(c => c.active).map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.global ? '🌐 ' : ''}{c.name}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="adm-hint">Filter chip on the customer wizard. Manage categories in the Categories tab.</span>
+                </div>
+                <div className="input-group">
                   <label><FiImage style={{ marginRight: 4, verticalAlign: -2 }} />Image URLs</label>
                   {form.imageUrls.map((url, i) => (
                     <div key={i} className="adm-img-row">
@@ -424,10 +624,19 @@ export default function AdminEventTypes() {
                   </div>
                   <div className="input-group">
                     <label>Category *</label>
-                    <select value={addonForm.category} onChange={e => setAddonForm({ ...addonForm, category: e.target.value })}>
-                      {ADDON_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    <select value={addonForm.categoryId}
+                      onChange={e => setAddonForm({ ...addonForm, categoryId: e.target.value })} required>
+                      <option value="">— Select a category —</option>
+                      {addOnCategories.filter(c => c.active).map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.global ? '🌐 ' : ''}{c.name}
+                        </option>
+                      ))}
                     </select>
                   </div>
+                </div>
+                <div className="input-group">
+                  <span className="adm-hint">Pick from global categories (🌐) or any you've created for this binge under the Categories tab.</span>
                 </div>
                 <div className="grid-2">
                   <div className="input-group">

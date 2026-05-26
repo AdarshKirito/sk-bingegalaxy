@@ -1490,6 +1490,12 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
           {b.guestAmount > 0 && (
             <div style={rowStyle}><span style={labelStyle}>Guest Charge</span><span>₹{b.guestAmount?.toLocaleString()}</span></div>
           )}
+          {b.taxAmount > 0 && (
+            <>
+              <div style={rowStyle}><span style={labelStyle}>Subtotal</span><span>₹{(b.subtotalAmount ?? b.totalAmount)?.toLocaleString()}</span></div>
+              <div style={rowStyle}><span style={labelStyle}>Tax</span><span>₹{b.taxAmount?.toLocaleString()}</span></div>
+            </>
+          )}
           <div style={{ ...rowStyle, fontWeight: 700, fontSize: '1rem' }}><span style={labelStyle}>Total Amount</span><span style={{ color: 'var(--primary)' }}>₹{b.totalAmount?.toLocaleString()}</span></div>
           {b.pricingSource && b.pricingSource !== 'DEFAULT' && (
             <div style={{ ...rowStyle, fontSize: '0.78rem' }}>

@@ -29,8 +29,15 @@ public class AddOn {
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal price;
 
-    @Column(nullable = false, length = 50)
-    private String category; // DECORATION, BEVERAGE, PHOTOGRAPHY, EFFECT, FOOD, EXPERIENCE
+    /**
+     * FK to {@code addon_categories.id}. NOT NULL since V59 — every add-on
+     * must resolve to a real category row. V55 introduced the column, V58
+     * dropped the legacy VARCHAR, and V59 enforces the constraint at the
+     * DB layer (matching the {@code @NotNull} contract on
+     * {@code AddOnSaveRequest.categoryId}).
+     */
+    @Column(name = "category_id", nullable = false)
+    private Long categoryId;
 
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "add_on_images", joinColumns = @JoinColumn(name = "add_on_id"))

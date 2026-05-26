@@ -168,16 +168,25 @@ export default function StepDateTime({
             </button>
             {venueRooms.map(room => {
               const isAvailable = availableRoomIds === null || availableRoomIds.has(room.id);
+              const priceAdd = Number(room.priceAddition || 0);
+              const thumb = Array.isArray(room.imageUrls) && room.imageUrls.length > 0 ? room.imageUrls[0] : null;
               return (
                 <button key={room.id}
                   className={`room-card ${form.venueRoomId === room.id ? 'selected' : ''} ${!isAvailable ? 'room-card-full' : ''}`}
                   aria-selected={form.venueRoomId === room.id}
                   disabled={!isAvailable}
                   onClick={() => setForm(f => ({ ...f, venueRoomId: room.id }))}>
+                  {thumb && (
+                    <img src={thumb} alt="" className="room-card-thumb"
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                  )}
                   <span className="room-card-name">{room.name}</span>
                   <span className="room-card-detail">
                     {room.roomType?.replace(/_/g, ' ')} · {room.capacity} guest{Number(room.capacity) === 1 ? '' : 's'}
                   </span>
+                  {priceAdd > 0 && (
+                    <span className="room-card-price">+₹{priceAdd.toLocaleString()}</span>
+                  )}
                   {!isAvailable && <span className="room-card-full-label">Full</span>}
                 </button>
               );

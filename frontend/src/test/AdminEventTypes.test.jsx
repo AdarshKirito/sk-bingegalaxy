@@ -23,9 +23,11 @@ vi.mock('../context/BingeContext', () => ({
   }),
 }));
 
-const { mockGetAllEventTypes, mockGetAllAddOns } = vi.hoisted(() => ({
+const { mockGetAllEventTypes, mockGetAllAddOns, mockGetEventCategories, mockGetAddOnCategories } = vi.hoisted(() => ({
   mockGetAllEventTypes: vi.fn(),
   mockGetAllAddOns: vi.fn(),
+  mockGetEventCategories: vi.fn(),
+  mockGetAddOnCategories: vi.fn(),
 }));
 vi.mock('../services/endpoints', () => ({
   toArray: (value) => Array.isArray(value) ? value : [],
@@ -40,6 +42,16 @@ vi.mock('../services/endpoints', () => ({
     updateAddOn: vi.fn().mockResolvedValue({ data: {} }),
     toggleAddOn: vi.fn().mockResolvedValue({ data: {} }),
     deleteAddOn: vi.fn().mockResolvedValue({ data: {} }),
+    getEventCategories: mockGetEventCategories,
+    createEventCategory: vi.fn().mockResolvedValue({ data: {} }),
+    updateEventCategory: vi.fn().mockResolvedValue({ data: {} }),
+    toggleEventCategory: vi.fn().mockResolvedValue({ data: {} }),
+    deleteEventCategory: vi.fn().mockResolvedValue({ data: {} }),
+    getAddOnCategories: mockGetAddOnCategories,
+    createAddOnCategory: vi.fn().mockResolvedValue({ data: {} }),
+    updateAddOnCategory: vi.fn().mockResolvedValue({ data: {} }),
+    toggleAddOnCategory: vi.fn().mockResolvedValue({ data: {} }),
+    deleteAddOnCategory: vi.fn().mockResolvedValue({ data: {} }),
   },
 }));
 
@@ -72,6 +84,12 @@ describe('AdminEventTypes Page', () => {
           { id: 1, name: 'DJ Setup', price: 1500, active: true },
         ],
       },
+    });
+    mockGetEventCategories.mockResolvedValue({
+      data: { data: [{ id: 20, name: 'PARTY', active: true, sortOrder: 0 }] },
+    });
+    mockGetAddOnCategories.mockResolvedValue({
+      data: { data: [{ id: 10, name: 'EXPERIENCE', active: true, sortOrder: 0 }] },
     });
   });
 

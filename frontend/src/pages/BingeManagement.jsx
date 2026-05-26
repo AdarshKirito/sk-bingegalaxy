@@ -48,6 +48,7 @@ export default function BingeManagement() {
     customerCancellationEnabled: true,
     customerCancellationCutoffMinutes: 180,
     maxConcurrentBookings: '',
+    roomSelectionRequired: false,
     openTime: '10:00',
     closeTime: '23:00',
   };
@@ -231,6 +232,7 @@ export default function BingeManagement() {
         customerCancellationEnabled: form.customerCancellationEnabled,
         customerCancellationCutoffMinutes: form.customerCancellationCutoffMinutes,
         maxConcurrentBookings: form.maxConcurrentBookings === '' ? null : form.maxConcurrentBookings,
+        roomSelectionRequired: !!form.roomSelectionRequired,
         openTime: form.openTime,
         closeTime: form.closeTime,
       };
@@ -272,6 +274,7 @@ export default function BingeManagement() {
       customerCancellationEnabled: b.customerCancellationEnabled !== false,
       customerCancellationCutoffMinutes: b.customerCancellationCutoffMinutes ?? 180,
       maxConcurrentBookings: b.maxConcurrentBookings ?? '',
+      roomSelectionRequired: b.roomSelectionRequired === true,
       openTime: (b.openTime || '10:00').slice(0, 5),
       closeTime: (b.closeTime || '23:00').slice(0, 5),
     });
@@ -593,6 +596,14 @@ export default function BingeManagement() {
                 <label>Max Concurrent Bookings per Slot</label>
                 <input type="number" min="1" value={form.maxConcurrentBookings} onChange={(e) => setForm({ ...form, maxConcurrentBookings: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Unlimited" />
                 <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Leave empty for unlimited capacity</span>
+              </div>
+              <div className="input-group">
+                <label>Room Selection</label>
+                <select value={form.roomSelectionRequired ? 'required' : 'optional'} onChange={(e) => setForm({ ...form, roomSelectionRequired: e.target.value === 'required' })}>
+                  <option value="optional">Optional</option>
+                  <option value="required">Required</option>
+                </select>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>When Required, customers and admins must pick a venue room before booking.</span>
               </div>
               <div className="input-group">
                 <label>Opening Time</label>

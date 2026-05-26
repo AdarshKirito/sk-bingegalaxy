@@ -59,6 +59,9 @@ public class AdminCreateBookingRequest {
     // Rate code override (optional — admin can select a different rate code than the customer's default)
     private Long rateCodeId;
 
+    /** Optional venue room (must be active + APPROVED + within capacity). */
+    private Long venueRoomId;
+
     // Admin price overrides (optional — overrides resolved pricing)
     @jakarta.validation.constraints.DecimalMin(value = "0.00", message = "Override base amount must be non-negative")
     @jakarta.validation.constraints.DecimalMax(value = "999999.99", message = "Override base amount exceeds maximum")

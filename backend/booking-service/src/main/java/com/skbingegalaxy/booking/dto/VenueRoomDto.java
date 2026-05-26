@@ -2,7 +2,9 @@ package com.skbingegalaxy.booking.dto;
 
 import lombok.*;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
 @NoArgsConstructor
@@ -21,6 +23,13 @@ public class VenueRoomDto {
     private Integer currentOccupancy;
     /** Whether the room is available for the queried slot. */
     private Boolean available;
+    // V56
+    private BigDecimal priceAddition;
+    private String status;
+    private Long approvalDecidedBy;
+    private LocalDateTime approvalDecidedAt;
+    private String approvalRejectionReason;
+    private List<String> imageUrls;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

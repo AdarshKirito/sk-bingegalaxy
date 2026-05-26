@@ -214,6 +214,16 @@ public class Booking {
     @Column(length = 100)
     private String venueRoomName;
 
+    /**
+     * V56: snapshot of the room's price_addition at booking time. The room's
+     * pricing is included in the subtotal-for-tax base, mirroring how
+     * eventBasePrice/eventHourlyAmount are captured so the booking stays
+     * reproducible even after the catalogue changes later.
+     */
+    @Column(name = "venue_room_price", nullable = false, precision = 10, scale = 2)
+    @Builder.Default
+    private BigDecimal venueRoomPrice = BigDecimal.ZERO;
+
     // ── Loyalty points ───────────────────────────────────────
     @Column(nullable = false)
     @Builder.Default

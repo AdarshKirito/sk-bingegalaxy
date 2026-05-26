@@ -22,6 +22,10 @@ public class EventTypeDto {
     private Integer minGuests;
     /** Per-event-type maximum guest count (null = no upper bound). */
     private Integer maxGuests;
+    /** FK to event_categories. Null = uncategorized. */
+    private Long categoryId;
+    /** Snapshotted category name for the wizard chip filter (null when uncategorized). */
+    private String categoryName;
     private List<String> imageUrls;
     private boolean active;
 }

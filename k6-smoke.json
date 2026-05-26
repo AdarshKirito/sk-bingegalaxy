@@ -1,0 +1,253 @@
+{
+    "root_group": {
+        "checks": {},
+        "name": "",
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e",
+        "groups": {
+                "public - health": {
+                    "path": "::public - health",
+                    "id": "09952055e867aae93da09204fa67feb5",
+                    "groups": {},
+                    "checks": {
+                            "health 200": {
+                                "path": "::public - health::health 200",
+                                "id": "bfdd2c93ff48d0cf12a228d7d568b456",
+                                "passes": 41,
+                                "fails": 0,
+                                "name": "health 200"
+                            }
+                        },
+                    "name": "public - health"
+                },
+                "public - event types": {
+                    "name": "public - event types",
+                    "path": "::public - event types",
+                    "id": "f3c7dca8355c0a5f046dc51eca55bea7",
+                    "groups": {},
+                    "checks": {
+                            "event-types 200": {
+                                "passes": 41,
+                                "fails": 0,
+                                "name": "event-types 200",
+                                "path": "::public - event types::event-types 200",
+                                "id": "0893a384c3c4f5070d78014f4cccf4f3"
+                            }
+                        }
+                },
+                "public - add-ons": {
+                    "name": "public - add-ons",
+                    "path": "::public - add-ons",
+                    "id": "05f6dcb6dec71a6036746a5179d52929",
+                    "groups": {},
+                    "checks": {
+                            "add-ons 200": {
+                                "name": "add-ons 200",
+                                "path": "::public - add-ons::add-ons 200",
+                                "id": "4eeeb4bb2124056fa9ee8c25efbd1fd4",
+                                "passes": 41,
+                                "fails": 0
+                            }
+                        }
+                },
+                "public - booked slots today": {
+                    "name": "public - booked slots today",
+                    "path": "::public - booked slots today",
+                    "id": "9a0050a0d1aa23d13ae27321d86d1125",
+                    "groups": {},
+                    "checks": {
+                            "booked-slots 200": {
+                                "name": "booked-slots 200",
+                                "path": "::public - booked slots today::booked-slots 200",
+                                "id": "5eca23118ce965a2e903e312531f6536",
+                                "passes": 41,
+                                "fails": 0
+                            }
+                        }
+                },
+                "auth - my bookings": {
+                    "groups": {},
+                    "checks": {
+                            "my bookings 200": {
+                                "fails": 0,
+                                "name": "my bookings 200",
+                                "path": "::auth - my bookings::my bookings 200",
+                                "id": "1dd8029355c9ba329ea8bd73be9a35e6",
+                                "passes": 41
+                            }
+                        },
+                    "name": "auth - my bookings",
+                    "path": "::auth - my bookings",
+                    "id": "ad329e3edcf21979a2f360a3b5b711c8"
+                },
+                "auth - my payments": {
+                    "name": "auth - my payments",
+                    "path": "::auth - my payments",
+                    "id": "67e1549d5bfe1d00de1f957d980fdbe2",
+                    "groups": {},
+                    "checks": {
+                            "my payments 200": {
+                                "passes": 41,
+                                "fails": 0,
+                                "name": "my payments 200",
+                                "path": "::auth - my payments::my payments 200",
+                                "id": "8f9cd392fd14f90f74264bf7e5dbbf1f"
+                            }
+                        }
+                }
+            }
+    },
+    "metrics": {
+        "http_req_sending": {
+            "min": 0,
+            "med": 0,
+            "p(90)": 0,
+            "p(95)": 0.35440999999999423,
+            "p(99)": 0.6120319999999996,
+            "max": 0.8105,
+            "count": 247,
+            "avg": 0.03050526315789474
+        },
+        "http_req_tls_handshaking": {
+            "max": 0,
+            "count": 247,
+            "avg": 0,
+            "min": 0,
+            "med": 0,
+            "p(90)": 0,
+            "p(95)": 0,
+            "p(99)": 0
+        },
+        "http_req_waiting": {
+            "med": 24.1786,
+            "p(90)": 139.58490000000015,
+            "p(95)": 215.81410999999989,
+            "p(99)": 1208.1216539999923,
+            "max": 8210.6201,
+            "count": 247,
+            "avg": 107.91391578947365,
+            "min": 5.1985
+        },
+        "vus": {
+            "value": 1,
+            "min": 0,
+            "max": 2
+        },
+        "http_req_connecting": {
+            "p(95)": 0,
+            "p(99)": 0.32680799999999516,
+            "max": 1.1015,
+            "count": 247,
+            "avg": 0.011369230769230769,
+            "min": 0,
+            "med": 0,
+            "p(90)": 0
+        },
+        "iteration_duration": {
+            "p(90)": 1719.9627,
+            "p(95)": 1876.4987,
+            "p(99)": 4900.26606,
+            "max": 4922.0897,
+            "count": 41,
+            "avg": 1487.5846219512196,
+            "min": 1080.2552,
+            "med": 1252.8432
+        },
+        "http_reqs": {
+            "count": 247,
+            "rate": 6.315350954446021
+        },
+        "http_req_duration{expected_response:true}": {
+            "p(95)": 272.4070099999998,
+            "p(99)": 1281.8109879999924,
+            "max": 8214.0741,
+            "count": 247,
+            "avg": 113.8905279352226,
+            "min": 5.1985,
+            "med": 24.9839,
+            "p(90)": 178.03874000000002
+        },
+        "http_req_duration": {
+            "med": 24.9839,
+            "p(90)": 178.03874000000002,
+            "p(95)": 272.4070099999998,
+            "p(99)": 1281.8109879999924,
+            "max": 8214.0741,
+            "count": 247,
+            "avg": 113.8905279352226,
+            "min": 5.1985,
+            "thresholds": {
+                "p(95)<800": false,
+                "p(99)<1500": false
+            }
+        },
+        "data_received": {
+            "count": 419136,
+            "rate": 10716.562500577682
+        },
+        "data_sent": {
+            "count": 145142,
+            "rate": 3711.0229483004227
+        },
+        "http_req_failed": {
+            "passes": 0,
+            "fails": 247,
+            "thresholds": {
+                "rate<0.01": false
+            },
+            "value": 0
+        },
+        "http_req_blocked": {
+            "max": 1.2277,
+            "count": 247,
+            "avg": 0.0213582995951417,
+            "min": 0,
+            "med": 0,
+            "p(90)": 0,
+            "p(95)": 0,
+            "p(99)": 0.9095879999999966
+        },
+        "checks": {
+            "passes": 246,
+            "fails": 0,
+            "thresholds": {
+                "rate>0.99": false
+            },
+            "value": 1
+        },
+        "http_req_receiving": {
+            "max": 86.463,
+            "count": 247,
+            "avg": 5.946106882591089,
+            "min": 0,
+            "med": 0.5726,
+            "p(90)": 3.1872400000000027,
+            "p(95)": 57.245879999999964,
+            "p(99)": 81.8125
+        },
+        "group_duration": {
+            "p(95)": 248.04562500000003,
+            "p(99)": 761.8643,
+            "max": 1761.0571,
+            "count": 246,
+            "avg": 81.17827886178861,
+            "min": 5.1985,
+            "med": 25.1044,
+            "p(90)": 173.56425000000002
+        },
+        "vus_max": {
+            "min": 2,
+            "max": 2,
+            "value": 2
+        },
+        "iterations": {
+            "count": 41,
+            "rate": 1.0482971219930641
+        }
+    },
+    "setup_data": {
+        "email": "k6+f8834edd-662f-4695-98cf-da49900dcc52@loadtest.skbingegalaxy.local",
+        "password": "LoadTest!2026#aA1",
+        "token": "eyJhbGciOiJIUzI1NiJ9.eyJmaXJzdE5hbWUiOiJMb2FkIiwicm9sZSI6IkNVU1RPTUVSIiwicGhvbmVDb3VudHJ5Q29kZSI6Iis5MSIsInBob25lIjoiMjIxMzM3NzUzOSIsInRva2VuX3R5cGUiOiJhY2Nlc3MiLCJlbWFpbCI6Ims2K2Y4ODM0ZWRkLTY2MmYtNDY5NS05OGNmLWRhNDk5MDBkY2M1MkBsb2FkdGVzdC5za2JpbmdlZ2FsYXh5LmxvY2FsIiwianRpIjoiNGI3ZGE2ZDYtZTFiOS00NjRlLWIxMzUtZDkxMTg2NDNiZGMyIiwic3ViIjoiMTI1IiwiaXNzIjoic2tiaW5nZWdhbGF4eS1hdXRoIiwiYXVkIjpbInNrYmluZ2VnYWxheHktd2ViIl0sImlhdCI6MTc3OTI5OTg1MSwiZXhwIjoxNzc5MzAwNzUxfQ.WVql3DJEc1zLc6dQ-owx_KqjouSQRbQSMBjsV4uKqys"
+    }
+}

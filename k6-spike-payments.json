@@ -1,0 +1,206 @@
+{
+    "metrics": {
+        "http_req_failed": {
+            "passes": 2648,
+            "fails": 2650,
+            "thresholds": {
+                "rate<0.05": true
+            },
+            "value": 0.49981124952812384
+        },
+        "http_reqs": {
+            "count": 5298,
+            "rate": 43.53342643154056
+        },
+        "iterations": {
+            "count": 2648,
+            "rate": 21.75849626098894
+        },
+        "http_req_waiting": {
+            "p(90)": 1556.49701,
+            "p(95)": 2108.815434999997,
+            "p(99)": 3266.2087109999898,
+            "max": 5760.2464,
+            "count": 5298,
+            "avg": 694.254529501699,
+            "min": 6.0364,
+            "med": 486.31665
+        },
+        "http_req_duration{name:GET /payments/my}": {
+            "min": 9.2236,
+            "med": 780.0759499999999,
+            "p(90)": 2140.76667,
+            "p(95)": 2682.823565,
+            "p(99)": 4099.373425000002,
+            "max": 5760.2464,
+            "count": 2648,
+            "avg": 1028.1926116314191,
+            "thresholds": {
+                "p(95)<1500": true
+            }
+        },
+        "http_req_duration": {
+            "min": 6.4159,
+            "med": 489.0579,
+            "p(90)": 1559.43535,
+            "p(95)": 2140.7386349999997,
+            "p(99)": 3316.3562190000002,
+            "max": 5760.2464,
+            "count": 5298,
+            "avg": 717.9082937523598,
+            "thresholds": {
+                "p(99)<3000": true,
+                "p(95)<1500": true
+            }
+        },
+        "vus_max": {
+            "value": 50,
+            "min": 50,
+            "max": 50
+        },
+        "iteration_duration": {
+            "max": 6245.6585,
+            "count": 2648,
+            "avg": 1536.737914765862,
+            "min": 119.5523,
+            "med": 1366.6543499999998,
+            "p(90)": 2732.34767,
+            "p(95)": 3269.719255,
+            "p(99)": 4680.517138000001
+        },
+        "checks": {
+            "passes": 5296,
+            "fails": 0,
+            "thresholds": {
+                "rate>0.95": false
+            },
+            "value": 1
+        },
+        "http_req_duration{name:POST /payments/initiate}": {
+            "max": 0,
+            "count": 0,
+            "avg": 0,
+            "min": 0,
+            "med": 0,
+            "p(90)": 0,
+            "p(95)": 0,
+            "p(99)": 0,
+            "thresholds": {
+                "p(95)<1500": false,
+                "p(99)<3000": false
+            }
+        },
+        "data_sent": {
+            "count": 2676105,
+            "rate": 21989.43377511851
+        },
+        "http_req_blocked": {
+            "med": 0,
+            "p(90)": 0,
+            "p(95)": 0,
+            "p(99)": 0.5985819999999976,
+            "max": 2.5475,
+            "count": 5298,
+            "avg": 0.014851396753491886,
+            "min": 0
+        },
+        "http_req_receiving": {
+            "p(99)": 291.98945299999997,
+            "max": 1067.5361,
+            "count": 5298,
+            "avg": 23.63282508493771,
+            "min": 0,
+            "med": 0.53765,
+            "p(90)": 96.53609999999999,
+            "p(95)": 99.9772
+        },
+        "data_received": {
+            "count": 5955002,
+            "rate": 48931.98215679066
+        },
+        "http_req_duration{expected_response:true}": {
+            "count": 2650,
+            "avg": 1028.034152981131,
+            "min": 9.2236,
+            "med": 780.0759499999999,
+            "p(90)": 2140.7292899999998,
+            "p(95)": 2682.5435549999993,
+            "p(99)": 4099.170774999998,
+            "max": 5760.2464
+        },
+        "http_req_connecting": {
+            "min": 0,
+            "med": 0,
+            "p(90)": 0,
+            "p(95)": 0,
+            "p(99)": 0,
+            "max": 2.2117,
+            "count": 5298,
+            "avg": 0.00959337485843715
+        },
+        "http_req_sending": {
+            "count": 5298,
+            "avg": 0.020939165722914318,
+            "min": 0,
+            "med": 0,
+            "p(90)": 0,
+            "p(95)": 0,
+            "p(99)": 0.616509,
+            "max": 2.9894
+        },
+        "http_req_duration{name:POST /payments/callback (forged)}": {
+            "max": 1758.7237,
+            "count": 2648,
+            "avg": 407.5482004909362,
+            "min": 6.4159,
+            "med": 387.25585,
+            "p(90)": 764.74685,
+            "p(95)": 875.7105200000001,
+            "p(99)": 1267.800377,
+            "thresholds": {
+                "p(95)<100": true
+            }
+        },
+        "http_req_tls_handshaking": {
+            "avg": 0,
+            "min": 0,
+            "med": 0,
+            "p(90)": 0,
+            "p(95)": 0,
+            "p(99)": 0,
+            "max": 0,
+            "count": 5298
+        },
+        "vus": {
+            "value": 4,
+            "min": 0,
+            "max": 50
+        }
+    },
+    "setup_data": {
+        "token": "eyJhbGciOiJIUzI1NiJ9.eyJmaXJzdE5hbWUiOiJMb2FkIiwicm9sZSI6IkNVU1RPTUVSIiwicGhvbmVDb3VudHJ5Q29kZSI6Iis5MSIsInBob25lIjoiMjQwMjg2MDI2NiIsInRva2VuX3R5cGUiOiJhY2Nlc3MiLCJlbWFpbCI6Ims2KzlhNmMzOTA4LWQ2MTYtNDhhMi1iODdhLWRjMzJhMWY2NGNmZkBsb2FkdGVzdC5za2JpbmdlZ2FsYXh5LmxvY2FsIiwianRpIjoiOTM3YTk5MGMtNGMyMS00ZmY5LWIyNTUtYWM1NDVkNzE5ZGZhIiwic3ViIjoiMTI3IiwiaXNzIjoic2tiaW5nZWdhbGF4eS1hdXRoIiwiYXVkIjpbInNrYmluZ2VnYWxheHktd2ViIl0sImlhdCI6MTc3OTMwMDA1NCwiZXhwIjoxNzc5MzAwOTU0fQ.Uf1vufUviQKpkoyJlOHg82yUU1fmFXK_jJiRYouvJKM",
+        "bookingRef": ""
+    },
+    "root_group": {
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e",
+        "groups": {},
+        "checks": {
+                "my payments 2xx/429": {
+                    "name": "my payments 2xx/429",
+                    "path": "::my payments 2xx/429",
+                    "id": "718d69c5e186b921bd9a4d04b559719c",
+                    "passes": 2648,
+                    "fails": 0
+                },
+                "forged callback rejected": {
+                    "name": "forged callback rejected",
+                    "path": "::forged callback rejected",
+                    "id": "867e9fea8f724a7af563f8a5a26e57f0",
+                    "passes": 2648,
+                    "fails": 0
+                }
+            },
+        "name": ""
+    }
+}

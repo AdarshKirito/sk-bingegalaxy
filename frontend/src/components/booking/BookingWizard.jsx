@@ -376,6 +376,11 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
     const guestCharge = pricePerGuest * Math.max(form.numberOfGuests - 1, 0);
     let subtotal = base + addOnTotal + guestCharge;
     if (activeSurge) subtotal = subtotal * activeSurge.multiplier;
+    // V56: venue room price addition is applied AFTER surge (matches backend)
+    if (form.venueRoomId) {
+      const room = venueRooms.find(r => r.id === Number(form.venueRoomId));
+      if (room?.priceAddition) subtotal += Number(room.priceAddition) || 0;
+    }
     return subtotal;
   };
 

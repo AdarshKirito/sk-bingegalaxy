@@ -67,6 +67,19 @@ spring:
                 name: availabilityServiceCB
                 fallbackUri: forward:/fallback
 
+        # SSE stream route — must come BEFORE the general booking route.
+        # No circuit breaker and no response-timeout so the long-lived
+        # text/event-stream connection is not killed at 30 s.
+        - id: booking-service-sse
+          uri: lb://booking-service
+          predicates:
+            - Path=/api/v1/bookings/admin/events/stream
+          metadata:
+            response-timeout: -1
+            connect-timeout: 5000
+          filters:
+            - StripPrefix=0
+
         - id: booking-service
           uri: lb://booking-service
           predicates:

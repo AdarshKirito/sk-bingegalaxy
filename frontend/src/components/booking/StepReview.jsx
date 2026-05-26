@@ -43,6 +43,12 @@ export default function StepReview({
             <span>{selectedRoom.name} ({selectedRoom.roomType?.replace(/_/g, ' ')})</span>
           </div>
         )}
+        {selectedRoom && Number(selectedRoom.priceAddition) > 0 && (
+          <div className="review-row" style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+            <span>Room Charge ({selectedRoom.name})</span>
+            <span>+₹{Number(selectedRoom.priceAddition).toLocaleString()}</span>
+          </div>
+        )}
 
         {(() => {
           const rep = resolvedPricing?.eventPricings?.find(ep => ep.eventTypeId === selectedEvent?.id);

@@ -5,6 +5,7 @@ import com.skbingegalaxy.booking.client.AvailabilityClientFallback;
 import com.skbingegalaxy.booking.dto.*;
 import com.skbingegalaxy.booking.entity.*;
 import com.skbingegalaxy.booking.repository.*;
+import com.skbingegalaxy.booking.tax.provider.TaxContext;
 import com.skbingegalaxy.common.constants.KafkaTopics;
 import com.skbingegalaxy.common.context.BingeContext;
 import com.skbingegalaxy.booking.service.statemachine.BookingStateMachine;
@@ -49,6 +50,8 @@ public class BookingService {
     private final BookingAddOnRepository bookingAddOnRepository;
     private final EventTypeRepository eventTypeRepository;
     private final AddOnRepository addOnRepository;
+    private final com.skbingegalaxy.booking.repository.EventCategoryRepository eventCategoryRepository;
+    private final com.skbingegalaxy.booking.repository.AddOnCategoryRepository addOnCategoryRepository;
     private final RateCodeEventPricingRepository rateCodeEventPricingRepository;
     private final RateCodeAddonPricingRepository rateCodeAddonPricingRepository;
     private final CustomerEventPricingRepository customerEventPricingRepository;
@@ -64,6 +67,7 @@ public class BookingService {
     private final BookingEventLogService eventLogService;
     private final SagaOrchestrator sagaOrchestrator;
     private final VenueRoomRepository venueRoomRepository;
+    private final com.skbingegalaxy.booking.repository.RoomBlockRepository roomBlockRepository;  // V57: maintenance windows
     private final com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyMemberService loyaltyMemberService;
     private final com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyMembershipRepository loyaltyMembershipRepository;
     private final com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyConfigService loyaltyConfigService;
@@ -75,6 +79,7 @@ public class BookingService {
     private final BookingRiskEvaluator bookingRiskEvaluator;                // Item 23 — fraud / abuse rule engine
     private final BookingAnalyticsMetrics analyticsMetrics;                 // Item 27 — funnel/lifecycle counters
     private final BookingStateMachine stateMachine;                         // Centralized status-transition engine
+    private final TaxService taxService;                                    // Tax computation at booking creation time
 
     @Value("${internal.api.secret}")
     private String internalApiSecret;
@@ -296,20 +301,37 @@ public class BookingService {
             totalAmount = totalAmount.multiply(surgeMultiplier).setScale(2, RoundingMode.HALF_UP);
         }
 
-        // â”€â”€ Venue room assignment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── Venue room assignment ─────────────────────────────────
         Long venueRoomId = null;
         String venueRoomName = null;
+        BigDecimal venueRoomPrice = BigDecimal.ZERO;
         if (request.getVenueRoomId() != null) {
             VenueRoom room = venueRoomRepository.findByIdAndBingeId(request.getVenueRoomId(), bingeId)
                 .orElseThrow(() -> new BusinessException("Selected room not found"));
             if (!room.isActive()) throw new BusinessException("Selected room is currently unavailable");
-            // Check room capacity for the requested time slot
+            // V56: block bookings against rooms that haven't been approved.
+            if (room.getStatus() != null && room.getStatus() != com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED) {
+                throw new BusinessException("Selected room is not yet approved for bookings");
+            }
             int roomOccupancy = countRoomBookings(room.getId(), request.getBookingDate(), startMinute, durMin);
             if (roomOccupancy >= room.getCapacity()) {
                 throw new BusinessException("Selected room '" + room.getName() + "' is fully booked for this time slot");
             }
             venueRoomId = room.getId();
             venueRoomName = room.getName();
+            venueRoomPrice = room.getPriceAddition() != null ? room.getPriceAddition() : BigDecimal.ZERO;
+        } else {
+            // V56: enforce the per-binge "must pick a room" toggle.
+            Binge bingeCfg = bingeRepository.findById(bingeId).orElse(null);
+            if (bingeCfg != null && bingeCfg.isRoomSelectionRequired()) {
+                throw new BusinessException("This binge requires a room to be selected before booking");
+            }
+        }
+        // Add the room surcharge to the booking total. We intentionally apply
+        // it after surge multiplication so the room fee is flat and predictable
+        // for the customer (a luxury room shouldn't get 1.5x'd on a busy night).
+        if (venueRoomPrice.compareTo(BigDecimal.ZERO) > 0) {
+            totalAmount = totalAmount.add(venueRoomPrice).setScale(2, RoundingMode.HALF_UP);
         }
 
         // â”€â”€ Loyalty redemption â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -335,6 +357,16 @@ public class BookingService {
             }
         }
 
+        // ── Tax computation (applied at creation, like Stripe/Shopify) ───────────
+        TaxContext taxCtx = buildBookingTaxContext(bingeId);
+        TaxComputationResult taxResult = taxService.compute(taxCtx, totalAmount, baseAmount, addOnTotal, guestAmount);
+        BigDecimal subtotalForTax = totalAmount;
+        BigDecimal taxComputed = taxResult.getTotalTax() != null ? taxResult.getTotalTax() : BigDecimal.ZERO;
+        if (taxComputed.compareTo(BigDecimal.ZERO) > 0) {
+            totalAmount = subtotalForTax.add(taxComputed).setScale(2, RoundingMode.HALF_UP);
+        }
+        String taxBreakdown = taxResult.getBreakdownJson();
+
         Booking booking = Booking.builder()
             .bookingRef(bookingRef)
             .bingeId(bingeId)
@@ -354,15 +386,14 @@ public class BookingService {
             .addOnAmount(addOnTotal)
             .guestAmount(guestAmount)
             .totalAmount(totalAmount)
-            // Pre-tax subtotal (V38 schema). No tax is applied at create time —
-            // tax computation runs later via the tax provider on confirmation —
-            // so subtotal == total here, matching the V38 backfill semantics
-            // (UPDATE bookings SET subtotal_amount = total_amount).
-            .subtotalAmount(totalAmount)
+            .subtotalAmount(subtotalForTax)
+            .taxAmount(taxComputed)
+            .taxBreakdownJson(taxBreakdown)
             .pricingSource(pricingSource)
             .rateCodeName(rateCodeName)
             .venueRoomId(venueRoomId)
             .venueRoomName(venueRoomName)
+            .venueRoomPrice(venueRoomPrice)
             .surgeMultiplier(surgeMultiplier)
             .surgeLabel(surgeLabel)
             .loyaltyPointsRedeemed(loyaltyPointsRedeemed)
@@ -858,6 +889,28 @@ public class BookingService {
         }
 
         // â”€â”€ Sync paymentStatus with actual balance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // -- Recompute taxes after any pricing / schedule / component override --
+        // Note: UpdateBookingRequest has no totalAmount field; admins can only
+        // override individual components (baseAmount / addOnAmount / guestAmount).
+        // Therefore tax must always be reapplied on top of the new line items —
+        // we do NOT treat a component override as "admin set the final number".
+        if (pricingChanged || dateTimeChanged || directPriceOverride) {
+            TaxContext taxCtxUpdate = buildBookingTaxContext(booking.getBingeId());
+            BigDecimal preTaxTotal = booking.getTotalAmount();
+            TaxComputationResult taxResultUpdate = taxService.compute(taxCtxUpdate, preTaxTotal,
+                booking.getBaseAmount() != null ? booking.getBaseAmount() : BigDecimal.ZERO,
+                booking.getAddOnAmount() != null ? booking.getAddOnAmount() : BigDecimal.ZERO,
+                booking.getGuestAmount() != null ? booking.getGuestAmount() : BigDecimal.ZERO);
+            BigDecimal taxAmtUpdate = taxResultUpdate.getTotalTax() != null ? taxResultUpdate.getTotalTax() : BigDecimal.ZERO;
+            booking.setSubtotalAmount(preTaxTotal);
+            booking.setTaxAmount(taxAmtUpdate);
+            booking.setTaxBreakdownJson(taxResultUpdate.getBreakdownJson());
+            if (taxAmtUpdate.compareTo(BigDecimal.ZERO) > 0) {
+                booking.setTotalAmount(preTaxTotal.add(taxAmtUpdate).setScale(2, RoundingMode.HALF_UP));
+            }
+        }
+
+        // -- Sync paymentStatus with actual balance -----------------------
         // When the admin changes the price, totalAmount may no longer match what has
         // been collected.  Keep paymentStatus consistent so the customer sees the
         // correct state (PARTIALLY_PAID) and is shown a "pay balance" call-to-action.
@@ -1112,6 +1165,26 @@ public class BookingService {
             }
         }
 
+        // -- Recompute taxes after schedule / surge change ----------------
+        // totalAmount above is the new pre-tax subtotal (post-surge). Tax must
+        // be reapplied so the rescheduled booking honours the binge's tax rules
+        // exactly like a fresh booking would.
+        {
+            TaxContext taxCtxResched = buildBookingTaxContext(booking.getBingeId());
+            BigDecimal preTaxTotalResched = booking.getTotalAmount();
+            TaxComputationResult taxResultResched = taxService.compute(taxCtxResched, preTaxTotalResched,
+                booking.getBaseAmount() != null ? booking.getBaseAmount() : BigDecimal.ZERO,
+                booking.getAddOnAmount() != null ? booking.getAddOnAmount() : BigDecimal.ZERO,
+                booking.getGuestAmount() != null ? booking.getGuestAmount() : BigDecimal.ZERO);
+            BigDecimal taxAmtResched = taxResultResched.getTotalTax() != null ? taxResultResched.getTotalTax() : BigDecimal.ZERO;
+            booking.setSubtotalAmount(preTaxTotalResched);
+            booking.setTaxAmount(taxAmtResched);
+            booking.setTaxBreakdownJson(taxResultResched.getBreakdownJson());
+            if (taxAmtResched.compareTo(BigDecimal.ZERO) > 0) {
+                booking.setTotalAmount(preTaxTotalResched.add(taxAmtResched).setScale(2, RoundingMode.HALF_UP));
+            }
+        }
+
         // Re-validate venue room if one is assigned (check active + capacity for new slot)
         if (booking.getVenueRoomId() != null) {
             VenueRoom room = venueRoomRepository.findById(booking.getVenueRoomId()).orElse(null);
@@ -1347,20 +1420,37 @@ public class BookingService {
                     totalAmount = totalAmount.multiply(surgeMultiplier).setScale(2, RoundingMode.HALF_UP);
                 }
 
-                // Validate venue room if requested
+                // Validate venue room if requested (V56: must be APPROVED). Done
+                // before tax so the room surcharge is part of the tax base.
                 Long venueRoomId = null;
                 String venueRoomName = null;
+                BigDecimal venueRoomPrice = BigDecimal.ZERO;
                 if (request.getVenueRoomId() != null) {
                     VenueRoom room = venueRoomRepository.findByIdAndBingeId(request.getVenueRoomId(), bingeId).orElse(null);
-                    if (room != null && room.isActive()) {
+                    if (room != null && room.isActive()
+                            && (room.getStatus() == null || room.getStatus() == com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED)) {
                         int roomOccupancy = countRoomBookings(room.getId(), date, startMinute, durMin);
                         if (roomOccupancy < room.getCapacity()) {
                             venueRoomId = room.getId();
                             venueRoomName = room.getName();
+                            venueRoomPrice = room.getPriceAddition() != null ? room.getPriceAddition() : BigDecimal.ZERO;
                         }
                         // silently skip room assignment if at capacity (don't fail the whole occurrence)
                     }
                 }
+                if (venueRoomPrice.compareTo(BigDecimal.ZERO) > 0) {
+                    totalAmount = totalAmount.add(venueRoomPrice).setScale(2, RoundingMode.HALF_UP);
+                }
+
+                // Tax computation (per-occurrence, since surge varies per date)
+                TaxContext taxCtxRec = buildBookingTaxContext(bingeId);
+                TaxComputationResult taxResultRec = taxService.compute(taxCtxRec, totalAmount, baseAmount, addOnTotal, guestAmount);
+                BigDecimal subtotalRec = totalAmount;
+                BigDecimal taxComputedRec = taxResultRec.getTotalTax() != null ? taxResultRec.getTotalTax() : BigDecimal.ZERO;
+                if (taxComputedRec.compareTo(BigDecimal.ZERO) > 0) {
+                    totalAmount = subtotalRec.add(taxComputedRec).setScale(2, RoundingMode.HALF_UP);
+                }
+                String taxBreakdownRec = taxResultRec.getBreakdownJson();
 
                 Booking booking = Booking.builder()
                     .bookingRef(generateBookingRef())
@@ -1381,15 +1471,16 @@ public class BookingService {
                     .addOnAmount(addOnTotal)
                     .guestAmount(guestAmount)
                     .totalAmount(totalAmount)
-                    // Pre-tax subtotal (V38 schema). Tax is applied later;
-                    // subtotal == total at create time.
-                    .subtotalAmount(totalAmount)
+                    .subtotalAmount(subtotalRec)
+                    .taxAmount(taxComputedRec)
+                    .taxBreakdownJson(taxBreakdownRec)
                     .surgeMultiplier(surgeMultiplier)
                     .surgeLabel(surgeLabel)
                     .pricingSource(eventPrice.source())
                     .rateCodeName(eventPrice.rateCodeName())
                     .venueRoomId(venueRoomId)
                     .venueRoomName(venueRoomName)
+                    .venueRoomPrice(venueRoomPrice)
                     .status(BookingStatus.PENDING)
                     .paymentStatus(PaymentStatus.PENDING)
                     .recurringGroupId(groupId)
@@ -2272,8 +2363,25 @@ public class BookingService {
         return countRoomBookings(roomId, date, startMinute, durationMinutes, null);
     }
 
+    /**
+     * V57: returns true when the slot [startMinute, startMinute+durationMinutes)
+     * on {@code date} overlaps any maintenance / hold block on {@code roomId}.
+     * Resolved at request time so newly-added blocks immediately gate availability.
+     */
+    private boolean isRoomBlocked(Long roomId, LocalDate date, int startMinute, int durationMinutes) {
+        if (roomId == null || date == null) return false;
+        java.time.LocalDateTime windowStart = date.atTime(startMinute / 60, startMinute % 60);
+        java.time.LocalDateTime windowEnd = windowStart.plusMinutes(Math.max(durationMinutes, 1));
+        return !roomBlockRepository.findOverlapping(roomId, windowStart, windowEnd).isEmpty();
+    }
+
     /** Count active bookings assigned to a specific venue room, optionally excluding one booking. */
     private int countRoomBookings(Long roomId, LocalDate date, int startMinute, int durationMinutes, Long excludeBookingId) {
+        // V57: a maintenance / hold block covering this slot makes the room fully unavailable.
+        if (isRoomBlocked(roomId, date, startMinute, durationMinutes)) {
+            VenueRoom room = venueRoomRepository.findById(roomId).orElse(null);
+            return room != null ? room.getCapacity() : Integer.MAX_VALUE;
+        }
         Long bid = BingeContext.getBingeId();
         List<Booking> activeBookings = bid != null
             ? bookingRepository.findActiveBookingsForReadByBingeAndDate(bid, date)
@@ -2305,6 +2413,37 @@ public class BookingService {
      * Refunded / FAILED / PENDING statuses are intentionally left untouched — those have
      * their own lifecycle managed by the PaymentEventListener saga.
      */
+
+    /**
+     * Build a {@link TaxContext} for a server-side booking persist operation.
+     *
+     * <p>Critical for jurisdiction matching: {@link JurisdictionResolver} hard-filters
+     * any TaxRule whose {@code countryCode} / {@code stateCode} / {@code city} /
+     * {@code postalCode} does not match the context. If we pass an empty context
+     * (only bingeId / customerType / productType), country-scoped rules such as
+     * India GST are silently dropped — leading to the customer being shown tax in
+     * the checkout preview but billed without tax on the persisted booking.
+     *
+     * <p>We therefore enrich the context with the binge's venue address (used by
+     * {@code TaxContext#resolved*()} when billing address is unknown). This keeps
+     * the persist path consistent with {@code CheckoutQuoteService.preview()}.
+     */
+    private TaxContext buildBookingTaxContext(Long bingeId) {
+        TaxContext.TaxContextBuilder b = TaxContext.builder()
+            .bingeId(bingeId)
+            .customerType("B2C")
+            .productType("BOOKING");
+        if (bingeId != null) {
+            bingeRepository.findById(bingeId).ifPresent(binge -> {
+                b.venueCountryCode(binge.getCountry())
+                 .venueStateCode(binge.getState())
+                 .venueCity(binge.getCity())
+                 .venuePostalCode(binge.getPostalCode());
+            });
+        }
+        return b.build();
+    }
+
     private void syncPaymentStatusToBalance(Booking booking) {
         PaymentStatus current = booking.getPaymentStatus();
         if (current == null) return;
@@ -2716,6 +2855,36 @@ public class BookingService {
             throw new BusinessException("Selected time slot conflicts with an existing booking");
         }
 
+        // ── Venue room assignment (admin walk-in) ─────────────
+        // Mirrors the customer createBooking room block: resolve, validate
+        // active+APPROVED, enforce per-room concurrent-capacity, and enforce
+        // the per-binge "room selection required" toggle. Snapshot the room
+        // id/name/price onto the Booking so reporting stays accurate even if
+        // the room is later renamed, re-priced, or deactivated.
+        Long adminVenueRoomId = null;
+        String adminVenueRoomName = null;
+        BigDecimal adminVenueRoomPrice = BigDecimal.ZERO;
+        if (request.getVenueRoomId() != null && adminBingeId != null) {
+            VenueRoom room = venueRoomRepository.findByIdAndBingeId(request.getVenueRoomId(), adminBingeId)
+                .orElseThrow(() -> new BusinessException("Selected room not found"));
+            if (!room.isActive()) throw new BusinessException("Selected room is currently unavailable");
+            if (room.getStatus() != null && room.getStatus() != com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED) {
+                throw new BusinessException("Selected room is not yet approved for bookings");
+            }
+            int roomOccupancy = countRoomBookings(room.getId(), request.getBookingDate(), startMinute, durMin);
+            if (roomOccupancy >= room.getCapacity()) {
+                throw new BusinessException("Selected room '" + room.getName() + "' is fully booked for this time slot");
+            }
+            adminVenueRoomId = room.getId();
+            adminVenueRoomName = room.getName();
+            adminVenueRoomPrice = room.getPriceAddition() != null ? room.getPriceAddition() : BigDecimal.ZERO;
+        } else if (adminBingeId != null) {
+            Binge bingeCfg = bingeRepository.findById(adminBingeId).orElse(null);
+            if (bingeCfg != null && bingeCfg.isRoomSelectionRequired()) {
+                throw new BusinessException("This binge requires a room to be selected before booking");
+            }
+        }
+
         // Calculate pricing using resolved customer pricing (if customer is known)
         Long custId = request.getCustomerId() != null ? request.getCustomerId() : 0L;
         String pricingSource;
@@ -2810,10 +2979,14 @@ public class BookingService {
                 .addOnAmount(addOnTotal)
                 .guestAmount(guestAmount)
                 .totalAmount(totalAmount)
-                // Admin override path: subtotal == total (no tax applied yet).
+                // Admin explicitly set the final total — respect it, no tax added on top.
                 .subtotalAmount(totalAmount)
+                .taxAmount(BigDecimal.ZERO)
                 .pricingSource(pricingSource)
                 .rateCodeName(rateCodeName)
+                .venueRoomId(adminVenueRoomId)
+                .venueRoomName(adminVenueRoomName)
+                .venueRoomPrice(adminVenueRoomPrice)
                 .status(status)
                 .paymentStatus(payStatus)
                 .paymentMethod(request.getPaymentMethod())
@@ -2835,12 +3008,26 @@ public class BookingService {
         }
 
         BigDecimal totalAmount = baseAmount.add(addOnTotal).add(guestAmount);
+        // V56: room surcharge added flat (pre-tax) — mirrors customer createBooking.
+        if (adminVenueRoomPrice.compareTo(BigDecimal.ZERO) > 0) {
+            totalAmount = totalAmount.add(adminVenueRoomPrice).setScale(2, RoundingMode.HALF_UP);
+        }
         validateAdminPaymentTracking(custId, totalAmount);
         String bookingRef = generateBookingRef();
 
         boolean autoConfirm = totalAmount.compareTo(BigDecimal.ZERO) == 0;
         BookingStatus status = autoConfirm ? BookingStatus.CONFIRMED : BookingStatus.PENDING;
         PaymentStatus payStatus = autoConfirm ? PaymentStatus.SUCCESS : PaymentStatus.PENDING;
+
+        // ── Tax computation ────────────────────────────────────
+        TaxContext taxCtxAdmin = buildBookingTaxContext(BingeContext.getBingeId());
+        TaxComputationResult taxResultAdmin = taxService.compute(taxCtxAdmin, totalAmount, baseAmount, addOnTotal, guestAmount);
+        BigDecimal subtotalAdmin = totalAmount;
+        BigDecimal taxComputedAdmin = taxResultAdmin.getTotalTax() != null ? taxResultAdmin.getTotalTax() : BigDecimal.ZERO;
+        if (taxComputedAdmin.compareTo(BigDecimal.ZERO) > 0) {
+            totalAmount = subtotalAdmin.add(taxComputedAdmin).setScale(2, RoundingMode.HALF_UP);
+        }
+        String taxBreakdownAdmin = taxResultAdmin.getBreakdownJson();
 
         Booking booking = Booking.builder()
             .bookingRef(bookingRef)
@@ -2862,10 +3049,14 @@ public class BookingService {
             .addOnAmount(addOnTotal)
             .guestAmount(guestAmount)
             .totalAmount(totalAmount)
-            // Admin standard path: subtotal == total (no tax applied yet).
-            .subtotalAmount(totalAmount)
+            .subtotalAmount(subtotalAdmin)
+            .taxAmount(taxComputedAdmin)
+            .taxBreakdownJson(taxBreakdownAdmin)
             .pricingSource(pricingSource)
             .rateCodeName(rateCodeName)
+            .venueRoomId(adminVenueRoomId)
+            .venueRoomName(adminVenueRoomName)
+            .venueRoomPrice(adminVenueRoomPrice)
             .status(status)
             .paymentStatus(payStatus)
             .paymentMethod(request.getPaymentMethod())
@@ -2908,22 +3099,19 @@ public class BookingService {
     // â”€â”€ Event types & add-ons (public) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public List<EventTypeDto> getActiveEventTypes() {
         Long bid = requireSelectedBinge("viewing event types");
-        return eventTypeRepository.findByBingeIdAndActiveTrue(bid)
-            .stream().map(this::toEventTypeDto).toList();
+        return toEventTypeDtoList(eventTypeRepository.findByBingeIdAndActiveTrue(bid));
     }
 
     public List<AddOnDto> getActiveAddOns() {
         Long bid = requireSelectedBinge("viewing add-ons");
-        return addOnRepository.findByBingeIdAndActiveTrue(bid)
-            .stream().map(this::toAddOnDto).toList();
+        return toAddOnDtoList(addOnRepository.findByBingeIdAndActiveTrue(bid));
     }
 
     // â”€â”€ Admin: Event type CRUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     @org.springframework.cache.annotation.Cacheable(value = "eventTypes", key = "T(com.skbingegalaxy.common.context.BingeContext).getBingeId()")
     public List<EventTypeDto> getAllEventTypes() {
         Long bid = requireSelectedBinge("managing event types");
-        return eventTypeRepository.findByBingeId(bid)
-            .stream().map(this::toEventTypeDto).toList();
+        return toEventTypeDtoList(eventTypeRepository.findByBingeId(bid));
     }
 
     @Transactional
@@ -2941,6 +3129,7 @@ public class BookingService {
             .maxHours(req.getMaxHours())
             .minGuests(req.getMinGuests())
             .maxGuests(req.getMaxGuests())
+            .categoryId(resolveEventCategoryId(req.getCategoryId(), bid))
             .imageUrls(req.getImageUrls() != null ? req.getImageUrls() : new ArrayList<>())
             .active(true)
             .bingeId(bid)
@@ -2974,6 +3163,7 @@ public class BookingService {
         et.setMaxHours(req.getMaxHours());
         et.setMinGuests(req.getMinGuests());
         et.setMaxGuests(req.getMaxGuests());
+        et.setCategoryId(resolveEventCategoryId(req.getCategoryId(), et.getBingeId()));
         et.getImageUrls().clear();
         if (req.getImageUrls() != null) et.getImageUrls().addAll(req.getImageUrls());
         return toEventTypeDto(eventTypeRepository.save(et));
@@ -3080,8 +3270,7 @@ public class BookingService {
     @org.springframework.cache.annotation.Cacheable(value = "addOns", key = "T(com.skbingegalaxy.common.context.BingeContext).getBingeId()")
     public List<AddOnDto> getAllAddOns() {
         Long bid = requireSelectedBinge("managing add-ons");
-        return addOnRepository.findByBingeId(bid)
-            .stream().map(this::toAddOnDto).toList();
+        return toAddOnDtoList(addOnRepository.findByBingeId(bid));
     }
 
     @Transactional
@@ -3092,7 +3281,7 @@ public class BookingService {
             .name(req.getName())
             .description(req.getDescription())
             .price(req.getPrice())
-            .category(req.getCategory().toUpperCase())
+            .categoryId(resolveAddOnCategoryId(req.getCategoryId(), bid))
             .imageUrls(req.getImageUrls() != null ? req.getImageUrls() : new ArrayList<>())
             .active(true)
             .bingeId(bid)
@@ -3109,7 +3298,7 @@ public class BookingService {
         a.setName(req.getName());
         a.setDescription(req.getDescription());
         a.setPrice(req.getPrice());
-        a.setCategory(req.getCategory().toUpperCase());
+        a.setCategoryId(resolveAddOnCategoryId(req.getCategoryId(), a.getBingeId()));
         a.setStockPerDay(req.getStockPerDay());
         a.setAdvanceNoticeMinutes(req.getAdvanceNoticeMinutes());
         a.getImageUrls().clear();
@@ -3156,6 +3345,237 @@ public class BookingService {
             .orElseThrow(() -> new ResourceNotFoundException("Booking", "ref", bookingRef));
     }
 
+    // ── Catalog categories (V55) ──────────────────────────────────────────
+    //
+    // Categories are an optional taxonomy layered over EventTypes/AddOns.
+    // Visibility model mirrors EventType/AddOn exactly:
+    //   * binge_id IS NULL  → global (super-admin owned)
+    //   * binge_id NOT NULL → per-binge (binge admin owned)
+    //
+    // The caller (controller) is responsible for enforcing the SUPER_ADMIN
+    // role on global-mutating endpoints. Service layer enforces ownership:
+    // a binge admin cannot mutate a category owned by a different binge or
+    // a global one.
+
+    @Transactional(readOnly = true)
+    public List<com.skbingegalaxy.booking.dto.CategoryDto> listVisibleEventCategories() {
+        Long bid = requireSelectedBinge("viewing event categories");
+        return eventCategoryRepository.findVisibleForBinge(bid).stream()
+            .map(this::toEventCategoryDto).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<com.skbingegalaxy.booking.dto.CategoryDto> listManagedEventCategories() {
+        Long bid = requireSelectedBinge("managing event categories");
+        return eventCategoryRepository.findByBingeId(bid).stream()
+            .map(this::toEventCategoryDto).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<com.skbingegalaxy.booking.dto.CategoryDto> listGlobalEventCategories() {
+        return eventCategoryRepository.findByBingeIdIsNull().stream()
+            .map(this::toEventCategoryDto).toList();
+    }
+
+    @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "eventTypes", allEntries = true)
+    public com.skbingegalaxy.booking.dto.CategoryDto createEventCategory(
+            com.skbingegalaxy.booking.dto.CategorySaveRequest req, boolean global) {
+        Long ownerBinge = global ? null : requireSelectedBinge("creating an event category");
+        String name = req.getName().trim();
+        boolean dup = global
+            ? eventCategoryRepository.existsByBingeIdIsNullAndNameIgnoreCase(name)
+            : eventCategoryRepository.existsByBingeIdAndNameIgnoreCase(ownerBinge, name);
+        if (dup) {
+            throw new BusinessException("An event category named '" + name + "' already exists in this scope");
+        }
+        com.skbingegalaxy.booking.entity.EventCategory c =
+            com.skbingegalaxy.booking.entity.EventCategory.builder()
+                .bingeId(ownerBinge)
+                .name(name)
+                .description(trimToNull(req.getDescription()))
+                .imageUrl(trimToNull(req.getImageUrl()))
+                .sortOrder(req.getSortOrder())
+                .active(true)
+                .build();
+        return toEventCategoryDto(eventCategoryRepository.save(c));
+    }
+
+    @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "eventTypes", allEntries = true)
+    public com.skbingegalaxy.booking.dto.CategoryDto updateEventCategory(
+            Long id, com.skbingegalaxy.booking.dto.CategorySaveRequest req, boolean global) {
+        com.skbingegalaxy.booking.entity.EventCategory c = loadOwnedEventCategory(id, global);
+        String name = req.getName().trim();
+        if (!c.getName().equalsIgnoreCase(name)) {
+            boolean dup = c.getBingeId() == null
+                ? eventCategoryRepository.existsByBingeIdIsNullAndNameIgnoreCase(name)
+                : eventCategoryRepository.existsByBingeIdAndNameIgnoreCase(c.getBingeId(), name);
+            if (dup) throw new BusinessException("Another event category already uses the name '" + name + "'");
+        }
+        c.setName(name);
+        c.setDescription(trimToNull(req.getDescription()));
+        c.setImageUrl(trimToNull(req.getImageUrl()));
+        c.setSortOrder(req.getSortOrder());
+        return toEventCategoryDto(eventCategoryRepository.save(c));
+    }
+
+    @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "eventTypes", allEntries = true)
+    public com.skbingegalaxy.booking.dto.CategoryDto toggleEventCategory(Long id, boolean global) {
+        com.skbingegalaxy.booking.entity.EventCategory c = loadOwnedEventCategory(id, global);
+        c.setActive(!c.isActive());
+        return toEventCategoryDto(eventCategoryRepository.save(c));
+    }
+
+    @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "eventTypes", allEntries = true)
+    public void deleteEventCategory(Long id, boolean global) {
+        com.skbingegalaxy.booking.entity.EventCategory c = loadOwnedEventCategory(id, global);
+        if (c.isActive()) throw new BusinessException("Deactivate the category before deleting it");
+        // ON DELETE SET NULL on event_types.category_id keeps existing event
+        // types intact — they simply become uncategorized after deletion.
+        eventCategoryRepository.delete(c);
+        log.info("Event category deleted: '{}' (id={}, binge={})", c.getName(), id, c.getBingeId());
+    }
+
+    private com.skbingegalaxy.booking.entity.EventCategory loadOwnedEventCategory(Long id, boolean global) {
+        if (global) {
+            return eventCategoryRepository.findByIdAndBingeIdIsNull(id)
+                .orElseThrow(() -> new ResourceNotFoundException("EventCategory", "id", id));
+        }
+        Long bid = requireSelectedBinge("managing event categories");
+        return eventCategoryRepository.findByIdAndBingeId(id, bid)
+            .orElseThrow(() -> new ResourceNotFoundException("EventCategory", "id", id));
+    }
+
+    private com.skbingegalaxy.booking.dto.CategoryDto toEventCategoryDto(
+            com.skbingegalaxy.booking.entity.EventCategory c) {
+        return com.skbingegalaxy.booking.dto.CategoryDto.builder()
+            .id(c.getId())
+            .bingeId(c.getBingeId())
+            .name(c.getName())
+            .description(c.getDescription())
+            .imageUrl(c.getImageUrl())
+            .sortOrder(c.getSortOrder())
+            .active(c.isActive())
+            .global(c.getBingeId() == null)
+            .build();
+    }
+
+    // ── Add-on categories ────────────────────────────────────────────────
+    @Transactional(readOnly = true)
+    public List<com.skbingegalaxy.booking.dto.CategoryDto> listVisibleAddOnCategories() {
+        Long bid = requireSelectedBinge("viewing add-on categories");
+        return addOnCategoryRepository.findVisibleForBinge(bid).stream()
+            .map(this::toAddOnCategoryDto).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<com.skbingegalaxy.booking.dto.CategoryDto> listManagedAddOnCategories() {
+        Long bid = requireSelectedBinge("managing add-on categories");
+        return addOnCategoryRepository.findByBingeId(bid).stream()
+            .map(this::toAddOnCategoryDto).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<com.skbingegalaxy.booking.dto.CategoryDto> listGlobalAddOnCategories() {
+        return addOnCategoryRepository.findByBingeIdIsNull().stream()
+            .map(this::toAddOnCategoryDto).toList();
+    }
+
+    @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "addOns", allEntries = true)
+    public com.skbingegalaxy.booking.dto.CategoryDto createAddOnCategory(
+            com.skbingegalaxy.booking.dto.CategorySaveRequest req, boolean global) {
+        Long ownerBinge = global ? null : requireSelectedBinge("creating an add-on category");
+        String name = req.getName().trim();
+        boolean dup = global
+            ? addOnCategoryRepository.existsByBingeIdIsNullAndNameIgnoreCase(name)
+            : addOnCategoryRepository.existsByBingeIdAndNameIgnoreCase(ownerBinge, name);
+        if (dup) throw new BusinessException("An add-on category named '" + name + "' already exists in this scope");
+        com.skbingegalaxy.booking.entity.AddOnCategory c =
+            com.skbingegalaxy.booking.entity.AddOnCategory.builder()
+                .bingeId(ownerBinge)
+                .name(name)
+                .description(trimToNull(req.getDescription()))
+                .imageUrl(trimToNull(req.getImageUrl()))
+                .sortOrder(req.getSortOrder())
+                .active(true)
+                .build();
+        return toAddOnCategoryDto(addOnCategoryRepository.save(c));
+    }
+
+    @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "addOns", allEntries = true)
+    public com.skbingegalaxy.booking.dto.CategoryDto updateAddOnCategory(
+            Long id, com.skbingegalaxy.booking.dto.CategorySaveRequest req, boolean global) {
+        com.skbingegalaxy.booking.entity.AddOnCategory c = loadOwnedAddOnCategory(id, global);
+        String name = req.getName().trim();
+        if (!c.getName().equalsIgnoreCase(name)) {
+            boolean dup = c.getBingeId() == null
+                ? addOnCategoryRepository.existsByBingeIdIsNullAndNameIgnoreCase(name)
+                : addOnCategoryRepository.existsByBingeIdAndNameIgnoreCase(c.getBingeId(), name);
+            if (dup) throw new BusinessException("Another add-on category already uses the name '" + name + "'");
+        }
+        c.setName(name);
+        c.setDescription(trimToNull(req.getDescription()));
+        c.setImageUrl(trimToNull(req.getImageUrl()));
+        c.setSortOrder(req.getSortOrder());
+        return toAddOnCategoryDto(addOnCategoryRepository.save(c));
+    }
+
+    @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "addOns", allEntries = true)
+    public com.skbingegalaxy.booking.dto.CategoryDto toggleAddOnCategory(Long id, boolean global) {
+        com.skbingegalaxy.booking.entity.AddOnCategory c = loadOwnedAddOnCategory(id, global);
+        c.setActive(!c.isActive());
+        return toAddOnCategoryDto(addOnCategoryRepository.save(c));
+    }
+
+    @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "addOns", allEntries = true)
+    public void deleteAddOnCategory(Long id, boolean global) {
+        com.skbingegalaxy.booking.entity.AddOnCategory c = loadOwnedAddOnCategory(id, global);
+        if (c.isActive()) throw new BusinessException("Deactivate the category before deleting it");
+        // Pre-check at the application layer: add_ons.category_id is NOT NULL
+        // (V59) with FK ON DELETE RESTRICT (V60), so deleting a referenced
+        // category would otherwise fail at the DB layer with a raw FK
+        // violation. Surface a clear, actionable message instead.
+        long inUse = addOnRepository.countByCategoryId(id);
+        if (inUse > 0) {
+            throw new BusinessException(
+                "Cannot delete this category because " + inUse + " add-on(s) still reference it. " +
+                "Reassign or delete those add-ons first.");
+        }
+        addOnCategoryRepository.delete(c);
+        log.info("Add-on category deleted: '{}' (id={}, binge={})", c.getName(), id, c.getBingeId());
+    }
+
+    private com.skbingegalaxy.booking.entity.AddOnCategory loadOwnedAddOnCategory(Long id, boolean global) {
+        if (global) {
+            return addOnCategoryRepository.findByIdAndBingeIdIsNull(id)
+                .orElseThrow(() -> new ResourceNotFoundException("AddOnCategory", "id", id));
+        }
+        Long bid = requireSelectedBinge("managing add-on categories");
+        return addOnCategoryRepository.findByIdAndBingeId(id, bid)
+            .orElseThrow(() -> new ResourceNotFoundException("AddOnCategory", "id", id));
+    }
+
+    private com.skbingegalaxy.booking.dto.CategoryDto toAddOnCategoryDto(
+            com.skbingegalaxy.booking.entity.AddOnCategory c) {
+        return com.skbingegalaxy.booking.dto.CategoryDto.builder()
+            .id(c.getId())
+            .bingeId(c.getBingeId())
+            .name(c.getName())
+            .description(c.getDescription())
+            .imageUrl(c.getImageUrl())
+            .sortOrder(c.getSortOrder())
+            .active(c.isActive())
+            .global(c.getBingeId() == null)
+            .build();
+    }
+
     private Booking findBookingByRef(String bookingRef) {
         return bookingRepository.findByBookingRef(bookingRef)
             .orElseThrow(() -> new ResourceNotFoundException("Booking", "ref", bookingRef));
@@ -3195,21 +3615,28 @@ public class BookingService {
     @Transactional(readOnly = true)
     public List<VenueRoomDto> getActiveVenueRooms() {
         Long bid = BingeContext.requireBingeId();
+        // V56: customer-facing endpoint must only surface APPROVED rooms so
+        // pending/rejected rooms never appear in the picker.
         return venueRoomRepository.findByBingeIdAndActiveTrueOrderBySortOrderAsc(bid)
-            .stream().map(this::toRoomDto).toList();
+            .stream()
+            .filter(r -> r.getStatus() == null || r.getStatus() == com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED)
+            .map(this::toRoomDto).toList();
     }
 
     @Transactional(readOnly = true)
     public List<VenueRoomDto> getAvailableRooms(LocalDate date, int startMinute, int durationMinutes) {
         Long bid = BingeContext.requireBingeId();
         List<VenueRoom> rooms = venueRoomRepository.findByBingeIdAndActiveTrueOrderBySortOrderAsc(bid);
-        return rooms.stream().map(room -> {
-            int occ = countRoomBookings(room.getId(), date, startMinute, durationMinutes);
-            VenueRoomDto dto = toRoomDto(room);
-            dto.setCurrentOccupancy(occ);
-            dto.setAvailable(occ < room.getCapacity());
-            return dto;
-        }).toList();
+        return rooms.stream()
+            // V56: only APPROVED rooms are bookable on the customer wizard.
+            .filter(r -> r.getStatus() == null || r.getStatus() == com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED)
+            .map(room -> {
+                int occ = countRoomBookings(room.getId(), date, startMinute, durationMinutes);
+                VenueRoomDto dto = toRoomDto(room);
+                dto.setCurrentOccupancy(occ);
+                dto.setAvailable(occ < room.getCapacity());
+                return dto;
+            }).toList();
     }
 
     @Transactional(readOnly = true)
@@ -3221,14 +3648,30 @@ public class BookingService {
 
     @Transactional
     public VenueRoomDto createVenueRoom(VenueRoomSaveRequest request) {
+        return createVenueRoom(request, false, null);
+    }
+
+    /**
+     * V56: create a venue room. {@code autoApprove} is true when the caller
+     * is a SUPER_ADMIN — those rooms become bookable immediately. Regular
+     * admins create rooms in PENDING_APPROVAL state.
+     */
+    @Transactional
+    public VenueRoomDto createVenueRoom(VenueRoomSaveRequest request, boolean autoApprove, Long actorAdminId) {
         Long bid = requireSelectedBinge("creating venue room");
         VenueRoom room = VenueRoom.builder()
             .bingeId(bid).name(request.getName()).roomType(request.getRoomType())
             .capacity(request.getCapacity()).description(request.getDescription())
             .sortOrder(request.getSortOrder()).active(request.isActive())
+            .priceAddition(request.getPriceAddition() != null ? request.getPriceAddition() : java.math.BigDecimal.ZERO)
+            .imageUrls(request.getImageUrls() != null ? new java.util.ArrayList<>(request.getImageUrls()) : new java.util.ArrayList<>())
+            .status(autoApprove ? com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED
+                                : com.skbingegalaxy.booking.entity.RoomApprovalStatus.PENDING_APPROVAL)
+            .approvalDecidedBy(autoApprove ? actorAdminId : null)
+            .approvalDecidedAt(autoApprove ? java.time.LocalDateTime.now() : null)
             .build();
         room = venueRoomRepository.save(room);
-        log.info("Venue room created: {}", room.getName());
+        log.info("Venue room created: {} (status={})", room.getName(), room.getStatus());
         return toRoomDto(room);
     }
 
@@ -3243,8 +3686,47 @@ public class BookingService {
         room.setDescription(request.getDescription());
         room.setSortOrder(request.getSortOrder());
         room.setActive(request.isActive());
+        if (request.getPriceAddition() != null) {
+            room.setPriceAddition(request.getPriceAddition());
+        }
+        if (request.getImageUrls() != null) {
+            room.getImageUrls().clear();
+            room.getImageUrls().addAll(request.getImageUrls());
+        }
         room = venueRoomRepository.save(room);
         log.info("Venue room updated: {}", room.getName());
+        return toRoomDto(room);
+    }
+
+    /** V56: SUPER_ADMIN approves a room created by a regular admin. */
+    @Transactional
+    public VenueRoomDto approveVenueRoom(Long id, Long actorAdminId) {
+        Long bid = requireSelectedBinge("approving venue room");
+        VenueRoom room = venueRoomRepository.findByIdAndBingeId(id, bid)
+            .orElseThrow(() -> new ResourceNotFoundException("VenueRoom", "id", id));
+        room.setStatus(com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED);
+        room.setApprovalDecidedBy(actorAdminId);
+        room.setApprovalDecidedAt(java.time.LocalDateTime.now());
+        room.setApprovalRejectionReason(null);
+        room = venueRoomRepository.save(room);
+        log.info("Venue room approved: {} by admin {}", room.getName(), actorAdminId);
+        publishRoomLifecycle(room, "APPROVED", com.skbingegalaxy.common.constants.KafkaTopics.ROOM_APPROVED, actorAdminId, null);
+        return toRoomDto(room);
+    }
+
+    /** V56: SUPER_ADMIN rejects a pending room with a reason. */
+    @Transactional
+    public VenueRoomDto rejectVenueRoom(Long id, Long actorAdminId, String reason) {
+        Long bid = requireSelectedBinge("rejecting venue room");
+        VenueRoom room = venueRoomRepository.findByIdAndBingeId(id, bid)
+            .orElseThrow(() -> new ResourceNotFoundException("VenueRoom", "id", id));
+        room.setStatus(com.skbingegalaxy.booking.entity.RoomApprovalStatus.REJECTED);
+        room.setApprovalDecidedBy(actorAdminId);
+        room.setApprovalDecidedAt(java.time.LocalDateTime.now());
+        room.setApprovalRejectionReason(reason);
+        room = venueRoomRepository.save(room);
+        log.info("Venue room rejected: {} by admin {} ({})", room.getName(), actorAdminId, reason);
+        publishRoomLifecycle(room, "REJECTED", com.skbingegalaxy.common.constants.KafkaTopics.ROOM_REJECTED, actorAdminId, reason);
         return toRoomDto(room);
     }
 
@@ -3267,12 +3749,141 @@ public class BookingService {
         log.info("Venue room deleted: {}", room.getName());
     }
 
+    // ───────────────────────────────────────────────────────────
+    //  V57: ROOM MAINTENANCE BLOCKS
+    // ───────────────────────────────────────────────────────────
+
+    /** Tenant-scoped lookup: room must belong to the current binge. */
+    private com.skbingegalaxy.booking.entity.VenueRoom requireRoomInCurrentBinge(Long roomId, String action) {
+        Long bid = requireSelectedBinge(action);
+        return venueRoomRepository.findByIdAndBingeId(roomId, bid)
+            .orElseThrow(() -> new ResourceNotFoundException("VenueRoom", "id", roomId));
+    }
+
+    @Transactional(readOnly = true)
+    public java.util.List<com.skbingegalaxy.booking.dto.RoomBlockDto> listRoomBlocks(Long roomId) {
+        requireRoomInCurrentBinge(roomId, "listing room blocks");
+        return roomBlockRepository.findByRoomIdOrderByStartAtAsc(roomId)
+            .stream().map(this::toRoomBlockDto).toList();
+    }
+
+    @Transactional
+    public com.skbingegalaxy.booking.dto.RoomBlockDto createRoomBlock(
+            Long roomId,
+            com.skbingegalaxy.booking.dto.RoomBlockSaveRequest req,
+            Long actorAdminId) {
+        requireRoomInCurrentBinge(roomId, "creating room block");
+        if (req.getStartAt() == null || req.getEndAt() == null) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "startAt and endAt are required", org.springframework.http.HttpStatus.BAD_REQUEST);
+        }
+        if (!req.getEndAt().isAfter(req.getStartAt())) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "endAt must be after startAt", org.springframework.http.HttpStatus.BAD_REQUEST);
+        }
+        com.skbingegalaxy.booking.entity.RoomBlock block = com.skbingegalaxy.booking.entity.RoomBlock.builder()
+            .roomId(roomId)
+            .startAt(req.getStartAt())
+            .endAt(req.getEndAt())
+            .reason(req.getReason())
+            .createdBy(actorAdminId)
+            .build();
+        block = roomBlockRepository.save(block);
+        log.info("Room block created: room={} window=[{} .. {}] reason='{}' by admin {}",
+            roomId, block.getStartAt(), block.getEndAt(), block.getReason(), actorAdminId);
+        publishBlockLifecycle(block, "BLOCKED", com.skbingegalaxy.common.constants.KafkaTopics.ROOM_BLOCKED, actorAdminId);
+        return toRoomBlockDto(block);
+    }
+
+    @Transactional
+    public void deleteRoomBlock(Long blockId) {
+        com.skbingegalaxy.booking.entity.RoomBlock block = roomBlockRepository.findById(blockId)
+            .orElseThrow(() -> new ResourceNotFoundException("RoomBlock", "id", blockId));
+        // Tenant-scope: ensure the block's room belongs to the caller's binge.
+        requireRoomInCurrentBinge(block.getRoomId(), "deleting room block");
+        roomBlockRepository.delete(block);
+        log.info("Room block deleted: id={} room={}", blockId, block.getRoomId());
+        publishBlockLifecycle(block, "UNBLOCKED", com.skbingegalaxy.common.constants.KafkaTopics.ROOM_UNBLOCKED, null);
+    }
+
+    /**
+     * V56: emit an outbox event for a room lifecycle action.
+     * Runs inside the caller's {@code @Transactional} boundary (publisher
+     * uses {@code Propagation.MANDATORY}). If the outbox write fails we
+     * deliberately re-throw so the entire admin action rolls back —
+     * that is the atomicity guarantee of the transactional outbox pattern.
+     */
+    private void publishRoomLifecycle(VenueRoom room, String action, String topic, Long actorAdminId, String reason) {
+        try {
+            com.skbingegalaxy.common.event.AdminLifecycleEvent ev =
+                com.skbingegalaxy.common.event.AdminLifecycleEvent.builder()
+                    .entityType("ROOM")
+                    .action(action)
+                    .entityId(room.getId())
+                    .bingeId(room.getBingeId())
+                    .actorAdminId(actorAdminId)
+                    .name(room.getName())
+                    .reason(reason)
+                    .build();
+            bookingEventPublisher.publish(topic, String.valueOf(room.getId()), ev);
+        } catch (Exception ex) {
+            log.error("Failed to publish room lifecycle event topic={} roomId={} — rolling back admin action",
+                topic, room.getId(), ex);
+            throw ex;
+        }
+    }
+
+    /**
+     * V57: emit an outbox event for a room-block lifecycle action.
+     * Same transactional-outbox semantics as {@link #publishRoomLifecycle}
+     * — a publish failure rolls back the room-block change.
+     */
+    private void publishBlockLifecycle(com.skbingegalaxy.booking.entity.RoomBlock block, String action, String topic, Long actorAdminId) {
+        try {
+            com.skbingegalaxy.common.event.AdminLifecycleEvent ev =
+                com.skbingegalaxy.common.event.AdminLifecycleEvent.builder()
+                    .entityType("ROOM_BLOCK")
+                    .action(action)
+                    .entityId(block.getId())
+                    .actorAdminId(actorAdminId != null ? actorAdminId : block.getCreatedBy())
+                    .reason(block.getReason())
+                    .startAt(block.getStartAt())
+                    .endAt(block.getEndAt())
+                    .build();
+            bookingEventPublisher.publish(topic, String.valueOf(block.getRoomId()), ev);
+        } catch (Exception ex) {
+            log.error("Failed to publish room-block lifecycle event topic={} blockId={} — rolling back admin action",
+                topic, block.getId(), ex);
+            throw ex;
+        }
+    }
+
+    private com.skbingegalaxy.booking.dto.RoomBlockDto toRoomBlockDto(com.skbingegalaxy.booking.entity.RoomBlock b) {
+        return com.skbingegalaxy.booking.dto.RoomBlockDto.builder()
+            .id(b.getId())
+            .roomId(b.getRoomId())
+            .startAt(b.getStartAt())
+            .endAt(b.getEndAt())
+            .reason(b.getReason())
+            .createdBy(b.getCreatedBy())
+            .createdAt(b.getCreatedAt())
+            .build();
+    }
+
     private VenueRoomDto toRoomDto(VenueRoom r) {
         return VenueRoomDto.builder()
             .id(r.getId()).bingeId(r.getBingeId()).name(r.getName())
             .roomType(r.getRoomType()).capacity(r.getCapacity())
             .description(r.getDescription()).sortOrder(r.getSortOrder())
-            .active(r.isActive()).createdAt(r.getCreatedAt()).updatedAt(r.getUpdatedAt())
+            .active(r.isActive())
+            // V56 fields
+            .priceAddition(r.getPriceAddition())
+            .status(r.getStatus() != null ? r.getStatus().name() : null)
+            .approvalDecidedBy(r.getApprovalDecidedBy())
+            .approvalDecidedAt(r.getApprovalDecidedAt())
+            .approvalRejectionReason(r.getApprovalRejectionReason())
+            .imageUrls(r.getImageUrls() != null ? new java.util.ArrayList<>(r.getImageUrls()) : new java.util.ArrayList<>())
+            .createdAt(r.getCreatedAt()).updatedAt(r.getUpdatedAt())
             .build();
     }
 
@@ -3457,6 +4068,19 @@ public class BookingService {
 
     private BookingDto toDto(Booking b) {
         CancellationPolicyDecision cancelDecision = evaluateCustomerCancellation(b);
+        // Batch-resolve add-on category names in a single IN query to avoid an
+        // N+1 against addon_categories for bookings with many add-ons.
+        java.util.List<Long> catIds = b.getAddOns().stream()
+            .map(ba -> ba.getAddOn() != null ? ba.getAddOn().getCategoryId() : null)
+            .filter(java.util.Objects::nonNull)
+            .distinct()
+            .toList();
+        final java.util.Map<Long, String> catNamesById = catIds.isEmpty()
+            ? java.util.Map.of()
+            : addOnCategoryRepository.findAllById(catIds).stream()
+                .collect(java.util.stream.Collectors.toMap(
+                    com.skbingegalaxy.booking.entity.AddOnCategory::getId,
+                    com.skbingegalaxy.booking.entity.AddOnCategory::getName));
         return BookingDto.builder()
             .id(b.getId())
             .bookingRef(b.getBookingRef())
@@ -3474,7 +4098,9 @@ public class BookingService {
             .addOns(b.getAddOns().stream().map(ba -> BookingAddOnDto.builder()
                 .addOnId(ba.getAddOn().getId())
                 .name(ba.getAddOn().getName())
-                .category(ba.getAddOn().getCategory())
+                .category(ba.getAddOn() != null && ba.getAddOn().getCategoryId() != null
+                    ? catNamesById.get(ba.getAddOn().getCategoryId())
+                    : null)
                 .quantity(ba.getQuantity())
                 .price(ba.getPrice())
                 .build()).toList())
@@ -3516,6 +4142,8 @@ public class BookingService {
             .loyaltyDiscountAmount(b.getLoyaltyDiscountAmount())
             .surgeMultiplier(b.getSurgeMultiplier())
             .surgeLabel(b.getSurgeLabel())
+            .subtotalAmount(b.getSubtotalAmount())
+            .taxAmount(b.getTaxAmount())
             .createdAt(b.getCreatedAt())
             .updatedAt(b.getUpdatedAt())
             .build();
@@ -3659,6 +4287,21 @@ public class BookingService {
     private record CancellationPolicyDecision(boolean allowed, String message, int refundPercentage) {}
 
     private EventTypeDto toEventTypeDto(EventType et) {
+        String categoryName = null;
+        if (et.getCategoryId() != null) {
+            categoryName = eventCategoryRepository.findById(et.getCategoryId())
+                .map(com.skbingegalaxy.booking.entity.EventCategory::getName)
+                .orElse(null);
+        }
+        return toEventTypeDto(et, categoryName);
+    }
+
+    /**
+     * Batch-aware overload used by list endpoints to avoid an N+1 against
+     * event_categories. Callers prefetch the catId→name map with a single
+     * {@code findAllById} and pass the resolved name in.
+     */
+    private EventTypeDto toEventTypeDto(EventType et, String categoryName) {
         return EventTypeDto.builder()
             .id(et.getId())
             .bingeId(et.getBingeId())
@@ -3671,6 +4314,8 @@ public class BookingService {
             .maxHours(et.getMaxHours())
             .minGuests(et.getMinGuests())
             .maxGuests(et.getMaxGuests())
+            .categoryId(et.getCategoryId())
+            .categoryName(categoryName)
             // Copy into a plain ArrayList so no Hibernate PersistentBag reference
             // leaks outside the transaction (would cause LazyInitializationException
             // when Jackson serializes the response after the session is closed).
@@ -3679,19 +4324,109 @@ public class BookingService {
             .build();
     }
 
+    private List<EventTypeDto> toEventTypeDtoList(List<EventType> ets) {
+        if (ets == null || ets.isEmpty()) return java.util.List.of();
+        List<Long> catIds = ets.stream()
+            .map(EventType::getCategoryId)
+            .filter(java.util.Objects::nonNull)
+            .distinct()
+            .toList();
+        Map<Long, String> catNames = catIds.isEmpty()
+            ? Map.of()
+            : eventCategoryRepository.findAllById(catIds).stream()
+                .collect(Collectors.toMap(
+                    com.skbingegalaxy.booking.entity.EventCategory::getId,
+                    com.skbingegalaxy.booking.entity.EventCategory::getName));
+        return ets.stream()
+            .map(et -> toEventTypeDto(
+                et,
+                et.getCategoryId() != null ? catNames.get(et.getCategoryId()) : null))
+            .toList();
+    }
+
     private AddOnDto toAddOnDto(AddOn a) {
+        String categoryName = null;
+        if (a.getCategoryId() != null) {
+            categoryName = addOnCategoryRepository.findById(a.getCategoryId())
+                .map(com.skbingegalaxy.booking.entity.AddOnCategory::getName)
+                .orElse(null);
+        }
+        return toAddOnDto(a, categoryName);
+    }
+
+    /**
+     * Batch-aware overload used by list endpoints to avoid an N+1 against
+     * addon_categories.
+     */
+    private AddOnDto toAddOnDto(AddOn a, String categoryName) {
         return AddOnDto.builder()
             .id(a.getId())
             .bingeId(a.getBingeId())
             .name(a.getName())
             .description(a.getDescription())
             .price(a.getPrice())
-            .category(a.getCategory())
+            .categoryId(a.getCategoryId())
+            .categoryName(categoryName)
             .imageUrls(a.getImageUrls() != null ? new ArrayList<>(a.getImageUrls()) : new ArrayList<>())
             .active(a.isActive())
             .stockPerDay(a.getStockPerDay())
             .advanceNoticeMinutes(a.getAdvanceNoticeMinutes())
             .build();
+    }
+
+    private List<AddOnDto> toAddOnDtoList(List<AddOn> addOns) {
+        if (addOns == null || addOns.isEmpty()) return java.util.List.of();
+        List<Long> catIds = addOns.stream()
+            .map(AddOn::getCategoryId)
+            .filter(java.util.Objects::nonNull)
+            .distinct()
+            .toList();
+        Map<Long, String> catNames = catIds.isEmpty()
+            ? Map.of()
+            : addOnCategoryRepository.findAllById(catIds).stream()
+                .collect(Collectors.toMap(
+                    com.skbingegalaxy.booking.entity.AddOnCategory::getId,
+                    com.skbingegalaxy.booking.entity.AddOnCategory::getName));
+        return addOns.stream()
+            .map(a -> toAddOnDto(
+                a,
+                a.getCategoryId() != null ? catNames.get(a.getCategoryId()) : null))
+            .toList();
+    }
+
+    /**
+     * Resolves and validates an event category for the current binge. Accepts
+     * either a binge-scoped or a global ({@code bingeId IS NULL}) category;
+     * rejects categories owned by a different binge.
+     *
+     * @return resolved {@code categoryId} or {@code null} when the caller did
+     *         not supply one.
+     */
+    private Long resolveEventCategoryId(Long requested, Long bingeId) {
+        if (requested == null) return null;
+        com.skbingegalaxy.booking.entity.EventCategory cat = eventCategoryRepository.findById(requested)
+            .orElseThrow(() -> new BusinessException("Event category " + requested + " not found"));
+        if (cat.getBingeId() != null && !cat.getBingeId().equals(bingeId)) {
+            throw new BusinessException("Event category " + requested + " is not available on this binge");
+        }
+        if (!cat.isActive()) {
+            throw new BusinessException("Event category '" + cat.getName() + "' is currently inactive");
+        }
+        return cat.getId();
+    }
+
+    /** Same contract as {@link #resolveEventCategoryId} but for add-ons. */
+    private Long resolveAddOnCategoryId(Long requested, Long bingeId) {
+        if (requested == null) return null;
+        com.skbingegalaxy.booking.entity.AddOnCategory cat = addOnCategoryRepository.findById(requested)
+            .orElseThrow(() -> new BusinessException("Add-on category " + requested + " not found"));
+        if (cat.getBingeId() != null && !cat.getBingeId().equals(bingeId)) {
+            throw new BusinessException("Add-on category " + requested + " is not available on this binge");
+        }
+        if (!cat.isActive()) {
+            throw new BusinessException("Add-on category '" + cat.getName() + "' is currently inactive");
+        }
+        return cat.getId();
     }
 }
 

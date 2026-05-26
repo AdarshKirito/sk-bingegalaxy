@@ -52,6 +52,14 @@ public class EventType {
     @Column(name = "max_guests")
     private Integer maxGuests;
 
+    /**
+     * Optional grouping category for filtering in the customer-facing
+     * wizard. NULL = uncategorized (surfaces only under the "All" filter).
+     * FK to {@code event_categories.id} — see V55.
+     */
+    @Column(name = "category_id")
+    private Long categoryId;
+
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "event_type_images", joinColumns = @JoinColumn(name = "event_type_id"))
     @Column(name = "image_url", columnDefinition = "TEXT")

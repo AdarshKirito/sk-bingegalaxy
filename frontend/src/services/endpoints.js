@@ -102,6 +102,9 @@ export const authorityService = {
 export const bookingService = {
   getEventTypes: () => api.get('/bookings/event-types'),
   getAddOns: () => api.get('/bookings/add-ons'),
+  // V55 — category taxonomy (globals ∪ binge-scoped, active only)
+  getEventCategories: () => api.get('/bookings/event-categories'),
+  getAddOnCategories: () => api.get('/bookings/addon-categories'),
   createBooking: (data) => api.post('/bookings', data),
   getByRef: (ref) => api.get(`/bookings/${ref}`),
   getMyBookings: () => api.get('/bookings/my'),
@@ -285,6 +288,30 @@ export const adminService = {
   updateAddOn: (id, data) => api.put(`/bookings/admin/add-ons/${id}`, data),
   toggleAddOn: (id) => api.patch(`/bookings/admin/add-ons/${id}/toggle-active`),
   deleteAddOn: (id) => api.delete(`/bookings/admin/add-ons/${id}`),
+  // Event-category management (V55) — per-binge
+  getEventCategories: () => api.get('/bookings/admin/event-categories'),
+  createEventCategory: (data) => api.post('/bookings/admin/event-categories', data),
+  updateEventCategory: (id, data) => api.put(`/bookings/admin/event-categories/${id}`, data),
+  toggleEventCategory: (id) => api.patch(`/bookings/admin/event-categories/${id}/toggle-active`),
+  deleteEventCategory: (id) => api.delete(`/bookings/admin/event-categories/${id}`),
+  // Event-category management — SUPER_ADMIN globals
+  getGlobalEventCategories: () => api.get('/bookings/admin/event-categories/global'),
+  createGlobalEventCategory: (data) => api.post('/bookings/admin/event-categories/global', data),
+  updateGlobalEventCategory: (id, data) => api.put(`/bookings/admin/event-categories/global/${id}`, data),
+  toggleGlobalEventCategory: (id) => api.patch(`/bookings/admin/event-categories/global/${id}/toggle-active`),
+  deleteGlobalEventCategory: (id) => api.delete(`/bookings/admin/event-categories/global/${id}`),
+  // Add-on-category management — per-binge
+  getAddOnCategories: () => api.get('/bookings/admin/addon-categories'),
+  createAddOnCategory: (data) => api.post('/bookings/admin/addon-categories', data),
+  updateAddOnCategory: (id, data) => api.put(`/bookings/admin/addon-categories/${id}`, data),
+  toggleAddOnCategory: (id) => api.patch(`/bookings/admin/addon-categories/${id}/toggle-active`),
+  deleteAddOnCategory: (id) => api.delete(`/bookings/admin/addon-categories/${id}`),
+  // Add-on-category management — SUPER_ADMIN globals
+  getGlobalAddOnCategories: () => api.get('/bookings/admin/addon-categories/global'),
+  createGlobalAddOnCategory: (data) => api.post('/bookings/admin/addon-categories/global', data),
+  updateGlobalAddOnCategory: (id, data) => api.put(`/bookings/admin/addon-categories/global/${id}`, data),
+  toggleGlobalAddOnCategory: (id) => api.patch(`/bookings/admin/addon-categories/global/${id}/toggle-active`),
+  deleteGlobalAddOnCategory: (id) => api.delete(`/bookings/admin/addon-categories/global/${id}`),
   // Invoices (admin)
   getAdminInvoices: () => api.get('/bookings/admin/invoices'),
   resendInvoice: (ref) => api.post(`/bookings/admin/${ref}/invoice/resend`),
@@ -439,6 +466,13 @@ export const adminService = {
   updateVenueRoom: (id, data) => api.put(`/bookings/admin/venue-rooms/${id}`, data),
   toggleVenueRoom: (id) => api.patch(`/bookings/admin/venue-rooms/${id}/toggle-active`),
   deleteVenueRoom: (id) => api.delete(`/bookings/admin/venue-rooms/${id}`),
+  // V56: SUPER_ADMIN approval workflow for ADMIN-created rooms
+  approveVenueRoom: (id) => api.post(`/bookings/admin/venue-rooms/${id}/approve`),
+  rejectVenueRoom: (id, reason) => api.post(`/bookings/admin/venue-rooms/${id}/reject`, { reason }),
+  // V57: maintenance / hold windows on a specific room
+  listRoomBlocks: (roomId) => api.get(`/bookings/admin/venue-rooms/${roomId}/blocks`),
+  createRoomBlock: (roomId, data) => api.post(`/bookings/admin/venue-rooms/${roomId}/blocks`, data),
+  deleteRoomBlock: (blockId) => api.delete(`/bookings/admin/venue-rooms/blocks/${blockId}`),
   // Surge pricing rules (admin)
   getSurgeRules: () => api.get('/bookings/admin/pricing/surge-rules'),
   createSurgeRule: (data) => api.post('/bookings/admin/pricing/surge-rules', data),

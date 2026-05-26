@@ -38,6 +38,13 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         jakarta.persistence.query.timeout: ${JPA_QUERY_TIMEOUT_MS:10000}
+        # ── JDBC batching — collapse N inserts/updates into single round-trips.
+        jdbc.batch_size: ${HIBERNATE_JDBC_BATCH_SIZE:50}
+        jdbc.batch_versioned_data: true
+        jdbc.fetch_size: ${HIBERNATE_JDBC_FETCH_SIZE:100}
+        order_inserts: true
+        order_updates: true
+        query.in_clause_parameter_padding: true
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:

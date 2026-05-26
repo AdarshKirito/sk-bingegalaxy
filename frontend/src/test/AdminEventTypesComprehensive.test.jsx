@@ -32,11 +32,14 @@ vi.mock('../context/BingeContext', () => ({
 
 const {
   mockGetAllEventTypes, mockGetAllAddOns,
+  mockGetEventCategories, mockGetAddOnCategories,
   mockCreateEventType, mockUpdateEventType, mockToggleEventType, mockDeleteEventType,
   mockCreateAddOn, mockUpdateAddOn, mockToggleAddOn, mockDeleteAddOn,
 } = vi.hoisted(() => ({
   mockGetAllEventTypes: vi.fn(),
   mockGetAllAddOns: vi.fn(),
+  mockGetEventCategories: vi.fn(),
+  mockGetAddOnCategories: vi.fn(),
   mockCreateEventType: vi.fn(),
   mockUpdateEventType: vi.fn(),
   mockToggleEventType: vi.fn(),
@@ -60,6 +63,8 @@ vi.mock('../services/endpoints', () => ({
     updateAddOn: mockUpdateAddOn,
     toggleAddOn: mockToggleAddOn,
     deleteAddOn: mockDeleteAddOn,
+    getEventCategories: mockGetEventCategories,
+    getAddOnCategories: mockGetAddOnCategories,
   },
 }));
 
@@ -89,8 +94,22 @@ describe('AdminEventTypes Comprehensive', () => {
     mockGetAllAddOns.mockResolvedValue({
       data: {
         data: [
-          { id: 1, name: 'DJ Setup', description: 'Full DJ', price: 1500, category: 'EXPERIENCE', active: true, imageUrls: [] },
-          { id: 2, name: 'Cake', description: 'Custom cake', price: 800, category: 'FOOD', active: true, imageUrls: [] },
+          { id: 1, name: 'DJ Setup', description: 'Full DJ', price: 1500, categoryId: 10, categoryName: 'EXPERIENCE', active: true, imageUrls: [] },
+          { id: 2, name: 'Cake', description: 'Custom cake', price: 800, categoryId: 11, categoryName: 'FOOD', active: true, imageUrls: [] },
+        ],
+      },
+    });
+    // V55+: AdminEventTypes loads category catalogs on mount via Promise.all.
+    // Tests must mock both endpoints or Promise.all rejects and the page
+    // toast-errors instead of rendering the seed data.
+    mockGetEventCategories.mockResolvedValue({
+      data: { data: [{ id: 20, name: 'PARTY', active: true, sortOrder: 0 }] },
+    });
+    mockGetAddOnCategories.mockResolvedValue({
+      data: {
+        data: [
+          { id: 10, name: 'EXPERIENCE', active: true, sortOrder: 0 },
+          { id: 11, name: 'FOOD', active: true, sortOrder: 1 },
         ],
       },
     });

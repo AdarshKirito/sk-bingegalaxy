@@ -180,6 +180,7 @@ public class BingeService {
             .maxConcurrentBookings(request.getMaxConcurrentBookings())
             .openTime(openT)
             .closeTime(closeT)
+            .roomSelectionRequired(Boolean.TRUE.equals(request.getRoomSelectionRequired()))
             .build();
         if (isSuperAdmin) {
             binge.setApprovalDecidedBy(adminId);
@@ -430,6 +431,10 @@ public class BingeService {
             binge.setCloseTime(request.getCloseTime());
         }
         validateOperatingHours(binge.getOpenTime(), binge.getCloseTime());
+        // V56: null leaves the existing value unchanged.
+        if (request.getRoomSelectionRequired() != null) {
+            binge.setRoomSelectionRequired(request.getRoomSelectionRequired());
+        }
         binge = bingeRepository.save(binge);
         log.info("Binge updated: '{}' (ID: {})", binge.getName(), id);
         return toDto(binge);
@@ -772,6 +777,7 @@ public class BingeService {
             .openTime(b.getOpenTime())
             .closeTime(b.getCloseTime())
             .createdAt(b.getCreatedAt())
+            .roomSelectionRequired(b.isRoomSelectionRequired())
             .freezePolicyEnabled(b.isFreezePolicyEnabled())
             .freezeDurationMinutes(b.getFreezeDurationMinutes())
             .maxPendingCancelsBeforeFreeze(b.getMaxPendingCancelsBeforeFreeze())

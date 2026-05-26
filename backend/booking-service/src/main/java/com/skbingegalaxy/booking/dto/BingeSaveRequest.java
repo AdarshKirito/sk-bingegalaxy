@@ -64,4 +64,11 @@ public class BingeSaveRequest {
 
     /** Per-binge closing time (local). Null behaves the same as {@link #openTime}. */
     private LocalTime closeTime;
+
+    /**
+     * V56: when {@code true}, customers must select a venue room during booking.
+     * Defaults to {@code false} (room selection optional). Null leaves the
+     * existing value unchanged on update.
+     */
+    private Boolean roomSelectionRequired;
 }

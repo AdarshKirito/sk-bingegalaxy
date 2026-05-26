@@ -194,6 +194,27 @@
   color: var(--text);
 }
 
+/* V55 — category chip filter (StepEvent / StepAddOns) */
+.chip-row .chip {
+  background: var(--bg-card);
+  border: 1.5px solid var(--border);
+  color: var(--text);
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.chip-row .chip:hover {
+  border-color: var(--primary-light);
+}
+.chip-row .chip.chip-active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
 .event-type-card {
   cursor: pointer;
   text-align: center;
@@ -448,6 +469,26 @@
   text-transform: uppercase;
   color: var(--danger, #ef4444);
   margin-top: 0.2rem;
+}
+
+/* V56: thumbnail + price addition on room cards */
+.room-card-thumb {
+  display: block;
+  width: 100%;
+  height: 80px;
+  object-fit: cover;
+  border-radius: var(--radius-xs, 6px);
+  margin-bottom: 0.4rem;
+}
+.room-card-price {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--primary);
+  margin-top: 0.25rem;
+}
+.room-card.selected .room-card-price {
+  color: #fff;
 }
 
 /* ====================================================================

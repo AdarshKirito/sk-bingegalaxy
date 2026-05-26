@@ -1,3 +1,74 @@
+# ── Shared YAML anchors ───────────────────────────────────
+# JVM tuning preset applied to every Java service. Settings chosen for
+# production-grade containerised workloads:
+#   * InitialRAMPercentage=50 + MaxRAMPercentage=75 — committed heap
+#     grows promptly under load, ceiling leaves headroom for native/Netty
+#     direct buffers and metaspace inside the cgroup memory limit.
+#   * UseG1GC + MaxGCPauseMillis=100 — bounded p99 GC pause for tail
+#     latency-sensitive request paths.
+#   * AlwaysPreTouch — pages the heap on startup so the first burst of
+#     traffic does not race with the OS for fresh pages (kills cold-start
+#     p99 spikes that show up as huge tail in load tests).
+#   * UseStringDeduplication — shrinks heap pressure on JSON-heavy paths.
+#   * ExitOnOutOfMemoryError + HeapDumpOnOutOfMemoryError — fail fast and
+#     leave a forensic artifact; Docker restart policy handles recovery.
+#   * java.security.egd=/dev/./urandom — avoids the well-known SecureRandom
+#     blocking-entropy stall on container startup.
+x-jvm-opts: &jvm_opts >-
+  -XX:InitialRAMPercentage=50.0
+  -XX:MaxRAMPercentage=75.0
+  -XX:+UseG1GC
+  -XX:MaxGCPauseMillis=100
+  -XX:+AlwaysPreTouch
+  -XX:+UseStringDeduplication
+  -XX:+ExitOnOutOfMemoryError
+  -XX:+HeapDumpOnOutOfMemoryError
+  -XX:HeapDumpPath=/tmp
+  -Djava.security.egd=file:/dev/./urandom
+
+# Hikari connection-pool preset for every Postgres-backed service.
+# Sized for ~100 concurrent VUs across the stack: 20 connections per
+# service × 5 services = 100 sessions, fits the bumped Postgres
+# max_connections=200 with headroom for admin/migrations. Fast-fail
+# timeouts surface saturation as 5xx instead of head-of-line stalling.
+x-hikari-env: &hikari_env
+  SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "20"
+  SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: "5"
+  SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT: "5000"
+  SPRING_DATASOURCE_HIKARI_VALIDATION_TIMEOUT: "2000"
+  SPRING_DATASOURCE_HIKARI_IDLE_TIMEOUT: "60000"
+  SPRING_DATASOURCE_HIKARI_MAX_LIFETIME: "600000"
+  SPRING_DATASOURCE_HIKARI_LEAK_DETECTION_THRESHOLD: "30000"
+  SPRING_DATASOURCE_HIKARI_KEEPALIVE_TIME: "30000"
+
+# Tomcat thread-pool preset. 400 worker threads + 100 accept-queue
+# matches the Hikari headroom and keeps the gateway → service connection
+# reuse efficient. min-spare=50 avoids cold-start ramp-up on traffic burst.
+x-tomcat-env: &tomcat_env
+  SERVER_TOMCAT_THREADS_MAX: "400"
+  SERVER_TOMCAT_THREADS_MIN_SPARE: "50"
+  SERVER_TOMCAT_ACCEPT_COUNT: "200"
+  SERVER_TOMCAT_MAX_CONNECTIONS: "10000"
+  SERVER_TOMCAT_CONNECTION_TIMEOUT: "5s"
+
+# Hibernate JDBC batching is now defined directly in each service's
+# config-server YAML (under spring.jpa.properties.hibernate.*) because
+# the `batch_size` / `batch_versioned_data` keys contain underscores that
+# Spring Boot's env-var → property binder would silently rewrite to dots
+# and Hibernate would ignore the resulting key. Two env knobs remain
+# overridable per service: HIBERNATE_JDBC_BATCH_SIZE, HIBERNATE_JDBC_FETCH_SIZE.
+
+# Kafka producer preset. lz4 compression halves wire size on JSON
+# payloads; batch 32 KiB + 10 ms linger lifts producer throughput
+# 3-5× under burst load without hurting steady-state latency.
+x-kafka-env: &kafka_env
+  SPRING_KAFKA_PRODUCER_BATCH_SIZE: "32768"
+  SPRING_KAFKA_PRODUCER_PROPERTIES_LINGER_MS: "10"
+  SPRING_KAFKA_PRODUCER_COMPRESSION_TYPE: "lz4"
+  SPRING_KAFKA_PRODUCER_BUFFER_MEMORY: "67108864"
+  SPRING_KAFKA_PRODUCER_PROPERTIES_MAX_REQUEST_SIZE: "2097152"
+  KAFKA_LISTENER_CONCURRENCY: "4"
+
 services:
   # ── Databases ──────────────────────────────────────────────
   postgres:
@@ -7,6 +78,34 @@ services:
     environment:
       POSTGRES_USER: skbg_admin
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # Production-grade Postgres tuning sized for the bumped Hikari pools
+    # (20 × 5 services = 100 sessions baseline). max_connections=200
+    # leaves headroom for migrations, replication slots, and admin
+    # tooling. shared_buffers ≈ 25% of allocated container memory.
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=200"
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "effective_cache_size=768MB"
+      - "-c"
+      - "work_mem=8MB"
+      - "-c"
+      - "maintenance_work_mem=128MB"
+      - "-c"
+      - "wal_buffers=16MB"
+      - "-c"
+      - "max_wal_size=2GB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+      - "-c"
+      - "log_min_duration_statement=500"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/init-databases.sql:/docker-entrypoint-initdb.d/01-init.sql
@@ -18,8 +117,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
-          cpus: "0.50"
+          memory: 1G
+          cpus: "1.00"
 
   mongodb:
     image: mongo:7
@@ -45,7 +144,29 @@ services:
     image: redis:7-alpine
     container_name: skbg-redis
     restart: unless-stopped
-    command: ["redis-server", "--save", "", "--appendonly", "no", "--requirepass", "${REDIS_PASSWORD:-}"]
+    # tcp-backlog + maxclients sized for gateway Lettuce pool × replicas.
+    # maxmemory-policy allkeys-lru protects the rate-limit + session cache
+    # from runaway growth under sustained load.
+    command:
+      - "redis-server"
+      - "--save"
+      - ""
+      - "--appendonly"
+      - "no"
+      - "--requirepass"
+      - "${REDIS_PASSWORD:-}"
+      - "--maxmemory"
+      - "384mb"
+      - "--maxmemory-policy"
+      - "allkeys-lru"
+      - "--tcp-backlog"
+      - "511"
+      - "--maxclients"
+      - "10000"
+      - "--timeout"
+      - "300"
+      - "--tcp-keepalive"
+      - "60"
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-}", "ping"]
       interval: 10s
@@ -54,8 +175,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
-          cpus: "0.25"
+          memory: 512M
+          cpus: "0.50"
 
   # ── Kafka (single-broker dev — Zookeeper) ────────────────
   # Single broker is sufficient for local development.
@@ -67,11 +188,19 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+    # Persisted ZK state keeps the broker cluster.id paired with the
+    # kafka-data volume. Wiping one without the other causes
+    # InconsistentClusterIdException on broker startup. The two volumes
+    # MUST be wiped together (`docker compose down -v`) or kept together.
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-log:/var/lib/zookeeper/log
     healthcheck:
         test: ["CMD-SHELL", "echo srvr | nc localhost 2181 | grep Mode"]
         interval: 10s
         timeout: 5s
-        retries: 5
+        retries: 10
+        start_period: 60s
     deploy:
       resources:
         limits:
@@ -98,18 +227,19 @@ services:
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       KAFKA_LOG_RETENTION_HOURS: 168
       KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_HEAP_OPTS: "-Xmx768M -Xms512M"
     volumes:
       - kafka-data:/var/lib/kafka/data
     healthcheck:
       test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
       interval: 15s
       timeout: 10s
-      retries: 10
-      start_period: 30s
+      retries: 20
+      start_period: 90s
     deploy:
       resources:
         limits:
-          memory: 1G
+          memory: 2G
           cpus: "1.00"
 
   # Kafka topic initialisation (runs once and exits)
@@ -151,7 +281,7 @@ services:
     restart: unless-stopped
     environment:
       EUREKA_PASSWORD: ${EUREKA_PASSWORD}
-      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+      JAVA_TOOL_OPTIONS: *jvm_opts
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8761/actuator/health"]
       interval: 15s
@@ -176,7 +306,7 @@ services:
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:${EUREKA_PASSWORD}@discovery-server:8761/eureka/
       CONFIG_SERVER_USER: ${CONFIG_SERVER_USER:-configuser}
       CONFIG_SERVER_PASSWORD: ${CONFIG_SERVER_PASSWORD}
-      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+      JAVA_TOOL_OPTIONS: *jvm_opts
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8888/actuator/health"]
       interval: 15s
@@ -211,12 +341,38 @@ services:
       SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       JWT_SECRET: ${JWT_SECRET}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8080}
-      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+      # Per-IP per-minute rate-limit caps. Production defaults are 100 / 30 / 5
+      # (see RateLimitFilter). Local-dev / k6 load runs all originate from a
+      # single host IP so we relax the standard limit; auth + sensitive caps
+      # stay tight to keep brute-force coverage realistic.
+      APP_RATELIMIT_STANDARD: ${APP_RATELIMIT_STANDARD:-50000}
+      APP_RATELIMIT_AUTH: ${APP_RATELIMIT_AUTH:-300}
+      APP_RATELIMIT_SENSITIVE: ${APP_RATELIMIT_SENSITIVE:-50}
+      # ── Reactor Netty downstream connection pool (gateway → services)
+      # Tight pool with bounded acquire timeout + idle eviction prevents
+      # connection-leak-driven p99 cliffs under burst load. Response
+      # timeout drops from 30s → 8s so a slow downstream surfaces as a
+      # 504 instead of consuming a VU for half a minute.
+      SPRING_CLOUD_GATEWAY_HTTPCLIENT_POOL_MAX_CONNECTIONS: "1000"
+      SPRING_CLOUD_GATEWAY_HTTPCLIENT_POOL_ACQUIRE_TIMEOUT: "10000"
+      SPRING_CLOUD_GATEWAY_HTTPCLIENT_POOL_MAX_IDLE_TIME: "30s"
+      SPRING_CLOUD_GATEWAY_HTTPCLIENT_POOL_MAX_LIFE_TIME: "5m"
+      SPRING_CLOUD_GATEWAY_HTTPCLIENT_POOL_EVICTION_INTERVAL: "60s"
+      SPRING_CLOUD_GATEWAY_HTTPCLIENT_RESPONSE_TIMEOUT: "8s"
+      SPRING_CLOUD_GATEWAY_HTTPCLIENT_CONNECT_TIMEOUT: "3000"
+      # Lettuce (Redis) pool: gateway hits Redis on every request for
+      # rate-limit token-bucket lookups; a bounded pool with min-idle=8
+      # avoids the "first request after idle" reconnect tax.
+      SPRING_DATA_REDIS_LETTUCE_POOL_MAX_ACTIVE: "64"
+      SPRING_DATA_REDIS_LETTUCE_POOL_MAX_IDLE: "16"
+      SPRING_DATA_REDIS_LETTUCE_POOL_MIN_IDLE: "8"
+      SPRING_DATA_REDIS_LETTUCE_POOL_MAX_WAIT: "2000ms"
+      JAVA_TOOL_OPTIONS: *jvm_opts
     deploy:
       resources:
         limits:
-          memory: 512M
-          cpus: "0.50"
+          memory: 1G
+          cpus: "1.50"
 
   # ── Application Services ───────────────────────────────────
   auth-service:
@@ -235,6 +391,7 @@ services:
       kafka-init:
         condition: service_completed_successfully
     environment:
+      <<: [*hikari_env, *tomcat_env, *kafka_env]
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/auth_db
       SPRING_DATASOURCE_USERNAME: auth_svc
       SPRING_DATASOURCE_PASSWORD: ${AUTH_SVC_PASSWORD:-auth_svc_dev}
@@ -249,12 +406,12 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       # Local compose runs over HTTP, so secure cookies must be opt-in.
       COOKIE_SECURE: "${COOKIE_SECURE:-false}"
-      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+      JAVA_TOOL_OPTIONS: *jvm_opts
     deploy:
       resources:
         limits:
-          memory: 512M
-          cpus: "0.50"
+          memory: 768M
+          cpus: "1.00"
 
   availability-service:
     build:
@@ -268,6 +425,7 @@ services:
       config-server:
         condition: service_healthy
     environment:
+      <<: [*hikari_env, *tomcat_env, *kafka_env]
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/availability_db
       SPRING_DATASOURCE_USERNAME: availability_svc
       SPRING_DATASOURCE_PASSWORD: ${AVAILABILITY_SVC_PASSWORD:-availability_svc_dev}
@@ -277,12 +435,12 @@ services:
       SPRING_CLOUD_CONFIG_USERNAME: ${CONFIG_SERVER_USER:-configuser}
       SPRING_CLOUD_CONFIG_PASSWORD: ${CONFIG_SERVER_PASSWORD}
       INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
-      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+      JAVA_TOOL_OPTIONS: *jvm_opts
     deploy:
       resources:
         limits:
-          memory: 512M
-          cpus: "0.50"
+          memory: 768M
+          cpus: "1.00"
 
   booking-service:
     build:
@@ -300,6 +458,7 @@ services:
       kafka-init:
         condition: service_completed_successfully
     environment:
+      <<: [*hikari_env, *tomcat_env, *kafka_env]
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/booking_db
       SPRING_DATASOURCE_USERNAME: booking_svc
       SPRING_DATASOURCE_PASSWORD: ${BOOKING_SVC_PASSWORD:-booking_svc_dev}
@@ -310,12 +469,12 @@ services:
       SPRING_CLOUD_CONFIG_PASSWORD: ${CONFIG_SERVER_PASSWORD}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
-      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+      JAVA_TOOL_OPTIONS: *jvm_opts
     deploy:
       resources:
         limits:
-          memory: 512M
-          cpus: "0.50"
+          memory: 1G
+          cpus: "1.50"
 
   payment-service:
     build:
@@ -333,6 +492,7 @@ services:
       kafka-init:
         condition: service_completed_successfully
     environment:
+      <<: [*hikari_env, *tomcat_env, *kafka_env]
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/payment_db
       SPRING_DATASOURCE_USERNAME: payment_svc
       SPRING_DATASOURCE_PASSWORD: ${PAYMENT_SVC_PASSWORD:-payment_svc_dev}
@@ -349,12 +509,12 @@ services:
       PAYMENT_SIMULATION_ENABLED: "${PAYMENT_SIMULATION_ENABLED:-true}"
       RAZORPAY_KEY_ID: "${RAZORPAY_KEY_ID}"
       RAZORPAY_KEY_SECRET: "${RAZORPAY_KEY_SECRET}"
-      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+      JAVA_TOOL_OPTIONS: *jvm_opts
     deploy:
       resources:
         limits:
-          memory: 512M
-          cpus: "0.50"
+          memory: 1G
+          cpus: "1.50"
 
   notification-service:
     build:
@@ -372,6 +532,7 @@ services:
       kafka-init:
         condition: service_completed_successfully
     environment:
+      <<: [*tomcat_env, *kafka_env]
       SPRING_DATA_MONGODB_URI: mongodb://skbg_admin:${MONGO_PASSWORD}@mongodb:27017/notification_db?authSource=admin
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:${EUREKA_PASSWORD}@discovery-server:8761/eureka/
       SPRING_CLOUD_CONFIG_URI: http://config-server:8888
@@ -394,12 +555,12 @@ services:
       FCM_CREDENTIALS_PATH: "${FCM_CREDENTIALS_PATH:-}"
       NOTIFICATION_UNSUBSCRIBE_URL: "${NOTIFICATION_UNSUBSCRIBE_URL:-http://localhost:3000/account/notifications}"
       REMINDER_CHECK_INTERVAL_MS: "${REMINDER_CHECK_INTERVAL_MS:-60000}"
-      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+      JAVA_TOOL_OPTIONS: *jvm_opts
     deploy:
       resources:
         limits:
-          memory: 512M
-          cpus: "0.50"
+          memory: 768M
+          cpus: "1.00"
 
   # ── Frontend ───────────────────────────────────────────────
   frontend:
@@ -424,3 +585,5 @@ volumes:
   postgres-data:
   mongo-data:
   kafka-data:
+  zookeeper-data:
+  zookeeper-log:

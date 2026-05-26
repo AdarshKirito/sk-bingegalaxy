@@ -3,6 +3,9 @@ package com.skbingegalaxy.booking.dto;
 import jakarta.validation.constraints.*;
 import lombok.*;
 
+import java.math.BigDecimal;
+import java.util.List;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -26,4 +29,11 @@ public class VenueRoomSaveRequest {
     private int sortOrder;
 
     private boolean active;
+
+    /** V56: surcharge added when this room is selected. Non-negative. */
+    @DecimalMin(value = "0.0", message = "Price addition must be non-negative")
+    private BigDecimal priceAddition;
+
+    /** V56: photo gallery URLs. */
+    private List<String> imageUrls;
 }
