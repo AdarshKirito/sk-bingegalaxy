@@ -32,7 +32,7 @@
     "react-phone-number-input": "^3.4.16",
     "react-router-dom": "^6.23.1",
     "react-toastify": "^10.0.5",
-    "zustand": "^5.0.12"
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
