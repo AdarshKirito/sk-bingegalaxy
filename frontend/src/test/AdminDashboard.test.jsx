@@ -37,9 +37,14 @@ vi.mock('../services/endpoints', () => ({
     getFailedSagas: vi.fn().mockResolvedValue({ data: { data: [] } }),
     getCompensatingSagas: vi.fn().mockResolvedValue({ data: { data: [] } }),
     retryFailedNotifications: vi.fn().mockResolvedValue({ data: {} }),
+    getFailedRefunds: vi.fn().mockResolvedValue({ data: { data: { totalElements: 0 } } }),
   },
   bookingService: {},
   authService: {},
+  // The dashboard surfaces the open-dispute count as a money-at-risk alert.
+  disputeService: {
+    count: vi.fn().mockResolvedValue({ data: { data: { openDisputes: 0 } } }),
+  },
 }));
 
 import AdminDashboard from '../pages/AdminDashboard';

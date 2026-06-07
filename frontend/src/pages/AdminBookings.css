@@ -329,14 +329,21 @@
 /* Detail Modal Tabs */
 .ab-detail-tabs {
   display: flex;
+  flex-wrap: nowrap;
   gap: 0.25rem;
   border-bottom: 1px solid var(--border);
   margin-bottom: 1rem;
   align-items: center;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ab-detail-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .ab-detail-tab {
-  padding: 0.5rem 1rem;
+  padding: 0.45rem 0.85rem;
   border: none;
   cursor: pointer;
   font-weight: 500;
@@ -344,6 +351,8 @@
   border-bottom: 2px solid transparent;
   background: none;
   color: var(--text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .ab-detail-tab.active {

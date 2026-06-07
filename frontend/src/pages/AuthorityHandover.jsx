@@ -4,7 +4,7 @@ import {
   FiShield, FiUserPlus, FiClock, FiSlash, FiLock, FiUnlock, FiRefreshCw,
   FiUsers, FiAlertTriangle, FiCheck, FiCheckCircle,
 } from 'react-icons/fi';
-import { authService, authorityService } from '../services/endpoints';
+import { authService, authorityService, adminService } from '../services/endpoints';
 import { useConfirm } from '../components/ui/ConfirmProvider';
 import SEO from '../components/SEO';
 import './AdminSecurity.css';
@@ -44,6 +44,16 @@ const SCOPE_LABELS = {
 };
 const ALL_SCOPES = Object.keys(SCOPE_LABELS);
 
+// Capabilities a super-admin can lock for one binge, or across ALL binges, so a
+// regular binge admin can view but not change them. Each token MUST match the
+// server-side AuthorityLockGuard capability enforced by that feature's controller
+// (e.g. AdminPricingController enforces "PRICING"). Add an entry here only after the
+// matching mutation endpoints call authorityLockGuard.requireUnlocked(token, role).
+const LOCKABLE_CAPABILITIES = [
+  { value: 'PRICING', label: 'Pricing — rate codes, customer pricing, surge' },
+];
+const ALL_BINGES = 'ALL';
+
 const fmtTs = (iso) => {
   if (!iso) return '—';
   try { return new Date(iso).toLocaleString(); } catch { return iso; }
@@ -68,6 +78,9 @@ export default function AuthorityHandover() {
   const [locksLoading, setLocksLoading] = useState(false);
 
   const [admins, setAdmins] = useState([]);
+  const [binges, setBinges] = useState([]);
+  const [lockForm, setLockForm] = useState({ capability: LOCKABLE_CAPABILITIES[0].value, bingeId: ALL_BINGES, reason: '' });
+  const [creatingLock, setCreatingLock] = useState(false);
   const confirm = useConfirm();
 
   const reload = useCallback(async () => {
@@ -112,6 +125,37 @@ export default function AuthorityHandover() {
       })
       .catch(() => { /* picker can render empty */ });
   }, []);
+  useEffect(() => {
+    // Binge list for the capability-lock target picker (super-admin sees all binges).
+    adminService.getAdminBinges()
+      .then(res => {
+        const payload = res.data?.data;
+        setBinges(Array.isArray(payload) ? payload : (Array.isArray(payload?.content) ? payload.content : []));
+      })
+      .catch(() => { /* picker still offers "All binges" */ });
+  }, []);
+
+  const onCreateCapabilityLock = async (e) => {
+    e.preventDefault();
+    const reason = (lockForm.reason || '').trim();
+    if (reason.length < 4) { toast.error('A reason (min 4 chars) is required for the audit log'); return; }
+    setCreatingLock(true);
+    try {
+      await authorityService.createLock({
+        resourceType: lockForm.capability,
+        resourceId: lockForm.bingeId,           // a binge id, or "ALL" for every binge
+        reason,
+      });
+      const target = lockForm.bingeId === ALL_BINGES ? 'all binges' : `binge #${lockForm.bingeId}`;
+      toast.success(`Locked ${lockForm.capability} for ${target}`);
+      setLockForm(f => ({ ...f, reason: '' }));
+      reloadLocks();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Failed to create lock');
+    } finally {
+      setCreatingLock(false);
+    }
+  };
 
   const onRevoke = async (g) => {
     const result = await confirm({
@@ -206,7 +250,49 @@ export default function AuthorityHandover() {
       )}
 
       {tab === 'locks' && (
-        <LocksTable locks={locks} loading={locksLoading} onRelease={onReleaseLock} onReload={reloadLocks} />
+        <>
+          <section className="sec-card" style={{ marginBottom: '1rem' }}>
+            <header className="sec-card-head">
+              <h2><FiLock /> Lock a capability</h2>
+              <p>
+                Freeze a feature so a binge admin can <strong>view but not change</strong> it —
+                for one binge or across <strong>all binges</strong>. Native super-admins are never
+                blocked and can release the lock here at any time.
+              </p>
+            </header>
+            <form onSubmit={onCreateCapabilityLock} style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end' }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13 }}>
+                <span>Capability</span>
+                <select value={lockForm.capability}
+                  onChange={(e) => setLockForm(f => ({ ...f, capability: e.target.value }))}>
+                  {LOCKABLE_CAPABILITIES.map(c => (
+                    <option key={c.value} value={c.value}>{c.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13 }}>
+                <span>Applies to</span>
+                <select value={lockForm.bingeId}
+                  onChange={(e) => setLockForm(f => ({ ...f, bingeId: e.target.value }))}>
+                  <option value={ALL_BINGES}>All binges</option>
+                  {binges.map(b => (
+                    <option key={b.id} value={String(b.id)}>{b.name || `Binge #${b.id}`}</option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13, flex: 1, minWidth: 240 }}>
+                <span>Reason (audit)</span>
+                <input type="text" maxLength={500} value={lockForm.reason}
+                  placeholder="e.g. Pricing frozen for the festival promo period"
+                  onChange={(e) => setLockForm(f => ({ ...f, reason: e.target.value }))} />
+              </label>
+              <button type="submit" className="btn btn-primary" disabled={creatingLock}>
+                <FiLock /> {creatingLock ? 'Locking…' : 'Lock'}
+              </button>
+            </form>
+          </section>
+          <LocksTable locks={locks} loading={locksLoading} onRelease={onReleaseLock} onReload={reloadLocks} />
+        </>
       )}
 
       {tab === 'new' && (

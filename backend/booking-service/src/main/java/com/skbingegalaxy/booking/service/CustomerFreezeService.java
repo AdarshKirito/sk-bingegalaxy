@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -85,7 +86,7 @@ public class CustomerFreezeService {
             int windowMin = binge.getFreezeDurationMinutes();
             if (threshold <= 0 || windowMin <= 0) return;
 
-            LocalDateTime since = LocalDateTime.now().minusMinutes(windowMin);
+            LocalDateTime since = LocalDateTime.now(ZoneOffset.UTC).minusMinutes(windowMin);
             // The just-cancelled booking from the outer @Transactional has not yet
             // committed when this REQUIRES_NEW transaction reads (READ_COMMITTED).
             // Add 1 to include the in-flight cancellation in the threshold check.
@@ -117,7 +118,7 @@ public class CustomerFreezeService {
             int windowMin = binge.getFreezeDurationMinutes();
             if (threshold <= 0 || windowMin <= 0) return;
 
-            LocalDateTime since = LocalDateTime.now().minusMinutes(windowMin);
+            LocalDateTime since = LocalDateTime.now(ZoneOffset.UTC).minusMinutes(windowMin);
             // The just-cancelled booking from the outer @Transactional has not yet
             // committed when this REQUIRES_NEW transaction reads. Add 1 for it.
             long committed = bookingRepository.countRecentTimeoutCancellationsByBinge(customerId, bingeId, since);
@@ -157,7 +158,7 @@ public class CustomerFreezeService {
             // NO_SHOW windows are typically wider than cancel/timeout windows,
             // but we reuse freezeDurationMinutes for operator simplicity. Ops
             // can lengthen it per-binge if they want a longer rolling window.
-            LocalDateTime since = LocalDateTime.now().minusMinutes(windowMin);
+            LocalDateTime since = LocalDateTime.now(ZoneOffset.UTC).minusMinutes(windowMin);
             // The just-flipped booking IS already committed by the time the
             // daily audit publishes — runDailyAudit calls bookingRepository.save
             // before invoking us. So we don't add 1 like the other triggers.
@@ -179,7 +180,7 @@ public class CustomerFreezeService {
 
     @Transactional(readOnly = true)
     public List<CustomerBingeFreezeDto> listMyActiveFreezes(Long customerId) {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         return freezeRepository.findByCustomerIdAndStatusOrderByFreezeUntilDesc(customerId, Status.ACTIVE)
             .stream()
             .filter(f -> f.getFreezeUntil().isAfter(now))
@@ -200,7 +201,7 @@ public class CustomerFreezeService {
         if (activeOnly) {
             return freezeRepository.findByBingeIdAndStatusOrderByFreezeUntilDesc(bingeId, Status.ACTIVE)
                 .stream()
-                .filter(f -> f.getFreezeUntil().isAfter(LocalDateTime.now()))
+                .filter(f -> f.getFreezeUntil().isAfter(LocalDateTime.now(ZoneOffset.UTC)))
                 .map(this::toDto)
                 .toList();
         }
@@ -217,7 +218,7 @@ public class CustomerFreezeService {
             throw new BusinessException("Freeze is not active (current: " + freeze.getStatus() + ")");
         }
         freeze.setStatus(Status.LIFTED);
-        freeze.setLiftedAt(LocalDateTime.now());
+        freeze.setLiftedAt(LocalDateTime.now(ZoneOffset.UTC));
         freeze.setLiftedByUserId(actingUserId);
         freeze.setLiftedReason(reason);
         log.info("Freeze {} lifted by user {} ({})", freezeId, actingUserId, role);
@@ -240,7 +241,7 @@ public class CustomerFreezeService {
                 request.getCustomerId(), request.getBingeId(), Status.ACTIVE)
             .ifPresent(existing -> {
                 existing.setStatus(Status.LIFTED);
-                existing.setLiftedAt(LocalDateTime.now());
+                existing.setLiftedAt(LocalDateTime.now(ZoneOffset.UTC));
                 existing.setLiftedByUserId(actingUserId);
                 existing.setLiftedReason("Superseded by new manual freeze");
                 freezeRepository.save(existing);
@@ -249,12 +250,12 @@ public class CustomerFreezeService {
         CustomerBingeFreeze freeze = CustomerBingeFreeze.builder()
             .customerId(request.getCustomerId())
             .bingeId(request.getBingeId())
-            .freezeUntil(LocalDateTime.now().plusMinutes(minutes))
+            .freezeUntil(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(minutes))
             .reason(request.getReason() != null ? request.getReason() : "Manual freeze by admin")
             .status(Status.ACTIVE)
             .triggerType(TriggerType.MANUAL)
             .triggeredByUserId(actingUserId)
-            .createdAt(LocalDateTime.now())
+            .createdAt(LocalDateTime.now(ZoneOffset.UTC))
             .build();
         log.info("Manual freeze applied by user {} to customer {} at binge {} for {} min",
             actingUserId, request.getCustomerId(), request.getBingeId(), minutes);
@@ -273,11 +274,11 @@ public class CustomerFreezeService {
         CustomerBingeFreeze freeze = CustomerBingeFreeze.builder()
             .customerId(customerId)
             .bingeId(bingeId)
-            .freezeUntil(LocalDateTime.now().plusMinutes(binge.getFreezeDurationMinutes()))
+            .freezeUntil(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(binge.getFreezeDurationMinutes()))
             .reason(reason)
             .status(Status.ACTIVE)
             .triggerType(trigger)
-            .createdAt(LocalDateTime.now())
+            .createdAt(LocalDateTime.now(ZoneOffset.UTC))
             .build();
         freezeRepository.save(freeze);
         log.warn("Auto-freeze applied: customer={} binge={} trigger={} reason='{}' until={}",
@@ -293,7 +294,7 @@ public class CustomerFreezeService {
             .findFirstByCustomerIdAndBingeIdAndStatusOrderByFreezeUntilDesc(customerId, bingeId, Status.ACTIVE);
         if (maybe.isEmpty()) return null;
         CustomerBingeFreeze freeze = maybe.get();
-        if (!freeze.getFreezeUntil().isAfter(LocalDateTime.now())) {
+        if (!freeze.getFreezeUntil().isAfter(LocalDateTime.now(ZoneOffset.UTC))) {
             freeze.setStatus(Status.EXPIRED);
             freezeRepository.save(freeze);
             return null;

@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -137,7 +138,7 @@ public class LoyaltyV2CustomerController {
                 .orElseThrow(() -> new IllegalStateException("Member not enrolled"));
 
         RedeemEngine.RedeemQuote quote = redeemEngine.quote(new RedeemEngine.QuoteRequest(
-                m.getId(), bingeId, points, bookingAmount, java.time.LocalDateTime.now()));
+                m.getId(), bingeId, points, bookingAmount, java.time.LocalDateTime.now(ZoneOffset.UTC)));
         return ResponseEntity.ok(ApiResponse.ok(quote));
     }
 

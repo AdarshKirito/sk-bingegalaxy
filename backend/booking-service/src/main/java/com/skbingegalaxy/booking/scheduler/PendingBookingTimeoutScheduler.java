@@ -11,6 +11,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -38,7 +39,7 @@ public class PendingBookingTimeoutScheduler {
     @Scheduled(fixedDelayString = "${app.saga.check-interval-ms:300000}")
     @SchedulerLock(name = "cancelStalePendingBookings", lockAtLeastFor = "4m", lockAtMostFor = "9m")
     public void cancelStalePendingBookings() {
-        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(pendingTimeoutMinutes);
+        LocalDateTime cutoff = LocalDateTime.now(ZoneOffset.UTC).minusMinutes(pendingTimeoutMinutes);
         List<Booking> stale = bookingRepository.findStalePendingBookings(cutoff);
 
         if (stale.isEmpty()) return;

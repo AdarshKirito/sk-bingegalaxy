@@ -22,6 +22,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.UUID;
@@ -65,7 +66,7 @@ public class EmailVerificationService {
             .userId(user.getId())
             .tokenHash(sha256Hex(plaintextToken))
             .otp(otp)
-            .expiresAt(LocalDateTime.now().plusMinutes(expirationMinutes))
+            .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(expirationMinutes))
             .build();
         tokenRepository.save(entry);
 
@@ -104,9 +105,7 @@ public class EmailVerificationService {
             .orElseThrow(() -> new ResourceNotFoundException("User", "email", email));
         if (user.isEmailVerified()) return user;
 
-        EmailVerificationToken token = tokenRepository.findAll().stream()
-            .filter(t -> !t.isUsed() && t.getUserId().equals(user.getId()))
-            .max(java.util.Comparator.comparing(EmailVerificationToken::getCreatedAt))
+        EmailVerificationToken token = tokenRepository.findLatestUnusedForUser(user.getId())
             .orElseThrow(() -> new BusinessException("No active verification code for this account", HttpStatus.BAD_REQUEST));
 
         if (token.isExpired()) {
@@ -117,7 +116,11 @@ public class EmailVerificationService {
             tokenRepository.save(token);
             throw new BusinessException("Too many incorrect attempts. Please request a new code.", HttpStatus.TOO_MANY_REQUESTS);
         }
-        if (!otp.trim().equals(token.getOtp())) {
+        // Constant-time comparison prevents timing-oracle attacks that allow
+        // an attacker to brute-force the 6-digit OTP digit-by-digit via response latency.
+        if (!MessageDigest.isEqual(
+                otp.trim().getBytes(StandardCharsets.UTF_8),
+                token.getOtp().getBytes(StandardCharsets.UTF_8))) {
             token.incrementAttempts();
             tokenRepository.save(token);
             throw new BusinessException("Invalid verification code", HttpStatus.BAD_REQUEST);
@@ -126,7 +129,7 @@ public class EmailVerificationService {
         token.setUsed(true);
         tokenRepository.save(token);
         user.setEmailVerified(true);
-        user.setEmailVerifiedAt(LocalDateTime.now());
+        user.setEmailVerifiedAt(LocalDateTime.now(ZoneOffset.UTC));
         return userRepository.save(user);
     }
 
@@ -145,7 +148,7 @@ public class EmailVerificationService {
             .orElseThrow(() -> new BusinessException("User no longer exists", HttpStatus.BAD_REQUEST));
         if (!user.isEmailVerified()) {
             user.setEmailVerified(true);
-            user.setEmailVerifiedAt(LocalDateTime.now());
+            user.setEmailVerifiedAt(LocalDateTime.now(ZoneOffset.UTC));
             userRepository.save(user);
         }
         token.setUsed(true);

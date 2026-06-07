@@ -72,6 +72,7 @@ export default function BingeSelector() {
       supportWhatsapp: binge.supportWhatsapp,
       customerCancellationEnabled: binge.customerCancellationEnabled,
       customerCancellationCutoffMinutes: binge.customerCancellationCutoffMinutes,
+      timezone: binge.timezone,
     });
     toast.success(`Selected: ${binge.name}`);
     navigate('/dashboard');

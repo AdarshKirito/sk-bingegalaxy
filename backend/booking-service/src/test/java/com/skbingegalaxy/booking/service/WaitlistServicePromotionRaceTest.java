@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.skbingegalaxy.booking.client.AvailabilityClient;
 import com.skbingegalaxy.booking.entity.WaitlistEntry;
 import com.skbingegalaxy.booking.entity.WaitlistEntry.WaitlistStatus;
+import com.skbingegalaxy.booking.metrics.BookingFunnelMetrics;
 import com.skbingegalaxy.booking.repository.BookingRepository;
 import com.skbingegalaxy.booking.repository.EventTypeRepository;
 import com.skbingegalaxy.booking.repository.OutboxEventRepository;
@@ -57,10 +58,12 @@ class WaitlistServicePromotionRaceTest {
 
     @Mock private WaitlistRepository waitlistRepository;
     @Mock private EventTypeRepository eventTypeRepository;
+    @Mock private BookingFunnelMetrics funnelMetrics;
     @Mock private BookingService bookingService;
     @Mock private BookingRepository bookingRepository;
     @Mock private OutboxEventRepository outboxEventRepository;
     @Mock private ObjectMapper objectMapper;
+    @Mock private BookingEventPublisher bookingEventPublisher;
     @Mock private AvailabilityClient availabilityClient;
 
     @InjectMocks

@@ -19,6 +19,14 @@ spring:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/booking_db}
     username: ${SPRING_DATASOURCE_USERNAME:booking_svc}
     password: ${SPRING_DATASOURCE_PASSWORD:?SPRING_DATASOURCE_PASSWORD must be set}
+    hikari:
+      maximum-pool-size: ${HIKARI_MAX_POOL_SIZE:20}
+      minimum-idle: ${HIKARI_MIN_IDLE:5}
+      connection-timeout: 10000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      leak-detection-threshold: 60000
+      auto-commit: false
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     producer:
@@ -48,6 +56,9 @@ spring:
       ack-mode: record
       missing-topics-fatal: false
       concurrency: 2
+      # Cap poll wait so in-flight consumers drain quickly during graceful shutdown.
+      # Default is 5000 ms; 3000 ms keeps the shutdown under the 30-second lifecycle budget.
+      poll-timeout: 3000
   flyway:
     baseline-on-migrate: true
     baseline-version: 0

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { bookingService, paymentService } from '../services/endpoints';
+import { useFormatMoney } from '../context/CurrencyContext';
 import { formatTime12h } from '../utils/format';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import SEO from '../components/SEO';
@@ -8,6 +9,12 @@ import { FiAlertCircle, FiCalendar, FiCheckCircle, FiCreditCard, FiFilter, FiRef
 import DOMPurify from 'dompurify';
 import { toast } from 'react-toastify';
 import './CustomerHub.css';
+
+// `/payments/my` returns a Spring Page ({ content, totalElements, … }) since
+// pagination was added server-side; the older "my bookings" endpoints still
+// return a bare array. Normalise both to a flat array so a backend pagination
+// change can never silently blank the payment history again.
+const toRows = (val) => (Array.isArray(val) ? val : (Array.isArray(val?.content) ? val.content : []));
 
 export default function CustomerPayments() {
   const navigate = useNavigate();
@@ -72,7 +79,7 @@ export default function CustomerPayments() {
         bookingService.getCurrentBookings(),
         bookingService.getPastBookings(),
       ]);
-      if (pay.status === 'fulfilled') setPayments(toArray(pay.value?.data?.data));
+      if (pay.status === 'fulfilled') setPayments(toRows(pay.value?.data?.data));
       const c = cur.status === 'fulfilled' ? toArray(cur.value?.data?.data) : [];
       const p = past.status === 'fulfilled' ? toArray(past.value?.data?.data) : [];
       setBookings([...c, ...p]);
@@ -106,7 +113,7 @@ export default function CustomerPayments() {
       bookingService.getPastBookings(),
     ]).then(([paymentRes, currentRes, pastRes]) => {
       const toArray = (val) => Array.isArray(val) ? val : [];
-      setPayments(paymentRes.status === 'fulfilled' ? toArray(paymentRes.value?.data?.data) : []);
+      setPayments(paymentRes.status === 'fulfilled' ? toRows(paymentRes.value?.data?.data) : []);
       const currentBookings = currentRes.status === 'fulfilled' ? toArray(currentRes.value?.data?.data) : [];
       const pastBookings = pastRes.status === 'fulfilled' ? toArray(pastRes.value?.data?.data) : [];
       setBookings([...currentBookings, ...pastBookings]);
@@ -125,7 +132,7 @@ export default function CustomerPayments() {
         bookingService.getCurrentBookings(),
         bookingService.getPastBookings(),
       ]).then(([paymentRes, currentRes, pastRes]) => {
-        if (paymentRes.status === 'fulfilled') setPayments(toArray(paymentRes.value?.data?.data));
+        if (paymentRes.status === 'fulfilled') setPayments(toRows(paymentRes.value?.data?.data));
         const cur = currentRes.status === 'fulfilled' ? toArray(currentRes.value?.data?.data) : [];
         const past = pastRes.status === 'fulfilled' ? toArray(pastRes.value?.data?.data) : [];
         if (currentRes.status === 'fulfilled' || pastRes.status === 'fulfilled') {
@@ -170,6 +177,7 @@ export default function CustomerPayments() {
     REFUNDED: 'badge-info',
     FAILED: 'badge-danger',
     INITIATED: 'badge-warning',
+    DISPUTED: 'badge-warning',
   }[status] || 'badge-warning');
 
   const statusLabel = (status) => ({
@@ -180,9 +188,14 @@ export default function CustomerPayments() {
     FAILED: 'Failed',
     INITIATED: 'In Progress',
     PENDING: 'Pending',
+    DISPUTED: 'Disputed',
   }[status] ?? (status?.replace(/_/g, ' ') || 'Pending'));
 
-  const formatAmount = (amount) => `₹${Number(amount || 0).toLocaleString()}`;
+  // Informational amounts (totals, payment history) render in the customer's selected
+  // display currency; amounts beside a "Pay Now" CTA use formatINR so they match the exact
+  // base-INR charge the customer will be billed.
+  const formatAmount = useFormatMoney();
+  const formatINR = (amount) => `₹${Number(amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const formatDate = (ts) => ts
     ? new Date(ts).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -336,7 +349,7 @@ export default function CustomerPayments() {
                   <p>{booking.bookingDate} at {formatTime12h(booking.startTime)}</p>
                 </div>
                 <div className="customer-mini-card-actions">
-                  <strong>{formatAmount(booking.totalAmount)}</strong>
+                  <strong>{formatINR(booking.totalAmount)}</strong>
                   <Link to={`/payment/${booking.bookingRef}`} className="btn btn-primary btn-sm">Pay Now</Link>
                   {booking.status === 'PENDING' && (
                     <button
@@ -481,7 +494,7 @@ export default function CustomerPayments() {
                       <p>{booking.bookingDate} at {formatTime12h(booking.startTime)}</p>
                     </div>
                     <div className="customer-mini-card-actions">
-                      <strong>{formatAmount(booking.totalAmount)}</strong>
+                      <strong>{formatINR(booking.totalAmount)}</strong>
                       {['SUCCESS', 'REFUNDED', 'PARTIALLY_REFUNDED'].includes(booking.paymentStatus) ? (
                         <Link to={`/booking/${booking.bookingRef}`} className="btn btn-secondary btn-sm">View Booking</Link>
                       ) : (

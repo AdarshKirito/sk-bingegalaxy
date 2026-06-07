@@ -13,6 +13,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -39,7 +40,7 @@ class TokenRevocationServiceTest {
     void revoke_newValidToken_persistsRow() {
         when(jwtProvider.getJtiFromToken(validToken)).thenReturn("jti-1");
         when(jwtProvider.getExpiryFromToken(validToken))
-            .thenReturn(LocalDateTime.now().plusMinutes(15));
+            .thenReturn(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(15));
         when(jwtProvider.getUserIdFromToken(validToken)).thenReturn(42L);
         when(jwtProvider.getTokenType(validToken)).thenReturn("access");
         when(revokedTokenRepository.existsByJti("jti-1")).thenReturn(false);
@@ -70,7 +71,7 @@ class TokenRevocationServiceTest {
         when(jwtProvider.getJtiFromToken(validToken)).thenReturn("jti-1");
         when(revokedTokenRepository.existsByJti("jti-1")).thenReturn(false);
         when(jwtProvider.getExpiryFromToken(validToken))
-            .thenReturn(LocalDateTime.now().minusMinutes(5));
+            .thenReturn(LocalDateTime.now(ZoneOffset.UTC).minusMinutes(5));
 
         service.revoke(validToken);
 

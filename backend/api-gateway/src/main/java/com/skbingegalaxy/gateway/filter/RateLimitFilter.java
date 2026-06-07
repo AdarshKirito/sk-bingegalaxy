@@ -2,7 +2,6 @@ package com.skbingegalaxy.gateway.filter;
 
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
-import io.github.bucket4j.Refill;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -108,15 +107,29 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
         String path = exchange.getRequest().getURI().getPath();
         boolean isSensitiveAuth = isSensitiveAuthPath(path);
         boolean isCredentialAuth = !isSensitiveAuth && isCredentialAuthPath(path);
+
         String bucketKey;
         int limit;
         if (isSensitiveAuth) {
+            // Credential-recovery: always bucket by IP — these endpoints are unauthenticated by nature.
             bucketKey = clientIp + ":auth-sensitive";
             limit = sensitiveAuthRateLimit;
         } else if (isCredentialAuth) {
+            // Credential-presenting auth: always bucket by IP — the request carries credentials, not a userId.
             bucketKey = clientIp + ":auth";
             limit = authRateLimit;
         } else {
+            // Standard API: bucket by client IP.
+            //
+            // SECURITY: Do NOT use X-User-Id here. This filter runs at order -2,
+            // BEFORE JwtAuthenticationFilter (order -1) which strips and re-sets
+            // X-User-Id from the validated JWT. At this point X-User-Id is still
+            // client-supplied and can be spoofed — an attacker could set
+            // X-User-Id=<victim> to drain that user's rate-limit bucket (targeted DoS).
+            //
+            // Per-user rate limits on critical write endpoints (booking creation,
+            // payment initiation) are enforced by UserRateLimitFilter at order 0,
+            // which runs after JWT validation and can trust X-User-Id.
             bucketKey = clientIp;
             limit = standardRateLimit;
         }
@@ -171,8 +184,12 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
                                            int limit,
                                            String path) {
         String counterKey = resolveRedisCounterKey(bucketKey);
-        return redisTemplate.opsForValue().increment(counterKey)
-            .flatMap(requestCount -> {
+        // increment() / expire() return non-null Mono<Long|Boolean> at runtime;
+        // the @NonNull mismatch is an Eclipse null-annotation issue in the Reactor API stubs.
+        @SuppressWarnings("null")
+        Mono<Long> inc = redisTemplate.opsForValue().increment(counterKey);
+        return inc.flatMap(requestCount -> {
+                @SuppressWarnings("null")
                 Mono<Boolean> ensureExpiry = requestCount == 1
                     ? redisTemplate.expire(counterKey, REDIS_COUNTER_TTL).onErrorReturn(Boolean.FALSE)
                     : Mono.just(Boolean.TRUE);
@@ -198,7 +215,10 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
     }
 
     private Bucket createBucket(int limit) {
-        Bandwidth bandwidth = Bandwidth.classic(limit, Refill.intervally(limit, RATE_LIMIT_WINDOW));
+        Bandwidth bandwidth = Bandwidth.builder()
+            .capacity(limit)
+            .refillIntervally(limit, RATE_LIMIT_WINDOW)
+            .build();
         return Bucket.builder().addLimit(bandwidth).build();
     }
 
@@ -214,8 +234,13 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
                 + retrySecs + " second" + (retrySecs != 1 ? "s" : "") + " before trying again.\",\"retryAfterSeconds\":"
                 + retrySecs + "}";
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        // bufferFactory().wrap() and writeWith() are non-null at runtime;
+        // @NonNull mismatch is from Eclipse null-annotation stubs in WebFlux.
+        @SuppressWarnings("null")
         DataBuffer buffer = response.bufferFactory().wrap(bytes);
-        return response.writeWith(Mono.just(buffer));
+        @SuppressWarnings("null")
+        Mono<Void> write = response.writeWith(Mono.just(buffer));
+        return write;
     }
 
     private String resolveRedisCounterKey(String bucketKey) {

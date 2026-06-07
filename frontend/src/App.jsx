@@ -4,6 +4,7 @@ import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { BingeProvider, useBinge } from './context/BingeContext';
+import { CurrencyProvider } from './context/CurrencyContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import PWAUpdatePrompt from './components/PWAUpdatePrompt';
 import { trackPageView } from './services/analytics';
@@ -56,6 +57,8 @@ const AdminRiskFlags = lazy(() => import('./pages/AdminRiskFlags'));
 const AdminSupportConsole = lazy(() => import('./pages/AdminSupportConsole'));
 const AdminRecoveryQueues = lazy(() => import('./pages/AdminRecoveryQueues'));
 const AdminApprovals = lazy(() => import('./pages/AdminApprovals'));
+const AdminDisputes = lazy(() => import('./pages/AdminDisputes'));
+const AdminFailedRefunds = lazy(() => import('./pages/AdminFailedRefunds'));
 const AdminSlotHolds = lazy(() => import('./pages/AdminSlotHolds'));
 const AdminTaxes = lazy(() => import('./pages/AdminTaxes'));
 const AdminCurrencies = lazy(() => import('./pages/AdminCurrencies'));
@@ -243,6 +246,8 @@ function AppFrame() {
           <Route path="/admin/support" element={<AdminRoute><AdminSupportConsole /></AdminRoute>} />
           <Route path="/admin/recovery" element={<AdminBingeRequired><AdminRecoveryQueues /></AdminBingeRequired>} />
           <Route path="/admin/approvals" element={<AdminBingeRequired><AdminApprovals /></AdminBingeRequired>} />
+          <Route path="/admin/disputes" element={<AdminBingeRequired><AdminDisputes /></AdminBingeRequired>} />
+          <Route path="/admin/failed-refunds" element={<AdminBingeRequired><AdminFailedRefunds /></AdminBingeRequired>} />
           <Route path="/admin/slot-holds" element={<AdminBingeRequired><AdminSlotHolds /></AdminBingeRequired>} />
           <Route path="/admin/taxes" element={<AdminBingeRequired><AdminTaxes /></AdminBingeRequired>} />
           <Route path="/admin/currencies" element={<SuperAdminRoute scope="CURRENCIES"><AdminCurrencies /></SuperAdminRoute>} />
@@ -271,7 +276,9 @@ export function AppContent() {
       <AuthProvider>
         <BingeProvider>
           <ConfirmProvider>
-            <AppFrame />
+            <CurrencyProvider>
+              <AppFrame />
+            </CurrencyProvider>
           </ConfirmProvider>
         </BingeProvider>
       </AuthProvider>

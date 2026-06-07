@@ -15,6 +15,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.apache.kafka.common.errors.SerializationException;
@@ -49,7 +50,7 @@ public class OutboxPublisher {
     @SchedulerLock(name = "outboxPublisher", lockAtLeastFor = "1s", lockAtMostFor = "30s")
     @Transactional
     public void publishPendingEvents() {
-        List<OutboxEvent> pending = outboxRepo.findTop100BySentFalseAndFailedPermanentFalseOrderByCreatedAtAsc();
+        List<OutboxEvent> pending = outboxRepo.findPendingBatchWithLock();
         if (pending.isEmpty()) return;
 
         int published = 0;
@@ -60,7 +61,7 @@ public class OutboxPublisher {
                 kafkaTemplate.send(event.getTopic(), event.getAggregateKey(), payload)
                     .get(KAFKA_SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 event.setSent(true);
-                event.setSentAt(LocalDateTime.now());
+                event.setSentAt(LocalDateTime.now(ZoneOffset.UTC));
                 event.setLastError(null);
                 // Persist immediately after successful Kafka send to prevent
                 // re-publishing this event if a later event in the batch fails.
@@ -79,7 +80,7 @@ public class OutboxPublisher {
             } catch (Exception e) {
                 failed++;
                 event.setAttempts(event.getAttempts() + 1);
-                event.setLastAttemptAt(LocalDateTime.now());
+                event.setLastAttemptAt(LocalDateTime.now(ZoneOffset.UTC));
                 event.setLastError(truncate(e.getMessage()));
                 if (isCodeBug(e)) {
                     // Serializer / class-convert failures are code/config bugs, not

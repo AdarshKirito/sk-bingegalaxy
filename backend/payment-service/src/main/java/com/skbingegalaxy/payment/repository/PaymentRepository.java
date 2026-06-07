@@ -109,6 +109,14 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
     List<Payment> findStaleInitiatedPayments(@Param("cutoff") java.time.LocalDateTime cutoff);
 
     /**
+     * All SUCCESS payments created within a time window (daily ledger reconciliation).
+     */
+    @Query("SELECT p FROM Payment p WHERE p.status = 'SUCCESS' AND p.createdAt >= :from AND p.createdAt < :to")
+    List<Payment> findSuccessPaymentsInWindow(
+        @Param("from") java.time.LocalDateTime from,
+        @Param("to")   java.time.LocalDateTime to);
+
+    /**
      * Paginated customer payment history.
      */
     org.springframework.data.domain.Page<Payment> findByCustomerIdAndBingeIdOrderByCreatedAtDesc(

@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -109,7 +110,7 @@ public class StatusMatchService {
 
         LoyaltyMembership m = requireMembership(req.getMembershipId());
         LoyaltyProgram program = configService.requireDefaultProgram();
-        LoyaltyTierDefinition target = configService.activeTier(program.getId(), req.getRequestedTierCode(), LocalDateTime.now())
+        LoyaltyTierDefinition target = configService.activeTier(program.getId(), req.getRequestedTierCode(), LocalDateTime.now(ZoneOffset.UTC))
                 .orElseThrow(() -> new IllegalArgumentException(
                         "target tier " + req.getRequestedTierCode() + " is not active"));
 
@@ -121,9 +122,9 @@ public class StatusMatchService {
         // currentTierCode + tierEffectiveUntil, which could knock a
         // lifetime/earned PLATINUM holder down to GOLD with a short
         // challenge window — a silent demotion.
-        LoyaltyTierDefinition currentDef = configService.activeTier(program.getId(), m.getCurrentTierCode(), LocalDateTime.now())
+        LoyaltyTierDefinition currentDef = configService.activeTier(program.getId(), m.getCurrentTierCode(), LocalDateTime.now(ZoneOffset.UTC))
                 .orElse(null);
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         if (currentDef != null && currentDef.getRankOrder() >= target.getRankOrder()) {
             log.info("[loyalty-v2] status-match no-op: membership {} already holds {} (rank {}) >= requested {} (rank {})",
                     m.getId(), m.getCurrentTierCode(), currentDef.getRankOrder(),
@@ -180,7 +181,7 @@ public class StatusMatchService {
         }
         req.setStatus("REJECTED");
         req.setReviewedByAdminId(adminUserId);
-        req.setReviewedAt(LocalDateTime.now());
+        req.setReviewedAt(LocalDateTime.now(ZoneOffset.UTC));
         req.setReviewNotes(reviewNotes);
         LoyaltyStatusMatchRequest saved = statusMatchRepository.save(req);
         log.info("[loyalty-v2] status-match REJECTED: request={} by admin {} notes='{}'",
@@ -196,7 +197,7 @@ public class StatusMatchService {
     @SchedulerLock(name = "loyaltyV2StatusMatchExpiry",
             lockAtMostFor = "PT30M", lockAtLeastFor = "PT1M")
     public void runChallengeExpiryJob() {
-        expireChallengesAsOf(LocalDateTime.now());
+        expireChallengesAsOf(LocalDateTime.now(ZoneOffset.UTC));
     }
 
     public int expireChallengesAsOf(LocalDateTime cutoff) {

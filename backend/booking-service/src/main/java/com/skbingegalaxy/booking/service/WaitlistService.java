@@ -7,6 +7,7 @@ import com.skbingegalaxy.booking.entity.EventType;
 import com.skbingegalaxy.booking.entity.OutboxEvent;
 import com.skbingegalaxy.booking.entity.WaitlistEntry;
 import com.skbingegalaxy.booking.entity.WaitlistEntry.WaitlistStatus;
+import com.skbingegalaxy.booking.metrics.BookingFunnelMetrics;
 import com.skbingegalaxy.booking.repository.EventTypeRepository;
 import com.skbingegalaxy.booking.repository.OutboxEventRepository;
 import com.skbingegalaxy.booking.repository.WaitlistRepository;
@@ -24,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 
@@ -34,6 +36,7 @@ public class WaitlistService {
 
     private final WaitlistRepository waitlistRepository;
     private final EventTypeRepository eventTypeRepository;
+    private final BookingFunnelMetrics funnelMetrics;
     private final BookingService bookingService;
     // BookingRepository is injected solely for its advisory-lock helper so that
     // {@link #promoteWaitlistOnCancellation} serialises with concurrent
@@ -118,6 +121,7 @@ public class WaitlistService {
             .build();
 
         entry = waitlistRepository.save(entry);
+        funnelMetrics.waitlistJoined();
         log.info("Customer {} joined waitlist (pos {}) for binge {} on {}", customerId, nextPos, bingeId, request.getPreferredDate());
         return toDto(entry);
     }
@@ -201,8 +205,8 @@ public class WaitlistService {
             throw new BusinessException("Only WAITING entries can be offered. Current: " + entry.getStatus());
         }
         entry.setStatus(WaitlistStatus.OFFERED);
-        entry.setNotifiedAt(LocalDateTime.now());
-        entry.setOfferExpiresAt(LocalDateTime.now().plusMinutes(offerExpiryMinutes));
+        entry.setNotifiedAt(LocalDateTime.now(ZoneOffset.UTC));
+        entry.setOfferExpiresAt(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(offerExpiryMinutes));
         waitlistRepository.save(entry);
         sendWaitlistNotification(entry);
         log.info("Admin {} manually offered waitlist entry {} (binge {})", adminId, entryId, bingeId);
@@ -290,9 +294,10 @@ public class WaitlistService {
                 }
                 // Offer the slot to this customer
                 entry.setStatus(WaitlistStatus.OFFERED);
-                entry.setNotifiedAt(LocalDateTime.now());
-                entry.setOfferExpiresAt(LocalDateTime.now().plusMinutes(offerExpiryMinutes));
+                entry.setNotifiedAt(LocalDateTime.now(ZoneOffset.UTC));
+                entry.setOfferExpiresAt(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(offerExpiryMinutes));
                 waitlistRepository.save(entry);
+                funnelMetrics.waitlistOffered();
 
                 // Send notification
                 sendWaitlistNotification(entry);
@@ -310,14 +315,38 @@ public class WaitlistService {
         promoteWaitlistOnCancellation(event.getBingeId(), event.getBookingDate());
     }
 
+    /**
+     * Marks a waitlist entry as BOOKED after the customer successfully converts
+     * their offered slot into a confirmed booking. Call this from BookingService
+     * (or a post-booking Kafka listener) after the booking saga completes.
+     *
+     * This is the missing transition that closes the funnel:
+     *   OFFERED → BOOKED = waitlist converted; OFFERED → EXPIRED = offer abandoned.
+     * The ratio of converted÷offered is the waitlist conversion rate tracked in Grafana.
+     */
+    @Transactional
+    public void markEntryConverted(Long entryId, String bookingRef) {
+        if (entryId == null) return;
+        waitlistRepository.findById(entryId).ifPresent(entry -> {
+            if (entry.getStatus() != WaitlistStatus.OFFERED) return;
+            entry.setStatus(WaitlistStatus.BOOKED);
+            entry.setConvertedBookingRef(bookingRef);
+            waitlistRepository.save(entry);
+            funnelMetrics.waitlistConverted();
+            log.info("Waitlist entry {} converted to booking {} for customer {}",
+                entryId, bookingRef, entry.getCustomerId());
+        });
+    }
+
     // ── Expire stale offers (called by scheduler) ───────────
     @Transactional
     public int expireStaleOffers() {
         List<WaitlistEntry> expired = waitlistRepository
-            .findByStatusAndOfferExpiresAtBefore(WaitlistStatus.OFFERED, LocalDateTime.now());
+            .findByStatusAndOfferExpiresAtBefore(WaitlistStatus.OFFERED, LocalDateTime.now(ZoneOffset.UTC));
         for (WaitlistEntry entry : expired) {
             entry.setStatus(WaitlistStatus.EXPIRED);
             waitlistRepository.save(entry);
+            funnelMetrics.waitlistExpired();
             log.info("Waitlist offer expired for entry {} (customer {})", entry.getId(), entry.getCustomerId());
 
             // Try to promote next in queue

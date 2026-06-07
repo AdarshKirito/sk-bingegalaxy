@@ -1,10 +1,12 @@
 package com.skbingegalaxy.booking.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
 import lombok.*;
 
+@JsonIgnoreProperties(ignoreUnknown = false)
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

@@ -5,6 +5,7 @@ import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 /**
  * Short-lived token + OTP pair used to confirm ownership of a newly-registered email
@@ -47,7 +48,7 @@ public class EmailVerificationToken {
     private LocalDateTime createdAt;
 
     public boolean isExpired() {
-        return expiresAt.isBefore(LocalDateTime.now());
+        return expiresAt.isBefore(LocalDateTime.now(ZoneOffset.UTC));
     }
 
     public boolean isAttemptsExhausted(int max) {

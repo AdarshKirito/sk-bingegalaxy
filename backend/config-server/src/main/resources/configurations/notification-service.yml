@@ -5,6 +5,8 @@ server:
   tomcat:
     max-http-form-post-size: 256KB
     max-swallow-size: 2MB
+    connection-timeout: ${TOMCAT_CONNECTION_TIMEOUT:5000}
+    keep-alive-timeout: ${TOMCAT_KEEP_ALIVE_TIMEOUT:20000}
 
 spring:
   servlet:
@@ -64,6 +66,10 @@ app:
     from-name: SK Binge Galaxy
     max-retries: ${NOTIFICATION_MAX_RETRIES:3}
     retry-interval-ms: ${NOTIFICATION_RETRY_INTERVAL_MS:300000}
+    # Guards SMTP from bulk-cancel storms. 100/min ≈ 1.7/s — enough for normal
+    # traffic; Kafka consumer threads back off when exceeded (30s wait then drop).
+    # Raise via EMAIL_RATE_PER_MINUTE env if SMTP provider allows higher throughput.
+    email-rate-limit-per-minute: ${EMAIL_RATE_PER_MINUTE:100}
   sms:
     provider: ${SMS_PROVIDER:disabled}
     api-key: ${SMS_API_KEY:}

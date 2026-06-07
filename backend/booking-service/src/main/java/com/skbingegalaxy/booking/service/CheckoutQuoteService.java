@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -59,14 +60,32 @@ public class CheckoutQuoteService {
         BigDecimal baseAmount = BigDecimal.ZERO;
         BigDecimal addOnTotal = BigDecimal.ZERO;
         BigDecimal guestAmount = BigDecimal.ZERO;
-        int guests = req.getNumberOfGuests() != null ? req.getNumberOfGuests() : 1;
+        int guests = req.getNumberOfGuests() != null ? Math.max(req.getNumberOfGuests(), 1) : 1;
         int durMin = req.getDurationMinutes() != null ? req.getDurationMinutes() : 60;
 
-        // We don't always know the eventTypeId in preview (frontend may pass
-        // packageId or only the binge). When unknown, baseAmount stays zero
-        // and the customer sees "Add details to see pricing". Keep simple.
-        // For now: support a pseudo-event resolution via the BingeContext's
-        // default event when packageId/eventTypeId is missing.
+        // Base price + per-guest charge — resolved through the SAME pricing engine
+        // and using the EXACT formula BookingService.createBooking applies, so the
+        // quote the customer sees matches what they will actually be charged:
+        //   baseAmount  = basePrice + hourlyRate * (durationMinutes / 60)
+        //   guestAmount = pricePerGuest * max(guests - 1, 0)   (first guest included)
+        // When eventTypeId is absent (anonymous "add details" preview) the base
+        // stays zero and only add-ons + tax are quoted.
+        if (req.getEventTypeId() != null) {
+            try {
+                PricingService.ResolvedEventPrice eventPrice =
+                    pricingService.resolveEventPrice(customerId, req.getEventTypeId());
+                BigDecimal durationDecimalHours = BigDecimal.valueOf(durMin)
+                    .divide(BigDecimal.valueOf(60), 4, java.math.RoundingMode.HALF_UP);
+                baseAmount = eventPrice.basePrice()
+                    .add(eventPrice.hourlyRate().multiply(durationDecimalHours)
+                        .setScale(2, java.math.RoundingMode.HALF_UP));
+                guestAmount = eventPrice.pricePerGuest()
+                    .multiply(BigDecimal.valueOf(Math.max(guests - 1, 0)));
+            } catch (RuntimeException ex) {
+                log.warn("Skipping unresolvable event {} during preview: {}",
+                    req.getEventTypeId(), ex.getMessage());
+            }
+        }
 
         // Add-ons
         if (req.getAddOnIds() != null) {
@@ -199,7 +218,7 @@ public class CheckoutQuoteService {
             if (membership == null) return BigDecimal.ZERO;
             RedeemEngine.RedeemQuote quote = redeemEngine.quote(new RedeemEngine.QuoteRequest(
                     membership.getId(), bingeId, req.getRedeemLoyaltyPoints(),
-                    subtotal, java.time.LocalDateTime.now()));
+                    subtotal, java.time.LocalDateTime.now(ZoneOffset.UTC)));
             return quote.eligible() ? quote.currencyValue() : BigDecimal.ZERO;
         } catch (RuntimeException ex) {
             log.debug("Loyalty preview skipped for customer {} binge {}: {}",

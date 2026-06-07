@@ -1,5 +1,6 @@
 package com.skbingegalaxy.payment.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.skbingegalaxy.common.enums.PaymentMethod;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
@@ -9,6 +10,7 @@ import lombok.*;
 
 import java.math.BigDecimal;
 
+@JsonIgnoreProperties(ignoreUnknown = false)
 @Getter @Setter
 @NoArgsConstructor @AllArgsConstructor
 @Builder

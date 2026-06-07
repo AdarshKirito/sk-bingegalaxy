@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -84,7 +85,7 @@ class IdempotencyServiceTest {
         assertThat(saved.getHttpMethod()).isEqualTo("POST");
         assertThat(saved.getUserId()).isEqualTo(7L);
         assertThat(saved.getRequestHash()).hasSize(64); // sha256 hex
-        assertThat(saved.getExpiresAt()).isAfter(LocalDateTime.now().plusHours(23));
+        assertThat(saved.getExpiresAt()).isAfter(LocalDateTime.now(ZoneOffset.UTC).plusHours(23));
     }
 
     @Test
@@ -95,7 +96,7 @@ class IdempotencyServiceTest {
             .idempotencyKey("k1").httpMethod("POST").requestPath("/api/v1/bookings").userId(7L)
             .requestHash(hash)
             .responseBody(mapper.writeValueAsString(new Res("REF-CACHED")))
-            .expiresAt(LocalDateTime.now().plusHours(1))
+            .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusHours(1))
             .build();
         when(repository.findByIdempotencyKeyAndHttpMethodAndRequestPathAndUserId(
             eq("k1"), eq("POST"), eq("/api/v1/bookings"), eq(7L))).thenReturn(Optional.of(existing));
@@ -115,7 +116,7 @@ class IdempotencyServiceTest {
             .idempotencyKey("k1").httpMethod("POST").requestPath("/api/v1/bookings").userId(7L)
             .requestHash(sha256Of(new Req("original")))
             .responseBody(mapper.writeValueAsString(new Res("REF-CACHED")))
-            .expiresAt(LocalDateTime.now().plusHours(1))
+            .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusHours(1))
             .build();
         when(repository.findByIdempotencyKeyAndHttpMethodAndRequestPathAndUserId(
             eq("k1"), eq("POST"), eq("/api/v1/bookings"), eq(7L))).thenReturn(Optional.of(existing));
@@ -133,7 +134,7 @@ class IdempotencyServiceTest {
             .idempotencyKey("k1").httpMethod("POST").requestPath("/api/v1/bookings").userId(7L)
             .requestHash(sha256Of(new Req("a")))
             .responseBody(mapper.writeValueAsString(new Res("OLD")))
-            .expiresAt(LocalDateTime.now().minusHours(1))
+            .expiresAt(LocalDateTime.now(ZoneOffset.UTC).minusHours(1))
             .build();
         when(repository.findByIdempotencyKeyAndHttpMethodAndRequestPathAndUserId(
             eq("k1"), eq("POST"), eq("/api/v1/bookings"), eq(7L))).thenReturn(Optional.of(expired));

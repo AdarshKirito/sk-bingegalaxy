@@ -32,6 +32,7 @@ class NotificationServiceTest {
     @Mock private TemplateEngine templateEngine;
     @Mock private TemplateService templateService;
     @Mock private com.skbingegalaxy.notification.repository.WhatsAppTemplateRepository whatsAppTemplateRepository;
+    @Mock private NotificationMetrics notificationMetrics;
 
     private NotificationService notificationService;
     private NotificationPreferenceService preferenceService;
@@ -43,7 +44,8 @@ class NotificationServiceTest {
         // smsProvider, whatsAppProvider, pushProvider are null (disabled)
         notificationService = new NotificationService(
                 notificationRepository, null, templateEngine, preferenceService,
-                templateService, whatsAppTemplateRepository, null, null, null);
+                templateService, whatsAppTemplateRepository, null, null, null,
+                notificationMetrics);
         ReflectionTestUtils.setField(notificationService, "fromEmail", "test@skbingegalaxy.com");
         ReflectionTestUtils.setField(notificationService, "maxRetries", 3);
         ReflectionTestUtils.setField(notificationService, "unsubscribeUrl", "https://example.com/unsub");
@@ -241,6 +243,30 @@ class NotificationServiceTest {
             assertThat(failed.getRetryCount()).isEqualTo(2);
             assertThat(failed.isSent()).isFalse();
             assertThat(failed.getNextRetryAt()).isNotNull();
+            verify(notificationRepository).save(failed);
+        }
+
+        @Test
+        @DisplayName("Marks notification BOUNCED (terminal) when retries are exhausted")
+        void exhaustedRetries_markedBounced() {
+            // retryCount 2 → after increment 3 == maxRetries → exhausted. Must become the
+            // terminal BOUNCED status (not linger as PENDING) with nextRetryAt cleared.
+            Notification failed = Notification.builder()
+                    .id("f2").recipientEmail("john@example.com")
+                    .type("BOOKING_CREATED").channel(NotificationChannel.EMAIL)
+                    .subject("Test").body("Body").sent(false).retryCount(2).build();
+
+            when(notificationRepository.findRetryableNotifications(eq(3), any(LocalDateTime.class), any(org.springframework.data.domain.Pageable.class)))
+                    .thenReturn(List.of(failed));
+
+            notificationService.retryFailedNotifications();
+
+            assertThat(failed.getRetryCount()).isEqualTo(3);
+            assertThat(failed.isSent()).isFalse();
+            assertThat(failed.getDeliveryStatus())
+                    .isEqualTo(com.skbingegalaxy.notification.model.DeliveryStatus.BOUNCED);
+            assertThat(failed.getBouncedAt()).isNotNull();
+            assertThat(failed.getNextRetryAt()).isNull();
             verify(notificationRepository).save(failed);
         }
 

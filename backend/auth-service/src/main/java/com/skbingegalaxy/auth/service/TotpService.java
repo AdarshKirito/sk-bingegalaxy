@@ -18,6 +18,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -97,7 +98,7 @@ public class TotpService {
             throw new BusinessException("Invalid verification code", HttpStatus.BAD_REQUEST);
         }
         user.setMfaEnabled(true);
-        user.setMfaEnrolledAt(LocalDateTime.now());
+        user.setMfaEnrolledAt(LocalDateTime.now(ZoneOffset.UTC));
         user.setMfaRecoveryCodesHash(hashRecoveryCodes(recoveryCodesPlain));
         userRepository.save(user);
     }

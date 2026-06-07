@@ -13,6 +13,8 @@ public class ApiResponse<T> {
     private String message;
     private T data;
     private Object errors;
+    /** When true, the client must present a solved CAPTCHA before the next attempt. */
+    private Boolean captchaRequired;
 
     public static <T> ApiResponse<T> ok(T data) {
         return ApiResponse.<T>builder().success(true).data(data).build();

@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
@@ -105,7 +106,7 @@ public class LoyaltyAdminService {
     public LoyaltyPerkCatalog savePerk(LoyaltyPerkCatalog draft) {
         validatePerk(draft);
         if (draft.getEffectiveFrom() == null) {
-            draft.setEffectiveFrom(LocalDateTime.now());
+            draft.setEffectiveFrom(LocalDateTime.now(ZoneOffset.UTC));
         }
         LoyaltyPerkCatalog saved = perkCatalogRepository.save(draft);
         log.info("[loyalty-v2] perk saved: program={} code={} handler={}",
@@ -135,11 +136,11 @@ public class LoyaltyAdminService {
                         .bingeId(bingeId)
                         .tenantId(tenantId)
                         .legacyFrozen(false)
-                        .effectiveFrom(LocalDateTime.now())
+                        .effectiveFrom(LocalDateTime.now(ZoneOffset.UTC))
                         .build());
         binding.setStatus(LoyaltyV2Constants.BINDING_ENABLED);
         binding.setLegacyFrozen(false);
-        binding.setEnrolledAt(LocalDateTime.now());
+        binding.setEnrolledAt(LocalDateTime.now(ZoneOffset.UTC));
         binding.setEnrolledByAdminId(adminUserId);
         binding.setDisabledAt(null);
         binding.setDisabledByAdminId(null);
@@ -156,7 +157,7 @@ public class LoyaltyAdminService {
             throw new IllegalStateException("legacy-frozen binding must be enabled/thawed before it can be disabled");
         }
         binding.setStatus(LoyaltyV2Constants.BINDING_DISABLED);
-        binding.setDisabledAt(LocalDateTime.now());
+        binding.setDisabledAt(LocalDateTime.now(ZoneOffset.UTC));
         binding.setDisabledByAdminId(adminUserId);
         LoyaltyBingeBinding saved = bindingRepository.save(binding);
         log.info("[loyalty-v2] binge-binding {} DISABLED by admin {}", bindingId, adminUserId);
@@ -178,7 +179,7 @@ public class LoyaltyAdminService {
                 && !LoyaltyV2Constants.BINDING_DISABLED.equals(status)) {
             throw new IllegalArgumentException("status must be ENABLED or DISABLED");
         }
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         boolean enabling = LoyaltyV2Constants.BINDING_ENABLED.equals(status);
         int touched = 0;
         for (Long id : bindingIds) {

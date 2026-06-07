@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.Month;
 import java.util.List;
 
@@ -124,7 +125,7 @@ public class TierEngine {
     @Scheduled(cron = "0 0 3 1 2 *")         // 03:00 UTC on Feb 1
     @SchedulerLock(name = "loyaltyV2TierRollover", lockAtMostFor = "PT4H", lockAtLeastFor = "PT5M")
     public void runAnnualRolloverJob() {
-        runAnnualRollover(LocalDateTime.now());
+        runAnnualRollover(LocalDateTime.now(ZoneOffset.UTC));
     }
 
     public int runAnnualRollover(LocalDateTime at) {

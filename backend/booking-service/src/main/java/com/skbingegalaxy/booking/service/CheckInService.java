@@ -29,6 +29,8 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
@@ -70,6 +72,7 @@ public class CheckInService {
     private final OutboxEventRepository outboxEventRepository;
     private final ObjectMapper objectMapper;
     private final SystemSettingsService systemSettingsService;
+    private final VenueClockService venueClock;
 
     @Value("${app.checkin.window-early-minutes:30}")
     private int windowEarlyMinutes;
@@ -100,7 +103,7 @@ public class CheckInService {
         // Invalidate prior active QR tokens
         List<CheckInToken> prior = tokenRepository
             .findActiveByBookingRefAndType(bookingRef, TokenType.QR);
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(venueClock.zoneOf(booking.getBingeId()));
         for (CheckInToken t : prior) {
             t.setExpiresAt(now);
         }
@@ -134,7 +137,7 @@ public class CheckInService {
         // Invalidate any prior active OTPs
         List<CheckInToken> prior = tokenRepository
             .findActiveByBookingRefAndType(bookingRef, TokenType.OTP);
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(venueClock.zoneOf(booking.getBingeId()));
         for (CheckInToken t : prior) {
             t.setExpiresAt(now);
         }
@@ -200,7 +203,7 @@ public class CheckInService {
         }
         // Use most recent (already DESC sorted)
         CheckInToken token = active.get(0);
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         if (token.isExpired(now)) {
             throw new BusinessException("OTP has expired — please request a new code");
         }
@@ -236,16 +239,19 @@ public class CheckInService {
 
     private BookingDto consumeAndCheckIn(CheckInToken token, Long actorAdminId, String actorEmail,
                                          String source, LocalDate clientDate) {
-        LocalDateTime now = LocalDateTime.now();
         if (token.isConsumed()) {
             throw new BusinessException("This " + token.getTokenType()
                 + " token has already been used");
         }
+        // Load the booking first so we can resolve the venue's timezone before
+        // any time-sensitive checks (expiry window, check-in window, late-arrival).
+        Booking booking = bookingRepository.findById(token.getBookingId())
+            .orElseThrow(() -> new ResourceNotFoundException("Booking", "id", token.getBookingId()));
+        ZoneId venueZone = venueClock.zoneOf(booking.getBingeId());
+        LocalDateTime now = LocalDateTime.now(venueZone);
         if (token.isExpired(now)) {
             throw new BusinessException(token.getTokenType() + " token has expired");
         }
-        Booking booking = bookingRepository.findById(token.getBookingId())
-            .orElseThrow(() -> new ResourceNotFoundException("Booking", "id", token.getBookingId()));
 
         // Status guard — only CONFIRMED can be checked in via this path
         if (booking.getStatus() != BookingStatus.CONFIRMED) {

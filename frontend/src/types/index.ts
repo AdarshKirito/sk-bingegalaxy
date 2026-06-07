@@ -46,9 +46,11 @@ export interface Binge {
   supportWhatsapp?: string;
   customerCancellationEnabled?: boolean;
   customerCancellationCutoffMinutes?: number;
-  /** Per-binge opening time (HH:mm or HH:mm:ss); used by booking guard. */
+  /** IANA timezone identifier (e.g. "Asia/Kolkata"). Governs opening/closing times and booking-date arithmetic. */
+  timezone?: string;
+  /** Per-binge opening time (HH:mm or HH:mm:ss); interpreted in the venue's timezone. */
   openTime?: string;
-  /** Per-binge closing time (HH:mm or HH:mm:ss); used by booking guard. */
+  /** Per-binge closing time (HH:mm or HH:mm:ss); interpreted in the venue's timezone. */
   closeTime?: string;
   active?: boolean;
 }
@@ -98,8 +100,8 @@ export interface Booking {
   customerEmail?: string;
   customerPhone?: string;
   paymentMethod?: 'CASH' | 'UPI' | 'CARD' | 'BANK_TRANSFER' | 'WALLET';
-  paymentStatus?: 'PENDING' | 'SUCCESS' | 'FAILED' | 'PARTIALLY_REFUNDED';
-  status?: 'PENDING' | 'CONFIRMED' | 'CHECKED_IN' | 'COMPLETED' | 'CANCELLED';
+  paymentStatus?: 'PENDING' | 'INITIATED' | 'SUCCESS' | 'FAILED' | 'REFUNDED' | 'PARTIALLY_REFUNDED' | 'PARTIALLY_PAID' | 'DISPUTED';
+  status?: 'PENDING' | 'CONFIRMED' | 'CHECKED_IN' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW';
   totalAmount?: number;
 }
 

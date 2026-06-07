@@ -10,6 +10,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -69,7 +70,7 @@ class RedeemEngineTest {
         when(configService.resolveRedemptionRule(eq(500L), any())).thenReturn(Optional.of(rule));
 
         var q = engine.quote(new RedeemEngine.QuoteRequest(
-                42L, 7L, 10_000L, new BigDecimal("500.00"), LocalDateTime.now()));
+                42L, 7L, 10_000L, new BigDecimal("500.00"), LocalDateTime.now(ZoneOffset.UTC)));
 
         // 10 000 pts ÷ 100 ppcu = 100.00 INR
         assertThat(q.eligible()).isTrue();
@@ -83,7 +84,7 @@ class RedeemEngineTest {
         when(configService.resolveRedemptionRule(eq(500L), any())).thenReturn(Optional.of(rule));
 
         var q = engine.quote(new RedeemEngine.QuoteRequest(
-                42L, 7L, 1_000L, new BigDecimal("500.00"), LocalDateTime.now()));
+                42L, 7L, 1_000L, new BigDecimal("500.00"), LocalDateTime.now(ZoneOffset.UTC)));
 
         assertThat(q.eligible()).isFalse();
         assertThat(q.rejectReason()).isEqualTo("BELOW_MIN_POINTS");
@@ -96,7 +97,7 @@ class RedeemEngineTest {
 
         // Requesting 20 000 pts = INR 200, but booking is INR 100 → 50 % cap = INR 50
         var q = engine.quote(new RedeemEngine.QuoteRequest(
-                42L, 7L, 20_000L, new BigDecimal("100.00"), LocalDateTime.now()));
+                42L, 7L, 20_000L, new BigDecimal("100.00"), LocalDateTime.now(ZoneOffset.UTC)));
 
         assertThat(q.eligible()).isTrue();
         assertThat(q.currencyValue()).isEqualByComparingTo(new BigDecimal("50.00"));
@@ -113,7 +114,7 @@ class RedeemEngineTest {
                 LoyaltyPointsWallet.builder().id(1000L).membershipId(42L).currentBalance(999L).build()));
 
         var q = engine.quote(new RedeemEngine.QuoteRequest(
-                42L, 7L, 1_000L, new BigDecimal("500.00"), LocalDateTime.now()));
+                42L, 7L, 1_000L, new BigDecimal("500.00"), LocalDateTime.now(ZoneOffset.UTC)));
 
         assertThat(q.eligible()).isFalse();
         assertThat(q.rejectReason()).isEqualTo("INSUFFICIENT_POINTS");
@@ -127,7 +128,7 @@ class RedeemEngineTest {
         when(configService.resolveRedemptionRule(eq(500L), any())).thenReturn(Optional.of(rule));
 
         var q = engine.quote(new RedeemEngine.QuoteRequest(
-                42L, 7L, 10_000L, new BigDecimal("500.00"), LocalDateTime.now()));
+                42L, 7L, 10_000L, new BigDecimal("500.00"), LocalDateTime.now(ZoneOffset.UTC)));
 
         // base = 100, + 5 % bonus = 105
         assertThat(q.currencyValue()).isEqualByComparingTo(new BigDecimal("105.00"));
@@ -139,7 +140,7 @@ class RedeemEngineTest {
         binding.setLegacyFrozen(true);
 
         var q = engine.quote(new RedeemEngine.QuoteRequest(
-                42L, 7L, 10_000L, new BigDecimal("500.00"), LocalDateTime.now()));
+                42L, 7L, 10_000L, new BigDecimal("500.00"), LocalDateTime.now(ZoneOffset.UTC)));
 
         assertThat(q.eligible()).isFalse();
         assertThat(q.rejectReason()).isEqualTo("LEGACY_FROZEN");
@@ -150,7 +151,7 @@ class RedeemEngineTest {
         LoyaltyBingeRedemptionRule rule = rule(100L, 0L, new BigDecimal("100.00"), null);
         when(configService.resolveRedemptionRule(eq(500L), any())).thenReturn(Optional.of(rule));
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         var res = engine.burn(new RedeemEngine.BurnRequest(
                 42L, 7L, "BK-9", 10_000L, new BigDecimal("500.00"), now, "corr"));
 
@@ -173,7 +174,7 @@ class RedeemEngineTest {
         LoyaltyBingeRedemptionRule rule = rule(100L, 0L, new BigDecimal("50.00"), null);
         when(configService.resolveRedemptionRule(eq(500L), any())).thenReturn(Optional.of(rule));
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         var res = engine.burn(new RedeemEngine.BurnRequest(
                 42L, 7L, "BK-CAP", 20_000L, new BigDecimal("100.00"), now, "corr"));
 
@@ -194,7 +195,7 @@ class RedeemEngineTest {
         when(configService.resolveRedemptionRule(eq(500L), any())).thenReturn(Optional.of(rule));
 
         var res = engine.burn(new RedeemEngine.BurnRequest(
-                42L, 7L, "BK-10", 1_000L, new BigDecimal("500.00"), LocalDateTime.now(), "corr"));
+                42L, 7L, "BK-10", 1_000L, new BigDecimal("500.00"), LocalDateTime.now(ZoneOffset.UTC), "corr"));
 
         assertThat(res.accepted()).isFalse();
         assertThat(res.rejectReason()).isEqualTo("BELOW_MIN_POINTS");
@@ -210,7 +211,7 @@ class RedeemEngineTest {
                 .minRedemptionPoints(minPoints)
                 .maxRedemptionPercent(maxPct)
                 .tierBonusPctJson(tierBonusJson)
-                .effectiveFrom(LocalDateTime.now().minusDays(30))
+                .effectiveFrom(LocalDateTime.now(ZoneOffset.UTC).minusDays(30))
                 .build();
     }
 }

@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Map;
 
 /**
@@ -82,7 +83,7 @@ public class AdminApprovalService {
             .requestedById(requestedById)
             .requestReason(safeTrim(requestReason, 1000))
             .payload(serialize(payload))
-            .expiresAt(LocalDateTime.now().plusHours(ttlHours))
+            .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusHours(ttlHours))
             .build();
         req = repository.save(req);
         auditLogService.record(requestedBy, "APPROVAL_REQUESTED", resourceType, resourceId,
@@ -103,7 +104,7 @@ public class AdminApprovalService {
                 "Only PENDING requests can be approved. Current: " + req.getStatus(),
                 HttpStatus.CONFLICT);
         }
-        if (req.getExpiresAt().isBefore(LocalDateTime.now())) {
+        if (req.getExpiresAt().isBefore(LocalDateTime.now(ZoneOffset.UTC))) {
             req.setStatus(Status.EXPIRED);
             repository.save(req);
             throw new BusinessException(
@@ -121,7 +122,7 @@ public class AdminApprovalService {
         req.setStatus(Status.APPROVED);
         req.setReviewedBy(reviewer);
         req.setReviewedById(reviewerId);
-        req.setReviewedAt(LocalDateTime.now());
+        req.setReviewedAt(LocalDateTime.now(ZoneOffset.UTC));
         req.setReviewReason(safeTrim(reason, 1000));
         AdminApprovalRequest saved = repository.save(req);
         auditLogService.record(reviewer, "APPROVAL_APPROVED",
@@ -152,7 +153,7 @@ public class AdminApprovalService {
         req.setStatus(Status.REJECTED);
         req.setReviewedBy(reviewer);
         req.setReviewedById(reviewerId);
-        req.setReviewedAt(LocalDateTime.now());
+        req.setReviewedAt(LocalDateTime.now(ZoneOffset.UTC));
         req.setReviewReason(safeTrim(reason, 1000));
         AdminApprovalRequest saved = repository.save(req);
         auditLogService.record(reviewer, "APPROVAL_REJECTED",
@@ -199,7 +200,7 @@ public class AdminApprovalService {
                 HttpStatus.CONFLICT);
         }
         req.setStatus(Status.EXECUTED);
-        req.setExecutedAt(LocalDateTime.now());
+        req.setExecutedAt(LocalDateTime.now(ZoneOffset.UTC));
         req.setExecutedResult(safeTrim(result, 2000));
         return repository.save(req);
     }
@@ -222,7 +223,7 @@ public class AdminApprovalService {
     /** Scheduler hook: bulk-expire stale PENDING rows. */
     @Transactional
     public int expireStale() {
-        int n = repository.expirePending(LocalDateTime.now());
+        int n = repository.expirePending(LocalDateTime.now(ZoneOffset.UTC));
         if (n > 0) log.info("Expired {} stale approval requests", n);
         return n;
     }

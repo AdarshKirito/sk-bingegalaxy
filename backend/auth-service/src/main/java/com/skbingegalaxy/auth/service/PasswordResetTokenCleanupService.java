@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 /**
  * Daily maintenance task that physically removes used / expired password-reset
@@ -35,7 +36,7 @@ public class PasswordResetTokenCleanupService {
     @SchedulerLock(name = "purgeExpiredResetTokens", lockAtMostFor = "PT10M", lockAtLeastFor = "PT1M")
     @Transactional
     public void purgeExpiredResetTokens() {
-        LocalDateTime cutoff = LocalDateTime.now().minusDays(RETENTION_DAYS);
+        LocalDateTime cutoff = LocalDateTime.now(ZoneOffset.UTC).minusDays(RETENTION_DAYS);
         int deleted = resetTokenRepository.deleteAllByExpiresAtBefore(cutoff);
         if (deleted > 0) {
             log.info("Purged {} password-reset tokens older than {}", deleted, cutoff);

@@ -1,8 +1,10 @@
 package com.skbingegalaxy.payment.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.validation.constraints.NotBlank;
 import lombok.*;
 
+@JsonIgnoreProperties(ignoreUnknown = false)
 @Getter @Setter
 @NoArgsConstructor @AllArgsConstructor
 @Builder

@@ -48,6 +48,10 @@ public class SecurityConfig {
                 // requirement is honoured (defence in depth on top of the
                 // shared-secret filter above).
                 .requestMatchers("/api/v1/auth/authority/internal/**").hasRole("SYSTEM")
+                // DPDP / GDPR privacy endpoints — must be declared before the
+                // catch-all /api/v1/auth/** permitAll so access control is enforced.
+                .requestMatchers("/api/v1/auth/privacy/admin/**").hasRole("SUPER_ADMIN")
+                .requestMatchers("/api/v1/auth/privacy/**").authenticated()
                 .requestMatchers("/api/v1/auth/admin/login").permitAll()
                 .requestMatchers("/api/v1/auth/admin/register").hasRole("SUPER_ADMIN")
                 .requestMatchers("/api/v1/auth/admin/user/**").hasRole("SUPER_ADMIN")

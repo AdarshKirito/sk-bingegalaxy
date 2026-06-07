@@ -68,22 +68,15 @@ export default defineConfig(async () => {
               urlPattern: /\/api\/v1\/(auth|payments)/,
               handler: 'NetworkOnly',
             },
-            {
-              // Google Fonts stylesheets
-              urlPattern: /^https:\/\/fonts\.googleapis\.com/,
-              handler: 'StaleWhileRevalidate',
-              options: { cacheName: 'google-fonts-stylesheets' },
-            },
-            {
-              // Google Fonts webfonts - immutable assets
-              urlPattern: /^https:\/\/fonts\.gstatic\.com/,
-              handler: 'CacheFirst',
-              options: {
-                cacheName: 'google-fonts-webfonts',
-                expiration: { maxEntries: 20, maxAgeSeconds: 365 * 24 * 60 * 60 },
-                cacheableResponse: { statuses: [0, 200] },
-              },
-            },
+            // Google Fonts are intentionally NOT cached by the service worker.
+            // When Workbox intercepts a fonts.googleapis.com or fonts.gstatic.com
+            // request and calls fetch() internally, the browser classifies that as
+            // connect-src (a JS fetch), NOT style-src / font-src. This causes a CSP
+            // violation on any policy that allows fonts under style-src / font-src
+            // but not under connect-src (which is the correct posture — connect-src
+            // should not grant broad external access just to satisfy a caching layer).
+            // Google Fonts ship with max-age=31536000 / immutable cache-control
+            // headers — the browser's native HTTP cache handles them without SW help.
           ],
           // Offline fallback for navigations
           navigateFallback: '/index.html',
@@ -113,6 +106,21 @@ export default defineConfig(async () => {
         // Match nginx dev/prod behavior so Google popup auth can use postMessage
         // without the browser warning emitted by stricter COOP values.
         'Cross-Origin-Opener-Policy': 'unsafe-none',
+        // Mirror production nginx CSP exactly so font/script violations surface
+        // in development rather than only after deployment.
+        // connect-src adds ws://localhost:* for Vite HMR WebSocket.
+        'Content-Security-Policy': [
+          "default-src 'self'",
+          "script-src 'self' https://accounts.google.com https://apis.google.com",
+          "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com",
+          "font-src 'self' https://fonts.gstatic.com",
+          "img-src 'self' data: https:",
+          "frame-src https://accounts.google.com",
+          // font CDN excluded from connect-src — Google Fonts are loaded via
+          // <link> / font-src, not JS fetch(); see workbox runtimeCaching comment.
+          "connect-src 'self' ws://localhost:* wss://localhost:* https://accounts.google.com",
+          "frame-ancestors 'self'",
+        ].join('; '),
       },
       proxy: {
         '/api/v1': {

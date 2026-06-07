@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.LocalTime;
 import java.util.List;
 
@@ -59,7 +60,7 @@ public class NoShowAutomationScheduler {
     public void sweep() {
         if (!enabled) return;
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         LocalDate today = now.toLocalDate();
         LocalTime cutoff = now.toLocalTime().minusMinutes(graceMinutes);
         // Skip if the cutoff would wrap before midnight (i.e. early in the day)

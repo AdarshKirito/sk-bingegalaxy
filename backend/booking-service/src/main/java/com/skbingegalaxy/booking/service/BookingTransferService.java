@@ -25,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.List;
 
@@ -107,7 +108,7 @@ public class BookingTransferService {
 
         // Anti-abuse: rolling 30-day count
         long recent = transferRepository.countByFromCustomerIdAndCreatedAtAfter(
-            customerId, LocalDateTime.now().minusDays(30));
+            customerId, LocalDateTime.now(ZoneOffset.UTC).minusDays(30));
         if (recent >= transferAbuseLimitPer30Days) {
             throw new BusinessException(
                 "Transfer limit reached: maximum " + transferAbuseLimitPer30Days
@@ -127,7 +128,7 @@ public class BookingTransferService {
             .toPhoneCountryCode(request.getRecipientPhoneCountryCode())
             .status(BookingTransfer.Status.PENDING)
             .acceptToken(generateToken())
-            .expiresAt(LocalDateTime.now().plusHours(transferRequestTtlHours))
+            .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusHours(transferRequestTtlHours))
             .build();
         transfer = transferRepository.save(transfer);
 
@@ -152,7 +153,7 @@ public class BookingTransferService {
                 "Invalid or unknown transfer token", HttpStatus.NOT_FOUND));
 
         ensurePending(transfer);
-        if (transfer.getExpiresAt().isBefore(LocalDateTime.now())) {
+        if (transfer.getExpiresAt().isBefore(LocalDateTime.now(ZoneOffset.UTC))) {
             transfer.setStatus(BookingTransfer.Status.EXPIRED);
             transferRepository.save(transfer);
             throw new BusinessException(
@@ -177,7 +178,7 @@ public class BookingTransferService {
         bookingService.transferBooking(transfer.getBookingRef(), transfer.getFromCustomerId(), req);
 
         transfer.setStatus(BookingTransfer.Status.ACCEPTED);
-        transfer.setAcceptedAt(LocalDateTime.now());
+        transfer.setAcceptedAt(LocalDateTime.now(ZoneOffset.UTC));
         transfer.setToCustomerId(recipientCustomerId);
         transfer = transferRepository.save(transfer);
 
@@ -196,7 +197,7 @@ public class BookingTransferService {
         ensurePending(transfer);
 
         transfer.setStatus(BookingTransfer.Status.DECLINED);
-        transfer.setDeclinedAt(LocalDateTime.now());
+        transfer.setDeclinedAt(LocalDateTime.now(ZoneOffset.UTC));
         transfer.setDeclineReason(reason);
         transfer = transferRepository.save(transfer);
 
@@ -219,7 +220,7 @@ public class BookingTransferService {
         ensurePending(transfer);
 
         transfer.setStatus(BookingTransfer.Status.REVOKED);
-        transfer.setRevokedAt(LocalDateTime.now());
+        transfer.setRevokedAt(LocalDateTime.now(ZoneOffset.UTC));
         transfer = transferRepository.save(transfer);
 
         publishOutbox("TRANSFER_REQUEST_REVOKED", transfer);
@@ -257,7 +258,7 @@ public class BookingTransferService {
     @Transactional
     public int expireStalePending() {
         List<BookingTransfer> expired =
-            transferRepository.findExpiredPending(LocalDateTime.now());
+            transferRepository.findExpiredPending(LocalDateTime.now(ZoneOffset.UTC));
         for (BookingTransfer t : expired) {
             t.setStatus(BookingTransfer.Status.EXPIRED);
             transferRepository.save(t);

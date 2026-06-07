@@ -24,6 +24,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneOffset;
 import java.util.*;
 
 import static org.assertj.core.api.Assertions.*;
@@ -54,7 +55,7 @@ class BookingServiceTest {
     @Mock private BookingEventLogService eventLogService;
     @Mock private SagaOrchestrator sagaOrchestrator;
     @Mock private VenueRoomRepository venueRoomRepository;
-        @Mock private LoyaltyService loyaltyService;
+        @Mock private com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyMemberService loyaltyMemberService;
         @Mock private com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyMembershipRepository loyaltyMembershipRepository;
         @Mock private com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyConfigService loyaltyConfigService;
         @Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
@@ -71,6 +72,8 @@ class BookingServiceTest {
         // existing assertions on bookingRepository.save() / eventLogService
         // continue to observe the SM's internal calls.
         @Mock private com.skbingegalaxy.booking.service.statemachine.BookingStateMachine stateMachineMock;
+        @Mock private VenueClockService venueClock;
+        @Mock private TaxService taxService;
 
     @InjectMocks private BookingService bookingService;
 
@@ -99,8 +102,19 @@ class BookingServiceTest {
                 ReflectionTestUtils.setField(bookingService, "maxBookingHorizonDays", 365);
                 ReflectionTestUtils.setField(bookingService, "defaultOpeningHour", 10);
                 ReflectionTestUtils.setField(bookingService, "defaultClosingHour", 23);
-                lenient().when(loyaltyService.redeemPoints(anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
-                        .thenReturn(new LoyaltyService.RedemptionResult(0L, BigDecimal.ZERO));
+                lenient().when(venueClock.zoneOf(any())).thenReturn(ZoneOffset.UTC);
+        lenient().when(venueClock.today(any())).thenReturn(LocalDate.now(ZoneOffset.UTC));
+        lenient().when(venueClock.defaultZone()).thenReturn(ZoneOffset.UTC);
+        lenient().when(taxService.compute(any(Long.class), any(BigDecimal.class), any(BigDecimal.class), any(BigDecimal.class), any(BigDecimal.class)))
+                .thenReturn(TaxComputationResult.builder()
+                        .subtotal(BigDecimal.ZERO).totalTax(BigDecimal.ZERO)
+                        .totalInclusiveTax(BigDecimal.ZERO).lines(List.of()).build());
+        lenient().when(taxService.compute(any(com.skbingegalaxy.booking.tax.provider.TaxContext.class), any(BigDecimal.class), any(BigDecimal.class), any(BigDecimal.class), any(BigDecimal.class)))
+                .thenReturn(TaxComputationResult.builder()
+                        .subtotal(BigDecimal.ZERO).totalTax(BigDecimal.ZERO)
+                        .totalInclusiveTax(BigDecimal.ZERO).lines(List.of()).build());
+        lenient().when(loyaltyMemberService.redeemForBooking(anyLong(), anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
+                        .thenReturn(new com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyMemberService.RedemptionResult(0L, BigDecimal.ZERO));
         lenient().when(bingeRepository.findById(anyLong())).thenAnswer(inv ->
             Optional.of(Binge.builder().id((Long) inv.getArgument(0)).build()));
         lenient().when(cancellationTierRepository.findByBingeIdOrderByHoursBeforeStartDesc(anyLong())).thenReturn(List.of());
@@ -127,8 +141,8 @@ class BookingServiceTest {
                 .paymentStatus(PaymentStatus.PENDING)
                 .checkedIn(false)
                 .addOns(new ArrayList<>())
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
+                .createdAt(LocalDateTime.now(ZoneOffset.UTC))
+                .updatedAt(LocalDateTime.now(ZoneOffset.UTC))
                 .build();
     }
 
@@ -404,7 +418,7 @@ class BookingServiceTest {
 
         @Test
         void deleteAddOn_rejectsBookingUsage() {
-                AddOn addOn = AddOn.builder().id(9L).name("Cake").active(false).price(BigDecimal.TEN).category("FOOD").build();
+                AddOn addOn = AddOn.builder().id(9L).name("Cake").active(false).price(BigDecimal.TEN).categoryId(1L).build();
                 BingeContext.setBingeId(11L);
                 when(addOnRepository.findByIdAndBingeId(9L, 11L)).thenReturn(Optional.of(addOn));
                 when(bookingAddOnRepository.existsByAddOnId(9L)).thenReturn(true);

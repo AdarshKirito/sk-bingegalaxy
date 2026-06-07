@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -44,7 +45,7 @@ public class OutboxPublisher {
     @SchedulerLock(name = "paymentOutboxPublisher", lockAtLeastFor = "1s", lockAtMostFor = "30s")
     @Transactional
     public void publishPendingEvents() {
-        List<OutboxEvent> pending = outboxRepo.findTop100BySentFalseAndFailedPermanentFalseOrderByCreatedAtAsc();
+        List<OutboxEvent> pending = outboxRepo.findPendingBatchWithLock();
         if (pending.isEmpty()) return;
 
         int published = 0;
@@ -55,8 +56,8 @@ public class OutboxPublisher {
                 kafkaTemplate.send(event.getTopic(), event.getAggregateKey(), payload)
                     .get(KAFKA_SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 event.setSent(true);
-                event.setSentAt(LocalDateTime.now());
-                event.setLastAttemptAt(LocalDateTime.now());
+                event.setSentAt(LocalDateTime.now(ZoneOffset.UTC));
+                event.setLastAttemptAt(LocalDateTime.now(ZoneOffset.UTC));
                 outboxRepo.save(event);
                 published++;
             } catch (Exception e) {
@@ -66,7 +67,7 @@ public class OutboxPublisher {
                 // goes to the same partition).
                 int attempts = event.getAttempts() + 1;
                 event.setAttempts(attempts);
-                event.setLastAttemptAt(LocalDateTime.now());
+                event.setLastAttemptAt(LocalDateTime.now(ZoneOffset.UTC));
                 String msg = e.getMessage();
                 event.setLastError(msg != null && msg.length() > 1000 ? msg.substring(0, 1000) : msg);
 

@@ -3,6 +3,8 @@ package com.skbingegalaxy.booking.tax.provider;
 import lombok.Builder;
 import lombok.Data;
 
+import java.time.ZoneId;
+
 /**
  * Inputs needed to resolve a tax jurisdiction. All fields are optional so
  * the provider can fall back to defaults when only partial data is known
@@ -13,6 +15,14 @@ import lombok.Data;
 public class TaxContext {
     /** Binge whose pricing this booking attaches to (used for binge-scoped rules). */
     private Long bingeId;
+
+    /**
+     * Venue's IANA timezone, resolved via {@link com.skbingegalaxy.booking.service.VenueClockService}.
+     * Used by {@link com.skbingegalaxy.booking.tax.provider.JurisdictionResolver} to evaluate
+     * tax-rule effective-date windows in the correct local time. When null the resolver
+     * falls back to the platform default timezone.
+     */
+    private ZoneId venueZone;
 
     /** Where the venue is located. Used as a fallback when billing is unknown. */
     private String venueCountryCode;

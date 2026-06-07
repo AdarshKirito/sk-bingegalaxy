@@ -1,0 +1,118 @@
+# docker-compose.kraft.yml — KRaft-mode (ZooKeeper-free) Kafka overlay
+#
+# Usage (always paired with the base file):
+#   docker compose -f docker-compose.yml -f docker-compose.kraft.yml up
+#
+# What this does:
+#   - Replaces the ZooKeeper-backed Kafka broker with a KRaft-mode broker.
+#   - Stubs ZooKeeper to a no-op container so the inherited depends_on resolves
+#     immediately (KRaft Kafka doesn't connect to ZooKeeper at all).
+#   - All other services (Spring apps, kafka-init, etc.) are UNCHANGED — they
+#     still connect to kafka:29092 exactly as they do today.
+#
+# Listener topology (identical to base docker-compose.yml):
+#   PLAINTEXT      → kafka:29092  (internal Docker — Spring services + kafka-init)
+#   PLAINTEXT_HOST → localhost:9092 (host-machine access)
+#   CONTROLLER     → kafka:9093   (KRaft quorum, internal only)
+#
+# One-time setup (first use only):
+#   KRaft requires the log dir to be pre-formatted. Remove the old ZK-linked volume
+#   first (the cluster.id embedded in it won't match the KRaft cluster UUID):
+#     docker compose down -v
+#     docker compose -f docker-compose.yml -f docker-compose.kraft.yml up
+#
+# Verify KRaft is healthy:
+#   docker exec skbg-kafka-kraft kafka-metadata-quorum \
+#     --bootstrap-server localhost:9092 describe --status
+#
+# Limitations (single-node dev only):
+#   - RF=1, no controller quorum redundancy.
+#   - Not for production load testing above a single broker.
+
+services:
+  # ── ZooKeeper stub ────────────────────────────────────────────────────────────
+  # The base kafka service inherits depends_on: zookeeper. Docker Compose merge
+  # rules prevent removing that dependency via an overlay, so we replace zookeeper
+  # with a trivial alpine container whose healthcheck passes immediately. The KRaft
+  # Kafka never connects to it; this stub purely satisfies the dependency resolver.
+  zookeeper:
+    image: alpine:3.19
+    container_name: skbg-zookeeper-stub
+    restart: "no"
+    command: ["sh", "-c", "echo 'ZooKeeper stub — KRaft mode active'; sleep infinity"]
+    healthcheck:
+      test: ["CMD", "echo", "ok"]
+      interval: 5s
+      timeout: 2s
+      retries: 1
+      start_period: 2s
+    volumes: []       # discard any volumes inherited from base
+    environment: {}   # no ZK env vars needed
+    deploy:
+      resources:
+        limits:
+          memory: 16M
+          cpus: "0.01"
+
+  # ── KRaft-mode Kafka broker ───────────────────────────────────────────────────
+  # Replaces the ZooKeeper-backed 'kafka' service from docker-compose.yml.
+  # Listener configuration is IDENTICAL to the base so every other service
+  # (Spring apps, kafka-init) continues to work without any config changes.
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: skbg-kafka-kraft
+    hostname: kafka
+    ports:
+      - "9092:9092"    # host-machine access (tools, local dev, k6)
+      - "9093:9093"    # KRaft controller quorum (internal)
+    environment:
+      # ── KRaft identity ─────────────────────────────────────────────────────
+      KAFKA_NODE_ID: 1
+      CLUSTER_ID: "skbg-dev-kraft-cluster-01"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+
+      # ── Listeners — identical ports to base docker-compose.yml ─────────────
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+
+      # ── Storage ─────────────────────────────────────────────────────────────
+      KAFKA_LOG_DIRS: "/var/lib/kafka/data"
+
+      # ── Topic defaults (match base) ─────────────────────────────────────────
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_MIN_INSYNC_REPLICAS: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+
+      # ── Unset ZK-specific vars inherited from base (KRaft ignores them but
+      #    setting to null is cleaner than empty string — avoids config warnings) ──
+      KAFKA_BROKER_ID: ~
+      KAFKA_ZOOKEEPER_CONNECT: ~
+
+    volumes:
+      - kafka_kraft_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "1.00"
+    # Note: depends_on: zookeeper inherited from base — resolved immediately by stub above.
+    # kafka-init from base also depends on kafka:service_healthy — works unchanged.
+
+volumes:
+  kafka_kraft_data:

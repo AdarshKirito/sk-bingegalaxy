@@ -12,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Set;
 
 /**
@@ -97,7 +98,7 @@ public class DeliveryWebhookController {
     }
 
     private void updateDeliveryStatus(Notification notification, String event) {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         switch (event) {
             case "delivered" -> {
                 notification.setDeliveryStatus(DeliveryStatus.DELIVERED);

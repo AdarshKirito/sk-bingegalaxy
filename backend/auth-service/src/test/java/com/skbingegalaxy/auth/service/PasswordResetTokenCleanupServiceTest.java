@@ -10,6 +10,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -29,13 +30,13 @@ class PasswordResetTokenCleanupServiceTest {
     @Test
     @DisplayName("purges tokens with expiry older than the 7-day retention window")
     void purgesUsingSevenDayCutoff() {
-        LocalDateTime before = LocalDateTime.now();
+        LocalDateTime before = LocalDateTime.now(ZoneOffset.UTC);
         when(resetTokenRepository.deleteAllByExpiresAtBefore(org.mockito.ArgumentMatchers.any()))
             .thenReturn(3);
 
         service.purgeExpiredResetTokens();
 
-        LocalDateTime after = LocalDateTime.now();
+        LocalDateTime after = LocalDateTime.now(ZoneOffset.UTC);
         ArgumentCaptor<LocalDateTime> cutoffCaptor = ArgumentCaptor.forClass(LocalDateTime.class);
         verify(resetTokenRepository, times(1)).deleteAllByExpiresAtBefore(cutoffCaptor.capture());
 

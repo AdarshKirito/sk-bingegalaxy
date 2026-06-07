@@ -5,6 +5,7 @@ import com.skbingegalaxy.booking.dto.SlotHoldDto;
 import com.skbingegalaxy.booking.entity.EventType;
 import com.skbingegalaxy.booking.entity.SlotHold;
 import com.skbingegalaxy.booking.entity.SlotHold.SlotHoldStatus;
+import com.skbingegalaxy.booking.metrics.BookingFunnelMetrics;
 import com.skbingegalaxy.booking.repository.EventTypeRepository;
 import com.skbingegalaxy.booking.repository.SlotHoldRepository;
 import com.skbingegalaxy.common.context.BingeContext;
@@ -19,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -53,6 +55,8 @@ public class SlotHoldService {
     private final EventTypeRepository eventTypeRepository;
     /** Used purely for its advisory-lock helper so hold creation serialises with bookings. */
     private final com.skbingegalaxy.booking.repository.BookingRepository bookingRepository;
+    private final BookingFunnelMetrics funnelMetrics;
+    private final VenueClockService venueClock;
 
     @Value("${app.slot-hold.ttl-minutes:7}")
     private int holdTtlMinutes;
@@ -78,7 +82,7 @@ public class SlotHoldService {
         if (req.getDurationMinutes() <= 0 || req.getDurationMinutes() % 30 != 0) {
             throw new BusinessException("Duration must be a positive 30-minute multiple");
         }
-        if (req.getBookingDate().isBefore(LocalDate.now())) {
+        if (req.getBookingDate().isBefore(venueClock.today(bingeId))) {
             throw new BusinessException("Cannot hold a slot in the past");
         }
 
@@ -89,7 +93,7 @@ public class SlotHoldService {
         // Serialise with concurrent booking creates / other holds on this slot.
         bookingRepository.acquireSlotLock(slotLockKey(bingeId, req.getBookingDate()));
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
 
         // Anti-abuse: cap concurrent active holds per customer per binge so a
         // user can't hold the entire schedule open and starve other customers.
@@ -124,6 +128,7 @@ public class SlotHoldService {
             .build();
 
         SlotHold saved = slotHoldRepository.save(hold);
+        funnelMetrics.holdCreated();
         log.info("Slot hold created: token={} customer={} binge={} {} {}+{}m (expires {})",
             saved.getHoldToken(), customerId, bingeId, saved.getBookingDate(),
             saved.getStartTime(), saved.getDurationMinutes(), saved.getExpiresAt());
@@ -137,7 +142,7 @@ public class SlotHoldService {
         if (!adminAccess && !Objects.equals(hold.getCustomerId(), customerId)) {
             throw new BusinessException("Not authorised to view this hold");
         }
-        return toDto(hold, LocalDateTime.now());
+        return toDto(hold, LocalDateTime.now(ZoneOffset.UTC));
     }
 
     @Transactional
@@ -149,15 +154,16 @@ public class SlotHoldService {
         }
         if (hold.getStatus() != SlotHoldStatus.ACTIVE) {
             // Idempotent: releasing an already-terminal hold returns its current state.
-            return toDto(hold, LocalDateTime.now());
+            return toDto(hold, LocalDateTime.now(ZoneOffset.UTC));
         }
         hold.setStatus(SlotHoldStatus.RELEASED);
-        hold.setReleasedAt(LocalDateTime.now());
+        hold.setReleasedAt(LocalDateTime.now(ZoneOffset.UTC));
         hold.setReleaseReason(reason != null ? reason : (adminAccess ? "ADMIN_RELEASE" : "CUSTOMER_RELEASE"));
         try {
             SlotHold saved = slotHoldRepository.save(hold);
+            funnelMetrics.holdReleased();
             log.info("Slot hold released: token={} reason={}", saved.getHoldToken(), saved.getReleaseReason());
-            return toDto(saved, LocalDateTime.now());
+            return toDto(saved, LocalDateTime.now(ZoneOffset.UTC));
         } catch (OptimisticLockingFailureException ex) {
             log.warn("Slot hold release race for token={}; refetching", token);
             return getByToken(token, customerId, adminAccess);
@@ -166,7 +172,7 @@ public class SlotHoldService {
 
     @Transactional(readOnly = true)
     public List<SlotHoldDto> listMyLiveHolds(Long customerId) {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         return slotHoldRepository.findLiveByCustomer(customerId, now).stream()
             .map(h -> toDto(h, now))
             .collect(Collectors.toList());
@@ -175,7 +181,7 @@ public class SlotHoldService {
     @Transactional(readOnly = true)
     public List<SlotHoldDto> listActiveHoldsForCurrentBinge() {
         Long bingeId = BingeContext.requireBingeId();
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         return slotHoldRepository
             .findByBingeIdAndStatusOrderByExpiresAtAsc(bingeId, SlotHoldStatus.ACTIVE)
             .stream()
@@ -214,7 +220,7 @@ public class SlotHoldService {
             throw new BusinessException("Slot hold has already been " + hold.getStatus().name().toLowerCase()
                 + ". Please re-select your slot.");
         }
-        if (hold.getExpiresAt() == null || hold.getExpiresAt().isBefore(LocalDateTime.now())) {
+        if (hold.getExpiresAt() == null || hold.getExpiresAt().isBefore(LocalDateTime.now(ZoneOffset.UTC))) {
             throw new BusinessException("Your slot hold has expired. Please re-select your slot.");
         }
 
@@ -231,7 +237,9 @@ public class SlotHoldService {
         hold.setStatus(SlotHoldStatus.CONVERTED);
         hold.setConvertedBookingRef(bookingRef);
         try {
-            return slotHoldRepository.save(hold);
+            SlotHold saved = slotHoldRepository.save(hold);
+            funnelMetrics.holdConverted();
+            return saved;
         } catch (OptimisticLockingFailureException ex) {
             throw new BusinessException("Your slot hold was modified concurrently. Please re-select your slot.");
         }
@@ -240,7 +248,7 @@ public class SlotHoldService {
     /** Returns counts of overlapping live holds for capacity / conflict checks. */
     @Transactional(readOnly = true)
     public List<SlotHold> findLiveHoldsForSlot(Long bingeId, LocalDate date) {
-        return slotHoldRepository.findLiveHoldsByBingeAndDate(bingeId, date, LocalDateTime.now());
+        return slotHoldRepository.findLiveHoldsByBingeAndDate(bingeId, date, LocalDateTime.now(ZoneOffset.UTC));
     }
 
     /** Marks a hold RELEASED non-throwing — for use when payment downstream fails. */
@@ -250,7 +258,7 @@ public class SlotHoldService {
         slotHoldRepository.findByHoldToken(token).ifPresent(h -> {
             if (h.getStatus() != SlotHoldStatus.ACTIVE) return;
             h.setStatus(SlotHoldStatus.RELEASED);
-            h.setReleasedAt(LocalDateTime.now());
+            h.setReleasedAt(LocalDateTime.now(ZoneOffset.UTC));
             h.setReleaseReason(reason != null ? reason : "PAYMENT_FAILED");
             try {
                 slotHoldRepository.save(h);
@@ -267,7 +275,7 @@ public class SlotHoldService {
 
     @Transactional
     public int expireStaleHolds() {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         List<SlotHold> stale = slotHoldRepository.findExpiredActiveHolds(now);
         if (stale.isEmpty()) return 0;
         int n = 0;
@@ -277,6 +285,7 @@ public class SlotHoldService {
                 h.setReleasedAt(now);
                 h.setReleaseReason("TTL_EXPIRED");
                 slotHoldRepository.save(h);
+                funnelMetrics.holdExpired();
                 n++;
             } catch (OptimisticLockingFailureException ignored) {
                 // Customer / payment flow updated it concurrently — skip.
@@ -288,7 +297,7 @@ public class SlotHoldService {
 
     @Transactional
     public int purgeOldTerminalHolds() {
-        LocalDateTime cutoff = LocalDateTime.now().minusDays(Math.max(1, terminalRetentionDays));
+        LocalDateTime cutoff = LocalDateTime.now(ZoneOffset.UTC).minusDays(Math.max(1, terminalRetentionDays));
         int deleted = slotHoldRepository.deleteOldTerminalHolds(cutoff);
         if (deleted > 0) log.info("Slot-hold scheduler: purged {} old terminal holds (>{}d)", deleted, terminalRetentionDays);
         return deleted;

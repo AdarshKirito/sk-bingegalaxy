@@ -3,6 +3,7 @@ package com.skbingegalaxy.booking.controller;
 import com.skbingegalaxy.booking.entity.Booking;
 import com.skbingegalaxy.booking.service.AdminBingeScopeService;
 import com.skbingegalaxy.booking.service.BookingService;
+import com.skbingegalaxy.booking.service.VenueClockService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -42,6 +43,7 @@ public class ExportController {
 
     private final AdminBingeScopeService adminBingeScopeService;
     private final BookingService bookingService;
+    private final VenueClockService venueClock;
 
     /**
      * Verify the admin owns the selected binge before every request in this controller.
@@ -68,8 +70,9 @@ public class ExportController {
             @RequestHeader("X-User-Role") String role) {
 
         var binge = adminBingeScopeService.requireManagedBinge(adminId, role, "exporting bookings");
-        LocalDate fromDate = from != null ? LocalDate.parse(from) : LocalDate.now().minusMonths(3);
-        LocalDate toDate = to != null ? LocalDate.parse(to) : LocalDate.now();
+        LocalDate exportToday = venueClock.today(binge.getId());
+        LocalDate fromDate = from != null ? LocalDate.parse(from) : exportToday.minusMonths(3);
+        LocalDate toDate = to != null ? LocalDate.parse(to) : exportToday;
         if (fromDate.isAfter(toDate)) {
             throw new com.skbingegalaxy.common.exception.BusinessException(
                 "From date (" + fromDate + ") must not be after to date (" + toDate + ").");

@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
@@ -57,7 +58,7 @@ public class FxLockService {
             ? null
             : MoneyUtil.convertWithRate(baseAmount, rate, toCurrency);
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         FxRateLock lock = FxRateLock.builder()
             .lockToken(UUID.randomUUID().toString())
             .customerId(customerId)
@@ -87,13 +88,13 @@ public class FxLockService {
         if (lock.getStatus() == FxRateLock.Status.CONSUMED) {
             throw new BusinessException("FX lock already consumed");
         }
-        if (lock.getStatus() == FxRateLock.Status.EXPIRED || lock.getLockedUntil().isBefore(LocalDateTime.now())) {
+        if (lock.getStatus() == FxRateLock.Status.EXPIRED || lock.getLockedUntil().isBefore(LocalDateTime.now(ZoneOffset.UTC))) {
             lock.setStatus(FxRateLock.Status.EXPIRED);
             repo.save(lock);
             throw new BusinessException("FX lock has expired — please refresh checkout");
         }
         lock.setStatus(FxRateLock.Status.CONSUMED);
-        lock.setConsumedAt(LocalDateTime.now());
+        lock.setConsumedAt(LocalDateTime.now(ZoneOffset.UTC));
         return repo.save(lock);
     }
 
@@ -106,7 +107,7 @@ public class FxLockService {
     /** Expires stale ACTIVE locks every minute. */
     @Scheduled(fixedDelay = 60_000)
     public void expireStaleLocks() {
-        LocalDateTime cutoff = LocalDateTime.now();
+        LocalDateTime cutoff = LocalDateTime.now(ZoneOffset.UTC);
         List<FxRateLock> stale = repo.findByStatusAndLockedUntilBefore(FxRateLock.Status.ACTIVE, cutoff);
         if (stale.isEmpty()) return;
         stale.forEach(l -> l.setStatus(FxRateLock.Status.EXPIRED));

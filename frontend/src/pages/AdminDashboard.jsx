@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { adminService } from '../services/endpoints';
+import { adminService, disputeService } from '../services/endpoints';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
-import { FiCalendar, FiDollarSign, FiUsers, FiTrendingUp, FiClock, FiClipboard, FiPlusCircle, FiSlash, FiStar, FiBarChart2, FiAlertTriangle, FiRefreshCw, FiBell, FiActivity, FiWifi, FiWifiOff } from 'react-icons/fi';
+import { FiCalendar, FiDollarSign, FiUsers, FiTrendingUp, FiClock, FiClipboard, FiPlusCircle, FiSlash, FiStar, FiBarChart2, FiAlertTriangle, FiAlertOctagon, FiRefreshCw, FiBell, FiActivity, FiWifi, FiWifiOff } from 'react-icons/fi';
 import { SkeletonStatCard } from '../components/ui/Skeleton';
 import useRealtimeUpdates from '../hooks/useRealtimeUpdates';
 import './AdminDashboard.css';
@@ -21,6 +21,8 @@ export default function AdminDashboard() {
   const [retryingNotifications, setRetryingNotifications] = useState(false);
   const [failedSagas, setFailedSagas] = useState([]);
   const [compensatingSagas, setCompensatingSagas] = useState([]);
+  const [openDisputes, setOpenDisputes] = useState(0);
+  const [failedRefunds, setFailedRefunds] = useState(0);
 
   const refreshStats = useCallback(() => {
     adminService.getDashboardStats()
@@ -81,6 +83,18 @@ export default function AdminDashboard() {
       .catch(() => setError('Failed to load dashboard stats'))
       .finally(() => setLoading(false));
     fetchOpDate();
+    // Open chargebacks are money-at-risk with a hard respond-by deadline — surface
+    // the count to every admin (the controller authorizes ADMIN + SUPER_ADMIN) so it
+    // can't sit unnoticed until it auto-loses. Best-effort: a failure must not break
+    // the dashboard.
+    disputeService.count()
+      .then(res => setOpenDisputes(res.data?.data?.openDisputes || 0))
+      .catch(() => {});
+    // Failed refunds = money still owed to customers. No dedicated count endpoint,
+    // so read totalElements off the first page of the queue. Best-effort.
+    adminService.getFailedRefunds({ page: 0, size: 1 })
+      .then(res => setFailedRefunds(res.data?.data?.totalElements || 0))
+      .catch(() => {});
     if (isSuperAdmin) {
       adminService.getFailedSagas().then(res => setFailedSagas(res.data.data || res.data || [])).catch(() => {});
       adminService.getCompensatingSagas().then(res => setCompensatingSagas(res.data.data || res.data || [])).catch(() => {});
@@ -147,6 +161,54 @@ export default function AdminDashboard() {
           {connected ? ' Live' : ' Offline'}
         </span>
       </div>
+
+      {/* Open payment disputes — money-at-risk with a hard Razorpay respond-by deadline. */}
+      {openDisputes > 0 && (
+        <Link
+          to="/admin/disputes"
+          className="card"
+          style={{
+            display: 'flex', alignItems: 'center', gap: '0.75rem',
+            padding: '0.85rem 1rem', marginBottom: '0.85rem',
+            border: '1px solid #ef4444', background: 'rgba(239, 68, 68, 0.08)',
+            color: 'inherit', textDecoration: 'none',
+          }}
+        >
+          <FiAlertOctagon size={24} style={{ color: '#ef4444', flexShrink: 0 }} />
+          <div style={{ flex: 1 }}>
+            <strong style={{ color: '#ef4444' }}>
+              {openDisputes} open payment dispute{openDisputes === 1 ? '' : 's'} need{openDisputes === 1 ? 's' : ''} a response
+            </strong>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+              Each chargeback is auto-lost if you miss its deadline. Review and gather evidence now →
+            </div>
+          </div>
+        </Link>
+      )}
+
+      {/* Failed refunds — money still owed to customers that didn't settle at the gateway. */}
+      {failedRefunds > 0 && (
+        <Link
+          to="/admin/failed-refunds"
+          className="card"
+          style={{
+            display: 'flex', alignItems: 'center', gap: '0.75rem',
+            padding: '0.85rem 1rem', marginBottom: '0.85rem',
+            border: '1px solid #f59e0b', background: 'rgba(245, 158, 11, 0.08)',
+            color: 'inherit', textDecoration: 'none',
+          }}
+        >
+          <FiAlertTriangle size={24} style={{ color: '#f59e0b', flexShrink: 0 }} />
+          <div style={{ flex: 1 }}>
+            <strong style={{ color: '#f59e0b' }}>
+              {failedRefunds} failed refund{failedRefunds === 1 ? '' : 's'} pending retry
+            </strong>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+              These customers are still owed money that didn’t settle. Review and retry →
+            </div>
+          </div>
+        </Link>
+      )}
 
       {/* Live Date & Time + Operational Date */}
       <Link to="/admin/reports" className="admin-dash-banner">

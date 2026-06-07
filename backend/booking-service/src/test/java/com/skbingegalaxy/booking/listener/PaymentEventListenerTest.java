@@ -90,5 +90,11 @@ class PaymentEventListenerTest {
         // the saga consumer.
         verify(bookingService, org.mockito.Mockito.times(3)).getBookingEntityForSystem("SKBG25123456");
         verify(bookingService).updatePaymentStatus("SKBG25123456", com.skbingegalaxy.common.enums.PaymentStatus.SUCCESS, "UPI");
+        // Full payment must drive the saga all the way to CONFIRMED (not leave it stuck at
+        // PAYMENT_RECEIVED) so its lifecycle tracks the booking and the underpayment guard runs.
+        verify(sagaOrchestrator).advanceTo("SKBG25123456",
+            com.skbingegalaxy.booking.entity.SagaState.SagaStatus.PAYMENT_RECEIVED, "PAYMENT_SUCCESS");
+        verify(sagaOrchestrator).advanceTo("SKBG25123456",
+            com.skbingegalaxy.booking.entity.SagaState.SagaStatus.CONFIRMED, "BOOKING_CONFIRMED");
     }
 }

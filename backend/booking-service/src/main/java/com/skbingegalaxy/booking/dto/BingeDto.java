@@ -20,6 +20,8 @@ public class BingeDto {
     private String state;
     private String country;
     private String postalCode;
+    /** IANA timezone for this venue, e.g. "Asia/Kolkata", "America/New_York". */
+    private String timezone;
     private Long adminId;
     private boolean active;
     private LocalDate operationalDate;

@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -90,7 +91,7 @@ public class SagaOrchestrator {
             saga.setSagaStatus(status);
             saga.setLastCompletedStep(completedStep);
             if (status == SagaStatus.COMPLETED || status == SagaStatus.COMPENSATED) {
-                saga.setCompletedAt(LocalDateTime.now());
+                saga.setCompletedAt(LocalDateTime.now(ZoneOffset.UTC));
             }
             sagaStateRepository.save(saga);
             log.info("Saga {} advanced to {} (step: {})", bookingRef, status, completedStep);
@@ -113,7 +114,7 @@ public class SagaOrchestrator {
         sagaStateRepository.findByBookingRef(bookingRef).ifPresent(saga -> {
             saga.setSagaStatus(SagaStatus.FAILED);
             saga.setFailureReason(reason);
-            saga.setCompletedAt(LocalDateTime.now());
+            saga.setCompletedAt(LocalDateTime.now(ZoneOffset.UTC));
             sagaStateRepository.save(saga);
             log.error("Saga {} FAILED: {}", bookingRef, reason);
         });

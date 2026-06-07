@@ -26,9 +26,11 @@ import DOMPurify from 'dompurify';
 import useBingeStore from '../stores/bingeStore';
 import PhoneField, { splitPhone } from '../components/form/PhoneField';
 import BookingTimelinePanel from '../components/booking/BookingTimelinePanel';
+import { useFormatMoney } from '../context/CurrencyContext';
 import './CustomerHub.css';
 
-const formatAmount = (value) => `₹${Number(value || 0).toLocaleString()}`;
+// formatAmount lives inside the component now (uses the customer's selected display
+// currency via useFormatMoney). All amounts passed in are base-INR and get converted.
 
 const formatLabel = (value, fallback = 'Pending') => {
   if (!value) return fallback;
@@ -62,6 +64,7 @@ export default function BookingConfirmation() {
   const [rescheduleForm, setRescheduleForm] = useState({ newBookingDate: '', newStartTime: '', newDurationMinutes: '' });
   const [transferForm, setTransferForm] = useState({ recipientName: '', recipientEmail: '', recipientPhone: '' });
   const [actionLoading, setActionLoading] = useState(false);
+  const formatAmount = useFormatMoney();
 
   useEffect(() => {
     bookingService.getByRef(ref)
@@ -147,9 +150,11 @@ export default function BookingConfirmation() {
     ? 'badge-success'
     : paymentStatus === 'FAILED'
       ? 'badge-danger'
-      : paymentStatus === 'INITIATED'
+      : paymentStatus === 'DISPUTED'
         ? 'badge-warning'
-        : 'badge-info';
+        : paymentStatus === 'INITIATED'
+          ? 'badge-warning'
+          : 'badge-info';
   const durationLabel = formatDuration(booking);
   const cleanNotes = booking.specialNotes ? DOMPurify.sanitize(booking.specialNotes, { ALLOWED_TAGS: [] }) : '';
   // Build a clean customer-facing early checkout message from raw booking data (not the operational note)
@@ -637,6 +642,79 @@ export default function BookingConfirmation() {
           </div>
         </div>
       )}
+      <div className="receipt-print-only" aria-hidden="true">
+        <div className="rpo-header">
+          <div className="rpo-brand">
+            <span className="rpo-brand-mark">◆</span>
+            <span className="rpo-brand-name">{selectedBinge?.name || 'SK Binge Galaxy'}</span>
+          </div>
+          <div className="rpo-header-right">
+            <span className="rpo-doc-type">Booking Receipt</span>
+            <span className="rpo-print-date">{new Date().toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+          </div>
+        </div>
+
+        <div className="rpo-ref-block">
+          <span className="rpo-ref-label">Booking Reference</span>
+          <span className="rpo-ref-number">{booking.bookingRef}</span>
+          <div className="rpo-badges">
+            <span className="rpo-badge">{bookingStatusLabel}</span>
+            <span className="rpo-badge">Payment: {paymentStatusLabel}</span>
+          </div>
+        </div>
+
+        <div className="rpo-body">
+          <section className="rpo-section">
+            <h3 className="rpo-section-title">Event Details</h3>
+            <table className="rpo-table">
+              <tbody>
+                <tr><td>Event</td><td>{eventLabel}</td></tr>
+                <tr><td>Date</td><td>{booking.bookingDate}</td></tr>
+                <tr><td>Time</td><td>{booking.startTime ? formatTimeRange12h(booking.startTime, booking.durationMinutes || (booking.durationHours ? booking.durationHours * 60 : 0)) : '—'}</td></tr>
+                <tr><td>Duration</td><td>{durationLabel}</td></tr>
+                <tr><td>Guests</td><td>{booking.numberOfGuests || 1}</td></tr>
+                <tr><td>Venue</td><td>{venueLabel}</td></tr>
+                {booking.venueRoomName && <tr><td>Room</td><td>{booking.venueRoomName}</td></tr>}
+                {addOnsLabel && <tr><td>Add-ons</td><td>{addOnsLabel}</td></tr>}
+              </tbody>
+            </table>
+          </section>
+
+          <section className="rpo-section">
+            <h3 className="rpo-section-title">Payment Breakdown</h3>
+            <table className="rpo-table">
+              <tbody>
+                <tr><td>Base amount</td><td>{formatAmount(booking.baseAmount)}</td></tr>
+                {(booking.addOnAmount || 0) > 0 && <tr><td>Add-on amount</td><td>{formatAmount(booking.addOnAmount)}</td></tr>}
+                {(booking.guestAmount || 0) > 0 && <tr><td>Guest charge</td><td>{formatAmount(booking.guestAmount)}</td></tr>}
+                {booking.surgeMultiplier && Number(booking.surgeMultiplier) > 1 && (
+                  <tr><td>Peak pricing</td><td>{booking.surgeMultiplier}× multiplier</td></tr>
+                )}
+                {(booking.loyaltyDiscountAmount || 0) > 0 && (
+                  <tr><td>Loyalty discount</td><td>−{formatAmount(booking.loyaltyDiscountAmount)}</td></tr>
+                )}
+                {(booking.taxAmount || 0) > 0 && <tr><td>Tax</td><td>{formatAmount(booking.taxAmount)}</td></tr>}
+              </tbody>
+              <tfoot>
+                <tr className="rpo-total-row"><td>Total</td><td>{formatAmount(booking.totalAmount)}</td></tr>
+              </tfoot>
+            </table>
+            <p className="rpo-payment-state">Payment: <strong>{paymentStatusLabel}</strong></p>
+          </section>
+        </div>
+
+        {booking.customerEmail && (
+          <div className="rpo-contact">
+            <span className="rpo-contact-label">Contact on file</span>
+            <span className="rpo-contact-value">{booking.customerEmail}</span>
+          </div>
+        )}
+
+        <div className="rpo-footer">
+          <p>Thank you for booking with {selectedBinge?.name || 'SK Binge Galaxy'}.</p>
+          <p>Present this receipt or quote <strong>{booking.bookingRef}</strong> at check-in. For support, visit our help desk.</p>
+        </div>
+      </div>
     </div>
   );
 }

@@ -23,6 +23,23 @@ spec:
         target:
           type: Utilization
           averageUtilization: 75
+  behavior:
+    scaleDown:
+      # 5-minute stabilization: HPA must see consistently low load for 300s before
+      # removing a pod. Without this, a brief traffic dip during a rolling update
+      # triggers scale-down while in-flight requests are still being served, causing
+      # 502s until the removed pod's connections drain. Scale-up stays responsive.
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -49,6 +66,19 @@ spec:
         target:
           type: Utilization
           averageUtilization: 75
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -75,6 +105,19 @@ spec:
         target:
           type: Utilization
           averageUtilization: 75
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -101,6 +144,19 @@ spec:
         target:
           type: Utilization
           averageUtilization: 75
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -127,6 +183,19 @@ spec:
         target:
           type: Utilization
           averageUtilization: 75
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -153,6 +222,19 @@ spec:
         target:
           type: Utilization
           averageUtilization: 75
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -179,3 +261,16 @@ spec:
         target:
           type: Utilization
           averageUtilization: 75
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60

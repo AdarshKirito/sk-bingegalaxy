@@ -83,7 +83,12 @@ public class CsrfProtectionFilter implements GlobalFilter, Ordered {
         "/api/v1/auth/refresh"
     );
 
-    private static final String WEBHOOK_PATH = "/api/v1/payments/callback";
+    // Webhook paths called by external servers (no browser Origin header, no CSRF cookie).
+    // These endpoints authenticate via their own mechanism (Razorpay HMAC-SHA256 signature).
+    private static final Set<String> WEBHOOK_PATHS = Set.of(
+        "/api/v1/payments/callback",
+        "/api/v1/payments/webhooks/razorpay"
+    );
 
     /**
      * Public POST endpoints that are intentionally callable by anonymous
@@ -145,7 +150,9 @@ public class CsrfProtectionFilter implements GlobalFilter, Ordered {
         }
 
         // State-changing requests below.
-        if (WEBHOOK_PATH.equals(path)) {
+        // External webhook calls (Razorpay, etc.) have no browser origin — bypass CSRF.
+        // Each webhook endpoint enforces its own authentication (HMAC-SHA256 signatures).
+        if (WEBHOOK_PATHS.contains(path)) {
             return chain.filter(exchange);
         }
 

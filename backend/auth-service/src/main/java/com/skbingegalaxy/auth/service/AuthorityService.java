@@ -23,6 +23,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -103,7 +104,7 @@ public class AuthorityService {
             // Bean Validation should have caught this; defensive belt+braces.
             throw new BusinessException("durationHours must be between 1 and " + MAX_DURATION_HOURS);
         }
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
 
         AuthorityGrant grant = AuthorityGrant.builder()
             .granteeUserId(grantee.getId())
@@ -150,7 +151,7 @@ public class AuthorityService {
 
         String safeReason = (reason == null || reason.isBlank())
             ? "Revoked by super-admin" : reason.trim();
-        int updated = grantRepo.revoke(grant.getId(), actor.getId(), safeReason, LocalDateTime.now());
+        int updated = grantRepo.revoke(grant.getId(), actor.getId(), safeReason, LocalDateTime.now(ZoneOffset.UTC));
         if (updated == 0) {
             // Already revoked — idempotent. Return current state.
             log.info("Grant {} was already revoked; returning current state", grantId);
@@ -189,7 +190,7 @@ public class AuthorityService {
 
     @Transactional(readOnly = true)
     public Page<AuthorityGrantDto> listActiveGrants(Pageable pageable) {
-        return grantRepo.findAllActive(LocalDateTime.now(), pageable).map(this::hydrate);
+        return grantRepo.findAllActive(LocalDateTime.now(ZoneOffset.UTC), pageable).map(this::hydrate);
     }
 
     @Transactional(readOnly = true)
@@ -213,7 +214,7 @@ public class AuthorityService {
             .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
 
         boolean nativeSuper = user.getRole() == UserRole.SUPER_ADMIN;
-        List<AuthorityGrant> active = grantRepo.findActiveForUser(userId, LocalDateTime.now());
+        List<AuthorityGrant> active = grantRepo.findActiveForUser(userId, LocalDateTime.now(ZoneOffset.UTC));
 
         Set<AuthorityScope> union = active.stream()
             .flatMap(g -> g.getScopes().stream())
@@ -238,7 +239,7 @@ public class AuthorityService {
      */
     @Transactional(readOnly = true)
     public Set<AuthorityScope> getActiveScopesForUser(Long userId) {
-        return grantRepo.findActiveForUser(userId, LocalDateTime.now()).stream()
+        return grantRepo.findActiveForUser(userId, LocalDateTime.now(ZoneOffset.UTC)).stream()
             .flatMap(g -> g.getScopes().stream())
             .collect(Collectors.toCollection(HashSet::new));
     }
@@ -251,7 +252,7 @@ public class AuthorityService {
      */
     @Transactional(readOnly = true)
     public long getEarliestGrantExpiryEpochMillis(Long userId) {
-        return grantRepo.findActiveForUser(userId, LocalDateTime.now()).stream()
+        return grantRepo.findActiveForUser(userId, LocalDateTime.now(ZoneOffset.UTC)).stream()
             .map(AuthorityGrant::getExpiresAt)
             .min(LocalDateTime::compareTo)
             .map(t -> t.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli())

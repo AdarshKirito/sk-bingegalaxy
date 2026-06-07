@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -44,7 +45,7 @@ public class ExpiryEngine {
     @Scheduled(cron = "0 15 2 * * *")     // 02:15 UTC every day
     @SchedulerLock(name = "loyaltyV2ExpiryEngine", lockAtMostFor = "PT30M", lockAtLeastFor = "PT1M")
     public void runDailyExpiry() {
-        expireAsOf(LocalDateTime.now());
+        expireAsOf(LocalDateTime.now(ZoneOffset.UTC));
     }
 
     /**
@@ -83,13 +84,13 @@ public class ExpiryEngine {
                 .orElse(null);
 
         if (membershipId == null) {
-            // Orphaned lot — wallet was deleted or never created.  Skip
-            // expiry rather than crashing the entire nightly run.  This
-            // should never happen in normal operation; log at ERROR so
-            // on-call can investigate and clean up the orphan manually.
+            // Orphaned lot — wallet was deleted or never created.  Throw so
+            // the expireAsOf loop catches it and excludes it from the success
+            // count.  Log at ERROR so on-call can investigate.
             log.error("[loyalty-v2] expiry skipped — wallet {} not found for lot {} (orphaned lot); "
                     + "manual cleanup required", lot.getWalletId(), lotId);
-            return;
+            throw new IllegalStateException(
+                    "Wallet " + lot.getWalletId() + " not found for lot " + lotId + " (orphaned)");
         }
 
         walletService.expireLot(membershipId, lotId, at);

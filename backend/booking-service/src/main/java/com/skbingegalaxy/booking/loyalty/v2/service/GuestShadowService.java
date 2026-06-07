@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
@@ -77,7 +78,7 @@ public class GuestShadowService {
                     .deviceFingerprintHash(deviceH)
                     .pendingPoints(0L)
                     .pendingQualifyingCredits(0L)
-                    .expiresAt(LocalDateTime.now().plusDays(
+                    .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusDays(
                             Math.max(program.getRetroactiveCreditDays(), 1)))
                     .build();
         }
@@ -117,7 +118,7 @@ public class GuestShadowService {
         if (shadows.isEmpty()) return 0L;
 
         LoyaltyMembership membership = enrollmentService.ensureEnrolledForBooking(customerId);
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         long totalCredited = 0L;
 
         for (LoyaltyGuestShadow s : shadows) {
@@ -167,7 +168,7 @@ public class GuestShadowService {
     @SchedulerLock(name = "loyaltyV2GuestShadowExpiry",
             lockAtMostFor = "PT30M", lockAtLeastFor = "PT1M")
     public void runExpiryJob() {
-        purgeExpiredAsOf(LocalDateTime.now());
+        purgeExpiredAsOf(LocalDateTime.now(ZoneOffset.UTC));
     }
 
     @Transactional

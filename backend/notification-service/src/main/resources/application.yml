@@ -43,6 +43,7 @@ spring:
       ack-mode: record
       missing-topics-fatal: false
       concurrency: 2
+      poll-timeout: 3000
 
 eureka:
   client:

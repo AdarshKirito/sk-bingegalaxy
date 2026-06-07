@@ -235,7 +235,26 @@ spec:
         - name: redis
           image: redis:7-alpine
           imagePullPolicy: IfNotPresent
-          args: ["redis-server", "--save", "", "--appendonly", "no", "--requirepass", "$(REDIS_PASSWORD)"]
+          args:
+            - redis-server
+            - "--save"
+            - ""
+            - "--appendonly"
+            - "no"
+            - "--requirepass"
+            - "$(REDIS_PASSWORD)"
+            # Eviction policy: when Redis hits maxmemory, evict the least-recently-used
+            # key across ALL keyspace (not just volatile keys with TTL). The default
+            # `noeviction` returns errors when full — breaking rate limiters silently.
+            - "--maxmemory-policy"
+            - "allkeys-lru"
+            # 200 MB cap. Adjust to match the pod's memory.limits reservation.
+            # Without a cap, Redis grows until the OOMKiller evicts it.
+            - "--maxmemory"
+            - "200mb"
+            # Slow-log any command taking > 10 ms so index scans are visible.
+            - "--slowlog-log-slower-than"
+            - "10000"
           ports:
             - containerPort: 6379
               name: redis
@@ -334,7 +353,7 @@ spec:
                 name: app-secrets
           env:
             - name: JAVA_TOOL_OPTIONS
-              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=8m -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/heapdump.hprof -Duser.timezone=UTC"
           resources:
             requests:
               memory: "256Mi"
@@ -354,7 +373,7 @@ spec:
             httpGet:
               path: /actuator/health/readiness
               port: 8080
-            initialDelaySeconds: 5
+            initialDelaySeconds: 15
             periodSeconds: 10
             timeoutSeconds: 5
           livenessProbe:

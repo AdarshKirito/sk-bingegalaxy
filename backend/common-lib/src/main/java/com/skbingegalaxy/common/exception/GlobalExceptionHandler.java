@@ -25,6 +25,16 @@ import java.util.Map;
 @Slf4j
 public class GlobalExceptionHandler {
 
+    @ExceptionHandler(CaptchaRequiredException.class)
+    public ResponseEntity<ApiResponse<Void>> handleCaptchaRequired(CaptchaRequiredException ex) {
+        ApiResponse<Void> body = ApiResponse.<Void>builder()
+            .success(false)
+            .message(ex.getMessage())
+            .captchaRequired(Boolean.TRUE)
+            .build();
+        return ResponseEntity.status(ex.getStatus()).body(body);
+    }
+
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResponse<Void>> handleBusiness(BusinessException ex) {
         return ResponseEntity.status(ex.getStatus())

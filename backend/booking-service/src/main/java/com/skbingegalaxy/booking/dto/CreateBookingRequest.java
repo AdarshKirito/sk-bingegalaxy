@@ -1,5 +1,6 @@
 package com.skbingegalaxy.booking.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import lombok.*;
@@ -8,6 +9,9 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
 
+// Strict mode: reject any unknown field to prevent mass-assignment probing.
+// A customer POSTing {"eventTypeId":1,"loyaltyTier":"GOLD"} gets 400, not silent ignore.
+@JsonIgnoreProperties(ignoreUnknown = false)
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -46,4 +50,15 @@ public class CreateBookingRequest {
     /** Number of loyalty points the customer wants to redeem as discount. */
     @Min(value = 0, message = "Loyalty points to redeem cannot be negative")
     private Long redeemLoyaltyPoints;
+
+    /**
+     * Optional FX rate lock token obtained from POST /checkout/lock-fx.
+     * When supplied, the locked rate is validated and consumed atomically at
+     * booking creation — if the lock has expired the request is rejected with
+     * 400 "FX rate has expired, please refresh your quote".
+     * International customers should always supply this to guarantee price
+     * stability between the checkout preview and payment.
+     */
+    @Size(max = 64, message = "FX lock token too long")
+    private String fxLockToken;
 }

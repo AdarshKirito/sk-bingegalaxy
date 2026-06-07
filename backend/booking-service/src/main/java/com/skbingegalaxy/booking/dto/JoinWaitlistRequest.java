@@ -1,5 +1,6 @@
 package com.skbingegalaxy.booking.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
@@ -7,6 +8,7 @@ import lombok.*;
 import java.time.LocalDate;
 import java.time.LocalTime;
 
+@JsonIgnoreProperties(ignoreUnknown = false)
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

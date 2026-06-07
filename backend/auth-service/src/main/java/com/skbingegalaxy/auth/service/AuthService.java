@@ -11,6 +11,7 @@ import com.skbingegalaxy.common.enums.NotificationChannel;
 import com.skbingegalaxy.common.enums.UserRole;
 import com.skbingegalaxy.common.event.NotificationEvent;
 import com.skbingegalaxy.common.exception.BusinessException;
+import com.skbingegalaxy.common.exception.CaptchaRequiredException;
 import com.skbingegalaxy.common.exception.DuplicateResourceException;
 import com.skbingegalaxy.common.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +30,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Month;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.time.format.TextStyle;
@@ -65,6 +67,8 @@ public class AuthService {
     private final EmailVerificationService emailVerificationService;
     private final TotpService totpService;
     private final AuthorityService authorityService;
+    private final CaptchaValidationService captchaValidationService;
+    private final PwnedPasswordService pwnedPasswordService;
 
     @Value("${app.otp.expiration-minutes:10}")
     private int otpExpirationMinutes;
@@ -74,6 +78,8 @@ public class AuthService {
 
     private static final int MAX_LOGIN_ATTEMPTS = 5;
     private static final int LOCKOUT_MINUTES = 15;
+    /** After this many failures the client must present a solved CAPTCHA before we check credentials. */
+    private static final int CAPTCHA_THRESHOLD = 3;
 
     /** Pre-computed BCrypt hash used in constant-time login to prevent timing oracles. */
     private String dummyHash;
@@ -162,6 +168,16 @@ public class AuthService {
             throw new DuplicateResourceException("User", "phone", request.getPhone());
         }
 
+        // Breach password check: reject passwords that appear in known data breaches
+        // (HaveIBeenPwned k-anonymity API — the plaintext password never leaves the JVM).
+        // Disabled in dev/test via app.security.check-pwned-passwords=false.
+        if (pwnedPasswordService.isPasswordPwned(request.getPassword())) {
+            throw new BusinessException(
+                "This password has appeared in a data breach and cannot be used. "
+                + "Please choose a unique password that you haven't used elsewhere.",
+                HttpStatus.BAD_REQUEST);
+        }
+
         User user = User.builder()
             .firstName(request.getFirstName())
             .lastName(request.getLastName())
@@ -177,6 +193,9 @@ public class AuthService {
             .password(passwordEncoder.encode(request.getPassword()))
             .role(UserRole.CUSTOMER)
             .active(true)
+            // DPDP: record explicit consent at registration time
+            .consentGivenAt(java.time.LocalDateTime.now(ZoneOffset.UTC))
+            .consentMarketing(request.isConsentMarketing())
             .build();
 
         user = userRepository.save(user);
@@ -184,7 +203,7 @@ public class AuthService {
 
         // Record initial password so future change-password attempts can check history.
         passwordHistoryService.record(user.getId(), user.getPassword());
-        user.setLastPasswordChangeAt(java.time.LocalDateTime.now());
+        user.setLastPasswordChangeAt(java.time.LocalDateTime.now(ZoneOffset.UTC));
         userRepository.save(user);
 
         // Fire email verification (best-effort — welcome email is sent separately by the
@@ -210,6 +229,17 @@ public class AuthService {
         User user = userRepository.findByEmail(request.getEmail().toLowerCase()).orElse(null);
         String storedHash = user != null ? user.getPassword() : this.dummyHash;
 
+        // CAPTCHA gate: if the account has accumulated enough failures, require a solved CAPTCHA
+        // before we even attempt credential verification. Done before password check to prevent
+        // attackers from burning attempts without proving they are human.
+        if (user != null && user.getFailedLoginAttempts() >= CAPTCHA_THRESHOLD) {
+            if (request.getCaptchaToken() == null || request.getCaptchaToken().isBlank()
+                    || !captchaValidationService.validate(request.getCaptchaToken())) {
+                auditService.failure(AuthAuditService.EventType.LOGIN_FAILED, user.getId(), user.getRole(), user.getId(), user.getEmail(), "CAPTCHA_REQUIRED");
+                throw new CaptchaRequiredException();
+            }
+        }
+
         boolean passwordMatches = passwordEncoder.matches(request.getPassword(), storedHash);
 
         if (user == null) {
@@ -233,8 +263,14 @@ public class AuthService {
                 user.lockAccount(LOCKOUT_MINUTES);
                 log.warn("Account locked for user {} after {} failed attempts", user.getId(), MAX_LOGIN_ATTEMPTS);
                 userRepository.save(user);
+                auditService.failure(AuthAuditService.EventType.LOGIN_FAILED, user.getId(), user.getRole(), user.getId(), user.getEmail(), "BAD_PASSWORD");
+                throw new BusinessException("Account is temporarily locked due to too many failed attempts. Try again later.", HttpStatus.TOO_MANY_REQUESTS);
             }
             auditService.failure(AuthAuditService.EventType.LOGIN_FAILED, user.getId(), user.getRole(), user.getId(), user.getEmail(), "BAD_PASSWORD");
+            // Signal CAPTCHA requirement once threshold is crossed
+            if (user.getFailedLoginAttempts() >= CAPTCHA_THRESHOLD) {
+                throw new CaptchaRequiredException();
+            }
             throw new BusinessException("Invalid email or password", HttpStatus.UNAUTHORIZED);
         }
 
@@ -321,6 +357,16 @@ public class AuthService {
         User user = userRepository.findByEmail(request.getEmail().toLowerCase()).orElse(null);
         String storedHash = user != null ? user.getPassword() : this.dummyHash;
 
+        // CAPTCHA gate for admin login (same threshold as customer login)
+        if (user != null && (user.getRole() == UserRole.ADMIN || user.getRole() == UserRole.SUPER_ADMIN)
+                && user.getFailedLoginAttempts() >= CAPTCHA_THRESHOLD) {
+            if (request.getCaptchaToken() == null || request.getCaptchaToken().isBlank()
+                    || !captchaValidationService.validate(request.getCaptchaToken())) {
+                auditService.failure(AuthAuditService.EventType.LOGIN_FAILED, user.getId(), user.getRole(), user.getId(), user.getEmail(), "CAPTCHA_REQUIRED");
+                throw new CaptchaRequiredException();
+            }
+        }
+
         boolean passwordMatches = passwordEncoder.matches(request.getPassword(), storedHash);
 
         if (user == null || (user.getRole() != UserRole.ADMIN && user.getRole() != UserRole.SUPER_ADMIN)) {
@@ -345,12 +391,49 @@ public class AuthService {
                 user.lockAccount(LOCKOUT_MINUTES);
                 log.warn("Admin account locked for user {} after {} failed attempts", user.getId(), MAX_LOGIN_ATTEMPTS);
                 userRepository.save(user);
+                auditService.failure(AuthAuditService.EventType.LOGIN_FAILED, user.getId(), user.getRole(), user.getId(), user.getEmail(), "BAD_PASSWORD");
+                throw new BusinessException("Account is temporarily locked due to too many failed attempts. Try again later.", HttpStatus.TOO_MANY_REQUESTS);
             }
             auditService.failure(AuthAuditService.EventType.LOGIN_FAILED, user.getId(), user.getRole(), user.getId(), user.getEmail(), "BAD_PASSWORD");
+            if (user.getFailedLoginAttempts() >= CAPTCHA_THRESHOLD) {
+                throw new CaptchaRequiredException();
+            }
             throw new BusinessException("Invalid admin credentials", HttpStatus.UNAUTHORIZED);
         }
 
-        // MFA is strongly recommended for admins; enforced when enabled
+        // SUPER_ADMIN accounts must always have MFA enrolled. This is enforced at promotion time
+        // (promoteToSuperAdmin blocks promotion without MFA), but we double-check here as a
+        // defence-in-depth measure against out-of-band DB modifications.
+        if (user.getRole() == UserRole.SUPER_ADMIN && !user.isMfaEnabled()) {
+            log.warn("SUPER_ADMIN login blocked: MFA not enrolled for userId={}", user.getId());
+            auditService.failure(AuthAuditService.EventType.LOGIN_FAILED, user.getId(), user.getRole(), user.getId(), user.getEmail(), "SUPER_ADMIN_MFA_NOT_ENROLLED");
+            throw new BusinessException(
+                "Super admin accounts require MFA. Please contact another super admin to enroll TOTP before logging in.",
+                HttpStatus.FORBIDDEN);
+        }
+
+        // FIDO2/WebAuthn gate: warn if SUPER_ADMIN does not have a hardware key enrolled.
+        // When webauthnRequired=true (production), block login entirely — TOTP alone is
+        // insufficient for accounts with full-platform authority (phishing-resistant auth required).
+        // webauthnRequired defaults to false to avoid blocking existing setups on upgrade;
+        // set SUPER_ADMIN_REQUIRE_WEBAUTHN=true once keys are provisioned.
+        if (user.getRole() == UserRole.SUPER_ADMIN && user.getWebauthnEnrolledAt() == null) {
+            boolean webauthnRequired = Boolean.parseBoolean(
+                System.getenv().getOrDefault("SUPER_ADMIN_REQUIRE_WEBAUTHN", "false"));
+            if (webauthnRequired) {
+                log.warn("SUPER_ADMIN login blocked: WebAuthn not enrolled for userId={}", user.getId());
+                auditService.failure(AuthAuditService.EventType.LOGIN_FAILED, user.getId(), user.getRole(), user.getId(), user.getEmail(), "SUPER_ADMIN_WEBAUTHN_NOT_ENROLLED");
+                throw new BusinessException(
+                    "Super admin accounts require a hardware security key (FIDO2/WebAuthn). "
+                    + "Please enroll a security key before logging in. Contact your security team.",
+                    HttpStatus.FORBIDDEN);
+            } else {
+                log.warn("SECURITY: SUPER_ADMIN userId={} logged in without a WebAuthn hardware key. "
+                    + "Set SUPER_ADMIN_REQUIRE_WEBAUTHN=true after provisioning keys.", user.getId());
+            }
+        }
+
+        // MFA is enforced for SUPER_ADMIN (above) and opt-in for ADMIN
         if (user.isMfaEnabled()) {
             if (request.getMfaCode() == null || request.getMfaCode().isBlank()) {
                 auditService.success(AuthAuditService.EventType.LOGIN_MFA_CHALLENGED, user.getId(), user.getRole(), user.getId(), user.getEmail(), null);
@@ -393,7 +476,7 @@ public class AuthService {
             .token(tokenHash)
             .otp(otp)
             .user(user)
-            .expiresAt(LocalDateTime.now().plusMinutes(otpExpirationMinutes))
+            .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(otpExpirationMinutes))
             .build();
 
         resetTokenRepository.save(resetToken);
@@ -426,7 +509,7 @@ public class AuthService {
         }
         String newHash = passwordEncoder.encode(request.getNewPassword());
         user.setPassword(newHash);
-        user.setLastPasswordChangeAt(java.time.LocalDateTime.now());
+        user.setLastPasswordChangeAt(java.time.LocalDateTime.now(ZoneOffset.UTC));
         userRepository.save(user);
         passwordHistoryService.record(user.getId(), newHash);
 
@@ -474,7 +557,7 @@ public class AuthService {
         }
         String newHash = passwordEncoder.encode(request.getNewPassword());
         user.setPassword(newHash);
-        user.setLastPasswordChangeAt(java.time.LocalDateTime.now());
+        user.setLastPasswordChangeAt(java.time.LocalDateTime.now(ZoneOffset.UTC));
         userRepository.save(user);
         passwordHistoryService.record(user.getId(), newHash);
 
@@ -514,9 +597,17 @@ public class AuthService {
             throw new BusinessException("You cannot reuse a recently used password. Please choose a different one.", HttpStatus.BAD_REQUEST);
         }
 
+        // Breach password check on the new password
+        if (pwnedPasswordService.isPasswordPwned(request.getNewPassword())) {
+            auditService.failure(AuthAuditService.EventType.PASSWORD_CHANGED, userId, user.getRole(), userId, user.getEmail(), "PWNED_PASSWORD");
+            throw new BusinessException(
+                "This password has appeared in a known data breach. Please choose a different password.",
+                HttpStatus.BAD_REQUEST);
+        }
+
         String newHash = passwordEncoder.encode(request.getNewPassword());
         user.setPassword(newHash);
-        user.setLastPasswordChangeAt(java.time.LocalDateTime.now());
+        user.setLastPasswordChangeAt(java.time.LocalDateTime.now(ZoneOffset.UTC));
         userRepository.save(user);
         passwordHistoryService.record(userId, newHash);
 
@@ -939,7 +1030,7 @@ public class AuthService {
         user = userRepository.save(user);
         log.info("Admin registered: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
         passwordHistoryService.record(user.getId(), user.getPassword());
-        user.setLastPasswordChangeAt(java.time.LocalDateTime.now());
+        user.setLastPasswordChangeAt(java.time.LocalDateTime.now(ZoneOffset.UTC));
         userRepository.save(user);
         auditService.success(AuthAuditService.EventType.ADMIN_CREATED,
             currentActorId(), currentActorRole(),
@@ -1254,6 +1345,20 @@ public class AuthService {
             .orElseThrow(() -> new ResourceNotFoundException("User", "id", targetId));
         if (user.getRole() != UserRole.ADMIN) {
             throw new BusinessException("Only ADMIN users can be promoted to SUPER_ADMIN", HttpStatus.BAD_REQUEST);
+        }
+        // Enforce MFA before granting the highest privilege. An account without MFA cannot be
+        // promoted — this prevents a compromised ADMIN account (password-only) from escalating.
+        if (!user.isMfaEnabled()) {
+            throw new BusinessException(
+                "MFA must be enabled before promoting a user to SUPER_ADMIN. Ask the user to enroll TOTP first.",
+                HttpStatus.BAD_REQUEST);
+        }
+        // Warn if WebAuthn not enrolled — log for ops visibility; not a hard block yet
+        // (admins may be promoted before their hardware key arrives). Set
+        // SUPER_ADMIN_REQUIRE_WEBAUTHN=true to make this a hard requirement at login.
+        if (user.getWebauthnEnrolledAt() == null) {
+            log.warn("SECURITY: Promoting user {} to SUPER_ADMIN without a WebAuthn hardware key enrolled. "
+                + "Provision a FIDO2 key and complete enrollment before granting production access.", user.getId());
         }
         user.setRole(UserRole.SUPER_ADMIN);
         user = userRepository.save(user);

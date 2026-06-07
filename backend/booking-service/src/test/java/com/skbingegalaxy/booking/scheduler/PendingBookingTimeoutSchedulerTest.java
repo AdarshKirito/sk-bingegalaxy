@@ -11,6 +11,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -32,7 +33,7 @@ class PendingBookingTimeoutSchedulerTest {
 
         Booking staleBooking = Booking.builder()
             .bookingRef("SKBG25123456")
-            .createdAt(LocalDateTime.now().minusMinutes(45))
+            .createdAt(LocalDateTime.now(ZoneOffset.UTC).minusMinutes(45))
             .build();
         when(bookingRepository.findStalePendingBookings(any())).thenReturn(List.of(staleBooking));
 

@@ -5,6 +5,8 @@ server:
   tomcat:
     max-http-form-post-size: 256KB
     max-swallow-size: 2MB
+    connection-timeout: ${TOMCAT_CONNECTION_TIMEOUT:5000}
+    keep-alive-timeout: ${TOMCAT_KEEP_ALIVE_TIMEOUT:20000}
 
 internal:
   api:
@@ -26,8 +28,9 @@ spring:
       minimum-idle: ${SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE:2}
       idle-timeout: ${SPRING_DATASOURCE_HIKARI_IDLE_TIMEOUT:300000}
       max-lifetime: ${SPRING_DATASOURCE_HIKARI_MAX_LIFETIME:1800000}
-      connection-timeout: ${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT:30000}
-      validation-timeout: ${SPRING_DATASOURCE_HIKARI_VALIDATION_TIMEOUT:5000}
+      connection-timeout: ${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT:5000}
+      validation-timeout: ${SPRING_DATASOURCE_HIKARI_VALIDATION_TIMEOUT:3000}
+      leak-detection-threshold: ${SPRING_DATASOURCE_HIKARI_LEAK_DETECTION_THRESHOLD:60000}
   flyway:
     enabled: ${SPRING_FLYWAY_ENABLED:true}
     baseline-on-migrate: ${SPRING_FLYWAY_BASELINE_ON_MIGRATE:true}
@@ -41,6 +44,7 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         jakarta.persistence.query.timeout: ${JPA_QUERY_TIMEOUT_MS:10000}
+        jdbc.time_zone: UTC
         # ── JDBC batching — collapse N inserts/updates into single round-trips.
         jdbc.batch_size: ${HIBERNATE_JDBC_BATCH_SIZE:50}
         jdbc.batch_versioned_data: true
@@ -83,9 +87,16 @@ app:
     currency: INR
     callback-url: ${PAYMENT_CALLBACK_URL}
     simulation-enabled: ${PAYMENT_SIMULATION_ENABLED:false}
+    settlement-reconciliation-cron: ${SETTLEMENT_RECONCILIATION_CRON:0 0 3 * * *}
+    settlement-reconciliation-zone: ${SETTLEMENT_RECONCILIATION_ZONE:Asia/Kolkata}
   razorpay:
     key-id: ${RAZORPAY_KEY_ID:}
     key-secret: ${RAZORPAY_KEY_SECRET:}
+    # Webhook secret for verifying Razorpay dispute/chargeback webhooks.
+    # Generate in Razorpay Dashboard → Settings → Webhooks → <webhook> → Secret.
+    # REQUIRED for dispute handling to work. Without this, all dispute webhooks
+    # are rejected with 403 to prevent spoofed chargebacks from corrupting state.
+    webhook-secret: ${RAZORPAY_WEBHOOK_SECRET:}
 
 springdoc:
   api-docs:

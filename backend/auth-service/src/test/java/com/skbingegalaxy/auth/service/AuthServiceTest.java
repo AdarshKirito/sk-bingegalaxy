@@ -21,6 +21,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.*;
@@ -42,6 +43,8 @@ class AuthServiceTest {
     @Mock private com.skbingegalaxy.auth.service.PasswordHistoryService passwordHistoryService;
     @Mock private com.skbingegalaxy.auth.service.EmailVerificationService emailVerificationService;
     @Mock private com.skbingegalaxy.auth.service.TotpService totpService;
+    @Mock private com.skbingegalaxy.auth.service.CaptchaValidationService captchaValidationService;
+    @Mock private com.skbingegalaxy.auth.service.PwnedPasswordService pwnedPasswordService;
 
     @InjectMocks private AuthService authService;
 
@@ -64,7 +67,7 @@ class AuthServiceTest {
                 .password("encodedPassword")
                 .role(UserRole.CUSTOMER)
                 .active(true)
-                .createdAt(LocalDateTime.now())
+                .createdAt(LocalDateTime.now(ZoneOffset.UTC))
                 .build();
     }
 
@@ -328,10 +331,11 @@ class AuthServiceTest {
 
     @Test
     void login_fiveWrongPasswords_locksAccount() {
-        testUser.setFailedLoginAttempts(4); // already 4 failed attempts
+        testUser.setFailedLoginAttempts(4); // already 4 failed attempts — above CAPTCHA threshold
         LoginRequest request = LoginRequest.builder()
-                .email("john@example.com").password("WrongPass").build();
+                .email("john@example.com").password("WrongPass").captchaToken("tok").build();
 
+        when(captchaValidationService.validate("tok")).thenReturn(true);
         when(userRepository.findByEmail("john@example.com")).thenReturn(Optional.of(testUser));
         when(passwordEncoder.matches("WrongPass", "encodedPassword")).thenReturn(false);
         // After atomic increment in DB, re-read returns user with count = 5
@@ -349,10 +353,11 @@ class AuthServiceTest {
 
     @Test
     void login_success_resetsFailedAttempts() {
-        testUser.setFailedLoginAttempts(3);
+        testUser.setFailedLoginAttempts(3); // at CAPTCHA threshold — must supply captchaToken
         LoginRequest request = LoginRequest.builder()
-                .email("john@example.com").password("Password@123").build();
+                .email("john@example.com").password("Password@123").captchaToken("tok").build();
 
+        when(captchaValidationService.validate("tok")).thenReturn(true);
         when(userRepository.findByEmail("john@example.com")).thenReturn(Optional.of(testUser));
         when(passwordEncoder.matches("Password@123", "encodedPassword")).thenReturn(true);
         when(jwtProvider.generateToken(testUser)).thenReturn("jwt-token");
@@ -366,7 +371,7 @@ class AuthServiceTest {
 
     @Test
     void login_expiredLockout_allowsLogin() {
-        testUser.setLockedUntil(LocalDateTime.now().minusMinutes(1)); // lockout expired
+        testUser.setLockedUntil(LocalDateTime.now(ZoneOffset.UTC).minusMinutes(1)); // lockout expired
         LoginRequest request = LoginRequest.builder()
                 .email("john@example.com").password("Password@123").build();
 
@@ -397,10 +402,11 @@ class AuthServiceTest {
     @Test
     void adminLogin_wrongPassword_incrementsAndLocks() {
         testUser.setRole(UserRole.ADMIN);
-        testUser.setFailedLoginAttempts(4);
+        testUser.setFailedLoginAttempts(4); // above CAPTCHA threshold — must supply captchaToken
         LoginRequest request = LoginRequest.builder()
-                .email("admin@example.com").password("WrongPass").build();
+                .email("admin@example.com").password("WrongPass").captchaToken("tok").build();
 
+        when(captchaValidationService.validate("tok")).thenReturn(true);
         when(userRepository.findByEmail("admin@example.com")).thenReturn(Optional.of(testUser));
         when(passwordEncoder.matches("WrongPass", "encodedPassword")).thenReturn(false);
         // After atomic increment in DB, re-read returns admin with count = 5
@@ -423,7 +429,7 @@ class AuthServiceTest {
                 .token("valid-token")
                 .otp("123456")
                 .user(testUser)
-                .expiresAt(LocalDateTime.now().plusMinutes(10))
+                .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(10))
                 .build();
 
         VerifyOtpRequest request = new VerifyOtpRequest();
@@ -446,7 +452,7 @@ class AuthServiceTest {
                 .token("valid-token")
                 .otp("123456")
                 .user(testUser)
-                .expiresAt(LocalDateTime.now().plusMinutes(10))
+                .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(10))
                 .build();
 
         VerifyOtpRequest request = new VerifyOtpRequest();
@@ -469,7 +475,7 @@ class AuthServiceTest {
                 .token("valid-token")
                 .otp("123456")
                 .user(testUser)
-                .expiresAt(LocalDateTime.now().plusMinutes(10))
+                .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(10))
                 .build();
         // Set to max attempts
         for (int i = 0; i < 5; i++) resetToken.incrementOtpAttempts();
@@ -505,7 +511,7 @@ class AuthServiceTest {
                 .token("expired-token")
                 .otp("123456")
                 .user(testUser)
-                .expiresAt(LocalDateTime.now().minusMinutes(1))
+                .expiresAt(LocalDateTime.now(ZoneOffset.UTC).minusMinutes(1))
                 .build();
 
         VerifyOtpRequest request = new VerifyOtpRequest();

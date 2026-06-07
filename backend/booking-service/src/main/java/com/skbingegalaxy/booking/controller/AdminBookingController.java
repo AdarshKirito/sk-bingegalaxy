@@ -5,6 +5,7 @@ import com.skbingegalaxy.booking.service.AdminBingeScopeService;
 import com.skbingegalaxy.booking.service.BookingEventLogService;
 import com.skbingegalaxy.booking.service.BookingService;
 import com.skbingegalaxy.booking.service.SystemSettingsService;
+import com.skbingegalaxy.booking.service.VenueClockService;
 import com.skbingegalaxy.common.context.BingeContext;
 import com.skbingegalaxy.common.dto.ApiResponse;
 import com.skbingegalaxy.common.dto.PagedResponse;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.LocalTime;
 import java.util.Set;
 import org.springframework.validation.annotation.Validated;
@@ -42,6 +44,7 @@ public class AdminBookingController {
     private final com.skbingegalaxy.booking.service.SagaOrchestrator sagaOrchestrator;
     private final com.skbingegalaxy.booking.service.PricingService pricingService;
     private final com.skbingegalaxy.booking.service.IdempotencyService idempotencyService;
+    private final VenueClockService venueClock;
 
     private static final int MAX_PAGE_SIZE = 100;
     private static final Set<String> ALLOWED_SORT_FIELDS = Set.of(
@@ -341,13 +344,14 @@ public class AdminBookingController {
                 log.warn("Failed to parse clientTime '{}' for operational-date: {}", clientTime, e.getMessage());
             }
         }
-        if (clientNow == null) clientNow = LocalDateTime.now();
+        if (clientNow == null) clientNow = LocalDateTime.now(ZoneOffset.UTC);
         // Audit is available at or after 23:59 of the operational date (client local time)
-        boolean available = !opDate.isAfter(clientDate != null ? clientDate : LocalDate.now())
+        LocalDate serverToday = venueClock.today(bid);
+        boolean available = !opDate.isAfter(clientDate != null ? clientDate : serverToday)
             && clientNow.isAfter(opDate.atTime(LocalTime.of(23, 59)).minusSeconds(1));
         String reason = null;
         if (!available) {
-            LocalDate refToday = clientDate != null ? clientDate : LocalDate.now();
+            LocalDate refToday = clientDate != null ? clientDate : serverToday;
             if (opDate.isAfter(refToday)) {
                 reason = "Operational date is already ahead of today.";
             } else {
@@ -386,7 +390,7 @@ public class AdminBookingController {
         return ResponseEntity.ok(ApiResponse.ok("Operational date advanced",
             OperationalDateDto.builder()
                 .operationalDate(newOp)
-                .serverDateTime(LocalDateTime.now())
+                .serverDateTime(LocalDateTime.now(ZoneOffset.UTC))
                 .auditAvailable(false)
                 .auditUnavailableReason(null)
                 .build()));
@@ -408,7 +412,7 @@ public class AdminBookingController {
         return ResponseEntity.ok(ApiResponse.ok("Operational date updated",
             OperationalDateDto.builder()
                 .operationalDate(newOp)
-                .serverDateTime(LocalDateTime.now())
+                .serverDateTime(LocalDateTime.now(ZoneOffset.UTC))
                 .auditAvailable(false)
                 .auditUnavailableReason(null)
                 .build()));

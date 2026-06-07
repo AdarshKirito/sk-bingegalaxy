@@ -29,7 +29,7 @@ public class GatewayConfig {
             "Content-Type",
             "X-Binge-Id",
             "X-Requested-With",
-            "X-CSRF-Token",
+            "X-XSRF-TOKEN",
             "Idempotency-Key"));
         config.setAllowCredentials(true);
         config.setMaxAge(3600L);

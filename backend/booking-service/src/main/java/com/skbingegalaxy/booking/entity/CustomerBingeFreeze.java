@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 /**
  * A time-bounded freeze applied to a single (customerId, bingeId) pair that
@@ -75,7 +76,7 @@ public class CustomerBingeFreeze {
 
     @PrePersist
     void prePersist() {
-        if (createdAt == null) createdAt = LocalDateTime.now();
+        if (createdAt == null) createdAt = LocalDateTime.now(ZoneOffset.UTC);
         if (status == null) status = Status.ACTIVE;
     }
 }

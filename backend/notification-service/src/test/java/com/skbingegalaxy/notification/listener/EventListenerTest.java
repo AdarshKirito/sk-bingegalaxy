@@ -8,6 +8,7 @@ import com.skbingegalaxy.notification.dto.NotificationDto;
 import com.skbingegalaxy.notification.repository.BookingReminderRepository;
 import com.skbingegalaxy.notification.repository.NotificationRepository;
 import com.skbingegalaxy.notification.service.ChannelRouter;
+import com.skbingegalaxy.notification.service.EmailRateLimiter;
 import com.skbingegalaxy.notification.service.NotificationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -32,6 +33,7 @@ class EventListenerTest {
     @Mock private NotificationRepository notificationRepository;
     @Mock private BookingReminderRepository bookingReminderRepository;
     @Mock private ChannelRouter channelRouter;
+    @Mock private EmailRateLimiter emailRateLimiter;
     @InjectMocks private EventListener eventListener;
 
     @BeforeEach
@@ -39,6 +41,8 @@ class EventListenerTest {
         // Default: channel router always returns EMAIL (matches existing test expectations)
         lenient().when(channelRouter.resolveChannel(any(), any(), any(), any()))
                 .thenReturn(NotificationChannel.EMAIL);
+        // EventListener gained an EmailRateLimiter dependency; allow sends through by default.
+        lenient().when(emailRateLimiter.tryAcquire(anyLong())).thenReturn(true);
     }
 
     @Test

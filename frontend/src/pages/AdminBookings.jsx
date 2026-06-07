@@ -18,6 +18,7 @@ const TABS = [
   { key: 'all', label: 'All Bookings' },
   { key: 'byDate', label: 'By Date' },
   { key: 'byStatus', label: 'By Status' },
+  { key: 'houseAccounts', label: 'House Accounts' },
 ];
 
 const TODAY_SUB_TABS = [
@@ -43,7 +44,7 @@ const statusBadge = (s) => ({
 const paymentBadge = (s) => ({
   SUCCESS: 'badge-success', PENDING: 'badge-warning', INITIATED: 'badge-warning',
   PARTIALLY_PAID: 'badge-warning', PARTIALLY_REFUNDED: 'badge-info',
-  REFUNDED: 'badge-info', FAILED: 'badge-danger',
+  REFUNDED: 'badge-info', FAILED: 'badge-danger', DISPUTED: 'badge-warning',
 }[s] || 'badge-danger');
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -117,6 +118,7 @@ export default function AdminBookings() {
       case 'upcoming':      req = adminService.getUpcomingBookings(page, PAGE_SIZE); break;
       case 'byDate':        req = adminService.getBookingsByDate(filterDate, page, PAGE_SIZE); break;
       case 'byStatus':      req = adminService.getBookingsByStatus(filterStatus, page, PAGE_SIZE); break;
+      case 'houseAccounts': req = adminService.getHouseAccounts(page, PAGE_SIZE); break;
       default:              req = adminService.getAllBookings(page, PAGE_SIZE); break;
     }
     req.then(res => {
@@ -437,6 +439,7 @@ export default function AdminBookings() {
             {isSearchActive ? `No bookings found for "${search}"` :
              activeTab === 'today' ? `No bookings for operational day (${operationalDate})` :
              activeTab === 'upcoming' ? "No upcoming bookings" :
+             activeTab === 'houseAccounts' ? "No bookings awaiting payment — all accounts are settled" :
              "No bookings found"}
           </p>
         </div>

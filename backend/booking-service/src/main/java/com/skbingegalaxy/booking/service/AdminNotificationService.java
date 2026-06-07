@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 /**
  * In-app notification inbox for ADMIN / SUPER_ADMIN users.
@@ -102,7 +103,7 @@ public class AdminNotificationService {
             throw new ResourceNotFoundException("Notification", "id", id);
         }
         if (n.getReadAt() == null) {
-            n.setReadAt(LocalDateTime.now());
+            n.setReadAt(LocalDateTime.now(ZoneOffset.UTC));
             repository.save(n);
         }
         return toDto(n);
@@ -110,7 +111,7 @@ public class AdminNotificationService {
 
     @Transactional
     public int markAllRead(Long userId, String role) {
-        return repository.markAllReadForUser(userId, role, LocalDateTime.now());
+        return repository.markAllReadForUser(userId, role, LocalDateTime.now(ZoneOffset.UTC));
     }
 
     private AdminNotificationDto toDto(AdminNotification n) {

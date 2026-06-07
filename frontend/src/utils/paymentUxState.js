@@ -1,7 +1,7 @@
 // Derive a richer customer-facing payment UX state from the existing
 // (booking, payment) data shape. The backend's PaymentStatus enum is kept
 // minimal on purpose (PENDING, INITIATED, SUCCESS, FAILED, REFUNDED,
-// PARTIALLY_REFUNDED, PARTIALLY_PAID) — adding "in-flight" enum values
+// PARTIALLY_REFUNDED, PARTIALLY_PAID, DISPUTED) — adding "in-flight" enum values
 // would force DB migrations, break the cross-machine invariant and ripple
 // through ~300 call sites for no real gain. Production gateways (Stripe,
 // Square, Adyen) follow the same pattern: small persistent enum, rich
@@ -18,6 +18,7 @@
 //   SUCCESS                 Fully settled, no balance
 //   REFUNDED                Fully refunded
 //   PARTIALLY_REFUNDED      Partially refunded (no balance due)
+//   DISPUTED                Chargeback / bank dispute raised; funds held pending review
 //   IDLE                    Fresh booking, no payment activity yet
 //
 // `severity` is one of: 'success' | 'info' | 'warning' | 'danger'.
@@ -158,6 +159,20 @@ export function derivePaymentUx({ booking, payment, hasOutstandingBalance }) {
       body: 'A portion of this payment has been refunded. The remaining amount remains captured against this booking.',
       canRetry: false,
       stage: 'closed',
+    };
+  }
+
+  // Chargeback / bank dispute raised (Razorpay dispute.created). The money is
+  // held by the gateway pending resolution — the customer must NOT be invited to
+  // pay again (that's exactly what the IDLE fallback would wrongly do).
+  if (paymentState === 'DISPUTED') {
+    return {
+      kind: 'DISPUTED',
+      severity: 'warning',
+      title: 'A payment dispute is being reviewed',
+      body: 'A chargeback or dispute has been raised with your bank for this payment. The amount is on hold with the payment provider while it is investigated — please do not pay again. We will update this booking once the dispute is resolved. If you raised this in error, contact support.',
+      canRetry: false,
+      stage: 'processing',
     };
   }
 

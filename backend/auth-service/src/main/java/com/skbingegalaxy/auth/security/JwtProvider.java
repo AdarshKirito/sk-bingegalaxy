@@ -39,14 +39,53 @@ public class JwtProvider {
     @Value("${app.jwt.audience:skbingegalaxy-web}")
     private String jwtAudience;
 
+    /**
+     * ISO-8601 date (yyyy-MM-dd) when the current JWT secret was issued.
+     * Used to enforce 90-day rotation policy. Absent = skip age check (useful
+     * in dev/test where secrets are ephemeral).
+     */
+    @Value("${app.jwt.secret-issued-at:}")
+    private String jwtSecretIssuedAt;
+
+    /** Hard-fail if secret is older than this many days (0 = disabled). */
+    @Value("${app.jwt.secret-max-age-days:365}")
+    private int jwtSecretMaxAgeDays;
+
     @PostConstruct
     void validateJwtSecret() {
         if (jwtSecret == null || jwtSecret.isBlank()) {
-            throw new IllegalStateException("app.jwt.secret must be set (env: JWT_SECRET). Cannot start auth-service without a JWT signing key.");
+            throw new IllegalStateException(
+                "app.jwt.secret must be set (env: JWT_SECRET). Cannot start auth-service without a JWT signing key.");
         }
-        byte[] keyBytes = io.jsonwebtoken.io.Decoders.BASE64.decode(jwtSecret);
+        byte[] keyBytes = Decoders.BASE64.decode(jwtSecret);
         if (keyBytes.length < 32) {
-            throw new IllegalStateException("app.jwt.secret must be at least 32 bytes (256 bits) for HMAC-SHA256. Current length: " + keyBytes.length);
+            throw new IllegalStateException(
+                "app.jwt.secret must be at least 32 bytes (256 bits) for HMAC-SHA256. Current length: "
+                + keyBytes.length + " bytes. Generate with: openssl rand -base64 32");
+        }
+
+        // JWT secret rotation policy: warn at 90 days, hard-fail at maxAgeDays (default 365)
+        if (jwtSecretIssuedAt != null && !jwtSecretIssuedAt.isBlank()) {
+            try {
+                java.time.LocalDate issuedAt = java.time.LocalDate.parse(jwtSecretIssuedAt);
+                long ageDays = java.time.temporal.ChronoUnit.DAYS.between(issuedAt, java.time.LocalDate.now(java.time.ZoneOffset.UTC));
+                if (jwtSecretMaxAgeDays > 0 && ageDays > jwtSecretMaxAgeDays) {
+                    throw new IllegalStateException(
+                        "FATAL: JWT secret is " + ageDays + " days old (issued " + jwtSecretIssuedAt
+                        + "). Rotation required every " + jwtSecretMaxAgeDays + " days. "
+                        + "Update JWT_SECRET and JWT_SECRET_ISSUED_AT environment variables.");
+                }
+                if (ageDays > 90) {
+                    // Log at WARN level — operations team should rotate soon
+                    org.slf4j.LoggerFactory.getLogger(JwtProvider.class).warn(
+                        "SECURITY WARNING: JWT secret is {} days old (issued {}). "
+                        + "Rotate within {} days to stay within policy.",
+                        ageDays, jwtSecretIssuedAt, jwtSecretMaxAgeDays - ageDays);
+                }
+            } catch (java.time.format.DateTimeParseException e) {
+                throw new IllegalStateException(
+                    "app.jwt.secret-issued-at must be in yyyy-MM-dd format (got: '" + jwtSecretIssuedAt + "')");
+            }
         }
     }
 
@@ -179,7 +218,7 @@ public class JwtProvider {
     public java.time.LocalDateTime getExpiryFromToken(String token) {
         Date exp = parseToken(token).getExpiration();
         return exp == null ? null
-            : java.time.LocalDateTime.ofInstant(exp.toInstant(), java.time.ZoneId.systemDefault());
+            : java.time.LocalDateTime.ofInstant(exp.toInstant(), java.time.ZoneOffset.UTC);
     }
 
     public String getTokenType(String token) {

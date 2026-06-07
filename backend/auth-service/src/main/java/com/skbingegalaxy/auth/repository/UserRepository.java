@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -53,4 +54,12 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     long countByRole(UserRole role);
     long countByRoleAndActiveTrue(UserRole role);
+
+    /**
+     * Accounts past their data-retention window that still need PII anonymization.
+     * Used by the daily anonymization scheduler.
+     */
+    @Query("SELECT u FROM User u WHERE u.dataRetentionExpiresAt IS NOT NULL " +
+           "AND u.dataRetentionExpiresAt <= :now AND u.anonymizedAt IS NULL")
+    List<User> findPendingAnonymization(@Param("now") LocalDateTime now);
 }

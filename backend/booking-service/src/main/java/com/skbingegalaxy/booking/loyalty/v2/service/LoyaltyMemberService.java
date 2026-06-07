@@ -57,7 +57,7 @@ public class LoyaltyMemberService {
     public MemberProfile getMemberProfile(Long customerId) {
         LoyaltyProgram program = configService.requireDefaultProgram();
         int redemptionRate = configService.resolveDisplayRedemptionRate(
-                program.getId(), LocalDateTime.now());
+                program.getId(), LocalDateTime.now(ZoneOffset.UTC));
 
         LoyaltyMembership m = enrollmentService.findForCustomer(customerId).orElse(null);
         if (m == null) {
@@ -142,7 +142,7 @@ public class LoyaltyMemberService {
         try {
             RedeemEngine.RedeemResult res = redeemEngine.burn(new RedeemEngine.BurnRequest(
                     m.getId(), bingeId, bookingRef, pointsToBurn,
-                    maxDiscount, LocalDateTime.now(), "redeem:" + bookingRef));
+                    maxDiscount, LocalDateTime.now(ZoneOffset.UTC), "redeem:" + bookingRef));
 
             if (!res.accepted()) {
                 log.info("[loyalty-v2] redeem rejected for booking {} — reason={}",
@@ -187,7 +187,7 @@ public class LoyaltyMemberService {
             throw new BusinessException("Insufficient loyalty balance for this adjustment");
         }
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         String desc = description != null ? description : "Admin adjustment";
         String idempotencyKey = "adjust:" + customerId + ":"
                 + now.toEpochSecond(ZoneOffset.UTC) + ":" + points;
@@ -223,7 +223,7 @@ public class LoyaltyMemberService {
                                    long currentQualifyingCredits) {
         try {
             List<LoyaltyTierDefinition> ladder =
-                    configService.activeLadder(programId, LocalDateTime.now());
+                    configService.activeLadder(programId, LocalDateTime.now(ZoneOffset.UTC));
             int idx = -1;
             for (int i = 0; i < ladder.size(); i++) {
                 if (ladder.get(i).getCode().equals(currentTierCode)) { idx = i; break; }

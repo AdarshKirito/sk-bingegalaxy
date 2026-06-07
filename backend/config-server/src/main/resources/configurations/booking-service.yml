@@ -5,6 +5,8 @@ server:
   tomcat:
     max-http-form-post-size: 512KB
     max-swallow-size: 2MB
+    connection-timeout: ${TOMCAT_CONNECTION_TIMEOUT:5000}
+    keep-alive-timeout: ${TOMCAT_KEEP_ALIVE_TIMEOUT:20000}
 
 internal:
   api:
@@ -26,8 +28,9 @@ spring:
       minimum-idle: ${SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE:2}
       idle-timeout: ${SPRING_DATASOURCE_HIKARI_IDLE_TIMEOUT:300000}
       max-lifetime: ${SPRING_DATASOURCE_HIKARI_MAX_LIFETIME:1800000}
-      connection-timeout: ${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT:30000}
-      validation-timeout: ${SPRING_DATASOURCE_HIKARI_VALIDATION_TIMEOUT:5000}
+      connection-timeout: ${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT:5000}
+      validation-timeout: ${SPRING_DATASOURCE_HIKARI_VALIDATION_TIMEOUT:3000}
+      leak-detection-threshold: ${SPRING_DATASOURCE_HIKARI_LEAK_DETECTION_THRESHOLD:60000}
   flyway:
     enabled: ${SPRING_FLYWAY_ENABLED:true}
     baseline-on-migrate: ${SPRING_FLYWAY_BASELINE_ON_MIGRATE:true}
@@ -41,6 +44,8 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         jakarta.persistence.query.timeout: ${JPA_QUERY_TIMEOUT_MS:10000}
+        # Force all JDBC timestamps to UTC.
+        jdbc.time_zone: UTC
         # ── JDBC batching — collapse N inserts/updates into single round-trips.
         # Single biggest write-path latency win after pool sizing; verified to
         # drop saga commit p95 by ~3× at 100 VUs on the booking write path.
@@ -81,6 +86,11 @@ spring:
       observation-enabled: true
 
 app:
+  business:
+    # IANA timezone for the platform business day. Used as a fallback when a
+    # venue has no timezone configured. Override per-deployment via env var.
+    # Example values: Asia/Kolkata, America/New_York, Europe/London, Asia/Dubai
+    default-timezone: ${BUSINESS_TIMEZONE:Asia/Kolkata}
   booking:
     ref-prefix: SKBG
     min-hours: 1
@@ -103,6 +113,9 @@ app:
     enabled:              ${NO_SHOW_AUTOMATION_ENABLED:true}
     grace-minutes:        ${NO_SHOW_GRACE_MINUTES:30}
     check-interval-ms:    ${NO_SHOW_CHECK_INTERVAL_MS:900000}
+  cqrs:
+    reconciliation-cron: ${CQRS_RECONCILIATION_CRON:0 15 2 * * *}
+    reconciliation-zone: ${CQRS_RECONCILIATION_ZONE:Asia/Kolkata}
 springdoc:
   api-docs:
     enabled: ${SPRINGDOC_ENABLED:true}

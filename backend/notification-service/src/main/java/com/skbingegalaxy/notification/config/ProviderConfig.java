@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
 
 @Slf4j
 @Configuration
@@ -24,9 +25,10 @@ public class ProviderConfig {
     }
 
     @Bean
+    @Profile("!production")
     @ConditionalOnProperty(name = "app.sms.provider", havingValue = "mock")
     public SmsProvider mockSmsProvider() {
-        log.info("Registering mock SMS provider");
+        log.warn("Registering MOCK SMS provider — DEV/TEST ONLY, no real SMS will be sent");
         return new MockSmsProvider();
     }
 
@@ -43,9 +45,10 @@ public class ProviderConfig {
     }
 
     @Bean
+    @Profile("!production")
     @ConditionalOnProperty(name = "app.whatsapp.provider", havingValue = "mock")
     public WhatsAppProvider mockWhatsAppProvider() {
-        log.info("Registering mock WhatsApp provider");
+        log.warn("Registering MOCK WhatsApp provider — DEV/TEST ONLY, no real messages will be sent");
         return new MockWhatsAppProvider();
     }
 
@@ -60,9 +63,10 @@ public class ProviderConfig {
     }
 
     @Bean
+    @Profile("!production")
     @ConditionalOnProperty(name = "app.push.provider", havingValue = "mock")
     public PushProvider mockPushProvider() {
-        log.info("Registering mock push provider");
+        log.warn("Registering MOCK push provider — DEV/TEST ONLY, no real push notifications will be sent");
         return new MockPushProvider();
     }
 }

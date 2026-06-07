@@ -159,24 +159,51 @@ public class LoyaltyV2BookingListener {
                     .setScale(0, RoundingMode.FLOOR).longValueExact();
             if (pointsToReverse <= 0) return;
 
+            // The earned points may already have been spent or expired, so the wallet
+            // balance can be < pointsToReverse. A plain debit() would throw
+            // InsufficientPointsException, which the outer catch swallows — silently
+            // letting the member keep ALL points from a reversed booking. Instead claw
+            // back what's actually available and log any shortfall for reconciliation.
+            // (Re-read the wallet: step 1's redeem-refund credit above may have raised the balance.)
+            long available = walletRepository.findByMembershipId(membership.getId())
+                    .map(LoyaltyPointsWallet::getCurrentBalance).orElse(0L);
+            long actualReverse = Math.min(pointsToReverse, Math.max(0L, available));
+            if (actualReverse <= 0) {
+                log.warn("[loyalty-v2] cancel {} — cannot claw back {} earned pts; available balance {} "
+                        + "(already spent/expired). Shortfall {} recorded for reconciliation.",
+                        evt.bookingRef(), pointsToReverse, available, pointsToReverse);
+                tierEngine.recalculateTier(membership.getId(), evt.cancelledAt());
+                return;
+            }
+
             String idempKey = "reverse-earn:booking=" + evt.bookingRef();
             walletService.debit(new PointsWalletService.DebitRequest(
                     membership.getId(),
-                    pointsToReverse,
+                    actualReverse,
                     "REVERSE_EARN",
                     evt.bingeId(),
                     evt.bookingRef(),
                     idempKey,
                     "booking=" + evt.bookingRef(),
                     "CANCELLATION",
-                    "Reversal of earn for cancelled booking " + evt.bookingRef(),
+                    "Reversal of earn for cancelled booking " + evt.bookingRef()
+                            + (actualReverse < pointsToReverse
+                               ? " (partial " + actualReverse + "/" + pointsToReverse + " — rest already spent/expired)"
+                               : ""),
                     null,
                     "SYSTEM"
             ));
 
+            if (actualReverse < pointsToReverse) {
+                log.warn("[loyalty-v2] cancel {} — PARTIAL earn claw-back: reversed {} of {} pts "
+                        + "(available {}); shortfall {} (points already spent/expired).",
+                        evt.bookingRef(), actualReverse, pointsToReverse, available,
+                        pointsToReverse - actualReverse);
+            }
+
             tierEngine.recalculateTier(membership.getId(), evt.cancelledAt());
             log.info("[loyalty-v2] cancel {} → reversed {} pts (of {} earned, {} refund ratio)",
-                    evt.bookingRef(), pointsToReverse, totalEarned, proportion);
+                    evt.bookingRef(), actualReverse, totalEarned, proportion);
         } catch (Exception ex) {
             log.error("[loyalty-v2] cancel listener failed for booking {}: {}",
                     evt.bookingRef(), ex.getMessage(), ex);

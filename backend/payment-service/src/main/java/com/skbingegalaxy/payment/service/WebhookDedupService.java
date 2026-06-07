@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 /**
  * Gateway-callback / webhook dedup.
@@ -68,7 +69,7 @@ public class WebhookDedupService {
                 .eventId(eventId)
                 .provider(PROVIDER_RAZORPAY)
                 .payloadHash(payload == null ? null : sha256(payload))
-                .receivedAt(LocalDateTime.now())
+                .receivedAt(LocalDateTime.now(ZoneOffset.UTC))
                 .build();
             repository.save(row);
         } catch (DataIntegrityViolationException dup) {
@@ -99,7 +100,7 @@ public class WebhookDedupService {
     @SchedulerLock(name = "webhookDedupCleanup", lockAtMostFor = "PT10M", lockAtLeastFor = "PT1M")
     @Transactional
     public void purgeOld() {
-        int removed = repository.deleteAllByReceivedAtBefore(LocalDateTime.now().minusDays(retentionDays));
+        int removed = repository.deleteAllByReceivedAtBefore(LocalDateTime.now(ZoneOffset.UTC).minusDays(retentionDays));
         if (removed > 0) log.info("Purged {} old webhook dedup records (>{} days)", removed, retentionDays);
     }
 

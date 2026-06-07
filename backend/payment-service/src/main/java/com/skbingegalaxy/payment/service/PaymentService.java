@@ -17,6 +17,7 @@ import com.skbingegalaxy.payment.repository.RefundRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,6 +26,7 @@ import org.springframework.beans.factory.annotation.Value;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -48,6 +50,7 @@ public class PaymentService {
     private final RazorpayGatewayClient razorpayGatewayClient;
     private final com.skbingegalaxy.payment.client.BookingAmountClient bookingAmountClient;
     private final com.skbingegalaxy.payment.repository.PaymentStatusHistoryRepository statusHistoryRepository;
+    private final Environment environment;
     private final WebhookDedupService webhookDedupService;
     private final AuditLogService auditLogService;
     private final PaymentMetrics metrics;
@@ -80,10 +83,30 @@ public class PaymentService {
 
     @jakarta.annotation.PostConstruct
     void validateConfig() {
+        boolean isProduction = java.util.Arrays.asList(environment.getActiveProfiles()).contains("production");
+
+        // CRITICAL: simulation MUST be off in production — a stray env var confirms fake payments
+        if (isProduction && paymentSimulationEnabled) {
+            throw new IllegalStateException(
+                "FATAL: PAYMENT_SIMULATION_ENABLED=true is set while the 'production' Spring profile is active. "
+                + "This would accept fake payments and confirm real bookings without capturing money. "
+                + "Set PAYMENT_SIMULATION_ENABLED=false in your production environment.");
+        }
+
         if (!paymentSimulationEnabled && (razorpayKeySecret == null || razorpayKeySecret.isBlank())) {
             throw new IllegalStateException(
                 "RAZORPAY_KEY_SECRET must be set when payment simulation is disabled");
         }
+
+        // Live Razorpay key must start with rzp_live_ in production
+        if (isProduction && razorpayKeyId != null && !razorpayKeyId.isBlank()
+                && !razorpayKeyId.startsWith("rzp_live_")) {
+            throw new IllegalStateException(
+                "FATAL: Production profile is active but Razorpay key_id does not start with 'rzp_live_'. "
+                + "key_id=" + razorpayKeyId.substring(0, Math.min(12, razorpayKeyId.length())) + "... — "
+                + "this looks like a test key. Set the correct live Razorpay credentials.");
+        }
+
         if (paymentSimulationEnabled && razorpayKeyId != null && !razorpayKeyId.isBlank()
                 && !razorpayKeyId.startsWith("rzp_test_")) {
             // Live Razorpay keys alongside simulation = dangerous misconfiguration
@@ -92,6 +115,8 @@ public class PaymentService {
                 + razorpayKeyId.substring(0, Math.min(12, razorpayKeyId.length())) + "...). "
                 + "Set PAYMENT_SIMULATION_ENABLED=false for production or remove the Razorpay keys.");
         }
+
+        log.info("PaymentService config validated: simulation={} production={}", paymentSimulationEnabled, isProduction);
     }
 
     /**
@@ -165,17 +190,56 @@ public class PaymentService {
                     existing.get().getTransactionId(), request.getBookingRef());
             return toPaymentDtoWithRefunds(existing.get());
         }
-        // Guard 3: Validate amount against booking's remaining balance (prevent client-side tampering)
+        // Detect customer-initiated retries: a FAILED payment exists for this booking
+        // but we are creating a new INITIATED attempt. This is the payment retry rate signal.
+        Long retryCheckBingeId = getCurrentBingeId();
+        var priorFailed = retryCheckBingeId != null
+            ? paymentRepository.findFirstByBookingRefAndStatusAndBingeIdOrderByCreatedAtDesc(
+                request.getBookingRef(), PaymentStatus.FAILED, retryCheckBingeId)
+            : paymentRepository.findFirstByBookingRefAndStatusOrderByCreatedAtDesc(
+                request.getBookingRef(), PaymentStatus.FAILED);
+        if (priorFailed.isPresent()) {
+            metrics.paymentRetry();
+        }
+        // Guard 3: Validate amount against booking's remaining balance (prevent client-side tampering).
         BigDecimal remainingBalance = snapshot.remainingBalance();
         if (remainingBalance == null) {
             throw new BusinessException(
                 "Unable to verify booking balance — booking-service unavailable. Please retry.",
                 HttpStatus.SERVICE_UNAVAILABLE);
         }
-        if (request.getAmount().compareTo(remainingBalance) > 0) {
+        // remainingBalance is in the BASE currency (INR). A non-INR payment must (a) match the
+        // currency the booking was FX-locked for, and (b) convert back to an INR-equivalent that
+        // doesn't exceed the INR balance — using the SAME locked rate stored on the booking
+        // (fxRate = foreign units per 1 INR). Validating server-side with the locked rate means a
+        // stale or forged client rate cannot slip an under-payment through.
+        String payCurrency = request.getCurrency() != null && !request.getCurrency().isBlank()
+            ? request.getCurrency().trim().toUpperCase() : "INR";
+        String bookingCurrency = snapshot.paymentCurrencyCode() != null
+            ? snapshot.paymentCurrencyCode().trim().toUpperCase() : "INR";
+        BigDecimal inrEquivalent;
+        if ("INR".equals(payCurrency)) {
+            inrEquivalent = request.getAmount();
+        } else {
+            if (!payCurrency.equals(bookingCurrency)) {
+                throw new BusinessException(
+                    "Payment currency " + payCurrency + " does not match this booking's locked currency "
+                        + bookingCurrency + ". Refresh checkout to lock a new rate.",
+                    HttpStatus.BAD_REQUEST);
+            }
+            BigDecimal fxRate = snapshot.fxRate();
+            if (fxRate == null || fxRate.compareTo(BigDecimal.ZERO) <= 0) {
+                throw new BusinessException(
+                    "No valid FX rate is locked for this booking — please refresh checkout.",
+                    HttpStatus.BAD_REQUEST);
+            }
+            inrEquivalent = request.getAmount().divide(fxRate, 2, java.math.RoundingMode.HALF_UP);
+        }
+        // 1-paisa tolerance absorbs foreign→INR rounding.
+        if (inrEquivalent.subtract(remainingBalance).compareTo(new BigDecimal("0.01")) > 0) {
             throw new BusinessException(
-                String.format("Payment amount ₹%.2f exceeds remaining booking balance ₹%.2f",
-                    request.getAmount(), remainingBalance),
+                String.format("Payment amount %s %s (≈ ₹%.2f) exceeds remaining booking balance ₹%.2f",
+                    request.getAmount(), payCurrency, inrEquivalent, remainingBalance),
                 HttpStatus.BAD_REQUEST);
         }
         String transactionId = "TXN-" + UUID.randomUUID().toString().substring(0, 12).toUpperCase();
@@ -244,7 +308,7 @@ public class PaymentService {
                 PaymentStatus oldStatus = payment.getStatus();
                 payment.setStatus(PaymentStatus.SUCCESS);
                 payment.setGatewayPaymentId(request.getGatewayPaymentId());
-                payment.setPaidAt(LocalDateTime.now());
+                payment.setPaidAt(LocalDateTime.now(ZoneOffset.UTC));
                 payment.setGatewayResponse(buildGatewayResponseSummary(request));
                 payment = paymentRepository.save(payment);
                 recordStatusChange(payment, oldStatus, PaymentStatus.SUCCESS, "Late capture — booking already cancelled");
@@ -258,7 +322,7 @@ public class PaymentService {
                     .gatewayRefundId(gatewayRefundId)
                     .status(PaymentStatus.REFUNDED)
                     .initiatedBy("SYSTEM")
-                    .refundedAt(LocalDateTime.now())
+                    .refundedAt(LocalDateTime.now(ZoneOffset.UTC))
                     .build();
                 refundRepository.save(autoRefund);
                 payment.setStatus(PaymentStatus.REFUNDED);
@@ -283,7 +347,7 @@ public class PaymentService {
         }
 
         // Reject stale callbacks — payment must have been initiated within the last 24 hours
-        if (payment.getCreatedAt() != null && payment.getCreatedAt().isBefore(LocalDateTime.now().minusHours(24))) {
+        if (payment.getCreatedAt() != null && payment.getCreatedAt().isBefore(LocalDateTime.now(ZoneOffset.UTC).minusHours(24))) {
             metrics.webhookStale();
             log.warn("Rejected stale payment callback for gatewayOrderId: {} (created: {})", request.getGatewayOrderId(), payment.getCreatedAt());
             throw new BusinessException("Payment callback expired — payment was initiated more than 24 hours ago", HttpStatus.BAD_REQUEST);
@@ -313,7 +377,7 @@ public class PaymentService {
             PaymentStatus oldStatus = payment.getStatus();
             payment.setStatus(PaymentStatus.SUCCESS);
             payment.setGatewayPaymentId(request.getGatewayPaymentId());
-            payment.setPaidAt(LocalDateTime.now());
+            payment.setPaidAt(LocalDateTime.now(ZoneOffset.UTC));
             log.info("Payment successful: {}", payment.getTransactionId());
             payment.setGatewayResponse(buildGatewayResponseSummary(request));
             payment = paymentRepository.save(payment);
@@ -390,7 +454,7 @@ public class PaymentService {
         // INITIATED or FAILED ? simulate success
         payment.setStatus(PaymentStatus.SUCCESS);
         payment.setGatewayPaymentId("SIM-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
-        payment.setPaidAt(LocalDateTime.now());
+        payment.setPaidAt(LocalDateTime.now(ZoneOffset.UTC));
         payment.setGatewayResponse("Simulated payment success");
         payment = paymentRepository.save(payment);
 
@@ -548,7 +612,7 @@ public class PaymentService {
             .status(PaymentStatus.REFUNDED)
             .refundStatus(com.skbingegalaxy.payment.entity.RefundStatus.SUCCEEDED)
             .initiatedBy(initiatedBy)
-            .refundedAt(LocalDateTime.now())
+            .refundedAt(LocalDateTime.now(ZoneOffset.UTC))
             .build();
 
         refund = refundRepository.save(refund);
@@ -610,7 +674,7 @@ public class PaymentService {
             .paymentMethod(PaymentMethod.CASH)
             .status(PaymentStatus.SUCCESS)
             .currency("INR")
-            .paidAt(LocalDateTime.now())
+            .paidAt(LocalDateTime.now(ZoneOffset.UTC))
             .gatewayResponse("Cash payment recorded by admin: " + adminEmail
                 + (request.getNotes() != null && !request.getNotes().isBlank()
                     ? " | " + request.getNotes() : ""))
@@ -643,7 +707,7 @@ public class PaymentService {
         // Idempotency guard: reject if an identical payment was recorded within the dedup window
         List<Payment> recentDupes = findRecentDuplicatesForCurrentBinge(
             request.getBookingRef(), request.getPaymentMethod(),
-            request.getAmount(), LocalDateTime.now().minusSeconds(dedupWindowSeconds));
+            request.getAmount(), LocalDateTime.now(ZoneOffset.UTC).minusSeconds(dedupWindowSeconds));
         if (!recentDupes.isEmpty()) {
             log.info("Duplicate addPayment detected for booking {} — returning existing payment {}",
                     request.getBookingRef(), recentDupes.get(0).getTransactionId());
@@ -680,7 +744,7 @@ public class PaymentService {
             .paymentMethod(request.getPaymentMethod())
             .status(PaymentStatus.SUCCESS)
             .currency("INR")
-            .paidAt(LocalDateTime.now())
+            .paidAt(LocalDateTime.now(ZoneOffset.UTC))
             .gatewayResponse("Payment recorded by admin: " + adminEmail
                 + (request.getNotes() != null && !request.getNotes().isBlank()
                     ? " | " + request.getNotes() : ""))
@@ -880,7 +944,7 @@ public class PaymentService {
             .retryOfId(original.getId())
             .retryCount(0)
             .initiatedBy(adminEmail)
-            .refundedAt(LocalDateTime.now())
+            .refundedAt(LocalDateTime.now(ZoneOffset.UTC))
             .build();
         retry = refundRepository.save(retry);
 

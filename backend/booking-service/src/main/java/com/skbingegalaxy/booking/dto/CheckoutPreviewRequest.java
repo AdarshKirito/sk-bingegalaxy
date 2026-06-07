@@ -19,6 +19,9 @@ import java.util.List;
 @Builder
 public class CheckoutPreviewRequest {
     private Long bingeId;
+    /** Event type being quoted. Required to resolve the base price; without it the
+     *  quote returns only add-ons + tax (anonymous "add details to see pricing"). */
+    private Long eventTypeId;
     private LocalDate bookingDate;
     private LocalTime startTime;
     private Integer durationMinutes;

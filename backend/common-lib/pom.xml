@@ -59,6 +59,20 @@
             <scope>provided</scope>
         </dependency>
 
+        <!-- Logback — provided by every Spring Boot service via spring-boot-starter-logging -->
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <!-- logstash-logback-encoder — used by all services for JSON logs in kubernetes profile -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>8.0</version>
+            <scope>provided</scope>
+        </dependency>
+
         <!-- Test dependencies -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>

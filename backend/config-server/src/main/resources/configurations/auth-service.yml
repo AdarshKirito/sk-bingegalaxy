@@ -5,6 +5,13 @@ server:
   tomcat:
     max-http-form-post-size: 256KB
     max-swallow-size: 2MB
+    # Slowloris defence: close TCP connections that don't send the first
+    # request byte within 5 s. Tomcat's default is 60 s — long enough for
+    # a botnet to exhaust the thread pool without ever completing a request.
+    connection-timeout: ${TOMCAT_CONNECTION_TIMEOUT:5000}
+    # Keep-alive timeout: close idle persistent connections after 20 s so
+    # slow clients don't hold Tomcat threads indefinitely.
+    keep-alive-timeout: ${TOMCAT_KEEP_ALIVE_TIMEOUT:20000}
 
 internal:
   api:
@@ -33,8 +40,15 @@ spring:
       minimum-idle: ${SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE:2}
       idle-timeout: ${SPRING_DATASOURCE_HIKARI_IDLE_TIMEOUT:300000}
       max-lifetime: ${SPRING_DATASOURCE_HIKARI_MAX_LIFETIME:1800000}
-      connection-timeout: ${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT:30000}
-      validation-timeout: ${SPRING_DATASOURCE_HIKARI_VALIDATION_TIMEOUT:5000}
+      # Fail fast (5 s) under pool exhaustion instead of queuing for 30 s.
+      # Under load, 30 s queue depth compounds: every waiting thread holds a
+      # Tomcat thread, starving new requests before the DB is even a bottleneck.
+      connection-timeout: ${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT:5000}
+      validation-timeout: ${SPRING_DATASOURCE_HIKARI_VALIDATION_TIMEOUT:3000}
+      # Detect connections held by application code for > 60 s (likely a leaked
+      # connection from a code path that never calls close()). Logs a WARN with
+      # the stack trace so the culprit is immediately identifiable.
+      leak-detection-threshold: ${SPRING_DATASOURCE_HIKARI_LEAK_DETECTION_THRESHOLD:60000}
   flyway:
     enabled: ${SPRING_FLYWAY_ENABLED:true}
     baseline-on-migrate: ${SPRING_FLYWAY_BASELINE_ON_MIGRATE:true}
@@ -49,6 +63,9 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
         jakarta.persistence.query.timeout: ${JPA_QUERY_TIMEOUT_MS:10000}
+        # Force all JDBC timestamps to UTC — prevents silent timezone skew between
+        # JVM local time and DB storage that causes "booked Saturday, shows Friday" bugs.
+        jdbc.time_zone: UTC
         # ── JDBC batching — collapse N inserts/updates into single round-trips.
         jdbc.batch_size: ${HIBERNATE_JDBC_BATCH_SIZE:50}
         jdbc.batch_versioned_data: true
@@ -81,6 +98,11 @@ app:
     # iss/aud are stamped on every new token and enforced on parse when present.
     issuer: ${JWT_ISSUER:skbingegalaxy-auth}
     audience: ${JWT_AUDIENCE:skbingegalaxy-web}
+    # Rotation policy: set JWT_SECRET_ISSUED_AT to the date the current secret was generated.
+    # WARN fires at 90 days; FATAL fails startup at secret-max-age-days (default 365).
+    # Omit JWT_SECRET_ISSUED_AT in dev/test to skip the age check.
+    secret-issued-at: ${JWT_SECRET_ISSUED_AT:}
+    secret-max-age-days: ${JWT_SECRET_MAX_AGE_DAYS:365}
   cookie:
     secure: ${COOKIE_SECURE:true}
     domain: ${COOKIE_DOMAIN:}
@@ -91,6 +113,12 @@ app:
     phone: ${ADMIN_PHONE:9876543210}
   google:
     client-id: ${GOOGLE_CLIENT_ID}
+  recaptcha:
+    # Google reCAPTCHA v3 secret key. Must be set in production.
+    # In dev/test, the StubCaptchaValidationService bypasses this.
+    secret-key: ${RECAPTCHA_SECRET_KEY:changeme-dev-only-stub-is-used}
+    # v3 score threshold: 0.0 (bot) to 1.0 (human). Default 0.5.
+    score-threshold: ${RECAPTCHA_SCORE_THRESHOLD:0.5}
   otp:
     expiration-minutes: 10
     length: 8
@@ -98,6 +126,15 @@ app:
     enabled: ${CELEBRATION_REMINDERS_ENABLED:true}
     cron: ${CELEBRATION_REMINDER_CRON:0 0 9 * * *}
     zone: ${CELEBRATION_REMINDER_ZONE:Asia/Kolkata}
+  privacy:
+    data-retention-days: ${PRIVACY_DATA_RETENTION_DAYS:30}
+    anonymization-cron: ${PRIVACY_ANONYMIZATION_CRON:0 30 2 * * *}
+    anonymization-zone: ${PRIVACY_ANONYMIZATION_ZONE:Asia/Kolkata}
+  security:
+    # Reject passwords that appear in known data breach lists (HaveIBeenPwned k-anonymity API).
+    # Disabled in dev/test (false default); must be true in production. Degrades gracefully
+    # on HIBP API timeout — a network error never blocks registration.
+    check-pwned-passwords: ${CHECK_PWNED_PASSWORDS:false}
 
 springdoc:
   api-docs:

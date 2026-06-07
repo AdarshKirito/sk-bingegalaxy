@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -81,7 +82,7 @@ public class BookingNoteService {
         if (!n.getAuthorAdminId().equals(adminId)) {
             throw new BusinessException("Only the note's author can edit it");
         }
-        Duration age = Duration.between(n.getCreatedAt(), LocalDateTime.now());
+        Duration age = Duration.between(n.getCreatedAt(), LocalDateTime.now(ZoneOffset.UTC));
         if (age.toMinutes() > BookingNote.EDIT_WINDOW_MINUTES) {
             throw new BusinessException("Edit window of " + BookingNote.EDIT_WINDOW_MINUTES
                 + " minutes has passed; please add a new note instead");

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useBinge } from '../context/BingeContext';
+import { useFormatMoney } from '../context/CurrencyContext';
 import { authService, bookingService, toArray } from '../services/endpoints';
 import { formatTime12h } from '../utils/format';
 import {
@@ -195,7 +196,11 @@ export default function MyBookings() {
     PARTIALLY_REFUNDED: 'Partially Refunded',
   }[paymentStatus] || paymentStatus || 'PENDING');
 
-  const formatAmount = (amount) => `₹${Number(amount || 0).toLocaleString()}`;
+  // Informational amounts (booking totals, spend stats) render in the customer's
+  // selected display currency. The "Pay Balance" CTA uses formatINR so it always shows
+  // the exact base-INR charge the customer will be billed, never a converted value.
+  const formatAmount = useFormatMoney();
+  const formatINR = (amount) => `₹${Number(amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const formatDuration = (booking) => {
     const totalMinutes = booking.durationMinutes || ((booking.durationHours || 0) * 60);
     if (!totalMinutes) return 'Flexible duration';
@@ -447,7 +452,7 @@ export default function MyBookings() {
                 <Link to={`/booking/${nextBooking.bookingRef}`} className="btn btn-primary btn-sm">View Booking</Link>
                 {(nextBooking.paymentStatus !== 'SUCCESS' || (nextBooking.balanceDue > 0.01)) && (
                   <Link to={`/payment/${nextBooking.bookingRef}`} className="btn btn-secondary btn-sm">
-                    {nextBooking.balanceDue > 0.01 ? `Pay Balance ${formatAmount(nextBooking.balanceDue)}` : 'Pay Pending Balance'}
+                    {nextBooking.balanceDue > 0.01 ? `Pay Balance ${formatINR(nextBooking.balanceDue)}` : 'Pay Pending Balance'}
                   </Link>
                 )}
               </div>
@@ -827,7 +832,7 @@ export default function MyBookings() {
                   )}
                   {(booking.paymentStatus !== 'SUCCESS' || (booking.balanceDue > 0.01)) && booking.status !== 'CANCELLED' && booking.status !== 'COMPLETED' && (
                     <Link to={`/payment/${booking.bookingRef}`} className="btn btn-primary btn-sm">
-                      {booking.balanceDue > 0.01 ? `Pay Balance ${formatAmount(booking.balanceDue)}` : 'Pay Pending Balance'}
+                      {booking.balanceDue > 0.01 ? `Pay Balance ${formatINR(booking.balanceDue)}` : 'Pay Pending Balance'}
                     </Link>
                   )}
                   {(booking.eventType?.id || booking.eventTypeId) && (

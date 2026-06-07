@@ -32,8 +32,10 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.LocalTime;
 import java.time.Year;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
@@ -80,6 +82,8 @@ public class BookingService {
     private final BookingAnalyticsMetrics analyticsMetrics;                 // Item 27 — funnel/lifecycle counters
     private final BookingStateMachine stateMachine;                         // Centralized status-transition engine
     private final TaxService taxService;                                    // Tax computation at booking creation time
+    private final FxLockService fxLockService;                              // FX rate lock validation at booking creation
+    private final VenueClockService venueClock;                             // Venue-aware timezone resolution
 
     @Value("${internal.api.secret}")
     private String internalApiSecret;
@@ -158,7 +162,7 @@ public class BookingService {
         }
 
         // Anti-abuse: cooldown after auto-cancelled (timed-out) bookings — also per binge.
-        LocalDateTime cooldownSince = LocalDateTime.now().minusMinutes(cooldownMinutesAfterTimeout);
+        LocalDateTime cooldownSince = LocalDateTime.now(ZoneOffset.UTC).minusMinutes(cooldownMinutesAfterTimeout);
         long recentTimeouts = bookingRepository.countRecentTimeoutCancellationsByBinge(customerId, bingeId, cooldownSince);
         if (recentTimeouts >= 2) {
             throw new BusinessException(
@@ -169,14 +173,16 @@ public class BookingService {
         customerFreezeService.assertNotFrozen(customerId, bingeId);
         EventType eventType = findBookableEventType(request.getEventTypeId());
 
-        // Reject bookings in the past
-        if (request.getBookingDate().isBefore(LocalDate.now())) {
+        // Reject bookings in the past — use the venue's configured timezone so the
+        // business-day boundary is correct for any country the venue operates in.
+        ZoneId bizZone = venueClock.zoneOf(bingeId);
+        if (request.getBookingDate().isBefore(LocalDate.now(bizZone))) {
             throw new BusinessException("Booking date cannot be in the past");
         }
         // Reject bookings absurdly far in the future. Production rule: customers may only
         // book within the published rolling window (default 365 days). Prevents "slot
         // squatting", schedule poisoning and pricing-rule drift on far-future dates.
-        LocalDate maxBookingDate = LocalDate.now().plusDays(maxBookingHorizonDays);
+        LocalDate maxBookingDate = LocalDate.now(bizZone).plusDays(maxBookingHorizonDays);
         if (request.getBookingDate().isAfter(maxBookingDate)) {
             throw new BusinessException(
                 "Bookings can only be made up to " + maxBookingHorizonDays + " days in advance.");
@@ -367,6 +373,27 @@ public class BookingService {
         }
         String taxBreakdown = taxResult.getBreakdownJson();
 
+        // ── FX rate lock validation ────────────────────────────────────────────
+        // If the customer obtained a rate lock at checkout, consume it now (atomic
+        // validate + mark CONSUMED). consumeLock() throws BusinessException if the
+        // lock has expired or was already consumed, preventing the booking from being
+        // committed at a stale rate. Domestic INR customers don't supply a token.
+        LocalDateTime fxLockedUntil = null;
+        String paymentCurrencyCode = null;
+        BigDecimal lockedFxRate = null;
+        if (request.getFxLockToken() != null && !request.getFxLockToken().isBlank()) {
+            com.skbingegalaxy.booking.entity.FxRateLock fxLock =
+                fxLockService.consumeLock(request.getFxLockToken());
+            fxLockedUntil = fxLock.getLockedUntil();
+            // Record WHICH currency and rate were locked so the payment path can
+            // validate a foreign-currency charge against the same rate (the booking
+            // total stays in base/INR; fxRate = foreign units per 1 INR).
+            paymentCurrencyCode = fxLock.getToCurrency();
+            lockedFxRate = fxLock.getFxRate();
+            log.info("FX lock consumed for booking {} — rate={} currency={} lockedUntil={}",
+                bookingRef, lockedFxRate, paymentCurrencyCode, fxLockedUntil);
+        }
+
         Booking booking = Booking.builder()
             .bookingRef(bookingRef)
             .bingeId(bingeId)
@@ -398,6 +425,9 @@ public class BookingService {
             .surgeLabel(surgeLabel)
             .loyaltyPointsRedeemed(loyaltyPointsRedeemed)
             .loyaltyDiscountAmount(loyaltyDiscountAmount)
+            .fxLockedUntil(fxLockedUntil)
+            .paymentCurrencyCode(paymentCurrencyCode)
+            .fxRate(lockedFxRate != null ? lockedFxRate : BigDecimal.ONE)
             .status(BookingStatus.PENDING)
             .paymentStatus(PaymentStatus.PENDING)
             .build();
@@ -485,8 +515,8 @@ public class BookingService {
 
     @Transactional(readOnly = true)
     public List<BookingDto> getCustomerCurrentBookings(Long customerId, LocalDate clientToday) {
-        LocalDate today = clientToday != null ? clientToday : LocalDate.now();
         Long bid = BingeContext.getBingeId();
+        LocalDate today = clientToday != null ? clientToday : venueClock.today(bid);
         List<Booking> list = bid != null
             ? bookingRepository.findCustomerCurrentBookingsByBinge(bid, customerId, today)
             : bookingRepository.findCustomerCurrentBookings(customerId, today);
@@ -495,8 +525,8 @@ public class BookingService {
 
     @Transactional(readOnly = true)
     public List<BookingDto> getCustomerPastBookings(Long customerId, LocalDate clientToday) {
-        LocalDate today = clientToday != null ? clientToday : LocalDate.now();
         Long bid = BingeContext.getBingeId();
+        LocalDate today = clientToday != null ? clientToday : venueClock.today(bid);
         List<Booking> list = bid != null
             ? bookingRepository.findCustomerPastBookingsByBinge(bid, customerId, today)
             : bookingRepository.findCustomerPastBookings(customerId, today);
@@ -618,8 +648,9 @@ public class BookingService {
                         adminActorFromContext(), /*reason*/ null);
                 }
                 booking.setCheckedIn(true);
+                ZoneId venueZone = venueClock.zoneOf(booking.getBingeId());
                 if (booking.getActualCheckInTime() == null) {
-                    booking.setActualCheckInTime(LocalDateTime.now());
+                    booking.setActualCheckInTime(LocalDateTime.now(venueZone));
                 }
                 // Late-arrival flag — set when the operational check-in time is
                 // after the scheduled start. Both QR/OTP and manual admin
@@ -627,7 +658,7 @@ public class BookingService {
                 // consistently regardless of channel.
                 LocalDateTime scheduledStart = LocalDateTime.of(
                     booking.getBookingDate(), booking.getStartTime());
-                if (LocalDateTime.now().isAfter(scheduledStart) && !booking.isLateArrival()) {
+                if (LocalDateTime.now(venueZone).isAfter(scheduledStart) && !booking.isLateArrival()) {
                     booking.setLateArrival(true);
                 }
                 // Emit booking.checked-in only on the transition (avoid double
@@ -1062,9 +1093,12 @@ public class BookingService {
                     + " times. Please cancel and create a new booking instead.");
         }
 
-        // Cutoff check: must be at least N hours before existing booking start
+        // Cutoff check: must be at least N hours before existing booking start.
+        // bookingDate/startTime are venue-local values — compare against venue-local "now"
+        // so the window is correct regardless of server or JVM timezone.
+        ZoneId rescheduleVenueZone = venueClock.zoneOf(booking.getBingeId());
         LocalDateTime eventStart = LocalDateTime.of(booking.getBookingDate(), booking.getStartTime());
-        long hoursUntilStart = java.time.temporal.ChronoUnit.HOURS.between(LocalDateTime.now(), eventStart);
+        long hoursUntilStart = java.time.temporal.ChronoUnit.HOURS.between(LocalDateTime.now(rescheduleVenueZone), eventStart);
         if (hoursUntilStart < rescheduleCutoffHours) {
             throw new BusinessException(
                 "Rescheduling requires at least " + rescheduleCutoffHours
@@ -1072,7 +1106,7 @@ public class BookingService {
         }
 
         // New date must be in the future
-        if (request.getNewBookingDate().isBefore(LocalDate.now())) {
+        if (request.getNewBookingDate().isBefore(venueClock.today(booking.getBingeId()))) {
             throw new BusinessException("New booking date must be today or later");
         }
 
@@ -1257,9 +1291,11 @@ public class BookingService {
             throw new BusinessException("Cannot transfer a booking to yourself");
         }
 
-        // Cutoff check: must be at least N hours before start
+        // Cutoff check: must be at least N hours before start.
+        // bookingDate/startTime are venue-local values — compare against venue-local "now".
+        ZoneId transferVenueZone = venueClock.zoneOf(booking.getBingeId());
         LocalDateTime eventStart = LocalDateTime.of(booking.getBookingDate(), booking.getStartTime());
-        long hoursUntilStart = java.time.temporal.ChronoUnit.HOURS.between(LocalDateTime.now(), eventStart);
+        long hoursUntilStart = java.time.temporal.ChronoUnit.HOURS.between(LocalDateTime.now(transferVenueZone), eventStart);
         if (hoursUntilStart < transferCutoffHours) {
             throw new BusinessException(
                 "Transfers require at least " + transferCutoffHours + " hours notice before the booking start time.");
@@ -1313,7 +1349,7 @@ public class BookingService {
             throw new BusinessException(
                 "You already have " + pendingCount + " pending booking(s). Please complete or cancel them before creating new ones.");
         }
-        LocalDateTime cooldownSince = LocalDateTime.now().minusMinutes(cooldownMinutesAfterTimeout);
+        LocalDateTime cooldownSince = LocalDateTime.now(ZoneOffset.UTC).minusMinutes(cooldownMinutesAfterTimeout);
         long recentTimeouts = bookingRepository.countRecentTimeoutCancellations(customerId, cooldownSince);
         if (recentTimeouts >= 2) {
             throw new BusinessException(
@@ -1344,7 +1380,7 @@ public class BookingService {
             LocalDate date = calculateRecurrenceDate(request.getStartDate(), request.getPattern(), i);
 
             // Skip dates in the past
-            if (date.isBefore(LocalDate.now())) {
+            if (date.isBefore(venueClock.today(bingeId))) {
                 skipped.add(RecurringBookingResult.SkippedOccurrence.builder()
                     .date(date).reason("Date is in the past").build());
                 continue;
@@ -1555,8 +1591,8 @@ public class BookingService {
 
     @Transactional(readOnly = true)
     public List<BookingDto> getPendingCustomerReviews(Long customerId, LocalDate clientToday) {
-        LocalDate today = clientToday != null ? clientToday : LocalDate.now();
         Long bid = BingeContext.getBingeId();
+        LocalDate today = clientToday != null ? clientToday : venueClock.today(bid);
 
         List<Booking> completed = (bid != null
             ? bookingRepository.findCustomerPastBookingsByBinge(bid, customerId, today)
@@ -1861,7 +1897,7 @@ public class BookingService {
                 saved.getTotalAmount(),
                 refundAmt,
                 description,
-                LocalDateTime.now()
+                LocalDateTime.now(ZoneOffset.UTC)
         ));
 
         // Reverse collectedAmount for cancellations where money was already collected
@@ -1983,10 +2019,9 @@ public class BookingService {
     @Transactional
     public AuditResultDto runAudit(LocalDate clientToday, LocalDateTime clientNow) {
         // Use client's date/time as reference so UTC-offset servers don't break IST admins
-        LocalDate refToday = clientToday != null ? clientToday : LocalDate.now();
-        LocalDateTime refNow  = clientNow  != null ? clientNow  : LocalDateTime.now();
-
         Long bid = BingeContext.getBingeId();
+        LocalDate refToday = clientToday != null ? clientToday : venueClock.today(bid);
+        LocalDateTime refNow  = clientNow  != null ? clientNow  : LocalDateTime.now(ZoneOffset.UTC);
         LocalDate operationalDate = systemSettingsService.getOperationalDate(bid, refToday);
 
         // Guard: operational date must not be ahead of client's today
@@ -2065,7 +2100,8 @@ public class BookingService {
 
     // â”€â”€ Reports â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public ReportDto getReport(String period, LocalDate clientToday) {
-        LocalDate today = clientToday != null ? clientToday : LocalDate.now();
+        Long bid = BingeContext.getBingeId();
+        LocalDate today = clientToday != null ? clientToday : venueClock.today(bid);
         LocalDate from;
         switch (period.toUpperCase()) {
             case "WEEK":
@@ -2081,7 +2117,6 @@ public class BookingService {
                 from = today;
                 break;
         }
-        Long bid = BingeContext.getBingeId();
         return ReportDto.builder()
             .fromDate(from)
             .toDate(today)
@@ -2100,12 +2135,12 @@ public class BookingService {
 
     // â”€â”€ Reports: custom date range â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public ReportDto getReportByDateRange(LocalDate from, LocalDate to, LocalDate clientToday) {
-        LocalDate refToday = clientToday != null ? clientToday : LocalDate.now();
+        Long bid = BingeContext.getBingeId();
+        LocalDate refToday = clientToday != null ? clientToday : venueClock.today(bid);
         if (to.isAfter(refToday)) to = refToday;
         if (from.isAfter(to)) from = to;
         LocalDate finalFrom = from;
         LocalDate finalTo = to;
-        Long bid = BingeContext.getBingeId();
         return ReportDto.builder()
             .fromDate(finalFrom)
             .toDate(finalTo)
@@ -2228,7 +2263,7 @@ public class BookingService {
 
         int liveHoldOverlap = 0;
         try {
-            java.time.LocalDateTime now = java.time.LocalDateTime.now();
+            java.time.LocalDateTime now = java.time.LocalDateTime.now(ZoneOffset.UTC);
             int newEnd = startMinute + durationMinutes;
             for (com.skbingegalaxy.booking.entity.SlotHold h :
                     slotHoldRepository.findLiveHoldsByBingeAndDate(bingeId, date, now)) {
@@ -2432,7 +2467,8 @@ public class BookingService {
         TaxContext.TaxContextBuilder b = TaxContext.builder()
             .bingeId(bingeId)
             .customerType("B2C")
-            .productType("BOOKING");
+            .productType("BOOKING")
+            .venueZone(venueClock.zoneOf(bingeId));
         if (bingeId != null) {
             bingeRepository.findById(bingeId).ifPresent(binge -> {
                 b.venueCountryCode(binge.getCountry())
@@ -2487,7 +2523,7 @@ public class BookingService {
                 booking.getBingeId(),
                 null,                                                       // tenantId — multi-tenant is future
                 payableAmount,
-                LocalDateTime.now()
+                LocalDateTime.now(ZoneOffset.UTC)
             ));
         } catch (Exception e) {
             log.error("Failed to publish loyalty earn event for booking {}: {}",
@@ -2634,7 +2670,7 @@ public class BookingService {
                 + " before checkout. Use \"Adjust Prices\" or the Payment tab to reconcile.");
         }
 
-        LocalDateTime now = clientNow != null ? clientNow : LocalDateTime.now();
+        LocalDateTime now = clientNow != null ? clientNow : LocalDateTime.now(ZoneOffset.UTC);
         // Use actual check-in time when available — otherwise fall back to scheduled start.
         LocalDateTime sessionStart = booking.getActualCheckInTime() != null
             ? booking.getActualCheckInTime()
@@ -3141,7 +3177,7 @@ public class BookingService {
         // sweep on subsequent ticks of BingeGracePeriodScheduler.
         bingeRepository.findById(bid).ifPresent(b -> {
             if (b.getFirstEventCreatedAt() == null) {
-                b.setFirstEventCreatedAt(java.time.LocalDateTime.now());
+                b.setFirstEventCreatedAt(java.time.LocalDateTime.now(ZoneOffset.UTC));
                 bingeRepository.save(b);
                 log.info("Binge {} marked operational (first event '{}' created)", bid, et.getName());
             }
@@ -3208,10 +3244,13 @@ public class BookingService {
                                           java.time.LocalDateTime bookingStart,
                                           Long excludeBookingId) {
         if (addOn == null) return;
-        // Advance-notice check
+        // Advance-notice check. bookingStart is venue-local, so compare against
+        // venue-local "now" (not UTC) or the notice window is off by the venue offset.
         Integer notice = addOn.getAdvanceNoticeMinutes();
         if (notice != null && notice > 0 && bookingStart != null) {
-            long minutesUntilStart = java.time.Duration.between(java.time.LocalDateTime.now(), bookingStart).toMinutes();
+            java.time.ZoneId addOnVenueZone = venueClock.zoneOf(BingeContext.getBingeId());
+            long minutesUntilStart = java.time.Duration.between(
+                java.time.LocalDateTime.now(addOnVenueZone), bookingStart).toMinutes();
             if (minutesUntilStart < notice) {
                 throw new BusinessException("Add-on '" + addOn.getName() + "' requires at least "
                     + notice + " minutes advance notice before the booking start time");
@@ -3668,7 +3707,7 @@ public class BookingService {
             .status(autoApprove ? com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED
                                 : com.skbingegalaxy.booking.entity.RoomApprovalStatus.PENDING_APPROVAL)
             .approvalDecidedBy(autoApprove ? actorAdminId : null)
-            .approvalDecidedAt(autoApprove ? java.time.LocalDateTime.now() : null)
+            .approvalDecidedAt(autoApprove ? java.time.LocalDateTime.now(ZoneOffset.UTC) : null)
             .build();
         room = venueRoomRepository.save(room);
         log.info("Venue room created: {} (status={})", room.getName(), room.getStatus());
@@ -3706,7 +3745,7 @@ public class BookingService {
             .orElseThrow(() -> new ResourceNotFoundException("VenueRoom", "id", id));
         room.setStatus(com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED);
         room.setApprovalDecidedBy(actorAdminId);
-        room.setApprovalDecidedAt(java.time.LocalDateTime.now());
+        room.setApprovalDecidedAt(java.time.LocalDateTime.now(ZoneOffset.UTC));
         room.setApprovalRejectionReason(null);
         room = venueRoomRepository.save(room);
         log.info("Venue room approved: {} by admin {}", room.getName(), actorAdminId);
@@ -3722,7 +3761,7 @@ public class BookingService {
             .orElseThrow(() -> new ResourceNotFoundException("VenueRoom", "id", id));
         room.setStatus(com.skbingegalaxy.booking.entity.RoomApprovalStatus.REJECTED);
         room.setApprovalDecidedBy(actorAdminId);
-        room.setApprovalDecidedAt(java.time.LocalDateTime.now());
+        room.setApprovalDecidedAt(java.time.LocalDateTime.now(ZoneOffset.UTC));
         room.setApprovalRejectionReason(reason);
         room = venueRoomRepository.save(room);
         log.info("Venue room rejected: {} by admin {} ({})", room.getName(), actorAdminId, reason);
@@ -4014,7 +4053,7 @@ public class BookingService {
         b.setGoodwillReason(reason != null && reason.length() > 500
             ? reason.substring(0, 500) : reason);
         b.setGoodwillIssuedByAdminId(adminId);
-        b.setGoodwillIssuedAt(java.time.LocalDateTime.now());
+        b.setGoodwillIssuedAt(java.time.LocalDateTime.now(ZoneOffset.UTC));
         Booking saved = bookingRepository.save(b);
         eventLogService.logEvent(saved, BookingEventType.GOODWILL_ISSUED,
             saved.getStatus().name(), adminId, "ADMIN",
@@ -4037,7 +4076,7 @@ public class BookingService {
             .customerEmail(b.getCustomerEmail())
             .customerPhone(b.getCustomerPhone())
             .customerPhoneCountryCode(b.getCustomerPhoneCountryCode())
-            .eventTypeName(b.getEventType().getName())
+            .eventTypeName(b.getEventType() != null ? b.getEventType().getName() : null)
             .bookingDate(b.getBookingDate())
             .startTime(b.getStartTime())
             .durationHours(b.getDurationHours())
@@ -4144,6 +4183,8 @@ public class BookingService {
             .surgeLabel(b.getSurgeLabel())
             .subtotalAmount(b.getSubtotalAmount())
             .taxAmount(b.getTaxAmount())
+            .paymentCurrencyCode(b.getPaymentCurrencyCode())
+            .fxRate(b.getFxRate())
             .createdAt(b.getCreatedAt())
             .updatedAt(b.getUpdatedAt())
             .build();
@@ -4152,16 +4193,18 @@ public class BookingService {
     private boolean canCustomerReschedule(Booking b) {
         if (b.getStatus() != BookingStatus.PENDING && b.getStatus() != BookingStatus.CONFIRMED) return false;
         if (b.getRescheduleCount() >= maxReschedulesPerBooking) return false;
+        ZoneId zone = venueClock.zoneOf(b.getBingeId());
         LocalDateTime eventStart = LocalDateTime.of(b.getBookingDate(), b.getStartTime());
-        long hoursUntilStart = java.time.temporal.ChronoUnit.HOURS.between(LocalDateTime.now(), eventStart);
+        long hoursUntilStart = java.time.temporal.ChronoUnit.HOURS.between(LocalDateTime.now(zone), eventStart);
         return hoursUntilStart >= rescheduleCutoffHours;
     }
 
     private boolean canCustomerTransfer(Booking b) {
         if (b.getStatus() != BookingStatus.PENDING && b.getStatus() != BookingStatus.CONFIRMED) return false;
         if (b.isTransferred()) return false;
+        ZoneId zone = venueClock.zoneOf(b.getBingeId());
         LocalDateTime eventStart = LocalDateTime.of(b.getBookingDate(), b.getStartTime());
-        long hoursUntilStart = java.time.temporal.ChronoUnit.HOURS.between(LocalDateTime.now(), eventStart);
+        long hoursUntilStart = java.time.temporal.ChronoUnit.HOURS.between(LocalDateTime.now(zone), eventStart);
         return hoursUntilStart >= transferCutoffHours;
     }
 
@@ -4182,8 +4225,14 @@ public class BookingService {
         // of any tiered refund schedule that would otherwise apply.
         boolean refundsAllowed = isRefundAllowedForPaymentStatus(binge, booking.getPaymentStatus());
 
+        // bookingDate/startTime are venue-local values, so "now" must be venue-local too —
+        // matching the reschedule/transfer cutoff checks. Using UTC here overstated
+        // hoursUntilStart by the venue's offset (e.g. +5.5h for IST), handing customers a more
+        // generous refund tier than the policy allows and permitting cancellations inside the
+        // cutoff window.
+        ZoneId cancelVenueZone = venueClock.zoneOf(booking.getBingeId());
         LocalDateTime eventStart = LocalDateTime.of(booking.getBookingDate(), booking.getStartTime());
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(cancelVenueZone);
         long hoursUntilStart = ChronoUnit.HOURS.between(now, eventStart);
 
         // Check for tiered cancellation policy

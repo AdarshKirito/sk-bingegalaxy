@@ -62,6 +62,16 @@ spec:
           ports:
             - containerPort: 9411
               name: http
+          env:
+            # Cap in-memory span count. At 233 req/s production throughput each
+            # request generates ≈2-4 spans. 500 000 spans ≈ 15-30 min of data —
+            # enough for incident triage. Without a cap the heap grows until OOM.
+            - name: MEM_MAX_SPANS
+              value: "500000"
+            - name: STORAGE_TYPE
+              value: "mem"
+            - name: JAVA_OPTS
+              value: "-Xms128m -Xmx384m -XX:+ExitOnOutOfMemoryError"
           resources:
             requests:
               memory: "256Mi"
@@ -455,6 +465,31 @@ spec:
           annotations:
             summary: "Card-testing attack pattern suspected"
             description: "The fraud heuristic fired. Check payment-service logs for the offending user/IP and block at the gateway if confirmed."
+        - alert: DisputeOpened
+          # A new Razorpay chargeback/dispute has been raised. Ops must submit
+          # evidence to Razorpay within 48–72 h or the dispute is auto-lost.
+          # Triage via GET /api/v1/payments/admin/disputes (sorted by deadline).
+          expr: |
+            increase(skbg_payment_dispute_total{namespace="sk-binge-galaxy", outcome="opened"}[10m]) > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "New Razorpay dispute opened — respond within 48h"
+            description: "A chargeback has been filed. Log in to the admin panel and navigate to Payments → Disputes to see the respond-by deadline. Evidence must be submitted to Razorpay before the deadline or the dispute is automatically lost."
+        - alert: DisputeDeadlineApproaching
+          # Fires when disputes are still open and the respond-by window is
+          # closing. Uses a 30d increase window as a proxy for open count.
+          # The admin API is the authoritative source for exact deadlines.
+          expr: |
+            (increase(skbg_payment_dispute_total{namespace="sk-binge-galaxy", outcome="opened"}[30d])
+             - increase(skbg_payment_dispute_total{namespace="sk-binge-galaxy", outcome=~"won|lost"}[30d])) > 0
+          for: 2h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Open disputes may be approaching response deadline"
+            description: "There are unresolved disputes. Check GET /api/v1/payments/admin/disputes for deadlines. Each dispute has a 48–72h window from Razorpay."
         - alert: SagaCompensationSpike
           # Compensations should be rare. A spike means payment-booking
           # consistency is breaking — worth a human eye.
@@ -503,6 +538,220 @@ spec:
           annotations:
             summary: "No successful mongodb backup in over 26 hours"
             description: "Latest successful mongodb backup completed over 26h ago. Check CronJob history, PVC space, and S3 connectivity."
+    # ── JVM heap creep ────────────────────────────────────────────────────────
+    - name: jvm-health
+      rules:
+        - alert: JvmHeapHighSustained
+          # Heap ratio > 80% for 30 min signals a probable leak. G1GC should
+          # keep post-GC usage well below 70%; sustained pressure above 80%
+          # means live objects are accumulating between major GC cycles.
+          expr: |
+            (
+              jvm_memory_used_bytes{namespace="sk-binge-galaxy", area="heap"}
+              /
+              jvm_memory_max_bytes{namespace="sk-binge-galaxy", area="heap"}
+            ) > 0.80
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.app }} JVM heap > 80% for 30 min — possible leak"
+            description: "Heap ratio: {{ $value | humanizePercentage }}. Check for unbounded caches, ThreadLocal accumulation, or class-loader leaks. Pod will restart on OOM."
+        - alert: JvmHeapCritical
+          expr: |
+            (
+              jvm_memory_used_bytes{namespace="sk-binge-galaxy", area="heap"}
+              /
+              jvm_memory_max_bytes{namespace="sk-binge-galaxy", area="heap"}
+            ) > 0.92
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.app }} JVM heap > 92% — OOM imminent"
+            description: "Heap ratio: {{ $value | humanizePercentage }}. Restart or heap-dump immediately before the pod crashes."
+    # ── Kafka consumer lag per topic ──────────────────────────────────────────
+    - name: kafka-lag-per-topic
+      rules:
+        - alert: KafkaConsumerLagPerTopicHigh
+          # Alert when any single topic accumulates > 500 unprocessed messages.
+          # The existing total-lag alert (> 1000 across all topics) fires too late
+          # — a single topic at 999 events is invisible to it. Per-topic alerting
+          # catches a slow consumer before it becomes a multi-thousand-event debt.
+          expr: |
+            kafka_consumer_lag{namespace="sk-binge-galaxy"} > 500
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kafka topic {{ $labels.topic }} lag > 500 for group {{ $labels.consumerGroup }}"
+            description: "Lag: {{ $value }}. Check consumer health and downstream service latency for this topic."
+        - alert: KafkaConsumerLagPerTopicCritical
+          expr: |
+            kafka_consumer_lag{namespace="sk-binge-galaxy"} > 5000
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Kafka topic {{ $labels.topic }} lag CRITICAL ({{ $value }}) — customers receiving stale state"
+            description: "Lag > 5000 on topic {{ $labels.topic }}, group {{ $labels.consumerGroup }}. Booking-payment consistency may be broken. Check consumer pods immediately."
+    # ── TLS certificate expiry ────────────────────────────────────────────────
+    - name: tls-cert-expiry
+      rules:
+        - alert: TlsCertExpiresIn7Days
+          # cert-manager exposes this metric. An ACME challenge failure silently
+          # stops renewal — P1 at 7 days gives ops a weekend to recover before
+          # customers hit hard HTTPS failures.
+          expr: |
+            (certmanager_certificate_expiration_timestamp_seconds{namespace="sk-binge-galaxy"}
+             - time()) < 7 * 24 * 3600
+          for: 1h
+          labels:
+            severity: warning
+            priority: P1
+          annotations:
+            summary: "TLS cert {{ $labels.name }} expires in < 7 days — P1"
+            description: "Certificate {{ $labels.name }} in namespace {{ $labels.namespace }} expires at {{ $value | humanizeTimestamp }}. Check cert-manager ACME challenge status and Let's Encrypt rate limits."
+        - alert: TlsCertExpiresIn3Days
+          expr: |
+            (certmanager_certificate_expiration_timestamp_seconds{namespace="sk-binge-galaxy"}
+             - time()) < 3 * 24 * 3600
+          for: 30m
+          labels:
+            severity: critical
+            priority: P0
+          annotations:
+            summary: "TLS cert {{ $labels.name }} expires in < 3 days — P0 IMMEDIATE ACTION"
+            description: "Certificate {{ $labels.name }} will expire in < 3 days. All HTTPS traffic will hard-fail at expiry. Manually trigger cert-manager renewal: kubectl annotate certificate {{ $labels.name }} cert-manager.io/renew-before=72h"
+    # ── Redis memory ──────────────────────────────────────────────────────────
+    - name: redis-health
+      rules:
+        - alert: RedisMemoryHigh
+          # redis_memory_used_bytes / redis_memory_max_bytes. When this ratio
+          # approaches 1.0, allkeys-lru eviction begins — rate-limit keys may
+          # be evicted, producing incorrect (too-permissive) rate limit results.
+          expr: |
+            redis_memory_used_bytes{namespace="sk-binge-galaxy"}
+            /
+            redis_memory_max_bytes{namespace="sk-binge-galaxy"} > 0.80
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Redis memory > 80% — LRU eviction active"
+            description: "Redis used {{ $value | humanizePercentage }} of maxmemory. Eviction is occurring — rate-limit buckets or session tokens may be evicted prematurely. Consider increasing maxmemory or reducing key TTLs."
+        - alert: RedisDown
+          expr: |
+            up{namespace="sk-binge-galaxy", job="redis"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Redis is DOWN — rate limiting, session revocation, and caching broken"
+            description: "Redis exporter is not responding. All distributed rate limiters, idempotency caches, and token revocation lists are unavailable."
+    # ── HikariCP connection queue ─────────────────────────────────────────────
+    - name: hikari-health
+      rules:
+        - alert: HikariPendingConnectionsNonZero
+          # Pending > 0 means all pool connections are in use and new requests
+          # are queuing. Any sustained non-zero pending count is early warning of
+          # pool exhaustion. connection-timeout (now 5 s) limits queue duration,
+          # but the pool may be undersized or queries are running too slow.
+          expr: |
+            hikaricp_connections_pending{namespace="sk-binge-galaxy"} > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.app }} HikariCP has {{ $value }} pending connection requests"
+            description: "All {{ $labels.pool }} connections are in use. Either slow queries are holding connections or the pool is undersized. Check hikaricp_connections_active and slow query logs."
+    # ── Mock notification provider usage ─────────────────────────────────────
+    - name: mock-provider-safety
+      rules:
+        - alert: MockNotificationProviderActiveInProduction
+          # This counter is incremented by MockSmsProvider / MockWhatsAppProvider
+          # / MockPushProvider. Any non-zero value in production means a mock
+          # provider registered despite @Profile("!production") — indicates a
+          # misconfigured SPRING_PROFILES_ACTIVE or a unit-test bean leaking.
+          expr: |
+            sum(increase(notification_mock_send_total{namespace="sk-binge-galaxy"}[1h])) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Mock notification provider sending real messages as stubs — no SMS/WhatsApp/push delivered"
+            description: "notification.mock.send counter is non-zero. A mock provider registered in production. Customers are NOT receiving notifications. Check SPRING_PROFILES_ACTIVE and provider config."
+    # ── Postgres transaction ID wraparound (CRITICAL infrastructure risk) ────
+    # pg_stat_user_tables exposes n_dead_tup. age(datfrozenxid) requires pg_stat_database.
+    # With postgres_exporter configured to scrape pg_stat_database, this alert fires
+    # when any DB approaches the 2-billion-XID wraparound threshold.
+    # Alert at 500M transactions remaining — gives a maintenance window before Postgres
+    # enters protective read-only mode at ~50M remaining.
+    - name: postgres-xid-wraparound
+      rules:
+        - alert: PostgresXidWraparoundApproaching
+          expr: |
+            max by (datname) (
+              pg_stat_database_xid_age{namespace="sk-binge-galaxy"}
+            ) > 1500000000
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres XID age {{ $value }} approaching wraparound (limit 2B) on {{ $labels.datname }}"
+            description: |
+              Database {{ $labels.datname }} XID age is {{ $value }}.
+              Postgres will go read-only at ~2B. Run: VACUUM FREEZE on high-write tables (outbox_event, booking_event_log, processed_event, loyalty_ledger_entry).
+              Also verify autovacuum is running: SELECT schemaname, relname, last_autovacuum FROM pg_stat_user_tables ORDER BY last_autovacuum NULLS FIRST;
+        - alert: PostgresXidWraparoundCritical
+          expr: |
+            max by (datname) (
+              pg_stat_database_xid_age{namespace="sk-binge-galaxy"}
+            ) > 1800000000
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "CRITICAL: Postgres XID wraparound IMMINENT on {{ $labels.datname }} — forced read-only in < 200M transactions"
+            description: |
+              XID age {{ $value }} on {{ $labels.datname }}. Postgres will go read-only to prevent corruption.
+              IMMEDIATE ACTION: Run VACUUM FREEZE on all high-write tables. Consider emergency maintenance window.
+    # ── Postgres dead tuple bloat (autovacuum not keeping up) ────────────────
+    - name: postgres-dead-tuples
+      rules:
+        - alert: PostgresHighDeadTuples
+          expr: |
+            max by (relname) (
+              pg_stat_user_tables_n_dead_tup{namespace="sk-binge-galaxy",relname=~"outbox_event|booking_event_log|processed_event|loyalty_ledger_entry"}
+            ) > 500000
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High dead tuple count on {{ $labels.relname }}: {{ $value }}"
+            description: "Table {{ $labels.relname }} has {{ $value }} dead tuples. Autovacuum may not be keeping up. Check pg_stat_user_tables.last_autovacuum."
+    # ── Kafka per-partition hot-spotting ─────────────────────────────────────
+    - name: kafka-partition-skew
+      rules:
+        - alert: KafkaPartitionLagSkew
+          # Fires when one partition has > 10× the lag of other partitions on the
+          # same topic+group — a sign of partition key skew (one key dominates).
+          # Two idle consumers + one overloaded consumer is invisible to total-lag alerts.
+          expr: |
+            (
+              max by (topic, consumerGroup) (kafka_consumer_lag_partition{namespace="sk-binge-galaxy"})
+              /
+              avg by (topic, consumerGroup) (kafka_consumer_lag_partition{namespace="sk-binge-galaxy"})
+            ) > 10
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kafka partition skew on topic {{ $labels.topic }}/{{ $labels.consumerGroup }}: one partition > 10× average"
+            description: |
+              Hot-spot detected. One partition is receiving most of the traffic.
+              Consider using bingeId as partition key for booking topics to distribute load evenly.
+              Inspect: kafka-consumer-groups.sh --describe --group {{ $labels.consumerGroup }}
 ---
 # Alertmanager configuration for notification routing
 apiVersion: v1
@@ -514,6 +763,33 @@ data:
   alertmanager.yml: |
     global:
       resolve_timeout: 5m
+    # ── Inhibit rules: suppress lower-severity alerts when a critical one fires ──
+    # Prevents alert storms from training engineers to dismiss pages.
+    inhibit_rules:
+      # When Redis is down, inhibit the "Redis memory high" warning — it's redundant.
+      - source_match:
+          alertname: RedisDown
+        target_match:
+          alertname: RedisMemoryHigh
+        equal: ['namespace']
+      # When JVM is critical, inhibit the warning version
+      - source_match:
+          alertname: JvmHeapCritical
+        target_match:
+          alertname: JvmHeapHighSustained
+        equal: ['namespace', 'pod']
+      # When Kafka is critical, inhibit per-topic warning
+      - source_match:
+          alertname: KafkaConsumerLagPerTopicCritical
+        target_match:
+          alertname: KafkaConsumerLagPerTopicHigh
+        equal: ['namespace', 'topic']
+      # During Postgres XID critical, inhibit dead-tuple warning (same root cause)
+      - source_match:
+          alertname: PostgresXidWraparoundCritical
+        target_match:
+          alertname: PostgresHighDeadTuples
+        equal: ['namespace']
     route:
       receiver: default-receiver
       group_by: ['alertname', 'namespace']
@@ -521,16 +797,29 @@ data:
       group_interval: 5m
       repeat_interval: 4h
       routes:
+        # P0/P1 critical alerts: page on-call immediately
         - match:
             severity: critical
           receiver: critical-receiver
           repeat_interval: 1h
+          group_wait: 10s
+        # Warning/P3 alerts: Slack only — no PagerDuty page to prevent fatigue
+        - match:
+            severity: warning
+          receiver: warning-receiver
+          repeat_interval: 6h
     receivers:
       - name: default-receiver
         slack_configs:
           - api_url: ${SLACK_WEBHOOK_URL}
             channel: '#sk-binge-alerts'
             title: '{{ .GroupLabels.alertname }}'
+            text: '{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}'
+      - name: warning-receiver
+        slack_configs:
+          - api_url: ${SLACK_WEBHOOK_URL}
+            channel: '#sk-binge-alerts-low'
+            title: '[WARNING] {{ .GroupLabels.alertname }}'
             text: '{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}'
       - name: critical-receiver
         slack_configs:

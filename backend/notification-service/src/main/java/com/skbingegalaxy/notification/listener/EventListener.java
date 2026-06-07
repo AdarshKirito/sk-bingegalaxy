@@ -9,6 +9,7 @@ import com.skbingegalaxy.notification.model.BookingReminder;
 import com.skbingegalaxy.notification.repository.BookingReminderRepository;
 import com.skbingegalaxy.notification.repository.NotificationRepository;
 import com.skbingegalaxy.notification.service.ChannelRouter;
+import com.skbingegalaxy.notification.service.EmailRateLimiter;
 import com.skbingegalaxy.notification.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,6 +17,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.LocalTime;
 import java.util.HashMap;
 import java.util.Map;
@@ -28,19 +30,39 @@ public class EventListener {
     /** Only suppress duplicates if a successfully-sent notification exists within this window. */
     private static final long DEDUP_TTL_HOURS = 1;
 
+    /** Max time a Kafka consumer thread will wait for an email rate-limit slot before dropping. */
+    private static final long EMAIL_RATE_LIMIT_WAIT_MS = 30_000;
+
     private final NotificationService notificationService;
     private final NotificationRepository notificationRepository;
     private final BookingReminderRepository bookingReminderRepository;
     private final ChannelRouter channelRouter;
+    private final EmailRateLimiter emailRateLimiter;
+
+    /**
+     * Acquire one email rate-limit slot before sending. Returns false (and logs a warning)
+     * if the per-minute quota is exhausted after waiting EMAIL_RATE_LIMIT_WAIT_MS.
+     * Non-EMAIL channels bypass the gate — they have their own provider-level limits.
+     */
+    private boolean acquireEmailSlot(NotificationChannel channel, String context) {
+        if (channel != NotificationChannel.EMAIL) return true;
+        boolean acquired = emailRateLimiter.tryAcquire(EMAIL_RATE_LIMIT_WAIT_MS);
+        if (!acquired) {
+            log.error("Email rate limit exceeded — dropping notification for {}. "
+                + "Remaining permits={}. Investigate bulk-cancel storm or raise EMAIL_RATE_PER_MINUTE.",
+                context, emailRateLimiter.availablePermits());
+        }
+        return acquired;
+    }
 
     private boolean recentlySentForBooking(String bookingRef, String type) {
         return notificationRepository.existsByBookingRefAndTypeAndSentTrueAndCreatedAtAfter(
-            bookingRef, type, LocalDateTime.now().minusHours(DEDUP_TTL_HOURS));
+            bookingRef, type, LocalDateTime.now(ZoneOffset.UTC).minusHours(DEDUP_TTL_HOURS));
     }
 
     private boolean recentlySentForEmail(String email, String type) {
         return notificationRepository.existsByRecipientEmailAndTypeAndSentTrueAndCreatedAtAfter(
-            email, type, LocalDateTime.now().minusHours(DEDUP_TTL_HOURS));
+            email, type, LocalDateTime.now(ZoneOffset.UTC).minusHours(DEDUP_TTL_HOURS));
     }
 
     @KafkaListener(topics = KafkaTopics.BOOKING_CREATED, groupId = "notification-service")
@@ -63,6 +85,7 @@ public class EventListener {
             meta.put("totalAmount", event.getTotalAmount() != null ? event.getTotalAmount().toPlainString() : "0");
             NotificationChannel channel = channelRouter.resolveChannel(
                     event.getCustomerEmail(), event.getCustomerPhone(), "BOOKING_CREATED", meta);
+            if (!acquireEmailSlot(channel, "BOOKING_CREATED:" + event.getBookingRef())) return;
             notificationService.sendNotification(
                 "BOOKING_CREATED",
                 channel,
@@ -113,6 +136,7 @@ public class EventListener {
             Map<String, Object> cancelMeta = Map.of("eventType", event.getEventTypeName() != null ? event.getEventTypeName() : "");
             NotificationChannel channel = channelRouter.resolveChannel(
                     event.getCustomerEmail(), event.getCustomerPhone(), "BOOKING_CANCELLED", cancelMeta);
+            if (!acquireEmailSlot(channel, "BOOKING_CANCELLED:" + event.getBookingRef())) return;
             notificationService.sendNotification(
                 "BOOKING_CANCELLED",
                 channel,
@@ -152,6 +176,7 @@ public class EventListener {
             meta.put("paymentMethod", event.getPaymentMethod() != null ? event.getPaymentMethod() : "");
             NotificationChannel channel = channelRouter.resolveChannel(
                     event.getCustomerEmail(), event.getCustomerPhone(), "PAYMENT_SUCCESS", meta);
+            if (!acquireEmailSlot(channel, "PAYMENT_SUCCESS:" + event.getBookingRef())) return;
             notificationService.sendNotification(
                 "PAYMENT_SUCCESS",
                 channel,
@@ -187,6 +212,7 @@ public class EventListener {
             meta.put("transactionId", event.getTransactionId() != null ? event.getTransactionId() : "");
             NotificationChannel channel = channelRouter.resolveChannel(
                     event.getCustomerEmail(), event.getCustomerPhone(), "PAYMENT_FAILED", meta);
+            if (!acquireEmailSlot(channel, "PAYMENT_FAILED:" + event.getBookingRef())) return;
             notificationService.sendNotification(
                 "PAYMENT_FAILED",
                 channel,
@@ -231,7 +257,7 @@ public class EventListener {
                 return;
             }
             NotificationChannel channel = event.getChannel() != null ? event.getChannel() : NotificationChannel.EMAIL;
-
+            if (!acquireEmailSlot(channel, "DIRECT:" + resolvedType + ":" + event.getRecipientEmail())) return;
             notificationService.sendNotification(
                 resolvedType,
                 channel,
@@ -298,6 +324,7 @@ public class EventListener {
             }
             NotificationChannel channel = channelRouter.resolveChannel(
                     event.getRecipientEmail(), event.getRecipientPhone(), "USER_REGISTERED", null);
+            if (!acquireEmailSlot(channel, "USER_REGISTERED:" + event.getRecipientEmail())) return;
             notificationService.sendNotification(
                 "USER_REGISTERED",
                 channel,
@@ -332,6 +359,7 @@ public class EventListener {
             meta.put("name", event.getRecipientName());
             NotificationChannel channel = channelRouter.resolveChannel(
                     event.getRecipientEmail(), null, "PASSWORD_RESET", meta);
+            if (!acquireEmailSlot(channel, "PASSWORD_RESET:" + event.getRecipientEmail())) return;
             notificationService.sendNotification(
                 "PASSWORD_RESET",
                 channel,
@@ -462,7 +490,7 @@ public class EventListener {
         }
         try {
             LocalDateTime bookingStart = LocalDateTime.of(event.getBookingDate(), event.getStartTime());
-            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
 
             // "Day before" reminder — fires at 10:00 the day before the booking
             LocalDateTime dayBefore = LocalDateTime.of(

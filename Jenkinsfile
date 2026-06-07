@@ -196,6 +196,18 @@
             }
         }
 
+        stage('Migration Safety Check') {
+            steps {
+                sh '''
+                    set -euo pipefail
+                    chmod +x scripts/check-migration-safety.sh
+                    # Block any migration with DROP/TRUNCATE/DELETE that lacks the explicit override tag.
+                    # This prevents accidental destructive DDL from reaching production.
+                    bash scripts/check-migration-safety.sh backend
+                '''
+            }
+        }
+
         stage('Verify Flyway Migrations') {
             steps {
                 dir('backend') {

@@ -2,7 +2,6 @@ package com.skbingegalaxy.gateway.filter;
 
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
-import io.github.bucket4j.Refill;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
@@ -70,13 +69,15 @@ public class UserRateLimitFilter implements GlobalFilter, Ordered {
      *   <li><b>payment-initiate</b> 15 / min — allow legitimate retries, block gateway-probing.</li>
      *   <li><b>forgot-password</b> 5 / 15 min — keyed on IP (anonymous); blocks enumeration / spam.</li>
      *   <li><b>verify-otp</b> 10 / 15 min — slows OTP brute-force across reset & login flows.</li>
+     *   <li><b>change-email</b> 5 / 15 min — account takeover vector; strict limit on email changes.</li>
      * </ul>
      */
     private static final List<Rule> RULES = List.of(
         new Rule(HttpMethod.POST, "/api/v1/bookings",             "booking-create",   10, Duration.ofMinutes(1)),
         new Rule(HttpMethod.POST, "/api/v1/payments/initiate",    "payment-initiate", 15, Duration.ofMinutes(1)),
         new Rule(HttpMethod.POST, "/api/v1/auth/forgot-password", "forgot-password",   5, Duration.ofMinutes(15)),
-        new Rule(HttpMethod.POST, "/api/v1/auth/verify-otp",      "verify-otp",       10, Duration.ofMinutes(15))
+        new Rule(HttpMethod.POST, "/api/v1/auth/verify-otp",      "verify-otp",       10, Duration.ofMinutes(15)),
+        new Rule(HttpMethod.PUT,  "/api/v1/auth/change-email",    "change-email",      5, Duration.ofMinutes(15))
     );
 
     @SuppressWarnings("serial")
@@ -196,7 +197,10 @@ public class UserRateLimitFilter implements GlobalFilter, Ordered {
     }
 
     private Bucket createBucket(Rule rule) {
-        Bandwidth bandwidth = Bandwidth.classic(rule.limit(), Refill.intervally(rule.limit(), rule.window()));
+        Bandwidth bandwidth = Bandwidth.builder()
+            .capacity(rule.limit())
+            .refillIntervally(rule.limit(), rule.window())
+            .build();
         return Bucket.builder().addLimit(bandwidth).build();
     }
 
@@ -243,6 +247,7 @@ public class UserRateLimitFilter implements GlobalFilter, Ordered {
             case "payment-initiate" -> "Too many payment attempts for this venue. Please wait " + waitTime + " before retrying.";
             case "forgot-password"  -> "Too many password reset requests. Please wait " + waitTime + " before retrying.";
             case "verify-otp"       -> "Too many verification attempts. Please wait " + waitTime + " before retrying.";
+            case "change-email"     -> "Too many email change requests. Please wait " + waitTime + " before retrying.";
             default                 -> "Too many requests. Please wait " + waitTime + " before trying again.";
         };
     }

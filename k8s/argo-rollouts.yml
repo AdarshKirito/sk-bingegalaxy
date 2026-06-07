@@ -152,7 +152,7 @@ spec:
                   name: auth-db-creds
                   key: password
             - name: JAVA_TOOL_OPTIONS
-              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=8m -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/heapdump.hprof -Duser.timezone=UTC"
           resources:
             requests:
               memory: "256Mi"
@@ -171,7 +171,7 @@ spec:
             httpGet:
               path: /actuator/health/readiness
               port: 8081
-            initialDelaySeconds: 5
+            initialDelaySeconds: 15
             periodSeconds: 10
           livenessProbe:
             httpGet:
@@ -293,7 +293,7 @@ spec:
                   name: availability-db-creds
                   key: password
             - name: JAVA_TOOL_OPTIONS
-              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=8m -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/heapdump.hprof -Duser.timezone=UTC"
           resources:
             requests:
               memory: "256Mi"
@@ -312,7 +312,7 @@ spec:
             httpGet:
               path: /actuator/health/readiness
               port: 8082
-            initialDelaySeconds: 5
+            initialDelaySeconds: 15
             periodSeconds: 10
           livenessProbe:
             httpGet:
@@ -433,7 +433,7 @@ spec:
                   name: booking-db-creds
                   key: password
             - name: JAVA_TOOL_OPTIONS
-              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=8m -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/heapdump.hprof -Duser.timezone=UTC"
           resources:
             requests:
               memory: "256Mi"
@@ -452,7 +452,7 @@ spec:
             httpGet:
               path: /actuator/health/readiness
               port: 8083
-            initialDelaySeconds: 5
+            initialDelaySeconds: 15
             periodSeconds: 10
           livenessProbe:
             httpGet:
@@ -573,7 +573,7 @@ spec:
                   name: payment-db-creds
                   key: password
             - name: JAVA_TOOL_OPTIONS
-              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=8m -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/heapdump.hprof -Duser.timezone=UTC"
           resources:
             requests:
               memory: "256Mi"
@@ -592,7 +592,7 @@ spec:
             httpGet:
               path: /actuator/health/readiness
               port: 8084
-            initialDelaySeconds: 5
+            initialDelaySeconds: 15
             periodSeconds: 10
           livenessProbe:
             httpGet:
@@ -705,7 +705,7 @@ spec:
                 name: mongo-secrets
           env:
             - name: JAVA_TOOL_OPTIONS
-              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=8m -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/heapdump.hprof -Duser.timezone=UTC"
           resources:
             requests:
               memory: "256Mi"
@@ -724,7 +724,7 @@ spec:
             httpGet:
               path: /actuator/health/readiness
               port: 8085
-            initialDelaySeconds: 5
+            initialDelaySeconds: 15
             periodSeconds: 10
           livenessProbe:
             httpGet:
@@ -751,3 +751,138 @@ spec:
   ports:
     - port: 8085
       targetPort: 8085
+---
+# ── AnalysisTemplate — frontend synthetic HTTP check ─────────────────────────
+# Uses the Argo Rollouts web provider: fires an HTTP GET at the canary Service
+# and treats any non-empty 200 response as healthy.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: frontend-synthetic-check
+  namespace: sk-binge-galaxy
+spec:
+  args:
+    - name: canary-svc
+  metrics:
+    - name: http-200
+      interval: 30s
+      count: 4
+      failureLimit: 1
+      successCondition: len(result) > 0
+      provider:
+        web:
+          url: "http://{{args.canary-svc}}.sk-binge-galaxy.svc.cluster.local/"
+          timeoutSeconds: 10
+---
+# ── frontend Rollout ──────────────────────────────────────────────────────────
+# SUPERSEDES the plain Deployment in frontend.yml.
+# The Service and Ingress in frontend.yml remain unchanged; this Rollout owns
+# the replica count and canary update strategy only.
+# Deploy: kubectl apply -f k8s/argo-rollouts.yml
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: frontend
+  namespace: sk-binge-galaxy
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: frontend
+  strategy:
+    canary:
+      canaryService: frontend-canary
+      stableService: frontend
+      steps:
+        - setWeight: 10
+        - pause: { duration: 3m }
+        - analysis:
+            templates:
+              - templateName: frontend-synthetic-check
+            args:
+              - name: canary-svc
+                value: frontend-canary
+        - setWeight: 50
+        - pause: { duration: 3m }
+        - analysis:
+            templates:
+              - templateName: frontend-synthetic-check
+            args:
+              - name: canary-svc
+                value: frontend-canary
+        - setWeight: 100
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: frontend
+          image: skbingegalaxy/frontend:IMAGE_TAG
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /var/cache/nginx
+            - name: pid
+              mountPath: /var/run
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: cache
+          emptyDir: {}
+        - name: pid
+          emptyDir: {}
+---
+# Canary service for frontend traffic splitting
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-canary
+  namespace: sk-binge-galaxy
+spec:
+  selector:
+    app: frontend
+  ports:
+    - port: 80
+      targetPort: 8080

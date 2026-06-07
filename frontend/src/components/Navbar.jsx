@@ -29,9 +29,12 @@ import {
   FiSend,
   FiTool,
   FiAlertTriangle,
+  FiAlertOctagon,
   FiMessageSquare,
+  FiDollarSign,
 } from 'react-icons/fi';
 import ThemeToggle from './ThemeToggle';
+import CurrencySwitcher from './CurrencySwitcher';
 
 import NavDropdownGroup from './NavDropdownGroup';
 import NotificationsBell from './NotificationsBell';
@@ -124,6 +127,8 @@ export default function Navbar() {
     { to: '/admin/taxes', icon: <FiCreditCard />, label: t('nav.taxes', 'Taxes') },
     { to: '/admin/recovery', icon: <FiShield />, label: t('nav.recovery', 'Recovery') },
     { to: '/admin/approvals', icon: <FiShield />, label: t('nav.approvals', 'Approvals') },
+    { to: '/admin/disputes', icon: <FiAlertOctagon />, label: t('nav.disputes', 'Disputes') },
+    { to: '/admin/failed-refunds', icon: <FiDollarSign />, label: t('nav.failed_refunds', 'Failed Refunds') },
     { to: '/admin/users-config', icon: <FiUsers />, label: t('nav.users') },
     { to: '/admin/reports', icon: <FiBarChart2 />, label: t('nav.reports', 'Reports') },
   ];
@@ -275,6 +280,7 @@ export default function Navbar() {
             </button>
           )}
 
+          {!effectiveIsAdmin && <CurrencySwitcher compact ariaLabel="Display currency" />}
           <ThemeToggle />
           <button
             className="lang-toggle-btn"
@@ -354,6 +360,8 @@ export default function Navbar() {
                 { to: '/admin/customer-freezes', icon: <FiLock />, label: t('nav.customer_freezes', 'Customer Freezes') },
                 { to: '/admin/risk-flags',   icon: <FiAlertTriangle />, label: t('nav.risk_flags', 'Risk Flags') },
                 { to: '/admin/support',      icon: <FiMessageSquare />, label: t('nav.support_console', 'Support Console') },
+                { to: '/admin/disputes',     icon: <FiAlertOctagon />, label: t('nav.disputes', 'Disputes') },
+                { to: '/admin/failed-refunds', icon: <FiDollarSign />, label: t('nav.failed_refunds', 'Failed Refunds') },
                 ...(effectiveIsSuperAdmin
                   ? [{ to: '/admin/register', icon: <FiShield />, label: t('nav.add_admin', 'Add Admin') }]
                   : []),
@@ -440,6 +448,8 @@ export default function Navbar() {
               <NavLink to="/admin/customer-freezes" className={navLinkClass}><FiLock /> <span>{t('nav.customer_freezes', 'Customer Freezes')}</span></NavLink>
               <NavLink to="/admin/risk-flags" className={navLinkClass}><FiAlertTriangle /> <span>{t('nav.risk_flags', 'Risk Flags')}</span></NavLink>
               <NavLink to="/admin/support" className={navLinkClass}><FiMessageSquare /> <span>{t('nav.support_console', 'Support Console')}</span></NavLink>
+              <NavLink to="/admin/disputes" className={navLinkClass}><FiAlertOctagon /> <span>{t('nav.disputes', 'Disputes')}</span></NavLink>
+              <NavLink to="/admin/failed-refunds" className={navLinkClass}><FiDollarSign /> <span>{t('nav.failed_refunds', 'Failed Refunds')}</span></NavLink>
               {effectiveIsSuperAdmin && <NavLink to="/admin/register" className={navLinkClass}><FiShield /> <span>{t('nav.add_admin', 'Add Admin')}</span></NavLink>}
             </div>
           </div>

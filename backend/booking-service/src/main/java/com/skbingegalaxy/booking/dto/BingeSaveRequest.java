@@ -30,6 +30,14 @@ public class BingeSaveRequest {
     @Pattern(regexp = "^$|^[A-Za-z0-9 \\-]{3,20}$", message = "Postal code must be 3-20 alphanumeric characters")
     private String postalCode;
 
+    /**
+     * IANA timezone for this venue. Must be a valid {@link java.time.ZoneId} string
+     * (e.g. "Asia/Kolkata", "America/New_York", "Europe/London", "Asia/Dubai").
+     * When omitted the platform default ({@code app.business.default-timezone}) applies.
+     */
+    @Size(max = 64)
+    private String timezone;
+
     @Size(max = 150)
     private String supportEmail;
 

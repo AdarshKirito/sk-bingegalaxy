@@ -106,6 +106,12 @@
                     <source>${java.version}</source>
                     <target>${java.version}</target>
                     <fork>true</fork>
+                    <!-- Forked javac JVM memory limits — .mvn/jvm.config only controls the
+                         Maven launcher, not this separate process. Without explicit limits the
+                         OS default applies, which is too small for Lombok + MapStruct + Spring
+                         Boot autoconfigure metadata on modules with large dependency graphs. -->
+                    <meminitial>128m</meminitial>
+                    <maxmem>512m</maxmem>
                     <compilerArgs>
                         <arg>-J--add-opens=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED</arg>
                         <arg>-J--add-opens=jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED</arg>
@@ -136,11 +142,69 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
                     <argLine>
+                        ${jacoco.surefire.argline}
                         --add-opens java.base/java.lang=ALL-UNNAMED
                         --add-opens java.base/java.lang.reflect=ALL-UNNAMED
                         --add-opens java.base/java.util=ALL-UNNAMED
                     </argLine>
                 </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.12</version>
+                <executions>
+                    <!-- Injects the JaCoCo agent into Surefire's JVM. The property
+                         ${jacoco.surefire.argline} is consumed by maven-surefire-plugin above. -->
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals><goal>prepare-agent</goal></goals>
+                        <configuration>
+                            <propertyName>jacoco.surefire.argline</propertyName>
+                        </configuration>
+                    </execution>
+                    <!-- Generates HTML + XML reports under target/site/jacoco/ -->
+                    <execution>
+                        <id>report</id>
+                        <phase>verify</phase>
+                        <goals><goal>report</goal></goals>
+                    </execution>
+                    <!-- Fails the build when line or branch coverage falls below threshold.
+                         Thresholds are intentionally conservative for the first enforcement
+                         pass — raise them as the test suite matures. -->
+                    <execution>
+                        <id>check</id>
+                        <phase>verify</phase>
+                        <goals><goal>check</goal></goals>
+                        <configuration>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.60</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>BRANCH</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.50</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                            <!-- Exclude generated / framework boilerplate from coverage counts -->
+                            <excludes>
+                                <exclude>**/config/**</exclude>
+                                <exclude>**/*Application.class</exclude>
+                                <exclude>**/dto/**</exclude>
+                                <exclude>**/entity/**</exclude>
+                                <exclude>**/exception/**</exclude>
+                            </excludes>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

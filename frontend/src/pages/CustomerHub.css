@@ -1667,3 +1667,185 @@
 @media (max-width: 600px) {
   .modal-overlay .modal-content { margin: 1rem; max-width: 100% !important; }
 }
+
+/* ── Print Receipt ───────────────────────────────────────────────── */
+.receipt-print-only { display: none; }
+
+@media print {
+  @page { margin: 0; size: A4 portrait; }
+
+  * { visibility: hidden; }
+  .receipt-print-only,
+  .receipt-print-only * { visibility: visible; }
+
+  .receipt-print-only {
+    display: block;
+    position: absolute;
+    inset: 0;
+    background: #fff;
+    color: #111;
+    padding: 18mm 20mm;
+    box-sizing: border-box;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 10pt;
+    line-height: 1.5;
+  }
+
+  /* Header */
+  .rpo-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding-bottom: 10pt;
+    border-bottom: 1.5pt solid #111;
+    margin-bottom: 14pt;
+  }
+  .rpo-brand {
+    display: flex;
+    align-items: center;
+    gap: 6pt;
+  }
+  .rpo-brand-mark {
+    font-size: 16pt;
+    color: #5b21b6;
+    line-height: 1;
+  }
+  .rpo-brand-name {
+    font-size: 16pt;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: #111;
+  }
+  .rpo-header-right { text-align: right; }
+  .rpo-doc-type {
+    display: block;
+    font-size: 7.5pt;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #555;
+  }
+  .rpo-print-date {
+    display: block;
+    font-size: 7.5pt;
+    color: #777;
+    margin-top: 2pt;
+  }
+
+  /* Ref block */
+  .rpo-ref-block {
+    background: #f6f6f6;
+    border: 0.5pt solid #d0d0d0;
+    border-radius: 4pt;
+    padding: 10pt 12pt;
+    margin-bottom: 14pt;
+  }
+  .rpo-ref-label {
+    display: block;
+    font-size: 7pt;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #555;
+    margin-bottom: 3pt;
+  }
+  .rpo-ref-number {
+    display: block;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 18pt;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: #111;
+    margin-bottom: 6pt;
+  }
+  .rpo-badges {
+    display: flex;
+    gap: 6pt;
+    flex-wrap: wrap;
+  }
+  .rpo-badge {
+    display: inline-block;
+    padding: 1.5pt 7pt;
+    border: 0.5pt solid #aaa;
+    border-radius: 100pt;
+    font-size: 7pt;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: #333;
+  }
+
+  /* Two-column body */
+  .rpo-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16pt;
+    margin-bottom: 14pt;
+  }
+  .rpo-section { break-inside: avoid; }
+  .rpo-section-title {
+    font-size: 7pt;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #555;
+    margin: 0 0 5pt 0;
+    padding-bottom: 3pt;
+    border-bottom: 0.5pt solid #d0d0d0;
+  }
+  .rpo-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9pt;
+  }
+  .rpo-table td {
+    padding: 2pt 0;
+    vertical-align: top;
+  }
+  .rpo-table td:first-child {
+    color: #555;
+    width: 48%;
+    padding-right: 6pt;
+  }
+  .rpo-table td:last-child {
+    font-weight: 600;
+    color: #111;
+    text-align: right;
+  }
+  .rpo-total-row td {
+    font-weight: 700;
+    font-size: 11pt;
+    border-top: 1pt solid #111;
+    padding-top: 5pt;
+    margin-top: 4pt;
+  }
+  .rpo-payment-state {
+    font-size: 8pt;
+    color: #555;
+    margin: 5pt 0 0 0;
+  }
+
+  /* Contact */
+  .rpo-contact {
+    display: flex;
+    align-items: baseline;
+    gap: 8pt;
+    font-size: 8.5pt;
+    margin-bottom: 12pt;
+  }
+  .rpo-contact-label {
+    font-size: 7pt;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #777;
+    flex-shrink: 0;
+  }
+  .rpo-contact-value { color: #111; }
+
+  /* Footer */
+  .rpo-footer {
+    border-top: 0.5pt solid #d0d0d0;
+    padding-top: 10pt;
+    text-align: center;
+    font-size: 8pt;
+    color: #666;
+  }
+  .rpo-footer p { margin: 2pt 0; }
+  .rpo-footer strong { color: #111; }
+}

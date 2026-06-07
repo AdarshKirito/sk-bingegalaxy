@@ -3,6 +3,8 @@ package com.skbingegalaxy.payment.controller;
 import com.skbingegalaxy.common.exception.BusinessException;
 import com.skbingegalaxy.common.exception.GlobalExceptionHandler;
 import com.skbingegalaxy.payment.dto.PaymentDto;
+import com.skbingegalaxy.payment.service.DisputeAdminService;
+import com.skbingegalaxy.payment.service.DisputeWebhookService;
 import com.skbingegalaxy.payment.service.PaymentBingeScopeService;
 import com.skbingegalaxy.payment.service.PaymentService;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,6 +24,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -45,6 +48,8 @@ class PaymentControllerAuthzTest {
     @MockBean private PaymentService paymentService;
     @MockBean private PaymentBingeScopeService scopeService;
     @MockBean private com.skbingegalaxy.payment.service.IdempotencyService idempotencyService;
+    @MockBean private DisputeWebhookService disputeWebhookService;
+    @MockBean private DisputeAdminService disputeAdminService;
 
     private PaymentDto paymentOwnedBy42;
 
@@ -171,12 +176,56 @@ class PaymentControllerAuthzTest {
 
     @Test
     void simulatePayment_nonAdmin_returns403() throws Exception {
-        // Controller checks X-User-Role directly and throws BusinessException(FORBIDDEN).
         mockMvc.perform(post("/api/v1/payments/admin/simulate/TXN-42")
                 .header("X-User-Id", "42")
                 .header("X-User-Role", "CUSTOMER")
                 .header("X-Binge-Id", "1"))
             .andExpect(status().isForbidden())
             .andExpect(jsonPath("$.message").value("Only admins can simulate payments"));
+    }
+
+    // ── Dispute admin endpoints — role enforcement ────────
+
+    @Test
+    void getOpenDisputes_nonAdmin_returns403() throws Exception {
+        mockMvc.perform(get("/api/v1/payments/admin/disputes")
+                .header("X-User-Id", "42")
+                .header("X-User-Role", "CUSTOMER")
+                .header("X-Binge-Id", "1"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.message").value("Only admins can view disputes"));
+    }
+
+    @Test
+    void countOpenDisputes_nonAdmin_returns403() throws Exception {
+        mockMvc.perform(get("/api/v1/payments/admin/disputes/count")
+                .header("X-User-Id", "42")
+                .header("X-User-Role", "CUSTOMER")
+                .header("X-Binge-Id", "1"))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void updateDisputeNotes_nonAdmin_returns403() throws Exception {
+        mockMvc.perform(patch("/api/v1/payments/admin/disputes/1/notes")
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content("{\"notes\":\"some evidence\"}")
+                .header("X-User-Id", "42")
+                .header("X-User-Email", "user@test.com")
+                .header("X-User-Role", "CUSTOMER")
+                .header("X-Binge-Id", "1"))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void updateDisputeNotes_emptyNotes_returns400() throws Exception {
+        mockMvc.perform(patch("/api/v1/payments/admin/disputes/1/notes")
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content("{\"notes\":\"\"}")
+                .header("X-User-Id", "42")
+                .header("X-User-Email", "admin@test.com")
+                .header("X-User-Role", "ADMIN")
+                .header("X-Binge-Id", "1"))
+            .andExpect(status().isBadRequest());
     }
 }

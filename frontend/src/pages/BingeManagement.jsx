@@ -49,6 +49,7 @@ export default function BingeManagement() {
     customerCancellationCutoffMinutes: 180,
     maxConcurrentBookings: '',
     roomSelectionRequired: false,
+    timezone: 'Asia/Kolkata',
     openTime: '10:00',
     closeTime: '23:00',
   };
@@ -233,6 +234,7 @@ export default function BingeManagement() {
         customerCancellationCutoffMinutes: form.customerCancellationCutoffMinutes,
         maxConcurrentBookings: form.maxConcurrentBookings === '' ? null : form.maxConcurrentBookings,
         roomSelectionRequired: !!form.roomSelectionRequired,
+        timezone: form.timezone || 'Asia/Kolkata',
         openTime: form.openTime,
         closeTime: form.closeTime,
       };
@@ -275,6 +277,7 @@ export default function BingeManagement() {
       customerCancellationCutoffMinutes: b.customerCancellationCutoffMinutes ?? 180,
       maxConcurrentBookings: b.maxConcurrentBookings ?? '',
       roomSelectionRequired: b.roomSelectionRequired === true,
+      timezone: b.timezone || 'Asia/Kolkata',
       openTime: (b.openTime || '10:00').slice(0, 5),
       closeTime: (b.closeTime || '23:00').slice(0, 5),
     });
@@ -483,6 +486,7 @@ export default function BingeManagement() {
       customerCancellationEnabled: binge.customerCancellationEnabled,
       customerCancellationCutoffMinutes: binge.customerCancellationCutoffMinutes,
       maxConcurrentBookings: binge.maxConcurrentBookings,
+      timezone: binge.timezone || 'Asia/Kolkata',
     });
     toast.success(`Entered: ${binge.name}`);
     navigate('/admin/dashboard');
@@ -604,6 +608,53 @@ export default function BingeManagement() {
                   <option value="required">Required</option>
                 </select>
                 <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>When Required, customers and admins must pick a venue room before booking.</span>
+              </div>
+              <div className="input-group" style={{ gridColumn: '1 / -1' }}>
+                <label>Venue Timezone *</label>
+                <select value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} required>
+                  <optgroup label="Asia">
+                    <option value="Asia/Kolkata">Asia/Kolkata (IST, UTC+5:30)</option>
+                    <option value="Asia/Dubai">Asia/Dubai (GST, UTC+4)</option>
+                    <option value="Asia/Singapore">Asia/Singapore (SGT, UTC+8)</option>
+                    <option value="Asia/Tokyo">Asia/Tokyo (JST, UTC+9)</option>
+                    <option value="Asia/Shanghai">Asia/Shanghai (CST, UTC+8)</option>
+                    <option value="Asia/Bangkok">Asia/Bangkok (ICT, UTC+7)</option>
+                    <option value="Asia/Karachi">Asia/Karachi (PKT, UTC+5)</option>
+                    <option value="Asia/Dhaka">Asia/Dhaka (BST, UTC+6)</option>
+                    <option value="Asia/Colombo">Asia/Colombo (SLST, UTC+5:30)</option>
+                  </optgroup>
+                  <optgroup label="Europe">
+                    <option value="Europe/London">Europe/London (GMT/BST)</option>
+                    <option value="Europe/Paris">Europe/Paris (CET/CEST, UTC+1/+2)</option>
+                    <option value="Europe/Berlin">Europe/Berlin (CET/CEST, UTC+1/+2)</option>
+                    <option value="Europe/Istanbul">Europe/Istanbul (TRT, UTC+3)</option>
+                    <option value="Europe/Moscow">Europe/Moscow (MSK, UTC+3)</option>
+                  </optgroup>
+                  <optgroup label="Americas">
+                    <option value="America/New_York">America/New_York (EST/EDT, UTC-5/-4)</option>
+                    <option value="America/Chicago">America/Chicago (CST/CDT, UTC-6/-5)</option>
+                    <option value="America/Denver">America/Denver (MST/MDT, UTC-7/-6)</option>
+                    <option value="America/Los_Angeles">America/Los_Angeles (PST/PDT, UTC-8/-7)</option>
+                    <option value="America/Sao_Paulo">America/Sao_Paulo (BRT, UTC-3)</option>
+                    <option value="America/Toronto">America/Toronto (EST/EDT, UTC-5/-4)</option>
+                  </optgroup>
+                  <optgroup label="Africa / Middle East">
+                    <option value="Africa/Cairo">Africa/Cairo (EET, UTC+2)</option>
+                    <option value="Africa/Nairobi">Africa/Nairobi (EAT, UTC+3)</option>
+                    <option value="Asia/Riyadh">Asia/Riyadh (AST, UTC+3)</option>
+                  </optgroup>
+                  <optgroup label="Pacific / Australia">
+                    <option value="Australia/Sydney">Australia/Sydney (AEST/AEDT)</option>
+                    <option value="Australia/Melbourne">Australia/Melbourne (AEST/AEDT)</option>
+                    <option value="Pacific/Auckland">Pacific/Auckland (NZST/NZDT)</option>
+                  </optgroup>
+                  <optgroup label="UTC">
+                    <option value="UTC">UTC</option>
+                  </optgroup>
+                </select>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  All booking times and schedules are interpreted in this timezone. Choose the local timezone of the venue.
+                </span>
               </div>
               <div className="input-group">
                 <label>Opening Time</label>
@@ -1034,7 +1085,7 @@ export default function BingeManagement() {
                 </thead>
                 <tbody>
                   {tierRows.map((row, i) => (
-                    <tr key={i}>
+                    <tr key={`tier-${i}-${row.hoursBeforeStart}`}>
                       <td style={{ padding: '0.3rem 0.6rem' }}>
                         <input type="number" min="0" style={{ width: '80px' }} value={row.hoursBeforeStart} onChange={(e) => setTierRows(prev => prev.map((r, j) => j === i ? { ...r, hoursBeforeStart: Number(e.target.value) } : r))} />
                       </td>

@@ -56,10 +56,14 @@ public class BookingAmountClient {
             if (response != null && response.get("data") instanceof Map<?, ?> data) {
                 Object remaining = data.get("remainingBalance");
                 Object status = data.get("status");
+                Object payCcy = data.get("paymentCurrencyCode");
+                Object fxRate = data.get("fxRate");
                 if (remaining != null) {
                     return new BookingSnapshot(
                         new BigDecimal(remaining.toString()),
-                        status != null ? status.toString() : null);
+                        status != null ? status.toString() : null,
+                        payCcy != null ? payCcy.toString() : "INR",
+                        fxRate != null ? new BigDecimal(fxRate.toString()) : BigDecimal.ONE);
                 }
             }
             return null;
@@ -75,5 +79,12 @@ public class BookingAmountClient {
         }
     }
 
-    public record BookingSnapshot(BigDecimal remainingBalance, String status) {}
+    /**
+     * @param remainingBalance   payable balance in the BASE currency (INR)
+     * @param status             booking status
+     * @param paymentCurrencyCode currency the booking is to be paid in ("INR" if domestic)
+     * @param fxRate             locked rate = foreign units per 1 INR (1 for INR bookings)
+     */
+    public record BookingSnapshot(BigDecimal remainingBalance, String status,
+                                  String paymentCurrencyCode, BigDecimal fxRate) {}
 }

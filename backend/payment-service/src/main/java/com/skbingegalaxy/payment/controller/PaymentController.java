@@ -1,6 +1,9 @@
 package com.skbingegalaxy.payment.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.skbingegalaxy.common.dto.ApiResponse;
+import com.skbingegalaxy.payment.service.DisputeAdminService;
+import com.skbingegalaxy.payment.service.DisputeWebhookService;
 import com.skbingegalaxy.payment.service.PaymentBingeScopeService;
 import com.skbingegalaxy.payment.service.IdempotencyService;
 import com.skbingegalaxy.payment.dto.*;
@@ -8,6 +11,8 @@ import com.skbingegalaxy.payment.service.PaymentService;
 import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
@@ -19,11 +24,15 @@ import java.util.Map;
 @RequestMapping("/api/v1/payments")
 @RequiredArgsConstructor
 @Validated
+@Slf4j
 public class PaymentController {
 
     private final PaymentBingeScopeService scopeService;
     private final PaymentService paymentService;
+    private final DisputeWebhookService disputeWebhookService;
+    private final DisputeAdminService disputeAdminService;
     private final IdempotencyService idempotencyService;
+    private final ObjectMapper objectMapper;
 
     @ModelAttribute
     void validateBingeScope(
@@ -31,7 +40,9 @@ public class PaymentController {
             @RequestHeader(value = "X-User-Id", required = false) Long userId,
             @RequestHeader(value = "X-User-Role", required = false) String role) {
         String uri = request.getRequestURI();
-        if (uri.endsWith("/callback")) {
+        // Gateway-facing webhook endpoints are called directly by Razorpay —
+        // they have no binge context and must validate only their own HMAC signature.
+        if (uri.endsWith("/callback") || uri.contains("/webhooks/")) {
             return;
         }
         if (uri.contains("/admin/")) {
@@ -207,6 +218,130 @@ public class PaymentController {
     @GetMapping("/admin/stats")
     public ResponseEntity<ApiResponse<Map<String, Object>>> getPaymentStats() {
         return ResponseEntity.ok(ApiResponse.ok("Payment statistics", paymentService.getPaymentStats()));
+    }
+
+    // ── Dispute / chargeback admin ────────────────────────────────────────────
+
+    /**
+     * List open disputes for the selected binge, sorted by respond-by deadline (most urgent first).
+     * Ops must respond to Razorpay within 48–72 h — this is the primary triage queue.
+     *
+     * RED   = minutesUntilDeadline < 1440  (< 24 h)
+     * AMBER = minutesUntilDeadline < 2880  (< 48 h)
+     * GREEN = minutesUntilDeadline >= 2880 (> 48 h)
+     */
+    @GetMapping("/admin/disputes")
+    public ResponseEntity<ApiResponse<org.springframework.data.domain.Page<PaymentDisputeDto>>> getOpenDisputes(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestHeader("X-User-Role") String userRole) {
+        if (!"ADMIN".equalsIgnoreCase(userRole) && !"SUPER_ADMIN".equalsIgnoreCase(userRole)) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Only admins can view disputes", org.springframework.http.HttpStatus.FORBIDDEN);
+        }
+        if (size > 100) size = 100;
+        var pageable = org.springframework.data.domain.PageRequest.of(page, size);
+        return ResponseEntity.ok(ApiResponse.ok("Open disputes", disputeAdminService.getOpenDisputes(pageable)));
+    }
+
+    /**
+     * List all disputes (including resolved) for the selected binge.
+     * Use this for historical audit and chargeback win/loss rate reporting.
+     */
+    @GetMapping("/admin/disputes/all")
+    public ResponseEntity<ApiResponse<org.springframework.data.domain.Page<PaymentDisputeDto>>> getAllDisputes(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestHeader("X-User-Role") String userRole) {
+        if (!"ADMIN".equalsIgnoreCase(userRole) && !"SUPER_ADMIN".equalsIgnoreCase(userRole)) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Only admins can view disputes", org.springframework.http.HttpStatus.FORBIDDEN);
+        }
+        if (size > 100) size = 100;
+        var pageable = org.springframework.data.domain.PageRequest.of(page, size);
+        return ResponseEntity.ok(ApiResponse.ok("All disputes", disputeAdminService.getAllDisputes(pageable)));
+    }
+
+    /**
+     * Count of open disputes for the admin dashboard badge.
+     * Returns { "openDisputes": N } — non-zero triggers the red alert badge.
+     */
+    @GetMapping("/admin/disputes/count")
+    public ResponseEntity<ApiResponse<Map<String, Long>>> countOpenDisputes(
+            @RequestHeader("X-User-Role") String userRole) {
+        if (!"ADMIN".equalsIgnoreCase(userRole) && !"SUPER_ADMIN".equalsIgnoreCase(userRole)) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Only admins can view disputes", org.springframework.http.HttpStatus.FORBIDDEN);
+        }
+        return ResponseEntity.ok(ApiResponse.ok(
+            "Open dispute count",
+            Map.of("openDisputes", disputeAdminService.countOpenDisputes())));
+    }
+
+    /**
+     * Add ops notes to a dispute record.
+     * Notes are timestamped and cumulative — used to document evidence gathered
+     * before submitting the dispute response to Razorpay.
+     *
+     * @param disputeId  internal ID of the PaymentDispute row
+     * @param body       { "notes": "..." } — appended to existing notes with timestamp
+     */
+    @PatchMapping("/admin/disputes/{disputeId}/notes")
+    public ResponseEntity<ApiResponse<PaymentDisputeDto>> updateDisputeNotes(
+            @PathVariable Long disputeId,
+            @RequestBody Map<String, String> body,
+            @RequestHeader("X-User-Email") String adminEmail,
+            @RequestHeader("X-User-Role") String userRole) {
+        if (!"ADMIN".equalsIgnoreCase(userRole) && !"SUPER_ADMIN".equalsIgnoreCase(userRole)) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Only admins can update dispute notes", org.springframework.http.HttpStatus.FORBIDDEN);
+        }
+        String notes = body.get("notes");
+        if (notes == null || notes.isBlank()) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "notes field is required and must not be blank", org.springframework.http.HttpStatus.BAD_REQUEST);
+        }
+        return ResponseEntity.ok(ApiResponse.ok(
+            "Dispute notes updated",
+            disputeAdminService.updateNotes(disputeId, notes, adminEmail)));
+    }
+
+    /**
+     * Razorpay dispute/chargeback webhook receiver.
+     *
+     * Called directly by Razorpay (not through the authenticated gateway path).
+     * Security: validated by HMAC-SHA256 over the raw request body using the
+     * webhook secret configured in RAZORPAY_WEBHOOK_SECRET (distinct from the
+     * API key secret). Reject unsigned requests with 403.
+     *
+     * Register this URL in the Razorpay dashboard under:
+     *   Settings → Webhooks → Add new webhook
+     *   URL: https://<your-domain>/api/v1/payments/webhooks/razorpay
+     *   Events: payment.dispute.created, payment.dispute.under_review,
+     *           payment.dispute.won, payment.dispute.lost, payment.dispute.accepted
+     */
+    @PostMapping("/webhooks/razorpay")
+    public ResponseEntity<Map<String, String>> handleRazorpayWebhook(
+            @RequestBody String rawBody,
+            @RequestHeader(value = "X-Razorpay-Signature", required = false) String signature) {
+
+        if (!disputeWebhookService.verifyWebhookSignature(rawBody, signature)) {
+            log.warn("Rejected Razorpay dispute webhook: invalid or missing signature");
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(Map.of("error", "Invalid webhook signature"));
+        }
+
+        DisputeWebhookRequest request;
+        try {
+            request = objectMapper.readValue(rawBody, DisputeWebhookRequest.class);
+        } catch (Exception e) {
+            log.warn("Failed to parse Razorpay dispute webhook body: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", "Unparseable webhook body"));
+        }
+
+        String result = disputeWebhookService.handleDisputeEvent(request, rawBody);
+        log.info("Razorpay dispute webhook processed: event={} result={}", request.getEvent(), result);
+        return ResponseEntity.ok(Map.of("status", result));
     }
 
     /**

@@ -7,3 +7,8 @@
 **/*.md
 **/src/test/
 .env
+**/node_modules/
+**/.npm/
+**/.pnpm-store/
+**/*.log
+**/*.txt

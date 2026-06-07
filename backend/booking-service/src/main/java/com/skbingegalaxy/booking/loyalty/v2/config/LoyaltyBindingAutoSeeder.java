@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -78,7 +79,7 @@ public class LoyaltyBindingAutoSeeder implements ApplicationRunner {
         }
 
         List<Binge> binges = bingeRepository.findAll();
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         int seededBindings = 0;
         int seededRules = 0;
         int seededRedemptionRules = 0;

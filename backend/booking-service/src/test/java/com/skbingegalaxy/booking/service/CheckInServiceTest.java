@@ -27,6 +27,7 @@ import java.security.MessageDigest;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneOffset;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
@@ -62,11 +63,14 @@ class CheckInServiceTest {
     @Mock private OutboxEventRepository outboxEventRepository;
     @Mock private ObjectMapper objectMapper;
     @Mock private SystemSettingsService systemSettingsService;
+    @Mock private VenueClockService venueClock;
 
     @InjectMocks private CheckInService checkInService;
 
     @BeforeEach
     void setUp() {
+        lenient().when(venueClock.zoneOf(any())).thenReturn(ZoneOffset.UTC);
+        lenient().when(venueClock.today(any())).thenReturn(LocalDate.now(ZoneOffset.UTC));
         ReflectionTestUtils.setField(checkInService, "windowEarlyMinutes", 30);
         ReflectionTestUtils.setField(checkInService, "windowLateMinutes", 60);
         ReflectionTestUtils.setField(checkInService, "otpTtlMinutes", 15);
@@ -97,7 +101,7 @@ class CheckInServiceTest {
         assertThat(saved.getTokenType()).isEqualTo(TokenType.QR);
         assertThat(saved.getTokenValue()).hasSize(32); // 24 random bytes → 32 chars base64url
         assertThat(saved.getIssuedBy()).isEqualTo("admin@x");
-        assertThat(saved.getExpiresAt()).isAfter(LocalDateTime.now().plusHours(47));
+        assertThat(saved.getExpiresAt()).isAfter(LocalDateTime.now(ZoneOffset.UTC).plusHours(47));
         assertThat(res.token()).isEqualTo(saved.getTokenValue());
     }
 
@@ -106,7 +110,7 @@ class CheckInServiceTest {
         Booking booking = activeBooking(BookingStatus.CONFIRMED);
         CheckInToken prior = CheckInToken.builder()
             .bookingRef(REF).bookingId(1L).tokenType(TokenType.QR)
-            .tokenValue("OLD").expiresAt(LocalDateTime.now().plusHours(40)).build();
+            .tokenValue("OLD").expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusHours(40)).build();
 
         when(bookingRepository.findByBookingRef(REF)).thenReturn(Optional.of(booking));
         when(tokenRepository.findActiveByBookingRefAndType(REF, TokenType.QR))
@@ -116,7 +120,7 @@ class CheckInServiceTest {
         checkInService.issueQrToken(REF, "admin@x");
 
         // Prior token expiry has been pulled forward to "now"
-        assertThat(prior.getExpiresAt()).isBeforeOrEqualTo(LocalDateTime.now().plusSeconds(1));
+        assertThat(prior.getExpiresAt()).isBeforeOrEqualTo(LocalDateTime.now(ZoneOffset.UTC).plusSeconds(1));
     }
 
     @Test
@@ -159,22 +163,22 @@ class CheckInServiceTest {
     void verifyQr_inWindow_consumesTokenAndDelegatesToBookingService() {
         Booking booking = activeBooking(BookingStatus.CONFIRMED);
         // Booking starts now+10min, so we are inside [start-30, start+60]
-        booking.setBookingDate(LocalDate.now());
-        booking.setStartTime(LocalTime.now().plusMinutes(10).withNano(0));
+        booking.setBookingDate(LocalDate.now(ZoneOffset.UTC));
+        booking.setStartTime(LocalTime.now(ZoneOffset.UTC).plusMinutes(10).withNano(0));
 
         CheckInToken token = CheckInToken.builder()
             .id(7L).bookingRef(REF).bookingId(1L).tokenType(TokenType.QR)
-            .tokenValue("TOK").expiresAt(LocalDateTime.now().plusHours(2)).build();
+            .tokenValue("TOK").expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusHours(2)).build();
 
         when(tokenRepository.findByValueAndTypeForUpdate("TOK", TokenType.QR))
             .thenReturn(Optional.of(token));
         when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
-        when(systemSettingsService.getOperationalDate(eq(99L), any())).thenReturn(LocalDate.now());
+        when(systemSettingsService.getOperationalDate(eq(99L), any())).thenReturn(LocalDate.now(ZoneOffset.UTC));
         BookingDto dto = new BookingDto();
         dto.setStatus(BookingStatus.CHECKED_IN);
         when(bookingService.updateBooking(eq(REF), any(UpdateBookingRequest.class))).thenReturn(dto);
 
-        BookingDto result = checkInService.verifyQr("TOK", 5L, "admin@x", LocalDate.now());
+        BookingDto result = checkInService.verifyQr("TOK", 5L, "admin@x", LocalDate.now(ZoneOffset.UTC));
 
         assertThat(result.getStatus()).isEqualTo(BookingStatus.CHECKED_IN);
         assertThat(token.isConsumed()).isTrue();
@@ -191,20 +195,20 @@ class CheckInServiceTest {
     @Test
     void verifyQr_consumedToken_isRejected() {
         Booking booking = activeBooking(BookingStatus.CONFIRMED);
-        booking.setBookingDate(LocalDate.now());
-        booking.setStartTime(LocalTime.now().plusMinutes(10).withNano(0));
+        booking.setBookingDate(LocalDate.now(ZoneOffset.UTC));
+        booking.setStartTime(LocalTime.now(ZoneOffset.UTC).plusMinutes(10).withNano(0));
 
         CheckInToken token = CheckInToken.builder()
             .bookingRef(REF).bookingId(1L).tokenType(TokenType.QR)
-            .tokenValue("TOK").expiresAt(LocalDateTime.now().plusHours(2))
-            .consumedAt(LocalDateTime.now().minusMinutes(5)).build();
+            .tokenValue("TOK").expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusHours(2))
+            .consumedAt(LocalDateTime.now(ZoneOffset.UTC).minusMinutes(5)).build();
 
         when(tokenRepository.findByValueAndTypeForUpdate("TOK", TokenType.QR))
             .thenReturn(Optional.of(token));
         // bookingRepository may or may not be invoked depending on guard ordering — make stubs lenient
         lenient().when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
 
-        assertThatThrownBy(() -> checkInService.verifyQr("TOK", 5L, "admin@x", LocalDate.now()))
+        assertThatThrownBy(() -> checkInService.verifyQr("TOK", 5L, "admin@x", LocalDate.now(ZoneOffset.UTC)))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("already been used");
         verify(bookingService, never()).updateBooking(anyString(), any());
@@ -213,18 +217,18 @@ class CheckInServiceTest {
     @Test
     void verifyQr_outsideWindow_isRejected() {
         // Pick a future LocalDateTime 5h ahead and *carry the date forward* if it
-        // wraps past midnight — otherwise LocalTime.now().plusHours(5) silently
+        // wraps past midnight — otherwise LocalTime.now(ZoneOffset.UTC).plusHours(5) silently
         // wraps to early morning of the same day and the production code
         // (correctly) reports it as a closed window rather than a not-yet-open
         // one. We want "way too early", i.e. before windowStart.
-        LocalDateTime startDt = LocalDateTime.now().plusHours(5).withNano(0);
+        LocalDateTime startDt = LocalDateTime.now(ZoneOffset.UTC).plusHours(5).withNano(0);
         Booking booking = activeBooking(BookingStatus.CONFIRMED);
         booking.setBookingDate(startDt.toLocalDate());
         booking.setStartTime(startDt.toLocalTime());
 
         CheckInToken token = CheckInToken.builder()
             .bookingRef(REF).bookingId(1L).tokenType(TokenType.QR)
-            .tokenValue("TOK").expiresAt(LocalDateTime.now().plusHours(48)).build();
+            .tokenValue("TOK").expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusHours(48)).build();
 
         when(tokenRepository.findByValueAndTypeForUpdate("TOK", TokenType.QR))
             .thenReturn(Optional.of(token));
@@ -234,7 +238,7 @@ class CheckInServiceTest {
         when(systemSettingsService.getOperationalDate(eq(99L), any()))
             .thenReturn(startDt.toLocalDate());
 
-        assertThatThrownBy(() -> checkInService.verifyQr("TOK", 5L, "admin@x", LocalDate.now()))
+        assertThatThrownBy(() -> checkInService.verifyQr("TOK", 5L, "admin@x", LocalDate.now(ZoneOffset.UTC)))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("Check-in opens at");
         verify(bookingService, never()).updateBooking(anyString(), any());
@@ -246,14 +250,14 @@ class CheckInServiceTest {
     @Test
     void verifyOtp_wrongCode_incrementsAttempts_thenLocksAfterMax() {
         Booking booking = activeBooking(BookingStatus.CONFIRMED);
-        booking.setBookingDate(LocalDate.now());
-        booking.setStartTime(LocalTime.now().plusMinutes(10).withNano(0));
+        booking.setBookingDate(LocalDate.now(ZoneOffset.UTC));
+        booking.setStartTime(LocalTime.now(ZoneOffset.UTC).plusMinutes(10).withNano(0));
 
         String correct = "654321";
         CheckInToken token = CheckInToken.builder()
             .bookingRef(REF).bookingId(1L).tokenType(TokenType.OTP)
             .tokenValue(sha256(correct))
-            .expiresAt(LocalDateTime.now().plusMinutes(10))
+            .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(10))
             .failedAttempts(0).build();
 
         when(tokenRepository.findActiveByBookingRefForUpdate(REF, TokenType.OTP))
@@ -262,41 +266,41 @@ class CheckInServiceTest {
         // 4 wrong attempts increment counter without locking
         for (int i = 1; i <= 4; i++) {
             int attemptNum = i;
-            assertThatThrownBy(() -> checkInService.verifyOtp(REF, "000000", 5L, "a@x", LocalDate.now()))
+            assertThatThrownBy(() -> checkInService.verifyOtp(REF, "000000", 5L, "a@x", LocalDate.now(ZoneOffset.UTC)))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("Incorrect OTP");
             assertThat(token.getFailedAttempts()).isEqualTo(attemptNum);
         }
         // 5th wrong attempt locks the OTP
-        assertThatThrownBy(() -> checkInService.verifyOtp(REF, "000000", 5L, "a@x", LocalDate.now()))
+        assertThatThrownBy(() -> checkInService.verifyOtp(REF, "000000", 5L, "a@x", LocalDate.now(ZoneOffset.UTC)))
             .hasMessageContaining("Too many incorrect attempts");
         assertThat(token.getFailedAttempts()).isEqualTo(5);
         // Lock pulls expiry forward to "now" — assert it's no later than the present moment
-        assertThat(token.getExpiresAt()).isBeforeOrEqualTo(LocalDateTime.now().plusSeconds(1));
+        assertThat(token.getExpiresAt()).isBeforeOrEqualTo(LocalDateTime.now(ZoneOffset.UTC).plusSeconds(1));
         verify(bookingService, never()).updateBooking(anyString(), any());
     }
 
     @Test
     void verifyOtp_correctCode_checksInBooking() {
         Booking booking = activeBooking(BookingStatus.CONFIRMED);
-        booking.setBookingDate(LocalDate.now());
-        booking.setStartTime(LocalTime.now().plusMinutes(10).withNano(0));
+        booking.setBookingDate(LocalDate.now(ZoneOffset.UTC));
+        booking.setStartTime(LocalTime.now(ZoneOffset.UTC).plusMinutes(10).withNano(0));
 
         String code = "123456";
         CheckInToken token = CheckInToken.builder()
             .bookingRef(REF).bookingId(1L).tokenType(TokenType.OTP)
             .tokenValue(sha256(code))
-            .expiresAt(LocalDateTime.now().plusMinutes(10)).build();
+            .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(10)).build();
 
         when(tokenRepository.findActiveByBookingRefForUpdate(REF, TokenType.OTP))
             .thenReturn(List.of(token));
         when(bookingRepository.findById(1L)).thenReturn(Optional.of(booking));
-        when(systemSettingsService.getOperationalDate(eq(99L), any())).thenReturn(LocalDate.now());
+        when(systemSettingsService.getOperationalDate(eq(99L), any())).thenReturn(LocalDate.now(ZoneOffset.UTC));
         BookingDto dto = new BookingDto();
         dto.setStatus(BookingStatus.CHECKED_IN);
         when(bookingService.updateBooking(eq(REF), any(UpdateBookingRequest.class))).thenReturn(dto);
 
-        BookingDto result = checkInService.verifyOtp(REF, code, 5L, "a@x", LocalDate.now());
+        BookingDto result = checkInService.verifyOtp(REF, code, 5L, "a@x", LocalDate.now(ZoneOffset.UTC));
 
         assertThat(result.getStatus()).isEqualTo(BookingStatus.CHECKED_IN);
         assertThat(token.isConsumed()).isTrue();
@@ -307,7 +311,7 @@ class CheckInServiceTest {
     void verifyOtp_noActiveToken_isRejected() {
         when(tokenRepository.findActiveByBookingRefForUpdate(REF, TokenType.OTP))
             .thenReturn(List.of());
-        assertThatThrownBy(() -> checkInService.verifyOtp(REF, "123456", 5L, "a@x", LocalDate.now()))
+        assertThatThrownBy(() -> checkInService.verifyOtp(REF, "123456", 5L, "a@x", LocalDate.now(ZoneOffset.UTC)))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("No active OTP");
     }
@@ -320,7 +324,7 @@ class CheckInServiceTest {
         b.setBookingRef(REF);
         b.setBingeId(99L);
         b.setStatus(status);
-        b.setBookingDate(LocalDate.now());
+        b.setBookingDate(LocalDate.now(ZoneOffset.UTC));
         b.setStartTime(LocalTime.of(18, 0));
         b.setCustomerName("Alice");
         b.setCustomerEmail("alice@example.com");

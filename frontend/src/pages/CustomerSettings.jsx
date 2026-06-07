@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { authService } from '../services/endpoints';
 import SEO from '../components/SEO';
 import { toast } from 'react-toastify';
-import { FiSettings, FiMail, FiLock, FiEye, FiEyeOff } from 'react-icons/fi';
+import { FiSettings, FiMail, FiLock, FiEye, FiEyeOff, FiTrash2, FiAlertTriangle } from 'react-icons/fi';
 import './CustomerHub.css';
 
 /**
@@ -30,8 +30,32 @@ export default function CustomerSettings() {
   const [showPasswords, setShowPasswords] = useState({ current: false, new: false, confirm: false });
   const [changingPassword, setChangingPassword] = useState(false);
 
+  // Account deletion (right-to-erasure)
+  const [deleteConfirm, setDeleteConfirm] = useState('');
+  const [deleting, setDeleting] = useState(false);
+
   const customer = user || {};
   const toggleShow = (k) => setShowPasswords((p) => ({ ...p, [k]: !p[k] }));
+
+  const handleDeleteAccount = async (e) => {
+    e.preventDefault();
+    if (deleteConfirm.trim().toUpperCase() !== 'DELETE') {
+      toast.error('Type DELETE to confirm account deletion');
+      return;
+    }
+    setDeleting(true);
+    try {
+      await authService.requestAccountDeletion();
+      // The account is deactivated and all sessions are revoked server-side, so
+      // force a local logout and bounce to home — the session is already dead.
+      toast.success('Your account has been scheduled for deletion. You have been signed out.');
+      try { await logout(); } catch { /* session already revoked server-side */ }
+      navigate('/', { replace: true });
+    } catch (error) {
+      toast.error(error.response?.data?.message || error.userMessage || 'Failed to submit deletion request');
+      setDeleting(false);
+    }
+  };
 
   const handleEmailChange = async (e) => {
     e.preventDefault();
@@ -193,6 +217,44 @@ export default function CustomerSettings() {
           </form>
         </section>
       </div>
+
+      {/* Danger Zone — right-to-erasure (DPDP Act 2023 / GDPR) */}
+      <section
+        className="customer-card"
+        style={{ marginTop: '1.25rem', border: '1px solid #ef4444' }}
+      >
+        <header className="customer-card-header">
+          <h2 style={{ color: '#ef4444' }}><FiAlertTriangle /> Delete Account</h2>
+        </header>
+        <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+          This permanently closes your account. You will be signed out immediately, and all
+          your personal data will be permanently anonymized within 30 days as required by law.
+          <strong> This cannot be undone.</strong> Bookings already completed are retained in
+          anonymized form for legal and accounting purposes.
+        </p>
+        <form onSubmit={handleDeleteAccount} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+          <div className="input-group">
+            <label>Type <strong>DELETE</strong> to confirm</label>
+            <input
+              type="text"
+              value={deleteConfirm}
+              onChange={(e) => setDeleteConfirm(e.target.value)}
+              placeholder="DELETE"
+              autoComplete="off"
+              aria-label="Type DELETE to confirm account deletion"
+            />
+          </div>
+          <button
+            type="submit"
+            className="btn btn-danger"
+            disabled={deleting || deleteConfirm.trim().toUpperCase() !== 'DELETE'}
+            style={{ alignSelf: 'flex-start' }}
+          >
+            <FiTrash2 style={{ verticalAlign: '-2px', marginRight: 6 }} />
+            {deleting ? 'Submitting…' : 'Permanently delete my account'}
+          </button>
+        </form>
+      </section>
     </div>
   );
 }

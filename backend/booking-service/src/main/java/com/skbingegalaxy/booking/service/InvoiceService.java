@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -74,7 +75,7 @@ public class InvoiceService {
             .taxTotal(booking.getTaxAmount())
             .grandTotal(booking.getDisplayAmount() != null ? booking.getDisplayAmount() : booking.getTotalAmount())
             .status(Invoice.Status.ISSUED)
-            .issuedAt(LocalDateTime.now())
+            .issuedAt(LocalDateTime.now(ZoneOffset.UTC))
             .taxBreakdownJson(booking.getTaxBreakdownJson())
             .build();
         invoice = invoiceRepo.save(invoice);
@@ -232,7 +233,7 @@ public class InvoiceService {
     }
 
     private String nextNumber() {
-        return INVOICE_PREFIX + "-" + LocalDateTime.now().format(YEAR) + "-" +
+        return INVOICE_PREFIX + "-" + LocalDateTime.now(ZoneOffset.UTC).format(YEAR) + "-" +
             String.format("%07d", COUNTER.incrementAndGet());
     }
 

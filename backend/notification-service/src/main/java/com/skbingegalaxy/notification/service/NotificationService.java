@@ -23,6 +23,7 @@ import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
@@ -34,6 +35,12 @@ import java.util.regex.Pattern;
 @Slf4j
 public class NotificationService {
 
+    private static final int RETRY_BATCH_SIZE = 100;
+    /** Exponential backoff intervals in minutes: 1m, 5m, 30m (capped). */
+    private static final long[] BACKOFF_MINUTES = {1, 5, 30};
+    /** Matches unreplaced {{variable}} placeholders left after substitution. */
+    private static final Pattern UNREPLACED_VARS = Pattern.compile("\\{\\{[^}]+}}");
+
     private final NotificationRepository notificationRepository;
     private final JavaMailSender mailSender;
     private final TemplateEngine templateEngine;
@@ -43,6 +50,7 @@ public class NotificationService {
     private final SmsProvider smsProvider;
     private final WhatsAppProvider whatsAppProvider;
     private final PushProvider pushProvider;
+    private final NotificationMetrics metrics;
 
     @Value("${app.notification.from-email:noreply@skbingegalaxy.com}")
     private String fromEmail;
@@ -53,14 +61,6 @@ public class NotificationService {
     @Value("${app.notification.unsubscribe-url:https://skbingegalaxy.com/account/notifications}")
     private String unsubscribeUrl;
 
-    private static final int RETRY_BATCH_SIZE = 100;
-
-    /** Exponential backoff intervals in minutes: 1m, 5m, 30m (capped). */
-    private static final long[] BACKOFF_MINUTES = {1, 5, 30};
-
-    /** Matches unreplaced {{variable}} placeholders left after substitution. */
-    private static final Pattern UNREPLACED_VARS = Pattern.compile("\\{\\{[^}]+}}");
-
     public NotificationService(
             NotificationRepository notificationRepository,
             @Autowired(required = false) JavaMailSender mailSender,
@@ -70,7 +70,8 @@ public class NotificationService {
             WhatsAppTemplateRepository whatsAppTemplateRepository,
             @Autowired(required = false) SmsProvider smsProvider,
             @Autowired(required = false) WhatsAppProvider whatsAppProvider,
-            @Autowired(required = false) PushProvider pushProvider) {
+            @Autowired(required = false) PushProvider pushProvider,
+            NotificationMetrics metrics) {
         this.notificationRepository = notificationRepository;
         this.mailSender = mailSender;
         this.templateEngine = templateEngine;
@@ -80,6 +81,7 @@ public class NotificationService {
         this.smsProvider = smsProvider;
         this.whatsAppProvider = whatsAppProvider;
         this.pushProvider = pushProvider;
+        this.metrics = metrics;
     }
 
     public NotificationDto sendNotification(
@@ -120,7 +122,7 @@ public class NotificationService {
                     .recipientName(recipientName)
                     .subject(subject).body(body).bookingRef(bookingRef).metadata(metadata)
                     .sent(false).failureReason("Suppressed by user preference")
-                    .retryCount(0).createdAt(LocalDateTime.now()).build();
+                    .retryCount(0).createdAt(LocalDateTime.now(ZoneOffset.UTC)).build();
             return toDto(notificationRepository.save(suppressed));
         }
 
@@ -137,7 +139,7 @@ public class NotificationService {
             .metadata(metadata)
             .sent(false)
             .retryCount(0)
-            .createdAt(LocalDateTime.now())
+            .createdAt(LocalDateTime.now(ZoneOffset.UTC))
             .build();
 
         notification = notificationRepository.save(notification);
@@ -145,11 +147,13 @@ public class NotificationService {
         boolean success = dispatchNotification(notification);
         notification.setSent(success);
         if (success) {
-            notification.setSentAt(LocalDateTime.now());
+            notification.setSentAt(LocalDateTime.now(ZoneOffset.UTC));
             notification.setDeliveryStatus(DeliveryStatus.SENT);
+            metrics.deliverySent(channel.name());
         } else {
             notification.setDeliveryStatus(DeliveryStatus.PENDING);
             notification.setNextRetryAt(computeNextRetryAt(0));
+            metrics.deliveryFailed(channel.name());
         }
         notification = notificationRepository.save(notification);
 
@@ -176,7 +180,7 @@ public class NotificationService {
      * the scheduler layer — no in-process AtomicBoolean needed.
      */
     public void retryFailedNotifications() {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         List<Notification> failed = notificationRepository
             .findRetryableNotifications(maxRetries, now,
                 org.springframework.data.domain.PageRequest.of(0, RETRY_BATCH_SIZE));
@@ -189,11 +193,27 @@ public class NotificationService {
             boolean success = dispatchNotification(n);
             n.setSent(success);
             if (success) {
-                n.setSentAt(LocalDateTime.now());
+                n.setSentAt(LocalDateTime.now(ZoneOffset.UTC));
                 n.setDeliveryStatus(DeliveryStatus.SENT);
                 n.setNextRetryAt(null);
+                metrics.deliverySent(n.getChannel().name());
             } else {
-                n.setNextRetryAt(computeNextRetryAt(n.getRetryCount()));
+                metrics.deliveryFailed(n.getChannel().name());
+                // Exhausted all retries — customer will never receive this notification.
+                if (n.getRetryCount() >= maxRetries) {
+                    // Mark it terminal (BOUNCED = the enum's "permanently failed" status) so it
+                    // stops appearing as PENDING/in-flight in admin views and queries. The
+                    // retryable query already excludes retryCount >= maxRetries, so it won't be
+                    // picked up again; clear nextRetryAt to keep the row clean.
+                    n.setDeliveryStatus(DeliveryStatus.BOUNCED);
+                    n.setBouncedAt(LocalDateTime.now(ZoneOffset.UTC));
+                    n.setNextRetryAt(null);
+                    metrics.permanentFailure(n.getChannel().name());
+                    log.error("PERMANENT FAILURE: notification {} ({}) to {} exhausted {} retries",
+                        n.getId(), n.getType(), n.getRecipientEmail(), maxRetries);
+                } else {
+                    n.setNextRetryAt(computeNextRetryAt(n.getRetryCount()));
+                }
             }
             notificationRepository.save(n);
         }
@@ -219,12 +239,14 @@ public class NotificationService {
         boolean success = dispatchNotification(n);
         n.setSent(success);
         if (success) {
-            n.setSentAt(LocalDateTime.now());
+            n.setSentAt(LocalDateTime.now(ZoneOffset.UTC));
             n.setDeliveryStatus(DeliveryStatus.SENT);
             n.setNextRetryAt(null);
             n.setFailureReason(null);
+            metrics.deliverySent(n.getChannel().name());
         } else {
             n.setNextRetryAt(computeNextRetryAt(n.getRetryCount()));
+            metrics.deliveryFailed(n.getChannel().name());
         }
         Notification saved = notificationRepository.save(n);
         log.info("admin-retry notificationId={} adminId={} success={}", id, adminId, success);
@@ -237,7 +259,7 @@ public class NotificationService {
      */
     static LocalDateTime computeNextRetryAt(int retryCount) {
         int idx = Math.min(retryCount, BACKOFF_MINUTES.length - 1);
-        return LocalDateTime.now().plusMinutes(BACKOFF_MINUTES[idx]);
+        return LocalDateTime.now(ZoneOffset.UTC).plusMinutes(BACKOFF_MINUTES[idx]);
     }
 
     private boolean dispatchNotification(Notification notification) {
@@ -282,7 +304,8 @@ public class NotificationService {
         MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, "UTF-8");
         helper.setFrom(fromEmail);
         helper.setTo(notification.getRecipientEmail());
-        helper.setSubject(notification.getSubject());
+        String subject = notification.getSubject();
+        helper.setSubject(subject != null && !subject.isBlank() ? subject : "SK Binge Galaxy");
 
         // ── CAN-SPAM / List-Unsubscribe headers ──
         String personalUnsubUrl = unsubscribeUrl + "?email=" + URLEncoder.encode(notification.getRecipientEmail(), StandardCharsets.UTF_8);

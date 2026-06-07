@@ -228,6 +228,11 @@ services:
       KAFKA_LOG_RETENTION_HOURS: 168
       KAFKA_LOG_SEGMENT_BYTES: 1073741824
       KAFKA_HEAP_OPTS: "-Xmx768M -Xms512M"
+      # Give Kafka extra time to (re)connect to ZooKeeper when ZK restarts
+      # alongside Kafka. Without these, Kafka crashes with a ZooKeeper
+      # connection timeout after ~30 s and dependent services abort.
+      KAFKA_ZOOKEEPER_CONNECTION_TIMEOUT_MS: "60000"
+      KAFKA_ZOOKEEPER_SESSION_TIMEOUT_MS: "60000"
     volumes:
       - kafka-data:/var/lib/kafka/data
     healthcheck:
@@ -509,6 +514,7 @@ services:
       PAYMENT_SIMULATION_ENABLED: "${PAYMENT_SIMULATION_ENABLED:-true}"
       RAZORPAY_KEY_ID: "${RAZORPAY_KEY_ID}"
       RAZORPAY_KEY_SECRET: "${RAZORPAY_KEY_SECRET}"
+      RAZORPAY_WEBHOOK_SECRET: "${RAZORPAY_WEBHOOK_SECRET:-}"
       JAVA_TOOL_OPTIONS: *jvm_opts
     deploy:
       resources:

@@ -13,7 +13,12 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.LocalTime;
 import java.util.List;
 
 /**
@@ -30,11 +35,14 @@ public class PaymentReconciliationScheduler {
     private final PaymentStatusHistoryRepository statusHistoryRepository;
     private final RazorpayGatewayClient razorpayGatewayClient;
 
+    @org.springframework.beans.factory.annotation.Value("${app.payment.settlement-reconciliation-zone:Asia/Kolkata}")
+    private String settlementZoneStr;
+
     @Scheduled(fixedDelay = 300_000) // 5 minutes
     @SchedulerLock(name = "paymentReconciliation", lockAtLeastFor = "30s", lockAtMostFor = "5m")
     @Transactional(timeout = 240) // 4 min — bound DB connection hold time even if Razorpay is slow
     public void reconcileStalePayments() {
-        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(30);
+        LocalDateTime cutoff = LocalDateTime.now(ZoneOffset.UTC).minusMinutes(30);
         List<Payment> stalePayments = paymentRepository.findStaleInitiatedPayments(cutoff);
 
         if (stalePayments.isEmpty()) return;
@@ -86,6 +94,80 @@ public class PaymentReconciliationScheduler {
         if (reconciled > 0 || gatewayPaid > 0) {
             log.info("Payment reconciliation: marked {} stale payments as FAILED, {} flagged as gateway-paid (needs review)",
                 reconciled, gatewayPaid);
+        }
+    }
+
+    /**
+     * Daily ledger reconciliation: for every SUCCESS payment recorded yesterday,
+     * verify with Razorpay that the gateway order/payment was actually captured.
+     *
+     * Discrepancies are logged as ERRORs and flagged in PaymentStatusHistory for
+     * ops review. This catches:
+     * - Callback spoofing (we recorded SUCCESS but gateway never captured)
+     * - Settled payments we never received a callback for (revenue leakage)
+     *
+     * Runs at 03:00 daily. ShedLock prevents duplicate runs across replicas.
+     */
+    @Scheduled(cron = "${app.payment.settlement-reconciliation-cron:0 0 3 * * *}",
+               zone  = "${app.payment.settlement-reconciliation-zone:Asia/Kolkata}")
+    @SchedulerLock(name = "dailySettlementReconciliation", lockAtLeastFor = "1m", lockAtMostFor = "20m")
+    @Transactional(timeout = 1100)
+    public void reconcileDailySettlement() {
+        ZoneId settlementZone = ZoneId.of(settlementZoneStr);
+        LocalDate yesterday = LocalDate.now(settlementZone).minusDays(1);
+        LocalDateTime from = LocalDateTime.of(yesterday, LocalTime.MIDNIGHT);
+        LocalDateTime to   = LocalDateTime.of(yesterday, LocalTime.MAX);
+
+        List<Payment> successPayments = paymentRepository.findSuccessPaymentsInWindow(from, to);
+        if (successPayments.isEmpty()) {
+            log.info("Daily settlement reconciliation: no SUCCESS payments for {} — nothing to verify", yesterday);
+            return;
+        }
+
+        log.info("Daily settlement reconciliation: verifying {} SUCCESS payment(s) for {}", successPayments.size(), yesterday);
+
+        int verified = 0;
+        int mismatch = 0;
+        BigDecimal verifiedTotal = BigDecimal.ZERO;
+
+        for (Payment payment : successPayments) {
+            if (payment.getGatewayOrderId() == null || payment.getGatewayOrderId().isBlank()) {
+                // Cash / admin-recorded payments have no gateway order — skip gateway check
+                verified++;
+                verifiedTotal = verifiedTotal.add(payment.getAmount() != null ? payment.getAmount() : BigDecimal.ZERO);
+                continue;
+            }
+            try {
+                String gatewayStatus = razorpayGatewayClient.fetchOrderStatus(payment.getGatewayOrderId());
+                if (!"paid".equalsIgnoreCase(gatewayStatus)) {
+                    log.error("SETTLEMENT_MISMATCH: payment {} (booking {}, order {}) recorded as SUCCESS locally "
+                        + "but Razorpay reports '{}'. Possible fraud or callback spoofing.",
+                        payment.getTransactionId(), payment.getBookingRef(),
+                        payment.getGatewayOrderId(), gatewayStatus);
+                    statusHistoryRepository.save(PaymentStatusHistory.builder()
+                        .paymentId(payment.getId())
+                        .bookingRef(payment.getBookingRef())
+                        .fromStatus(PaymentStatus.SUCCESS)
+                        .toStatus(PaymentStatus.SUCCESS)
+                        .reason("SETTLEMENT_MISMATCH: local=SUCCESS but Razorpay='" + gatewayStatus
+                            + "'. Manual investigation required.")
+                        .build());
+                    mismatch++;
+                } else {
+                    verified++;
+                    verifiedTotal = verifiedTotal.add(payment.getAmount() != null ? payment.getAmount() : BigDecimal.ZERO);
+                }
+            } catch (Exception e) {
+                log.warn("Settlement reconciliation: could not verify payment {} via Razorpay: {}",
+                    payment.getTransactionId(), e.getMessage());
+            }
+        }
+
+        log.info("Daily settlement reconciliation for {}: verified={} (₹{}), mismatches={}",
+            yesterday, verified, verifiedTotal.toPlainString(), mismatch);
+        if (mismatch > 0) {
+            log.error("SETTLEMENT_ALERT: {} payment(s) on {} have gateway/internal discrepancies — ops review required",
+                mismatch, yesterday);
         }
     }
 }

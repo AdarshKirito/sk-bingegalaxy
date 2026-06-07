@@ -64,4 +64,17 @@ public final class LogSanitizer {
         }
         return token.substring(0, 4) + REDACTED + token.substring(token.length() - 4);
     }
+
+    /**
+     * Mask a card PAN at the call site: show only the last 4 digits.
+     * {@code 4111111111111111} → {@code ****1111}.
+     * Use when explicitly logging payment-related values rather than relying
+     * solely on the logback pipeline filter.
+     */
+    public static String maskCardNumber(String pan) {
+        if (pan == null) return REDACTED;
+        String digits = pan.replaceAll("[\\s\\-]", "");
+        if (digits.length() < 4) return REDACTED;
+        return "****" + digits.substring(digits.length() - 4);
+    }
 }

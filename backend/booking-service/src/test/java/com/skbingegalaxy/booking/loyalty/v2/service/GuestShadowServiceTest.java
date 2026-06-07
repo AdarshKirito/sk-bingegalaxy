@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -83,7 +84,7 @@ class GuestShadowServiceTest {
     void accrueForGuest_aggregates_into_existing_shadow() {
         LoyaltyGuestShadow existing = LoyaltyGuestShadow.builder()
                 .id(1L).emailHash("dummy").pendingPoints(300L).pendingQualifyingCredits(200L)
-                .expiresAt(LocalDateTime.now().plusDays(30)).build();
+                .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusDays(30)).build();
         when(guestShadowRepository.findUnmergedByIdentityHash(any(), any()))
                 .thenReturn(List.of(existing));
 
@@ -98,7 +99,7 @@ class GuestShadowServiceTest {
     void mergeOnSignup_credits_pending_points_with_idempotency_key() {
         LoyaltyGuestShadow shadow = LoyaltyGuestShadow.builder()
                 .id(55L).pendingPoints(750L).pendingQualifyingCredits(750L)
-                .expiresAt(LocalDateTime.now().plusDays(30))
+                .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusDays(30))
                 .lastBookingRef("BK-X").build();
         when(guestShadowRepository.findUnmergedByIdentityHash(any(), any()))
                 .thenReturn(List.of(shadow));
@@ -126,7 +127,7 @@ class GuestShadowServiceTest {
     void mergeOnSignup_skips_expired_shadows() {
         LoyaltyGuestShadow shadow = LoyaltyGuestShadow.builder()
                 .id(66L).pendingPoints(1000L).pendingQualifyingCredits(0L)
-                .expiresAt(LocalDateTime.now().minusDays(1))
+                .expiresAt(LocalDateTime.now(ZoneOffset.UTC).minusDays(1))
                 .build();
         when(guestShadowRepository.findUnmergedByIdentityHash(any(), any()))
                 .thenReturn(List.of(shadow));
@@ -160,7 +161,7 @@ class GuestShadowServiceTest {
         );
         when(guestShadowRepository.findExpired(any())).thenReturn(expired);
 
-        int n = service.purgeExpiredAsOf(LocalDateTime.now());
+        int n = service.purgeExpiredAsOf(LocalDateTime.now(ZoneOffset.UTC));
 
         assertThat(n).isEqualTo(2);
         verify(guestShadowRepository).deleteAll(expired);

@@ -118,10 +118,20 @@ export default function PaymentPage() {
     setProcessing(true);
     trackPaymentStarted(ref, amountToPay);
     try {
+      // Multi-currency: if the booking was created with a locked foreign payment currency,
+      // charge in that currency at the locked rate (foreign = INR amount × fxRate). The
+      // backend re-validates this against the locked rate (amount / fxRate ≤ balance), so a
+      // client-side rounding/tamper can only be rejected — never overcharge. INR bookings are
+      // unchanged (no currency field, amount in INR).
+      const payCcy = booking?.paymentCurrencyCode && booking.paymentCurrencyCode !== 'INR'
+        ? booking.paymentCurrencyCode : null;
+      const payRate = Number(booking?.fxRate) || 1;
+      const chargeAmount = payCcy ? Number((amountToPay * payRate).toFixed(2)) : amountToPay;
       const res = await paymentService.initiate({
         bookingRef: ref,
-        amount: amountToPay,
+        amount: chargeAmount,
         paymentMethod,
+        ...(payCcy ? { currency: payCcy } : {}),
       });
       const payData = res.data.data;
       setPayment(payData);
@@ -229,6 +239,10 @@ export default function PaymentPage() {
     && (paymentState === 'SUCCESS' || paymentState === 'REFUNDED' || paymentState === 'PARTIALLY_REFUNDED');
   const isInitiated = !isBalanceDue && paymentState === 'INITIATED';
   const isFailed = !isBalanceDue && paymentState === 'FAILED';
+  // Chargeback / bank dispute raised — funds are held pending review. The customer
+  // must not be offered a "Pay" button (that would invite a duplicate charge on a
+  // payment they have already disputed).
+  const isDisputed = !isBalanceDue && paymentState === 'DISPUTED';
   // Booking-level terminal states that make payment impossible.
   const bookingState = String(booking.status || '').toUpperCase();
   const isBookingClosed = bookingState === 'CANCELLED' || bookingState === 'NO_SHOW' || bookingState === 'EXPIRED';
@@ -286,7 +300,9 @@ export default function PaymentPage() {
         ? 'customer-flow-note-warning'
         : isFailed
           ? 'customer-flow-note-danger'
-          : 'customer-flow-note-info';
+          : isDisputed
+            ? 'customer-flow-note-warning'
+            : 'customer-flow-note-info';
   const paymentBannerTitle = isBalanceDue
     ? `Outstanding balance of ${balanceDueLabel}`
     : isSuccess
@@ -297,7 +313,9 @@ export default function PaymentPage() {
         ? 'Payment handoff already started'
         : isFailed
           ? 'The last payment attempt did not complete'
-          : 'Choose a method and continue when ready';
+          : isDisputed
+            ? 'A payment dispute is being reviewed'
+            : 'Choose a method and continue when ready';
   const paymentBannerBody = isBalanceDue
     ? `You have paid ${formatAmount(booking.collectedAmount || 0)} out of ${amountLabel}. Please pay the remaining ${balanceDueLabel} to fully settle this reservation. This can happen when an admin adjusts the booking price or a partial refund is applied.`
     : isSuccess
@@ -306,7 +324,9 @@ export default function PaymentPage() {
         ? 'If you just completed the provider step, refresh once. Start a new payment only if the previous handoff was abandoned.'
         : isFailed
           ? (payment?.failureReason || 'Retry with the same method or switch to another one for a cleaner attempt.')
-          : 'This screen keeps the booking details, amount, and transaction status together so you do not have to cross-check another page before paying.';
+          : isDisputed
+            ? 'A chargeback or dispute has been raised with your bank for this payment. The amount is on hold with the payment provider while it is reviewed — please do not pay again. We will update this booking once the dispute is resolved. Contact support if you raised this in error.'
+            : 'This screen keeps the booking details, amount, and transaction status together so you do not have to cross-check another page before paying.';
   const nextSteps = isSuccess
     ? [
         {
@@ -427,7 +447,7 @@ export default function PaymentPage() {
           <p>{booking.bookingDate} at {formatTime12h(booking.startTime)}</p>
           <div className="customer-flow-badges">
             <span className="badge badge-info">Ref {ref}</span>
-            <span className={`badge ${isSuccess ? 'badge-success' : isInitiated ? 'badge-warning' : isFailed ? 'badge-danger' : 'badge-info'}`}>
+            <span className={`badge ${isSuccess ? 'badge-success' : isInitiated ? 'badge-warning' : isFailed ? 'badge-danger' : isDisputed ? 'badge-warning' : 'badge-info'}`}>
               {paymentStatusLabel}
             </span>
           </div>
@@ -500,7 +520,7 @@ export default function PaymentPage() {
           </div>
 
           <div className={`customer-flow-note ${paymentBannerClass}`}>
-            <strong>{isBalanceDue ? <FiAlertCircle /> : isSuccess ? <FiCheckCircle /> : isInitiated ? <FiClock /> : isFailed ? <FiAlertCircle /> : <FiCreditCard />}{paymentBannerTitle}</strong>
+            <strong>{isBalanceDue ? <FiAlertCircle /> : isSuccess ? <FiCheckCircle /> : isInitiated ? <FiClock /> : isFailed ? <FiAlertCircle /> : isDisputed ? <FiAlertCircle /> : <FiCreditCard />}{paymentBannerTitle}</strong>
             <p>{paymentBannerBody}</p>
           </div>
 
@@ -511,7 +531,7 @@ export default function PaymentPage() {
             </div>
           )}
 
-          {!isSuccess && !isInitiated && (
+          {!isSuccess && !isInitiated && !isDisputed && (
             <label className="customer-flow-select">
               <span className="customer-flow-helper">Payment method</span>
               <select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
@@ -562,6 +582,15 @@ export default function PaymentPage() {
                 Start Fresh Payment
               </button>
               <Link className="btn btn-secondary" to={`/booking/${ref}`}>Review Booking</Link>
+            </div>
+          ) : isDisputed ? (
+            <div className="customer-flow-actions customer-flow-actions-left">
+              <div className="customer-flow-note-warning" style={{ width: '100%' }}>
+                A payment dispute is under review with your bank. Please don’t pay again — the amount
+                is on hold until the dispute is resolved. Contact support if you raised this in error.
+              </div>
+              <Link className="btn btn-secondary" to={`/booking/${ref}`}>View Booking</Link>
+              <Link className="btn btn-secondary" to="/payments">Payment History</Link>
             </div>
           ) : (
             <div className="customer-flow-actions customer-flow-actions-left">

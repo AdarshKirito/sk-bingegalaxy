@@ -36,10 +36,17 @@ class GatewayHeaderAuthFilterTest {
         when(request.getHeader("X-User-Id")).thenReturn("1");
         when(request.getHeader("X-User-Role")).thenReturn("ADMIN");
 
-        filter.doFilter(request, response, chain);
+        doAnswer(invocation -> {
+            var auth = SecurityContextHolder.getContext().getAuthentication();
+            assertThat(auth).isNotNull();
+            assertThat(auth.getPrincipal()).isEqualTo("1");
+            assertThat(auth.getAuthorities()).hasSize(1);
+            assertThat(auth.getAuthorities().iterator().next().getAuthority()).isEqualTo("ROLE_ADMIN");
+            return null;
+        }).when(chain).doFilter(request, response);
 
+        filter.doFilter(request, response, chain);
         verify(chain).doFilter(request, response);
-        // After filter, context is cleared; verify chain was called properly
     }
 
     @Test

@@ -11,6 +11,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 
@@ -29,7 +30,7 @@ public class BookingReminderScheduler {
     @Scheduled(fixedDelayString = "${app.reminder.check-interval-ms:60000}")
     @SchedulerLock(name = "BookingReminderScheduler", lockAtMostFor = "5m", lockAtLeastFor = "30s")
     public void fireReminders() {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         List<BookingReminder> due = reminderRepo.findByFiredFalseAndCancelledFalseAndFireAtBefore(now);
         if (due.isEmpty()) return;
 

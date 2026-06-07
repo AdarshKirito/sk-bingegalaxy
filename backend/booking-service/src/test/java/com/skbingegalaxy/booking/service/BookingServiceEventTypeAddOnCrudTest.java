@@ -13,6 +13,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.*;
 
 import static org.assertj.core.api.Assertions.*;
@@ -40,13 +42,16 @@ class BookingServiceEventTypeAddOnCrudTest {
     @Mock private PricingService pricingService;
     @Mock private BookingEventLogService eventLogService;
     @Mock private SagaOrchestrator sagaOrchestrator;
-    @Mock private LoyaltyService loyaltyService;
+    @Mock private com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyMemberService loyaltyMemberService;
     @Mock private com.skbingegalaxy.booking.client.AvailabilityClient availabilityClient;
     @Spy  private com.skbingegalaxy.booking.client.AvailabilityClientFallback availabilityFallback;
     @Mock private org.springframework.kafka.core.KafkaTemplate<String, Object> kafkaTemplate;
     @Mock private com.skbingegalaxy.booking.repository.BingeRepository bingeRepository;
     @Mock private com.skbingegalaxy.booking.service.CustomerFreezeService customerFreezeService;
     @Mock private com.skbingegalaxy.booking.repository.SlotHoldRepository slotHoldRepository;
+    @Mock private VenueClockService venueClock;
+    @Mock private TaxService taxService;
+    @Mock private com.skbingegalaxy.booking.repository.AddOnCategoryRepository addOnCategoryRepository;
 
     @InjectMocks private BookingService bookingService;
 
@@ -58,8 +63,18 @@ class BookingServiceEventTypeAddOnCrudTest {
         ReflectionTestUtils.setField(bookingService, "refPrefix", "SKBG");
         ReflectionTestUtils.setField(bookingService, "maxPendingPerCustomer", 2);
         ReflectionTestUtils.setField(bookingService, "cooldownMinutesAfterTimeout", 10);
-        lenient().when(loyaltyService.redeemPoints(anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
-            .thenReturn(new LoyaltyService.RedemptionResult(0L, BigDecimal.ZERO));
+        lenient().when(venueClock.zoneOf(any())).thenReturn(ZoneOffset.UTC);
+        lenient().when(venueClock.today(any())).thenReturn(LocalDate.now(ZoneOffset.UTC));
+        lenient().when(venueClock.defaultZone()).thenReturn(ZoneOffset.UTC);
+        lenient().when(addOnCategoryRepository.findAllById(any())).thenReturn(List.of());
+        lenient().when(addOnCategoryRepository.findById(anyLong())).thenAnswer(inv ->
+            Optional.of(AddOnCategory.builder()
+                .id((Long) inv.getArgument(0))
+                .name("Test Category")
+                .active(true)
+                .build()));
+        lenient().when(loyaltyMemberService.redeemForBooking(anyLong(), anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
+            .thenReturn(new com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyMemberService.RedemptionResult(0L, BigDecimal.ZERO));
     }
 
     @AfterEach
@@ -353,14 +368,14 @@ class BookingServiceEventTypeAddOnCrudTest {
     class CreateAddOnTests {
 
         @Test
-        @DisplayName("creates binge-scoped add-on with uppercased category")
+        @DisplayName("creates binge-scoped add-on with category id")
         void createAddOn_assignsBingeId() {
             BingeContext.setBingeId(11L);
             AddOnSaveRequest req = new AddOnSaveRequest();
             req.setName("DJ Setup");
             req.setDescription("Full DJ system");
             req.setPrice(BigDecimal.valueOf(2000));
-            req.setCategory("experience");
+            req.setCategoryId(2L);
 
             when(addOnRepository.save(any(AddOn.class))).thenAnswer(inv -> {
                 AddOn a = inv.getArgument(0);
@@ -373,7 +388,7 @@ class BookingServiceEventTypeAddOnCrudTest {
             ArgumentCaptor<AddOn> captor = ArgumentCaptor.forClass(AddOn.class);
             verify(addOnRepository).save(captor.capture());
             assertThat(captor.getValue().getBingeId()).isEqualTo(11L);
-            assertThat(captor.getValue().getCategory()).isEqualTo("EXPERIENCE");
+            assertThat(captor.getValue().getCategoryId()).isEqualTo(2L);
             assertThat(captor.getValue().isActive()).isTrue();
         }
 
@@ -383,7 +398,7 @@ class BookingServiceEventTypeAddOnCrudTest {
             AddOnSaveRequest req = new AddOnSaveRequest();
             req.setName("Test");
             req.setPrice(BigDecimal.TEN);
-            req.setCategory("FOOD");
+            req.setCategoryId(1L);
 
             assertThatThrownBy(() -> bookingService.createAddOn(req))
                 .isInstanceOf(BusinessException.class)
@@ -400,7 +415,7 @@ class BookingServiceEventTypeAddOnCrudTest {
         void deleteAddOn_success() {
             BingeContext.setBingeId(11L);
             AddOn addOn = AddOn.builder()
-                .id(5L).bingeId(11L).name("Deletable").active(false).price(BigDecimal.TEN).category("FOOD").build();
+                .id(5L).bingeId(11L).name("Deletable").active(false).price(BigDecimal.TEN).categoryId(1L).build();
 
             when(addOnRepository.findByIdAndBingeId(5L, 11L)).thenReturn(Optional.of(addOn));
             when(bookingAddOnRepository.existsByAddOnId(5L)).thenReturn(false);
@@ -417,7 +432,7 @@ class BookingServiceEventTypeAddOnCrudTest {
         void deleteAddOn_active_throws() {
             BingeContext.setBingeId(11L);
             AddOn addOn = AddOn.builder()
-                .id(5L).bingeId(11L).name("Active").active(true).price(BigDecimal.TEN).category("FOOD").build();
+                .id(5L).bingeId(11L).name("Active").active(true).price(BigDecimal.TEN).categoryId(1L).build();
 
             when(addOnRepository.findByIdAndBingeId(5L, 11L)).thenReturn(Optional.of(addOn));
 
@@ -431,7 +446,7 @@ class BookingServiceEventTypeAddOnCrudTest {
         void deleteAddOn_hasBookings_throws() {
             BingeContext.setBingeId(11L);
             AddOn addOn = AddOn.builder()
-                .id(5L).bingeId(11L).name("Used").active(false).price(BigDecimal.TEN).category("FOOD").build();
+                .id(5L).bingeId(11L).name("Used").active(false).price(BigDecimal.TEN).categoryId(1L).build();
 
             when(addOnRepository.findByIdAndBingeId(5L, 11L)).thenReturn(Optional.of(addOn));
             when(bookingAddOnRepository.existsByAddOnId(5L)).thenReturn(true);
@@ -446,7 +461,7 @@ class BookingServiceEventTypeAddOnCrudTest {
         void deleteAddOn_hasRateCodePricing_throws() {
             BingeContext.setBingeId(11L);
             AddOn addOn = AddOn.builder()
-                .id(5L).bingeId(11L).name("RateRef").active(false).price(BigDecimal.TEN).category("FOOD").build();
+                .id(5L).bingeId(11L).name("RateRef").active(false).price(BigDecimal.TEN).categoryId(1L).build();
 
             when(addOnRepository.findByIdAndBingeId(5L, 11L)).thenReturn(Optional.of(addOn));
             when(bookingAddOnRepository.existsByAddOnId(5L)).thenReturn(false);
@@ -462,7 +477,7 @@ class BookingServiceEventTypeAddOnCrudTest {
         void deleteAddOn_hasCustomerPricing_throws() {
             BingeContext.setBingeId(11L);
             AddOn addOn = AddOn.builder()
-                .id(5L).bingeId(11L).name("CustRef").active(false).price(BigDecimal.TEN).category("FOOD").build();
+                .id(5L).bingeId(11L).name("CustRef").active(false).price(BigDecimal.TEN).categoryId(1L).build();
 
             when(addOnRepository.findByIdAndBingeId(5L, 11L)).thenReturn(Optional.of(addOn));
             when(bookingAddOnRepository.existsByAddOnId(5L)).thenReturn(false);
@@ -513,7 +528,7 @@ class BookingServiceEventTypeAddOnCrudTest {
         @DisplayName("getActiveAddOns only returns binge-scoped items")
         void getActiveAddOns_bingeScoped() {
             BingeContext.setBingeId(11L);
-            AddOn a = AddOn.builder().id(1L).bingeId(11L).name("Local Addon").active(true).price(BigDecimal.TEN).category("FOOD").build();
+            AddOn a = AddOn.builder().id(1L).bingeId(11L).name("Local Addon").active(true).price(BigDecimal.TEN).categoryId(1L).build();
             when(addOnRepository.findByBingeIdAndActiveTrue(11L)).thenReturn(List.of(a));
 
             List<AddOnDto> result = bookingService.getActiveAddOns();

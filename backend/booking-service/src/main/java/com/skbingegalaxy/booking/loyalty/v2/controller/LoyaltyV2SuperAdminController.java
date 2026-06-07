@@ -9,6 +9,7 @@ import com.skbingegalaxy.common.dto.ApiResponse;
 import com.skbingegalaxy.common.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
@@ -16,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 
@@ -26,12 +28,15 @@ import java.util.Map;
  * AdminLoyaltyCenter UI: program-level config, tier ladder edits, perk
  * catalog CRUD, bulk binding actions, and per-customer wallet operations.
  *
- * <p><b>Authorization:</b> two-layer defence-in-depth:
+ * <p><b>Authorization:</b> three-layer defence-in-depth:
  * <ol>
  *   <li>API-gateway {@code JwtAuthenticationFilter} rejects requests to
  *       /api/v2/loyalty/super-admin/** without SUPER_ADMIN role claim.</li>
  *   <li>This service's {@code SecurityConfig} maps
  *       /api/v2/loyalty/super-admin/** to {@code hasRole("SUPER_ADMIN")}.</li>
+ *   <li>{@code @PreAuthorize("hasRole('SUPER_ADMIN')")} at the class level
+ *       enforces the role even for direct service-mesh or internal callers
+ *       that bypass the URL-matcher (e.g. forward-dispatched requests).</li>
  * </ol>
  *
  * <p>All config mutations go through {@link LoyaltyAdminService} which
@@ -41,6 +46,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v2/loyalty/super-admin")
 @RequiredArgsConstructor
+@PreAuthorize("hasRole('SUPER_ADMIN')")
 public class LoyaltyV2SuperAdminController {
 
     private final LoyaltyAdminService adminService;
@@ -77,7 +83,7 @@ public class LoyaltyV2SuperAdminController {
     public ResponseEntity<ApiResponse<List<LoyaltyTierDefinition>>> listTiers() {
         LoyaltyProgram p = configService.requireDefaultProgram();
         return ResponseEntity.ok(ApiResponse.ok(
-                configService.activeLadder(p.getId(), LocalDateTime.now())));
+                configService.activeLadder(p.getId(), LocalDateTime.now(ZoneOffset.UTC))));
     }
 
     @PostMapping("/tiers")
@@ -87,12 +93,12 @@ public class LoyaltyV2SuperAdminController {
             draft.setProgramId(configService.requireDefaultProgram().getId());
         }
         return ResponseEntity.ok(ApiResponse.ok(
-                adminService.upsertTier(draft, LocalDateTime.now())));
+                adminService.upsertTier(draft, LocalDateTime.now(ZoneOffset.UTC))));
     }
 
     @DeleteMapping("/tiers/{tierId}")
     public ResponseEntity<ApiResponse<Void>> retireTier(@PathVariable Long tierId) {
-        adminService.retireTier(tierId, LocalDateTime.now());
+        adminService.retireTier(tierId, LocalDateTime.now(ZoneOffset.UTC));
         return ResponseEntity.ok(ApiResponse.ok(null));
     }
 
@@ -102,7 +108,7 @@ public class LoyaltyV2SuperAdminController {
     public ResponseEntity<ApiResponse<List<LoyaltyPerkCatalog>>> listPerks() {
         LoyaltyProgram p = configService.requireDefaultProgram();
         return ResponseEntity.ok(ApiResponse.ok(
-                configService.activePerks(p.getId(), LocalDateTime.now())));
+                configService.activePerks(p.getId(), LocalDateTime.now(ZoneOffset.UTC))));
     }
 
     @PostMapping("/perks")

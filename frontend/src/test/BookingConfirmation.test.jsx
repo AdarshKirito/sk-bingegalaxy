@@ -89,7 +89,9 @@ describe('BookingConfirmation Page', () => {
     renderConfirmation('BK-001');
     await waitFor(() => {
       expect(screen.getAllByText('BK-001').length).toBeGreaterThan(0);
-      expect(screen.getByText('Confirmed')).toBeInTheDocument();
+      // Status is shown in two intentional places (digest badge + summary badge),
+      // so assert presence rather than uniqueness — matches the BK-001 / event assertions.
+      expect(screen.getAllByText('Confirmed').length).toBeGreaterThan(0);
       expect(screen.getAllByText('Birthday Party').length).toBeGreaterThan(0);
     });
   });

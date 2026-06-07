@@ -9,6 +9,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -121,7 +122,7 @@ class EarnEngineTest {
         when(configService.findActiveBinding(1L, 7L)).thenReturn(Optional.empty());
 
         var result = engine.earnForBooking(new EarnEngine.EarnRequest(
-                42L, 7L, "BK-3", new BigDecimal("500.00"), LocalDateTime.now(), "c"));
+                42L, 7L, "BK-3", new BigDecimal("500.00"), LocalDateTime.now(ZoneOffset.UTC), "c"));
 
         assertThat(result.awarded()).isFalse();
         assertThat(result.skipReason()).isEqualTo("NO_BINDING");
@@ -133,7 +134,7 @@ class EarnEngineTest {
         binding.setLegacyFrozen(true);
 
         var result = engine.earnForBooking(new EarnEngine.EarnRequest(
-                42L, 7L, "BK-4", new BigDecimal("500.00"), LocalDateTime.now(), "c"));
+                42L, 7L, "BK-4", new BigDecimal("500.00"), LocalDateTime.now(ZoneOffset.UTC), "c"));
 
         assertThat(result.skipReason()).isEqualTo("LEGACY_FROZEN");
         verifyNoInteractions(walletService);
@@ -144,7 +145,7 @@ class EarnEngineTest {
         when(configService.resolveEarningRule(eq(500L), eq("GOLD"), any())).thenReturn(Optional.empty());
 
         var result = engine.earnForBooking(new EarnEngine.EarnRequest(
-                42L, 7L, "BK-5", new BigDecimal("500.00"), LocalDateTime.now(), "c"));
+                42L, 7L, "BK-5", new BigDecimal("500.00"), LocalDateTime.now(ZoneOffset.UTC), "c"));
 
         assertThat(result.skipReason()).isEqualTo("NO_EARN_RULE");
         verifyNoInteractions(walletService);
@@ -157,7 +158,7 @@ class EarnEngineTest {
         when(configService.resolveEarningRule(eq(500L), eq("GOLD"), any())).thenReturn(Optional.of(rule));
 
         var result = engine.earnForBooking(new EarnEngine.EarnRequest(
-                42L, 7L, "BK-6", new BigDecimal("500.00"), LocalDateTime.now(), "c"));
+                42L, 7L, "BK-6", new BigDecimal("500.00"), LocalDateTime.now(ZoneOffset.UTC), "c"));
 
         assertThat(result.skipReason()).isEqualTo("BELOW_MIN_AMOUNT");
         verifyNoInteractions(walletService);
@@ -173,7 +174,7 @@ class EarnEngineTest {
                         LoyaltyQualificationEvent.builder().id(123L).qualificationCredits(999L).build()));
 
         var result = engine.earnForBooking(new EarnEngine.EarnRequest(
-                42L, 7L, "BK-7", new BigDecimal("1000.00"), LocalDateTime.now(), "c"));
+                42L, 7L, "BK-7", new BigDecimal("1000.00"), LocalDateTime.now(ZoneOffset.UTC), "c"));
 
         assertThat(result.awarded()).isTrue();
         verify(qcEventRepository, never()).save(any());
@@ -190,7 +191,7 @@ class EarnEngineTest {
                 .qcMultiplier(qcMultiplier)
                 .minBookingAmount(minAmount)
                 .capPerBooking(cap)
-                .effectiveFrom(LocalDateTime.now().minusDays(30))
+                .effectiveFrom(LocalDateTime.now(ZoneOffset.UTC).minusDays(30))
                 .build();
     }
 }

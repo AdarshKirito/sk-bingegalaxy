@@ -23,6 +23,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Optional;
@@ -52,7 +53,7 @@ class BookingCheckoutAndRevenueTest {
     @Mock private PricingService pricingService;
     @Mock private BookingEventLogService eventLogService;
     @Mock private SagaOrchestrator sagaOrchestrator;
-        @Mock private LoyaltyService loyaltyService;
+        @Mock private com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyMemberService loyaltyMemberService;
         @Mock private com.skbingegalaxy.booking.service.CustomerFreezeService customerFreezeService;
         @Mock private com.skbingegalaxy.booking.repository.SlotHoldRepository slotHoldRepository;
         @Mock private com.skbingegalaxy.booking.service.BookingEventPublisher bookingEventPublisher;
@@ -60,6 +61,7 @@ class BookingCheckoutAndRevenueTest {
         @Mock private com.skbingegalaxy.booking.service.BookingRiskEvaluator bookingRiskEvaluator;
         @Mock private com.skbingegalaxy.booking.repository.BookingTransferRepository bookingTransferRepository;
         @Mock private com.skbingegalaxy.booking.service.statemachine.BookingStateMachine stateMachineMock;
+        @Mock private VenueClockService venueClock;
 
     @InjectMocks private BookingService bookingService;
 
@@ -76,8 +78,11 @@ class BookingCheckoutAndRevenueTest {
         ReflectionTestUtils.setField(bookingService, "stateMachine",
             new com.skbingegalaxy.booking.service.statemachine.BookingStateMachine(
                 bookingRepository, eventLogService));
-                lenient().when(loyaltyService.redeemPoints(anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
-                        .thenReturn(new LoyaltyService.RedemptionResult(0L, BigDecimal.ZERO));
+                lenient().when(loyaltyMemberService.redeemForBooking(anyLong(), anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
+                        .thenReturn(new com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyMemberService.RedemptionResult(0L, BigDecimal.ZERO));
+                // Booking date/time are venue-local; the cancellation + add-on-notice checks
+                // resolve the venue zone via VenueClockService. Stub it so getBookingDto works.
+                lenient().when(venueClock.zoneOf(any())).thenReturn(java.time.ZoneId.of("Asia/Kolkata"));
 
         EventType eventType = EventType.builder()
                 .id(1L).name("Birthday Party")
@@ -103,8 +108,8 @@ class BookingCheckoutAndRevenueTest {
                 .paymentStatus(PaymentStatus.SUCCESS)
                 .checkedIn(true)
                 .addOns(new ArrayList<>())
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
+                .createdAt(LocalDateTime.now(ZoneOffset.UTC))
+                .updatedAt(LocalDateTime.now(ZoneOffset.UTC))
                 .build();
     }
 
@@ -161,7 +166,7 @@ class BookingCheckoutAndRevenueTest {
             when(bookingRepository.findByBookingRefAndBingeId("SKBG25123456", 11L))
                     .thenReturn(Optional.of(checkedInBooking));
 
-            assertThatThrownBy(() -> bookingService.earlyCheckout("SKBG25123456", LocalDateTime.now()))
+            assertThatThrownBy(() -> bookingService.earlyCheckout("SKBG25123456", LocalDateTime.now(ZoneOffset.UTC)))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("CHECKED_IN");
         }
@@ -174,7 +179,7 @@ class BookingCheckoutAndRevenueTest {
             when(bookingRepository.findByBookingRefAndBingeId("SKBG25123456", 11L))
                     .thenReturn(Optional.of(checkedInBooking));
 
-            assertThatThrownBy(() -> bookingService.earlyCheckout("SKBG25123456", LocalDateTime.now()))
+            assertThatThrownBy(() -> bookingService.earlyCheckout("SKBG25123456", LocalDateTime.now(ZoneOffset.UTC)))
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("no valid payment");
         }
@@ -184,7 +189,7 @@ class BookingCheckoutAndRevenueTest {
         void checkout_notFound_throwsException() {
                         when(bookingRepository.findByBookingRefAndBingeId("INVALID", 11L)).thenReturn(Optional.empty());
 
-            assertThatThrownBy(() -> bookingService.earlyCheckout("INVALID", LocalDateTime.now()))
+            assertThatThrownBy(() -> bookingService.earlyCheckout("INVALID", LocalDateTime.now(ZoneOffset.UTC)))
                     .isInstanceOf(ResourceNotFoundException.class);
         }
 

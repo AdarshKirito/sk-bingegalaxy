@@ -5,14 +5,19 @@ import com.skbingegalaxy.booking.loyalty.v2.repository.*;
 import com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyAdminService;
 import com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyConfigService;
 import com.skbingegalaxy.booking.loyalty.v2.service.StatusMatchService;
+import com.skbingegalaxy.booking.service.AdminBingeScopeService;
 import com.skbingegalaxy.common.dto.ApiResponse;
+import com.skbingegalaxy.common.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
@@ -34,11 +39,13 @@ import java.util.Optional;
 @RestController
 @RequestMapping("/api/v2/loyalty/admin")
 @RequiredArgsConstructor
+@PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
 public class LoyaltyV2AdminController {
 
     private final LoyaltyAdminService adminService;
     private final LoyaltyConfigService configService;
     private final StatusMatchService statusMatchService;
+    private final AdminBingeScopeService adminBingeScopeService;
 
     private final LoyaltyBingeBindingRepository bindingRepository;
     private final LoyaltyBingeEarningRuleRepository earningRuleRepository;
@@ -49,16 +56,25 @@ public class LoyaltyV2AdminController {
 
     @GetMapping("/bindings/{bingeId}")
     public ResponseEntity<ApiResponse<LoyaltyBingeBinding>> getBinding(
-            @PathVariable Long bingeId) {
+            @PathVariable Long bingeId,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        // IDOR guard: verify the calling admin owns this binge (SUPER_ADMIN bypasses)
+        adminBingeScopeService.requireBingeOwnership(bingeId, adminId, role, "reading loyalty binding");
         LoyaltyProgram program = configService.requireDefaultProgram();
-        LoyaltyBingeBinding binding = bindingRepository.findByProgramIdAndBingeId(program.getId(), bingeId).orElse(null);
-        return ResponseEntity.ok(ApiResponse.ok(binding));
+        return bindingRepository.findByProgramIdAndBingeId(program.getId(), bingeId)
+                .<ResponseEntity<ApiResponse<LoyaltyBingeBinding>>>map(b -> ResponseEntity.ok(ApiResponse.ok(b)))
+                .orElse(ResponseEntity.status(HttpStatus.NOT_FOUND)
+                        .body(ApiResponse.error("No loyalty binding found for binge " + bingeId)));
     }
 
     @PostMapping("/bindings/{bingeId}/enable")
     public ResponseEntity<ApiResponse<LoyaltyBingeBinding>> enable(
             @PathVariable Long bingeId,
-            @RequestHeader("X-User-Id") Long adminId) {
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        // IDOR guard: verify the calling admin owns this binge
+        adminBingeScopeService.requireBingeOwnership(bingeId, adminId, role, "enabling loyalty for binge");
         LoyaltyProgram program = configService.requireDefaultProgram();
         return ResponseEntity.ok(ApiResponse.ok(
                 adminService.enableBingeForLoyalty(program.getId(), bingeId, null, adminId)));
@@ -67,7 +83,12 @@ public class LoyaltyV2AdminController {
     @PostMapping("/bindings/{bindingId}/disable")
     public ResponseEntity<ApiResponse<LoyaltyBingeBinding>> disable(
             @PathVariable Long bindingId,
-            @RequestHeader("X-User-Id") Long adminId) {
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        // IDOR guard: load the binding to get its bingeId, then verify ownership
+        LoyaltyBingeBinding binding = bindingRepository.findById(bindingId)
+            .orElseThrow(() -> new ResourceNotFoundException("LoyaltyBingeBinding", "id", bindingId));
+        adminBingeScopeService.requireBingeOwnership(binding.getBingeId(), adminId, role, "disabling loyalty binding");
         return ResponseEntity.ok(ApiResponse.ok(
                 adminService.disableBingeForLoyalty(bindingId, adminId)));
     }
@@ -76,34 +97,60 @@ public class LoyaltyV2AdminController {
 
     @GetMapping("/bindings/{bindingId}/earn-rules")
     public ResponseEntity<ApiResponse<List<LoyaltyBingeEarningRule>>> listEarnRules(
-            @PathVariable Long bindingId) {
+            @PathVariable Long bindingId,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        // IDOR guard: verify admin owns the binge this binding belongs to
+        LoyaltyBingeBinding binding = bindingRepository.findById(bindingId)
+            .orElseThrow(() -> new ResourceNotFoundException("LoyaltyBingeBinding", "id", bindingId));
+        adminBingeScopeService.requireBingeOwnership(binding.getBingeId(), adminId, role, "listing earn rules");
         return ResponseEntity.ok(ApiResponse.ok(
-                earningRuleRepository.findActive(bindingId, LocalDateTime.now())));
+                earningRuleRepository.findActive(bindingId, LocalDateTime.now(ZoneOffset.UTC))));
     }
 
     @PostMapping("/bindings/{bindingId}/earn-rules")
     public ResponseEntity<ApiResponse<LoyaltyBingeEarningRule>> upsertEarnRule(
             @PathVariable Long bindingId,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role,
             @RequestBody LoyaltyBingeEarningRule draft) {
+        // IDOR guard: verify admin owns the binge before modifying its earn rules
+        LoyaltyBingeBinding binding = bindingRepository.findById(bindingId)
+            .orElseThrow(() -> new ResourceNotFoundException("LoyaltyBingeBinding", "id", bindingId));
+        adminBingeScopeService.requireBingeOwnership(binding.getBingeId(), adminId, role, "upserting earn rule");
         draft.setBindingId(bindingId);
         return ResponseEntity.ok(ApiResponse.ok(
-                adminService.upsertEarningRule(draft, LocalDateTime.now())));
+                adminService.upsertEarningRule(draft, LocalDateTime.now(ZoneOffset.UTC))));
     }
 
     @GetMapping("/bindings/{bindingId}/redeem-rule")
     public ResponseEntity<ApiResponse<LoyaltyBingeRedemptionRule>> getRedeemRule(
-            @PathVariable Long bindingId) {
-        return ResponseEntity.ok(ApiResponse.ok(
-                redemptionRuleRepository.findActive(bindingId, LocalDateTime.now()).orElse(null)));
+            @PathVariable Long bindingId,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        // IDOR guard
+        LoyaltyBingeBinding binding = bindingRepository.findById(bindingId)
+            .orElseThrow(() -> new ResourceNotFoundException("LoyaltyBingeBinding", "id", bindingId));
+        adminBingeScopeService.requireBingeOwnership(binding.getBingeId(), adminId, role, "reading redeem rule");
+        return redemptionRuleRepository.findActive(bindingId, LocalDateTime.now(ZoneOffset.UTC))
+                .<ResponseEntity<ApiResponse<LoyaltyBingeRedemptionRule>>>map(r -> ResponseEntity.ok(ApiResponse.ok(r)))
+                .orElse(ResponseEntity.status(HttpStatus.NOT_FOUND)
+                        .body(ApiResponse.error("No active redemption rule for binding " + bindingId)));
     }
 
     @PostMapping("/bindings/{bindingId}/redeem-rule")
     public ResponseEntity<ApiResponse<LoyaltyBingeRedemptionRule>> upsertRedeemRule(
             @PathVariable Long bindingId,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role,
             @RequestBody LoyaltyBingeRedemptionRule draft) {
+        // IDOR guard
+        LoyaltyBingeBinding binding = bindingRepository.findById(bindingId)
+            .orElseThrow(() -> new ResourceNotFoundException("LoyaltyBingeBinding", "id", bindingId));
+        adminBingeScopeService.requireBingeOwnership(binding.getBingeId(), adminId, role, "upserting redeem rule");
         draft.setBindingId(bindingId);
         return ResponseEntity.ok(ApiResponse.ok(
-                adminService.upsertRedemptionRule(draft, LocalDateTime.now())));
+                adminService.upsertRedemptionRule(draft, LocalDateTime.now(ZoneOffset.UTC))));
     }
 
     // ── Perk overrides ───────────────────────────────────────────────────
@@ -111,7 +158,13 @@ public class LoyaltyV2AdminController {
     @PostMapping("/bindings/{bindingId}/perks")
     public ResponseEntity<ApiResponse<LoyaltyBingePerkOverride>> upsertPerkOverride(
             @PathVariable Long bindingId,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role,
             @RequestBody LoyaltyBingePerkOverride draft) {
+        // IDOR guard
+        LoyaltyBingeBinding binding = bindingRepository.findById(bindingId)
+            .orElseThrow(() -> new ResourceNotFoundException("LoyaltyBingeBinding", "id", bindingId));
+        adminBingeScopeService.requireBingeOwnership(binding.getBingeId(), adminId, role, "upserting perk override");
         draft.setBindingId(bindingId);
         return ResponseEntity.ok(ApiResponse.ok(adminService.upsertPerkOverride(draft)));
     }

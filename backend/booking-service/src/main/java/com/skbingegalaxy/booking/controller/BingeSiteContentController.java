@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -89,7 +90,7 @@ public class BingeSiteContentController {
             .orElseGet(() -> BingeSiteContent.builder().bingeId(bingeId).slug(slug).build());
         sc.setContentJson(json);
         sc.setUpdatedBy(adminId);
-        sc.setUpdatedAt(LocalDateTime.now());
+        sc.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
         repo.save(sc);
 
         Map<String, Object> resp = new HashMap<>();

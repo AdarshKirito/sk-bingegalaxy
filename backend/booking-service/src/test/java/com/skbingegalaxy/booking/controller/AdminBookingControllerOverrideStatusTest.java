@@ -63,6 +63,7 @@ class AdminBookingControllerOverrideStatusTest {
     @MockBean private SagaOrchestrator sagaOrchestrator;
     @MockBean private PricingService pricingService;
     @MockBean private IdempotencyService idempotencyService;
+    @MockBean private com.skbingegalaxy.booking.service.VenueClockService venueClock;
 
     private static final String REF = "SKBG25000042";
     private static final String URL = "/api/v1/bookings/admin/" + REF + "/override-status";

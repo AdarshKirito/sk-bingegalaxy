@@ -118,7 +118,7 @@ class PaymentServiceTest {
                 "SKBG25123456", PaymentStatus.INITIATED))
                 .thenReturn(Optional.empty());
         when(bookingAmountClient.fetchSnapshot("SKBG25123456"))
-                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), "PENDING"));
+                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), "PENDING", "INR", BigDecimal.ONE));
         when(paymentRepository.save(any(Payment.class))).thenReturn(testPayment);
         stubNoRefunds(1L);
 
@@ -143,7 +143,7 @@ class PaymentServiceTest {
                 "SKBG25123456", PaymentStatus.INITIATED))
                 .thenReturn(Optional.of(testPayment));
         when(bookingAmountClient.fetchSnapshot("SKBG25123456"))
-                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), "PENDING"));
+                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), "PENDING", "INR", BigDecimal.ONE));
         stubNoRefunds(1L);
 
         PaymentDto result = paymentService.initiatePayment(request, 1L, "test@example.com", "Test User");
@@ -164,11 +164,92 @@ class PaymentServiceTest {
         testPayment.setStatus(PaymentStatus.SUCCESS);
         when(paymentRepository.findByBookingRefAndStatus("SKBG25123456", PaymentStatus.SUCCESS)).thenReturn(List.of(testPayment));
         when(bookingAmountClient.fetchSnapshot("SKBG25123456"))
-                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), "PENDING"));
+                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), "PENDING", "INR", BigDecimal.ONE));
 
         assertThatThrownBy(() -> paymentService.initiatePayment(request, 1L, "test@example.com", "Test User"))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("already completed");
+    }
+
+    @Test
+    void initiatePayment_currencyMismatch_rejected() {
+        // A USD payment against a booking that was NOT FX-locked for USD (locked currency = INR)
+        // must be rejected — you can't pay in a currency the booking's rate wasn't fixed for.
+        BingeContext.clear();
+        InitiatePaymentRequest request = InitiatePaymentRequest.builder()
+                .bookingRef("SKBG25123456")
+                .amount(BigDecimal.valueOf(60))
+                .paymentMethod(PaymentMethod.CARD)
+                .currency("USD")
+                .build();
+
+        when(paymentRepository.findByBookingRefAndStatus("SKBG25123456", PaymentStatus.SUCCESS))
+                .thenReturn(List.of());
+        when(paymentRepository.findFirstByBookingRefAndStatusOrderByCreatedAtDesc(
+                "SKBG25123456", PaymentStatus.INITIATED))
+                .thenReturn(Optional.empty());
+        when(bookingAmountClient.fetchSnapshot("SKBG25123456"))
+                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), "PENDING", "INR", BigDecimal.ONE));
+
+        assertThatThrownBy(() -> paymentService.initiatePayment(request, 1L, "test@example.com", "Test User"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("does not match");
+        verify(paymentRepository, never()).save(any());
+    }
+
+    @Test
+    void initiatePayment_lockedForeignCurrency_validatedAgainstLockedRate() {
+        // Happy path: booking FX-locked for USD at rate 0.012 (foreign units per 1 INR).
+        // A 5000 INR balance => 60 USD. Paying 60 USD converts back to 5000 INR (<= balance) and
+        // is accepted. The locked rate is taken from the booking snapshot, NOT the client.
+        BingeContext.clear();
+        InitiatePaymentRequest request = InitiatePaymentRequest.builder()
+                .bookingRef("SKBG25123456")
+                .amount(BigDecimal.valueOf(60))
+                .paymentMethod(PaymentMethod.CARD)
+                .currency("USD")
+                .build();
+
+        when(paymentRepository.findByBookingRefAndStatus("SKBG25123456", PaymentStatus.SUCCESS))
+                .thenReturn(List.of());
+        when(paymentRepository.findFirstByBookingRefAndStatusOrderByCreatedAtDesc(
+                "SKBG25123456", PaymentStatus.INITIATED))
+                .thenReturn(Optional.empty());
+        when(bookingAmountClient.fetchSnapshot("SKBG25123456"))
+                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), "PENDING", "USD", new BigDecimal("0.012")));
+        when(paymentRepository.save(any(Payment.class))).thenReturn(testPayment);
+        stubNoRefunds(1L);
+
+        PaymentDto result = paymentService.initiatePayment(request, 1L, "test@example.com", "Test User");
+
+        assertThat(result.getBookingRef()).isEqualTo("SKBG25123456");
+        verify(paymentRepository).save(any(Payment.class));
+    }
+
+    @Test
+    void initiatePayment_lockedForeignCurrency_overpaymentRejected() {
+        // Same USD-locked booking, but paying 120 USD => 10000 INR-equivalent, which exceeds the
+        // 5000 INR balance. Must be rejected using the locked rate, not the client's amount.
+        BingeContext.clear();
+        InitiatePaymentRequest request = InitiatePaymentRequest.builder()
+                .bookingRef("SKBG25123456")
+                .amount(BigDecimal.valueOf(120))
+                .paymentMethod(PaymentMethod.CARD)
+                .currency("USD")
+                .build();
+
+        when(paymentRepository.findByBookingRefAndStatus("SKBG25123456", PaymentStatus.SUCCESS))
+                .thenReturn(List.of());
+        when(paymentRepository.findFirstByBookingRefAndStatusOrderByCreatedAtDesc(
+                "SKBG25123456", PaymentStatus.INITIATED))
+                .thenReturn(Optional.empty());
+        when(bookingAmountClient.fetchSnapshot("SKBG25123456"))
+                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), "PENDING", "USD", new BigDecimal("0.012")));
+
+        assertThatThrownBy(() -> paymentService.initiatePayment(request, 1L, "test@example.com", "Test User"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("exceeds remaining booking balance");
+        verify(paymentRepository, never()).save(any());
     }
 
     @Test
@@ -202,7 +283,7 @@ class PaymentServiceTest {
                 "SKBG25123456", PaymentStatus.INITIATED, 11L))
                 .thenReturn(Optional.empty());
         when(bookingAmountClient.fetchSnapshot("SKBG25123456"))
-                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), "PENDING"));
+                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), "PENDING", "INR", BigDecimal.ONE));
         when(paymentRepository.save(any(Payment.class))).thenReturn(savedPayment);
         stubNoRefunds(1L);
 

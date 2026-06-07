@@ -47,7 +47,7 @@ class AvailabilityBingeScopeServiceTest {
     @DisplayName("Availability admin actions reject another admin's binge")
     void requireManagedBingeRejectsForeignBinge() {
         BingeContext.setBingeId(11L);
-        when(bookingBingeClient.getBinge(11L)).thenReturn(ApiResponse.ok(new BookingBingeDto(11L, 44L, true, null, null)));
+        when(bookingBingeClient.getBinge(11L)).thenReturn(ApiResponse.ok(new BookingBingeDto(11L, 44L, true, null, null, null)));
 
         assertThatThrownBy(() -> availabilityBingeScopeService.requireManagedBinge(9L, "ADMIN", "managing availability"))
             .isInstanceOf(BusinessException.class)
@@ -60,7 +60,7 @@ class AvailabilityBingeScopeServiceTest {
     @DisplayName("Availability admin actions allow super admins")
     void requireManagedBingeAllowsSuperAdmin() {
         BingeContext.setBingeId(11L);
-        when(bookingBingeClient.getBinge(11L)).thenReturn(ApiResponse.ok(new BookingBingeDto(11L, 44L, true, null, null)));
+        when(bookingBingeClient.getBinge(11L)).thenReturn(ApiResponse.ok(new BookingBingeDto(11L, 44L, true, null, null, null)));
 
         BookingBingeDto resolved = availabilityBingeScopeService.requireManagedBinge(9L, "SUPER_ADMIN", "managing availability");
 

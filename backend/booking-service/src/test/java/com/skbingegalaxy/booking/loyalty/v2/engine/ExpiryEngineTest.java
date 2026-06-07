@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
@@ -45,7 +46,7 @@ class ExpiryEngineTest {
     void expireAsOf_returns_zero_when_nothing_due() {
         when(lotRepository.findExpiringLots(any())).thenReturn(List.of());
 
-        int n = engine.expireAsOf(LocalDateTime.now());
+        int n = engine.expireAsOf(LocalDateTime.now(ZoneOffset.UTC));
 
         assertThat(n).isZero();
         verifyNoInteractions(walletService);
@@ -63,7 +64,7 @@ class ExpiryEngineTest {
         when(walletRepository.findById(2L)).thenReturn(Optional.of(
                 LoyaltyPointsWallet.builder().id(2L).membershipId(43L).build()));
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         int n = engine.expireAsOf(now);
 
         assertThat(n).isEqualTo(2);
@@ -84,7 +85,7 @@ class ExpiryEngineTest {
         when(walletRepository.findById(2L)).thenReturn(Optional.of(
                 LoyaltyPointsWallet.builder().id(2L).membershipId(43L).build()));
 
-        int n = engine.expireAsOf(LocalDateTime.now());
+        int n = engine.expireAsOf(LocalDateTime.now(ZoneOffset.UTC));
 
         assertThat(n).isEqualTo(1);                        // only the good one succeeded
         verify(walletService).expireLot(eq(43L), eq(11L), any());

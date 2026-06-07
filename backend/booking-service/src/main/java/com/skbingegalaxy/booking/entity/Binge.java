@@ -46,6 +46,15 @@ public class Binge {
     @Column(name = "postal_code", length = 20)
     private String postalCode;
 
+    /**
+     * IANA timezone identifier for this venue (e.g. "Asia/Kolkata", "America/New_York",
+     * "Europe/London"). Used by all booking-date validation, check-in window arithmetic,
+     * and tax-rule effective-date evaluation. Never rely on the JVM default timezone.
+     */
+    @Column(length = 64, nullable = false)
+    @Builder.Default
+    private String timezone = "Asia/Kolkata";
+
     @Column(nullable = false)
     private Long adminId;
 

@@ -16,9 +16,15 @@ import java.util.List;
 
 @Entity
 @Table(name = "bookings", indexes = {
-    @Index(name = "idx_booking_ref", columnList = "bookingRef"),
-    @Index(name = "idx_booking_customer", columnList = "customerId"),
-    @Index(name = "idx_booking_date", columnList = "bookingDate")
+    @Index(name = "idx_booking_ref",              columnList = "bookingRef"),
+    @Index(name = "idx_booking_customer",          columnList = "customerId"),
+    @Index(name = "idx_booking_date",              columnList = "bookingDate"),
+    // Composite: supports "WHERE customerId=? AND bookingDate>=? AND status IN (...)"
+    @Index(name = "idx_booking_customer_date",     columnList = "customerId, bookingDate"),
+    // Composite: supports binge-scoped date-range queries used in availability checks
+    @Index(name = "idx_booking_binge_date_status", columnList = "bingeId, bookingDate, status"),
+    // Composite: supports admin booking list filtered by binge + status (common admin view)
+    @Index(name = "idx_booking_binge_status",      columnList = "bingeId, status")
 })
 @Getter @Setter
 @NoArgsConstructor @AllArgsConstructor

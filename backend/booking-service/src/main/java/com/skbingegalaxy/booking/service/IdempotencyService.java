@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.function.Supplier;
 
@@ -84,7 +85,7 @@ public class IdempotencyService {
 
         if (existing.isPresent()) {
             IdempotencyKey stored = existing.get();
-            if (stored.getExpiresAt() != null && stored.getExpiresAt().isBefore(LocalDateTime.now())) {
+            if (stored.getExpiresAt() != null && stored.getExpiresAt().isBefore(LocalDateTime.now(ZoneOffset.UTC))) {
                 log.info("Idempotency key expired — re-running work");
                 repository.delete(stored);
                 // fall through to miss path
@@ -113,7 +114,7 @@ public class IdempotencyService {
                 .requestHash(payloadHash)
                 .responseStatus(200)
                 .responseBody(objectMapper.writeValueAsString(response))
-                .expiresAt(LocalDateTime.now().plusHours(ttlHours))
+                .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusHours(ttlHours))
                 .build();
             repository.save(row);
             incr("stored");
@@ -132,7 +133,7 @@ public class IdempotencyService {
     @SchedulerLock(name = "bookingIdempotencyKeyCleanup", lockAtMostFor = "PT5M", lockAtLeastFor = "PT30S")
     @Transactional
     public void purgeExpired() {
-        int removed = repository.deleteAllByExpiresAtBefore(LocalDateTime.now());
+        int removed = repository.deleteAllByExpiresAtBefore(LocalDateTime.now(ZoneOffset.UTC));
         if (removed > 0) log.info("Purged {} expired booking idempotency keys", removed);
     }
 

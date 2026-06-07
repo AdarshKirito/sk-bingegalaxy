@@ -15,6 +15,7 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
@@ -142,7 +143,7 @@ public class UserSessionService {
     @SchedulerLock(name = "userSessionCleanup", lockAtMostFor = "PT5M", lockAtLeastFor = "PT30S")
     @Transactional
     public void purgeExpired() {
-        int deleted = repository.deleteExpiredBefore(LocalDateTime.now().minusDays(1));
+        int deleted = repository.deleteExpiredBefore(LocalDateTime.now(ZoneOffset.UTC).minusDays(1));
         if (deleted > 0) log.info("Purged {} expired user_session rows", deleted);
     }
 

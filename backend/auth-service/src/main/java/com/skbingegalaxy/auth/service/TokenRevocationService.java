@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 /**
  * Tracks JWTs that have been revoked before their natural expiry.
@@ -48,7 +49,7 @@ public class TokenRevocationService {
                 return;
             }
             LocalDateTime expiresAt = jwtProvider.getExpiryFromToken(token);
-            if (expiresAt == null || expiresAt.isBefore(LocalDateTime.now())) {
+            if (expiresAt == null || expiresAt.isBefore(LocalDateTime.now(ZoneOffset.UTC))) {
                 return;
             }
             Long userId = null;
@@ -83,7 +84,7 @@ public class TokenRevocationService {
      */
     @Transactional
     public void revokeByJti(String jti, Long userId, String tokenType, LocalDateTime expiresAt) {
-        if (jti == null || jti.isBlank() || expiresAt == null || expiresAt.isBefore(LocalDateTime.now())) {
+        if (jti == null || jti.isBlank() || expiresAt == null || expiresAt.isBefore(LocalDateTime.now(ZoneOffset.UTC))) {
             return;
         }
         if (revokedTokenRepository.existsByJti(jti)) return;
@@ -116,7 +117,7 @@ public class TokenRevocationService {
                    lockAtLeastFor = "PT30S")
     @Transactional
     public void purgeExpired() {
-        int deleted = revokedTokenRepository.deleteAllByExpiresAtBefore(LocalDateTime.now());
+        int deleted = revokedTokenRepository.deleteAllByExpiresAtBefore(LocalDateTime.now(ZoneOffset.UTC));
         if (deleted > 0) {
             log.info("Purged {} expired revoked-token rows", deleted);
         }

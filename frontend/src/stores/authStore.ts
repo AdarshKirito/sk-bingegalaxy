@@ -41,24 +41,31 @@ const useAuthStore = create<AuthState>((set, get) => {
     } catch { return null; }
   })();
 
-  // Validate stored user against the server on load
+  // Validate stored user against the server on load.
+  // Only 401/403 mean the token is genuinely invalid (clear session).
+  // 5xx means the server is temporarily unavailable — keep the stored user
+  // so the UI doesn't lose all local state on a backend blip.
   if (storedUser) {
     api.get('/auth/profile').then(res => {
       const userData = res.data?.data;
       if (userData) {
         get()._setAuth(userData);
         set({ loading: false });
-        // Best-effort delegation refresh on cold-load. Non-fatal on failure.
         get().refreshAuthority();
       } else {
-        // Server rejected — clear stale local state
         localStorage.removeItem('user');
         set({ user: null, isAuthenticated: false, isAdmin: false, isSuperAdmin: false, effectiveAuthority: null, loading: false });
       }
-    }).catch(() => {
-      // Token expired / invalid — clear stale local state
-      localStorage.removeItem('user');
-      set({ user: null, isAuthenticated: false, isAdmin: false, isSuperAdmin: false, effectiveAuthority: null, loading: false });
+    }).catch((err) => {
+      const status = err?.response?.status;
+      if (status === 401 || status === 403) {
+        // Token genuinely expired or revoked — clear session
+        localStorage.removeItem('user');
+        set({ user: null, isAuthenticated: false, isAdmin: false, isSuperAdmin: false, effectiveAuthority: null, loading: false });
+      } else {
+        // Network error or server-side 5xx — keep local session, mark loading done
+        set({ loading: false });
+      }
     });
   }
 

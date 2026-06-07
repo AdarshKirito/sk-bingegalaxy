@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 /**
  * Category for grouping {@link EventType}s under filterable headings
@@ -49,11 +50,11 @@ public class EventCategory {
 
     @Column(name = "created_at", nullable = false, updatable = false)
     @Builder.Default
-    private LocalDateTime createdAt = LocalDateTime.now();
+    private LocalDateTime createdAt = LocalDateTime.now(ZoneOffset.UTC);
 
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
     @PreUpdate
-    void onUpdate() { this.updatedAt = LocalDateTime.now(); }
+    void onUpdate() { this.updatedAt = LocalDateTime.now(ZoneOffset.UTC); }
 }

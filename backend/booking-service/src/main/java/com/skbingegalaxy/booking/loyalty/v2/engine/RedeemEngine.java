@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Optional;
 
@@ -77,7 +78,7 @@ public class RedeemEngine {
     @Transactional
     public RedeemResult burn(BurnRequest req) {
         if (req == null) return RedeemResult.rejected("INVALID_REQUEST");
-        LocalDateTime mutationAt = req.at() == null ? LocalDateTime.now() : req.at();
+        LocalDateTime mutationAt = req.at() == null ? LocalDateTime.now(ZoneOffset.UTC) : req.at();
         RedeemQuote q = compute(req.membershipId(), req.bingeId(), req.pointsToBurn(),
                 req.bookingAmount(), mutationAt);
         if (!q.eligible()) {
@@ -128,7 +129,7 @@ public class RedeemEngine {
             return RedeemQuote.rejected(pointsToBurn, "INVALID_POINTS");
         if (bookingAmount == null || bookingAmount.signum() <= 0)
             return RedeemQuote.rejected(pointsToBurn, "INVALID_BOOKING_AMOUNT");
-        if (at == null) at = LocalDateTime.now();
+        if (at == null) at = LocalDateTime.now(ZoneOffset.UTC);
 
         LoyaltyProgram program = configService.requireDefaultProgram();
         Optional<LoyaltyBingeBinding> bindingOpt = configService.findActiveBinding(program.getId(), bingeId);

@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -68,7 +69,7 @@ public class NotificationPreferenceService {
             pref.setPrimaryChannel(null);
         }
 
-        pref.setUpdatedAt(LocalDateTime.now());
+        pref.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
         preferenceRepo.save(pref);
         log.info("Updated notification preferences for {}", email);
         return toDto(pref);
@@ -155,7 +156,7 @@ public class NotificationPreferenceService {
                 .globalOptOut(false)
                 .quietHoursEnabled(false)
                 .marketingFrequency("IMMEDIATE")
-                .updatedAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now(ZoneOffset.UTC))
                 .build();
     }
 

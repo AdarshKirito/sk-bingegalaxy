@@ -12,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 @RestController
 @RequestMapping("/api/v1/notifications/admin/whatsapp-templates")
@@ -43,8 +44,8 @@ public class WhatsAppTemplateController {
     @PostMapping
     public ResponseEntity<ApiResponse<WhatsAppTemplate>> create(@RequestBody WhatsAppTemplate template) {
         template.setId(null);
-        template.setCreatedAt(LocalDateTime.now());
-        template.setUpdatedAt(LocalDateTime.now());
+        template.setCreatedAt(LocalDateTime.now(ZoneOffset.UTC));
+        template.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
         WhatsAppTemplate saved = repository.save(template);
         log.info("Created WhatsApp template: name={} contentSid={}", saved.getTemplateName(), saved.getContentSid());
         return ResponseEntity.ok(ApiResponse.ok("WhatsApp template created", saved));
@@ -59,7 +60,7 @@ public class WhatsAppTemplateController {
                     existing.setContentSid(template.getContentSid());
                     existing.setDescription(template.getDescription());
                     existing.setActive(template.isActive());
-                    existing.setUpdatedAt(LocalDateTime.now());
+                    existing.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
                     WhatsAppTemplate saved = repository.save(existing);
                     log.info("Updated WhatsApp template: id={} name={}", id, saved.getTemplateName());
                     return ResponseEntity.ok(ApiResponse.ok("WhatsApp template updated", saved));

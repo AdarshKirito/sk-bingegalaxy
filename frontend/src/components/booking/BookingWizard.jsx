@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
-import { bookingService, availabilityService, adminService } from '../../services/endpoints';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { bookingService, availabilityService, adminService, checkoutService } from '../../services/endpoints';
 import { toast } from 'react-toastify';
 import { format, addDays } from 'date-fns';
 import { trackBookingStarted, trackBookingStepCompleted } from '../../services/analytics';
 import { useBinge } from '../../context/BingeContext';
+import { useCurrency } from '../../context/CurrencyContext';
 import loyaltyV2 from '../../services/loyaltyV2';
 
 import ImagePopup from './ImagePopup';
@@ -116,6 +117,16 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
   const [surgeRules, setSurgeRules] = useState([]);
   const [loyalty, setLoyalty] = useState(null);
   const [loyaltyQuote, setLoyaltyQuote] = useState(null);
+  const [taxPreview, setTaxPreview] = useState(null);
+  // Multi-currency payment: currencies the super-admin has enabled for payment
+  // (CurrencyRate.supportsPayment), excluding the base INR. When empty, the selector
+  // is hidden and the flow is exactly the existing INR checkout.
+  const { currencies } = useCurrency();
+  const payableCurrencies = useMemo(
+    () => (currencies || []).filter((c) => c.supportsPayment && c.code !== 'INR'),
+    [currencies]
+  );
+  const [paymentCurrency, setPaymentCurrency] = useState('INR');
   const [activeSurge, setActiveSurge] = useState(null);
 
   const [form, setForm] = useState({
@@ -422,6 +433,29 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
     resolvedPricing,
   ]);
 
+  // Tax preview — fetch the server-computed tax breakdown whenever the subtotal
+  // changes so StepReview can display taxes before the booking is committed.
+  useEffect(() => {
+    const subtotal = Math.max(0, calculateTotal() - (loyaltyQuote?.eligible ? Math.min(Number(loyaltyQuote.currencyValue || 0), calculateTotal()) : 0));
+    if (!subtotal || subtotal <= 0 || !selectedBinge?.id) { setTaxPreview(null); return; }
+    let cancelled = false;
+    bookingService.previewTaxes({ subtotal })
+      .then(res => { if (!cancelled) setTaxPreview(res.data?.data ?? null); })
+      .catch(() => { if (!cancelled) setTaxPreview(null); });
+    return () => { cancelled = true; };
+  }, [
+    selectedBinge?.id,
+    form.eventTypeId,
+    form.durationMinutes,
+    form.numberOfGuests,
+    form.addOns,
+    form.venueRoomId,
+    form.redeemLoyaltyPoints,
+    activeSurge,
+    resolvedPricing,
+    loyaltyQuote,
+  ]);
+
   const toggleAddOn = (addon) => {
     const exists = form.addOns.find(a => a.addOnId === addon.id);
     if (exists) {
@@ -508,6 +542,30 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
         const alreadyPaid = editBookingData?.paymentStatus === 'SUCCESS' || editBookingData?.paymentStatus === 'PARTIALLY_REFUNDED';
         if (!alreadyPaid) payload.paymentMethod = form.paymentMethod;
         if (selectedRateCodeId) payload.rateCodeId = Number(selectedRateCodeId);
+      }
+      // Multi-currency: if the customer chose a foreign payment currency, lock the
+      // INR→currency rate now (immediately before create) so the booking is fixed at
+      // this rate. Skipped for INR, admin, and recurring flows. The server records the
+      // locked currency + rate from this token and charges the foreign amount at it.
+      if (!isAdmin && !form.recurringEnabled && paymentCurrency && paymentCurrency !== 'INR') {
+        try {
+          const lockRes = await checkoutService.lockFx({
+            fromCurrency: 'INR',
+            toCurrency: paymentCurrency,
+            baseAmount: calculateTotal(),
+            ttlMinutes: 15,
+          });
+          const token = lockRes?.data?.data?.lockToken;
+          if (!token) throw new Error('No FX lock token returned');
+          payload.fxLockToken = token;
+        } catch (lockErr) {
+          setLoading(false);
+          submittingRef.current = false;
+          toast.error(
+            lockErr.response?.data?.message
+            || 'Could not lock the exchange rate. Please try again, or switch to INR.');
+          return;
+        }
       }
       // Recurring booking flow
       if (form.recurringEnabled && !editBookingData) {
@@ -784,7 +842,9 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
           loading={loading} onSubmit={handleSubmit} onBack={() => setStep(3)}
           capacityFull={capacityFull} onJoinWaitlist={handleJoinWaitlist}
           venueRooms={venueRooms} activeSurge={activeSurge} loyalty={loyalty}
-          loyaltyQuote={loyaltyQuote}
+          loyaltyQuote={loyaltyQuote} taxPreview={taxPreview}
+          payableCurrencies={payableCurrencies}
+          paymentCurrency={paymentCurrency} setPaymentCurrency={setPaymentCurrency}
         />
       )}
     </div>

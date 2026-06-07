@@ -10,11 +10,24 @@ import java.util.List;
 public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> {
 
     /**
-     * Pending batch: unsent events that haven't been marked as permanent failures.
-     * Poisoned events (failedPermanent=true) are excluded so they don't head-of-line
-     * block subsequent events on every tick.
+     * Pending batch with advisory row-level locking (SKIP LOCKED).
+     *
+     * SKIP LOCKED ensures that if ShedLock's 30s lease expires and a second pod
+     * starts publishing while the first is still mid-batch, the two pods work on
+     * disjoint sets of rows — no duplicate Kafka publishes. ShedLock is the primary
+     * guard; this is the belt-and-suspenders safety net.
+     *
+     * Ordered by created_at ASC to preserve per-aggregate insertion ordering within
+     * each batch (Kafka key-based partitioning maintains ordering across batches).
      */
-    List<OutboxEvent> findTop100BySentFalseAndFailedPermanentFalseOrderByCreatedAtAsc();
+    @Query(value = """
+        SELECT * FROM outbox_event
+        WHERE sent = false AND failed_permanent = false
+        ORDER BY created_at ASC
+        LIMIT 100
+        FOR UPDATE SKIP LOCKED
+        """, nativeQuery = true)
+    List<OutboxEvent> findPendingBatchWithLock();
 
     long countByFailedPermanentTrue();
 

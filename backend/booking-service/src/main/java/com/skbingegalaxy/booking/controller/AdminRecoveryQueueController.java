@@ -7,6 +7,7 @@ import com.skbingegalaxy.booking.repository.SlotHoldRepository;
 import com.skbingegalaxy.booking.service.AdminBingeScopeService;
 import com.skbingegalaxy.booking.service.BookingService;
 import com.skbingegalaxy.booking.service.SlotHoldService;
+import com.skbingegalaxy.booking.service.VenueClockService;
 import com.skbingegalaxy.common.context.BingeContext;
 import com.skbingegalaxy.common.dto.ApiResponse;
 import com.skbingegalaxy.common.enums.BookingStatus;
@@ -28,6 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -63,6 +65,7 @@ public class AdminRecoveryQueueController {
     private final BookingService bookingService;
     private final SlotHoldService slotHoldService;
     private final AdminBingeScopeService adminBingeScopeService;
+    private final VenueClockService venueClock;
 
     /** Bookings that have been PENDING + payment-PENDING for too long — abandoned mid-checkout. */
     @GetMapping("/stuck-pending")
@@ -72,7 +75,7 @@ public class AdminRecoveryQueueController {
             @RequestParam(defaultValue = "50") int size) {
         if (olderThanMinutes < 1) olderThanMinutes = 60;
         size = capSize(size);
-        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(olderThanMinutes);
+        LocalDateTime cutoff = LocalDateTime.now(ZoneOffset.UTC).minusMinutes(olderThanMinutes);
         Page<Booking> p = bookingRepository.findStuckPending(cutoff, PageRequest.of(page, size));
         return ResponseEntity.ok(ApiResponse.ok(toQueueResponse("stuck-pending", p, b -> {
             Map<String, Object> row = new LinkedHashMap<>();
@@ -81,7 +84,7 @@ public class AdminRecoveryQueueController {
             row.put("customerEmail", b.getCustomerEmail());
             row.put("amount", b.getTotalAmount());
             row.put("createdAt", b.getCreatedAt());
-            row.put("ageMinutes", java.time.temporal.ChronoUnit.MINUTES.between(b.getCreatedAt(), LocalDateTime.now()));
+            row.put("ageMinutes", java.time.temporal.ChronoUnit.MINUTES.between(b.getCreatedAt(), LocalDateTime.now(ZoneOffset.UTC)));
             return row;
         })));
     }
@@ -92,7 +95,7 @@ public class AdminRecoveryQueueController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
         size = capSize(size);
-        Page<SlotHold> p = slotHoldRepository.findExpiredNotReleased(LocalDateTime.now(),
+        Page<SlotHold> p = slotHoldRepository.findExpiredNotReleased(LocalDateTime.now(ZoneOffset.UTC),
             PageRequest.of(page, size));
         return ResponseEntity.ok(ApiResponse.ok(toQueueResponse("expired-holds", p, h -> {
             Map<String, Object> row = new LinkedHashMap<>();
@@ -102,7 +105,7 @@ public class AdminRecoveryQueueController {
             row.put("bingeId", h.getBingeId());
             row.put("bookingDate", h.getBookingDate());
             row.put("expiresAt", h.getExpiresAt());
-            row.put("overdueMinutes", java.time.temporal.ChronoUnit.MINUTES.between(h.getExpiresAt(), LocalDateTime.now()));
+            row.put("overdueMinutes", java.time.temporal.ChronoUnit.MINUTES.between(h.getExpiresAt(), LocalDateTime.now(ZoneOffset.UTC)));
             return row;
         })));
     }
@@ -115,7 +118,7 @@ public class AdminRecoveryQueueController {
             @RequestParam(defaultValue = "50") int size) {
         if (olderThanMinutes < 1) olderThanMinutes = 5;
         size = capSize(size);
-        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(olderThanMinutes);
+        LocalDateTime cutoff = LocalDateTime.now(ZoneOffset.UTC).minusMinutes(olderThanMinutes);
         Page<Booking> p = bookingRepository.findPaidButNotConfirmed(cutoff, PageRequest.of(page, size));
         return ResponseEntity.ok(ApiResponse.ok(toQueueResponse("paid-not-confirmed", p, b -> {
             Map<String, Object> row = new LinkedHashMap<>();
@@ -125,7 +128,7 @@ public class AdminRecoveryQueueController {
             row.put("amount", b.getTotalAmount());
             row.put("collectedAmount", b.getCollectedAmount());
             row.put("paidAt", b.getUpdatedAt());
-            row.put("staleMinutes", java.time.temporal.ChronoUnit.MINUTES.between(b.getUpdatedAt(), LocalDateTime.now()));
+            row.put("staleMinutes", java.time.temporal.ChronoUnit.MINUTES.between(b.getUpdatedAt(), LocalDateTime.now(ZoneOffset.UTC)));
             return row;
         })));
     }
@@ -138,7 +141,7 @@ public class AdminRecoveryQueueController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
         size = capSize(size);
-        LocalDate today = LocalDate.now();
+        LocalDate today = venueClock.today(BingeContext.getBingeId());
         LocalDate f = from != null ? from : today.minusDays(7);
         LocalDate t = to != null ? to : today;
         Page<Booking> p = bookingRepository.findNoShowBookings(f, t, PageRequest.of(page, size));
@@ -159,13 +162,14 @@ public class AdminRecoveryQueueController {
     @GetMapping("/summary")
     public ResponseEntity<ApiResponse<Map<String, Object>>> summary() {
         long stuckPending = bookingRepository.findStuckPending(
-            LocalDateTime.now().minusMinutes(60), PageRequest.of(0, 1)).getTotalElements();
+            LocalDateTime.now(ZoneOffset.UTC).minusMinutes(60), PageRequest.of(0, 1)).getTotalElements();
         long expiredHolds = slotHoldRepository.findExpiredNotReleased(
-            LocalDateTime.now(), PageRequest.of(0, 1)).getTotalElements();
+            LocalDateTime.now(ZoneOffset.UTC), PageRequest.of(0, 1)).getTotalElements();
         long paidNotConfirmed = bookingRepository.findPaidButNotConfirmed(
-            LocalDateTime.now().minusMinutes(5), PageRequest.of(0, 1)).getTotalElements();
+            LocalDateTime.now(ZoneOffset.UTC).minusMinutes(5), PageRequest.of(0, 1)).getTotalElements();
+        LocalDate summaryToday = venueClock.today(BingeContext.getBingeId());
         long noShow = bookingRepository.findNoShowBookings(
-            LocalDate.now().minusDays(7), LocalDate.now(), PageRequest.of(0, 1)).getTotalElements();
+            summaryToday.minusDays(7), summaryToday, PageRequest.of(0, 1)).getTotalElements();
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("stuckPending", stuckPending);
         body.put("expiredHolds", expiredHolds);
@@ -273,7 +277,7 @@ public class AdminRecoveryQueueController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
         adminBingeScopeService.requireSelectedBinge("viewing checkout funnel");
         Long bid = BingeContext.getBingeId();
-        LocalDate today = LocalDate.now();
+        LocalDate today = venueClock.today(bid);
         LocalDate f = from != null ? from : today.minusDays(7);
         LocalDate t = to != null ? to : today;
         if (t.isBefore(f)) {

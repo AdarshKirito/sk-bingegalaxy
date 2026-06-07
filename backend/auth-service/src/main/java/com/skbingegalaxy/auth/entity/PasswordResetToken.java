@@ -5,6 +5,7 @@ import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 @Entity
 @Table(name = "password_reset_tokens")
@@ -45,7 +46,7 @@ public class PasswordResetToken {
     private LocalDateTime createdAt;
 
     public boolean isExpired() {
-        return LocalDateTime.now().isAfter(expiresAt);
+        return LocalDateTime.now(ZoneOffset.UTC).isAfter(expiresAt);
     }
 
     public boolean isOtpAttemptsExhausted() {

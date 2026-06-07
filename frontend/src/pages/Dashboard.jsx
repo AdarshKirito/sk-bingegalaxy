@@ -4,6 +4,7 @@ import { toast } from 'react-toastify';
 import { useAuth } from '../context/AuthContext';
 import { authService, bookingService, paymentService } from '../services/endpoints';
 import { formatTime12h } from '../utils/format';
+import { useFormatMoney } from '../context/CurrencyContext';
 import { normalizeDashboardExperience } from '../services/dashboardExperience';
 import useBingeStore from '../stores/bingeStore';
 import {
@@ -114,7 +115,9 @@ export default function Dashboard() {
     if (lowerName.includes('hd') || lowerName.includes('screen')) return { tag: 'Movie Night', blurb: 'Keep it simple and cinematic with a focused private-screening setup.', theme: 'cinema' };
     return { tag: 'Private Event', blurb: 'Shape the room around your plan instead of fitting into a public showtime.', theme: 'luxury' };
   };
-  const formatAmount = (amount) => `Rs ${Number(amount || 0).toLocaleString()}`;
+  // Informational amounts render in the customer's selected display currency
+  // (CurrencySwitcher). All values here are base-INR; formatMoney converts + formats.
+  const formatAmount = useFormatMoney();
   const formatDuration = (booking) => {
     const totalMinutes = booking?.durationMinutes || ((booking?.durationHours || 0) * 60);
     if (!totalMinutes) return 'Flexible duration';

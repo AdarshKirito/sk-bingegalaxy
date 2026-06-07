@@ -7,6 +7,7 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
+import java.util.concurrent.TimeUnit;
 
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -52,7 +53,12 @@ public class Notification {
 
     private LocalDateTime sentAt;
 
+    // TTL index: MongoDB will automatically delete notification documents after
+    // 90 days. Without this, the collection grows unboundedly — at production
+    // volume it will exceed 1M documents within months, slowing queries and
+    // bloating backups. 90 days covers any audit or support-forensics window.
     @CreatedDate
+    @Indexed(expireAfter = "P90D")
     private LocalDateTime createdAt;
 
     // ── Delivery tracking ──

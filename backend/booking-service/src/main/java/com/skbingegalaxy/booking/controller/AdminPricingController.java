@@ -2,6 +2,7 @@ package com.skbingegalaxy.booking.controller;
 
 import com.skbingegalaxy.booking.dto.*;
 import com.skbingegalaxy.booking.service.AdminBingeScopeService;
+import com.skbingegalaxy.booking.service.AuthorityLockGuard;
 import com.skbingegalaxy.booking.service.PricingService;
 import com.skbingegalaxy.common.dto.ApiResponse;
 import jakarta.validation.Valid;
@@ -11,6 +12,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.util.List;
 
@@ -20,12 +23,24 @@ import java.util.List;
 @Validated
 public class AdminPricingController {
 
+    /** Capability token shared with the Authority Handover lock UI. */
+    private static final String LOCK_CAPABILITY = "PRICING";
+
     private final AdminBingeScopeService adminBingeScopeService;
     private final PricingService pricingService;
+    private final AuthorityLockGuard authorityLockGuard;
 
     private void validatePricingScope(Long adminId, String role) {
         adminBingeScopeService.requireManagedBinge(adminId, role);
         pricingService.setCurrentAdminId(adminId);
+        // Authority Handover: if a super-admin has locked PRICING for this binge (or all
+        // binges), a regular admin may still VIEW but not CHANGE it. Reads (GET) are never
+        // blocked; only mutations are. Native super-admins bypass inside the guard.
+        ServletRequestAttributes attrs =
+            (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+        if (attrs != null && !"GET".equalsIgnoreCase(attrs.getRequest().getMethod())) {
+            authorityLockGuard.requireUnlocked(LOCK_CAPABILITY, role);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════

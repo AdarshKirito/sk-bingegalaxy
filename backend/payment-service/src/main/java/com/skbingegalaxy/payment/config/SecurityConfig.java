@@ -22,6 +22,9 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/v1/payments/admin/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                 .requestMatchers("/api/v1/payments/callback").permitAll()
+                // Razorpay dispute webhooks are called directly by the gateway — no auth headers.
+                // Security is enforced by HMAC-SHA256 signature verification in DisputeWebhookService.
+                .requestMatchers("/api/v1/payments/webhooks/**").permitAll()
                 .requestMatchers("/actuator/health/**", "/actuator/health").permitAll()
                 .requestMatchers("/actuator/**").hasRole("SYSTEM")
                 .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").hasAnyRole("ADMIN", "SUPER_ADMIN")

@@ -5,10 +5,21 @@ export default function StepReview({
   loading, onSubmit, onBack,
   capacityFull, onJoinWaitlist,
   venueRooms, activeSurge, loyalty, loyaltyQuote,
+  taxPreview,
+  payableCurrencies = [], paymentCurrency = 'INR', setPaymentCurrency,
 }) {
   const selectedRoom = venueRooms?.find(r => r.id === form.venueRoomId);
   const loyaltyDiscount = calculateLoyaltyDiscount ? calculateLoyaltyDiscount() : 0;
-  const finalTotal = calculateTotal() - loyaltyDiscount;
+  const subtotal = calculateTotal();
+  const taxAmount = taxPreview?.totalTax ? Number(taxPreview.totalTax) : 0;
+  const finalTotal = Math.max(0, subtotal - loyaltyDiscount + taxAmount);
+  // Multi-currency: when the customer picks a foreign payment currency, preview the
+  // converted total at the current rate. The exact rate is locked at confirmation.
+  const payCcyObj = paymentCurrency === 'INR'
+    ? null
+    : (payableCurrencies.find(c => c.code === paymentCurrency) || null);
+  const payRate = payCcyObj ? (Number(payCcyObj.rateToBase) || 1) : 1;
+  const foreignTotal = finalTotal * payRate;
   const perBookingTotal = Math.max(0, finalTotal);
   const recurringTotal = form.recurringEnabled ? perBookingTotal * Number(form.recurringOccurrences || 1) : perBookingTotal;
 
@@ -157,19 +168,58 @@ export default function StepReview({
           )
         ) : null}
 
+        {(loyaltyDiscount > 0 || taxAmount > 0) && (
+          <div className="review-row" style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+            <span>Subtotal</span>
+            <span>₹{subtotal.toLocaleString()}</span>
+          </div>
+        )}
+        {loyaltyDiscount > 0 && (
+          <div className="review-row" style={{ color: 'var(--success)', fontSize: '0.9rem' }}>
+            <span>Loyalty Discount</span>
+            <span>− ₹{loyaltyDiscount.toLocaleString()}</span>
+          </div>
+        )}
+        {taxAmount > 0 && (
+          <div className="review-row" style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+            <span>Tax</span>
+            <span>+ ₹{taxAmount.toLocaleString()}</span>
+          </div>
+        )}
         <div className="review-row total">
-          <span>Estimated Total</span>
-          <span aria-live="polite">
-            {loyaltyDiscount > 0 ? (
-              <>
-                <span className="price-original">₹{calculateTotal().toLocaleString()}</span>
-                ₹{Math.max(0, finalTotal).toLocaleString()}
-              </>
-            ) : (
-              <>₹{calculateTotal().toLocaleString()}</>
-            )}
-          </span>
+          <span>{taxAmount > 0 ? 'Total (incl. tax)' : 'Estimated Total'}</span>
+          <span aria-live="polite">₹{finalTotal.toLocaleString()}</span>
         </div>
+
+        {/* Multi-currency payment — only shown when the venue has enabled payment
+            currencies beyond INR, and only for customer (non-recurring) bookings. */}
+        {!isAdmin && !form.recurringEnabled && payableCurrencies.length > 0 && (
+          <div className="review-row" style={{ alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' }}>
+            <span>Pay in</span>
+            <select
+              value={paymentCurrency}
+              onChange={(e) => setPaymentCurrency && setPaymentCurrency(e.target.value)}
+              aria-label="Payment currency"
+              style={{ padding: '0.4rem 0.6rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--text)', fontSize: '0.85rem' }}
+            >
+              <option value="INR">₹ INR — Indian Rupee</option>
+              {payableCurrencies.map(c => (
+                <option key={c.code} value={c.code}>{c.symbol} {c.code} — {c.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        {!isAdmin && paymentCurrency !== 'INR' && payCcyObj && (
+          <div className="review-row total" style={{ color: 'var(--text)' }}>
+            <span>You pay (rate locked at confirm)</span>
+            <span aria-live="polite">
+              {payCcyObj.symbol}{foreignTotal.toLocaleString(undefined, {
+                minimumFractionDigits: payCcyObj.decimalDigits ?? 2,
+                maximumFractionDigits: payCcyObj.decimalDigits ?? 2,
+              })} {payCcyObj.code}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Recurring Booking Option */}

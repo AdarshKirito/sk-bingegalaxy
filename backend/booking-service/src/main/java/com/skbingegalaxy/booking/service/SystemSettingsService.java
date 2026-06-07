@@ -24,12 +24,13 @@ public class SystemSettingsService {
 
     private final SystemSettingsRepository repo;
     private final BingeRepository bingeRepository;
+    private final VenueClockService venueClock;
 
     // ── Global fallback (no binge) ───────────────────────────
 
     @Transactional
     public LocalDate getOperationalDate(LocalDate clientToday) {
-        LocalDate today = clientToday != null ? clientToday : LocalDate.now();
+        LocalDate today = clientToday != null ? clientToday : venueClock.today(null);
         return repo.findById(1L)
                 .map(s -> {
                     LocalDate stored = s.getOperationalDate();
@@ -56,7 +57,7 @@ public class SystemSettingsService {
 
     @Transactional
     public LocalDate advanceOperationalDate(LocalDate clientToday) {
-        LocalDate cap = clientToday != null ? clientToday : LocalDate.now();
+        LocalDate cap = clientToday != null ? clientToday : venueClock.today(null);
         SystemSettings settings = repo.findByIdForUpdate(1L)
                 .orElseGet(() -> SystemSettings.builder().id(1L).operationalDate(cap).build());
         settings.setOperationalDate(settings.getOperationalDate().plusDays(1));
@@ -75,7 +76,7 @@ public class SystemSettingsService {
     public LocalDate getOperationalDate(Long bingeId, LocalDate clientToday) {
         if (bingeId == null) return getOperationalDate(clientToday);
 
-        LocalDate cap = clientToday != null ? clientToday : LocalDate.now();
+        LocalDate cap = clientToday != null ? clientToday : venueClock.today(bingeId);
         Binge binge = bingeRepository.findById(bingeId)
                 .orElseThrow(() -> new ResourceNotFoundException("Binge", "id", bingeId));
 
@@ -104,7 +105,7 @@ public class SystemSettingsService {
         Binge binge = bingeRepository.findById(bingeId)
                 .orElseThrow(() -> new ResourceNotFoundException("Binge", "id", bingeId));
 
-        LocalDate cap = clientToday != null ? clientToday : LocalDate.now();
+        LocalDate cap = clientToday != null ? clientToday : venueClock.today(bingeId);
         if (binge.getOperationalDate() == null) {
             binge.setOperationalDate(cap);
         }
@@ -144,7 +145,7 @@ public class SystemSettingsService {
             throw new BusinessException("operationalDate is required.");
         }
 
-        LocalDate today = clientToday != null ? clientToday : LocalDate.now();
+        LocalDate today = clientToday != null ? clientToday : venueClock.today(null);
         if (newOpDate.isBefore(today.minusDays(MAX_BACKWARD_DAYS))) {
             throw new BusinessException(
                 "Operational date cannot be more than " + MAX_BACKWARD_DAYS + " days in the past.");

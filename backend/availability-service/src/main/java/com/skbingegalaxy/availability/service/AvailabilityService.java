@@ -40,10 +40,16 @@ public class AvailabilityService {
     private static final long OPERATING_WINDOW_TTL_MS = 30_000L;
     private final java.util.concurrent.ConcurrentHashMap<Long, long[]> operatingWindowCache =
         new java.util.concurrent.ConcurrentHashMap<>();
+    /** Cache of IANA timezone IDs per binge, same TTL as operatingWindowCache. */
+    private final java.util.concurrent.ConcurrentHashMap<Long, String> venueTimezoneCache =
+        new java.util.concurrent.ConcurrentHashMap<>();
 
     // ── Public: get available dates in range ─────────────────
     public List<DayAvailabilityDto> getAvailability(LocalDate from, LocalDate to, LocalDate clientToday) {
-        LocalDate today = (clientToday != null) ? clientToday : LocalDate.now();
+        // Use the client-supplied date when present (preferred — client knows its local clock).
+        // Fall back to venue-local date so a server in UTC does not treat a booking date as
+        // "past" when the venue is in a UTC+ zone and the real local date is still tomorrow.
+        LocalDate today = (clientToday != null) ? clientToday : venueLocalToday();
         if (from.isBefore(today)) {
             from = today;
         }
@@ -249,6 +255,9 @@ public class AvailabilityService {
                 if (b.getCloseTime() != null) {
                     closeMin = b.getCloseTime().getHour() * 60 + b.getCloseTime().getMinute();
                 }
+                if (b.getTimezone() != null && !b.getTimezone().isBlank()) {
+                    venueTimezoneCache.put(bid, b.getTimezone());
+                }
             }
         } catch (Exception ex) {
             // Rate-limit log: only warn on first miss (cached==null) within TTL window
@@ -266,10 +275,40 @@ public class AvailabilityService {
         return new int[]{openMin, closeMin};
     }
 
-    /** Manually invalidate the per-binge operating-window cache. */
+    /** Manually invalidate the per-binge operating-window and timezone caches. */
     public void evictOperatingWindowCache(Long bingeId) {
-        if (bingeId == null) operatingWindowCache.clear();
-        else operatingWindowCache.remove(bingeId);
+        if (bingeId == null) {
+            operatingWindowCache.clear();
+            venueTimezoneCache.clear();
+        } else {
+            operatingWindowCache.remove(bingeId);
+            venueTimezoneCache.remove(bingeId);
+        }
+    }
+
+    /**
+     * Return the current date in the venue's local timezone. If the binge ID
+     * is unknown or the timezone is uncached/unavailable, the cache is populated
+     * via resolveOperatingWindow() (which already calls the booking-service) and
+     * then the timezone is read from venueTimezoneCache. Falls back to UTC if
+     * the booking-service is unreachable.
+     */
+    private LocalDate venueLocalToday() {
+        Long bid = BingeContext.getBingeId();
+        if (bid == null) return LocalDate.now(java.time.ZoneOffset.UTC);
+        String tz = venueTimezoneCache.get(bid);
+        if (tz == null) {
+            // Warm the cache via the operating-window path (same Feign call).
+            resolveOperatingWindow();
+            tz = venueTimezoneCache.get(bid);
+        }
+        if (tz == null) return LocalDate.now(java.time.ZoneOffset.UTC);
+        try {
+            return LocalDate.now(java.time.ZoneId.of(tz));
+        } catch (java.time.zone.ZoneRulesException e) {
+            log.warn("Invalid IANA timezone '{}' for binge {} — falling back to UTC", tz, bid);
+            return LocalDate.now(java.time.ZoneOffset.UTC);
+        }
     }
 
     private DayAvailabilityDto buildDayAvailability(LocalDate date, List<BlockedSlot> blockedSlots) {

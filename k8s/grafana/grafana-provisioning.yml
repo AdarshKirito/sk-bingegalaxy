@@ -1,0 +1,443 @@
+# ── Grafana Dashboard Provisioning — SK Binge Galaxy ─────────────────────────
+#
+# Deploys two ConfigMaps into the `monitoring` namespace:
+#   1. grafana-datasource-skbg  — configures the Prometheus datasource
+#   2. grafana-dashboard-skbg   — the application observability dashboard
+#
+# The grafana-sc-dashboard sidecar (kube-prometheus-stack default) watches for
+# ConfigMaps labelled `grafana_dashboard: "1"` and auto-imports them at runtime,
+# so no Grafana restart is needed after `kubectl apply`.
+#
+# Usage:
+#   kubectl apply -f k8s/grafana/grafana-provisioning.yml
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Prometheus datasource ─────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasource-skbg
+  namespace: monitoring
+  labels:
+    grafana_datasource: "1"
+data:
+  datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus-SKBG
+        type: prometheus
+        url: http://prometheus.monitoring.svc.cluster.local:9090
+        access: proxy
+        isDefault: false
+        jsonData:
+          timeInterval: "15s"
+---
+# ── Application dashboard ─────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-skbg
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  sk-binge-galaxy.json: |
+    {
+      "title": "SK Binge Galaxy — Operations",
+      "uid": "skbg-ops-v1",
+      "schemaVersion": 38,
+      "version": 1,
+      "refresh": "30s",
+      "time": { "from": "now-1h", "to": "now" },
+      "tags": ["sk-binge-galaxy", "spring-boot", "kafka"],
+      "templating": {
+        "list": [
+          {
+            "name": "service",
+            "type": "query",
+            "datasource": "Prometheus-SKBG",
+            "query": "label_values(http_server_requests_seconds_count{namespace=\"sk-binge-galaxy\"}, app)",
+            "refresh": 2,
+            "multi": true,
+            "includeAll": true,
+            "current": { "text": "All", "value": "$__all" }
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "title": "HTTP Throughput (req/s)",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 0, "w": 12, "h": 7 },
+          "datasource": "Prometheus-SKBG",
+          "targets": [
+            {
+              "expr": "sum by (app) (rate(http_server_requests_seconds_count{namespace=\"sk-binge-galaxy\", app=~\"$service\"}[2m]))",
+              "legendFormat": "{{app}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "reqps", "custom": { "lineWidth": 2 } }
+          }
+        },
+        {
+          "id": 2,
+          "title": "HTTP Error Rate (%)",
+          "type": "timeseries",
+          "gridPos": { "x": 12, "y": 0, "w": 12, "h": 7 },
+          "datasource": "Prometheus-SKBG",
+          "targets": [
+            {
+              "expr": "100 * sum by (app) (rate(http_server_requests_seconds_count{namespace=\"sk-binge-galaxy\", app=~\"$service\", status=~\"5..\"}[2m])) / sum by (app) (rate(http_server_requests_seconds_count{namespace=\"sk-binge-galaxy\", app=~\"$service\"}[2m]))",
+              "legendFormat": "{{app}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 1 },
+                  { "color": "red", "value": 5 }
+                ]
+              },
+              "custom": { "lineWidth": 2 }
+            }
+          }
+        },
+        {
+          "id": 3,
+          "title": "HTTP p95 Latency (ms)",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 7, "w": 12, "h": 7 },
+          "datasource": "Prometheus-SKBG",
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum by (app, le) (rate(http_server_requests_seconds_bucket{namespace=\"sk-binge-galaxy\", app=~\"$service\"}[2m]))) * 1000",
+              "legendFormat": "{{app}} p95"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "ms", "custom": { "lineWidth": 2 } }
+          }
+        },
+        {
+          "id": 4,
+          "title": "HTTP p99 Latency (ms)",
+          "type": "timeseries",
+          "gridPos": { "x": 12, "y": 7, "w": 12, "h": 7 },
+          "datasource": "Prometheus-SKBG",
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.99, sum by (app, le) (rate(http_server_requests_seconds_bucket{namespace=\"sk-binge-galaxy\", app=~\"$service\"}[2m]))) * 1000",
+              "legendFormat": "{{app}} p99"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "ms", "custom": { "lineWidth": 2 } }
+          }
+        },
+        {
+          "id": 5,
+          "title": "JVM Heap Used (MB)",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 14, "w": 8, "h": 7 },
+          "datasource": "Prometheus-SKBG",
+          "targets": [
+            {
+              "expr": "jvm_memory_used_bytes{namespace=\"sk-binge-galaxy\", app=~\"$service\", area=\"heap\"} / 1048576",
+              "legendFormat": "{{app}} heap"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "decmbytes", "custom": { "lineWidth": 2 } }
+          }
+        },
+        {
+          "id": 6,
+          "title": "JVM GC Pause Time (ms/s)",
+          "type": "timeseries",
+          "gridPos": { "x": 8, "y": 14, "w": 8, "h": 7 },
+          "datasource": "Prometheus-SKBG",
+          "targets": [
+            {
+              "expr": "sum by (app) (rate(jvm_gc_pause_seconds_sum{namespace=\"sk-binge-galaxy\", app=~\"$service\"}[2m])) * 1000",
+              "legendFormat": "{{app}} GC pause"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "ms", "custom": { "lineWidth": 2 } }
+          }
+        },
+        {
+          "id": 7,
+          "title": "HikariCP Active Connections",
+          "type": "timeseries",
+          "gridPos": { "x": 16, "y": 14, "w": 8, "h": 7 },
+          "datasource": "Prometheus-SKBG",
+          "targets": [
+            {
+              "expr": "hikaricp_connections_active{namespace=\"sk-binge-galaxy\", app=~\"$service\"}",
+              "legendFormat": "{{app}} active"
+            },
+            {
+              "expr": "hikaricp_connections_pending{namespace=\"sk-binge-galaxy\", app=~\"$service\"}",
+              "legendFormat": "{{app}} pending"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "short", "custom": { "lineWidth": 2 } }
+          }
+        },
+        {
+          "id": 8,
+          "title": "Kafka Consumer Lag",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 21, "w": 12, "h": 7 },
+          "datasource": "Prometheus-SKBG",
+          "targets": [
+            {
+              "expr": "sum by (topic, consumerGroup) (kafka_consumer_records_lag{namespace=\"sk-binge-galaxy\"})",
+              "legendFormat": "{{consumerGroup}}/{{topic}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 100 },
+                  { "color": "red", "value": 1000 }
+                ]
+              },
+              "custom": { "lineWidth": 2 }
+            }
+          }
+        },
+        {
+          "id": 9,
+          "title": "Redis Commands/s",
+          "type": "timeseries",
+          "gridPos": { "x": 12, "y": 21, "w": 12, "h": 7 },
+          "datasource": "Prometheus-SKBG",
+          "targets": [
+            {
+              "expr": "sum by (command) (rate(redis_commands_total{namespace=\"sk-binge-galaxy\"}[2m]))",
+              "legendFormat": "{{command}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "ops", "custom": { "lineWidth": 2 } }
+          }
+        },
+        {
+          "id": 10,
+          "title": "Rate-Limit Rejections (429/s)",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 28, "w": 12, "h": 7 },
+          "datasource": "Prometheus-SKBG",
+          "targets": [
+            {
+              "expr": "sum by (app) (rate(http_server_requests_seconds_count{namespace=\"sk-binge-galaxy\", status=\"429\"}[2m]))",
+              "legendFormat": "{{app}} 429s"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "reqps", "custom": { "lineWidth": 2 } }
+          }
+        },
+        {
+          "id": 11,
+          "title": "Mock Notification Calls (should be 0 in prod)",
+          "type": "stat",
+          "gridPos": { "x": 12, "y": 28, "w": 12, "h": 7 },
+          "datasource": "Prometheus-SKBG",
+          "targets": [
+            {
+              "expr": "sum by (provider) (increase(notification_mock_send_total{namespace=\"sk-binge-galaxy\"}[1h]))",
+              "legendFormat": "{{provider}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red", "value": 1 }
+                ]
+              }
+            }
+          },
+          "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } }
+        },
+        {
+          "id": 12,
+          "title": "Pod Restarts (last 30m)",
+          "type": "stat",
+          "gridPos": { "x": 0, "y": 35, "w": 24, "h": 5 },
+          "datasource": "Prometheus-SKBG",
+          "targets": [
+            {
+              "expr": "sum by (container) (increase(kube_pod_container_status_restarts_total{namespace=\"sk-binge-galaxy\"}[30m]))",
+              "legendFormat": "{{container}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 1 },
+                  { "color": "red", "value": 3 }
+                ]
+              }
+            }
+          },
+          "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } }
+        },
+        {
+          "id": 13,
+          "title": "Checkout Abandonment Rate (%)",
+          "description": "Slot holds that expired without converting to a booking. High rate = customers abandoning at checkout.",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 40, "w": 12, "h": 7 },
+          "datasource": "Prometheus-SKBG",
+          "targets": [
+            {
+              "expr": "100 * rate(skbg_slot_hold_total{outcome=\"expired\"}[5m]) / clamp_min(rate(skbg_slot_hold_total{outcome=\"created\"}[5m]), 0.001)",
+              "legendFormat": "abandonment %"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 30 },
+                  { "color": "red", "value": 60 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 14,
+          "title": "Waitlist Conversion Rate (%)",
+          "description": "Waitlist offers that converted to confirmed bookings. Low rate = offers are not being actioned.",
+          "type": "timeseries",
+          "gridPos": { "x": 12, "y": 40, "w": 12, "h": 7 },
+          "datasource": "Prometheus-SKBG",
+          "targets": [
+            {
+              "expr": "100 * rate(skbg_waitlist_total{outcome=\"converted\"}[10m]) / clamp_min(rate(skbg_waitlist_total{outcome=\"offered\"}[10m]), 0.001)",
+              "legendFormat": "conversion %"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "red", "value": null },
+                  { "color": "yellow", "value": 30 },
+                  { "color": "green", "value": 60 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 15,
+          "title": "Payment Retry Rate (%)",
+          "description": "New INITIATED payments for bookings that already had a FAILED attempt. High rate = payment friction.",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 47, "w": 12, "h": 7 },
+          "datasource": "Prometheus-SKBG",
+          "targets": [
+            {
+              "expr": "100 * rate(skbg_payment_retry_total[5m]) / clamp_min(rate(skbg_payment_idempotency_hits_total{result=\"stored\"}[5m]), 0.001)",
+              "legendFormat": "retry %"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 10 },
+                  { "color": "red", "value": 25 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 16,
+          "title": "Open Payment Disputes",
+          "description": "Active chargebacks (not yet WON/LOST). Each unresolved dispute = money held by Razorpay.",
+          "type": "stat",
+          "gridPos": { "x": 12, "y": 47, "w": 6, "h": 7 },
+          "datasource": "Prometheus-SKBG",
+          "targets": [
+            {
+              "expr": "sum(increase(skbg_payment_dispute_total{outcome=\"opened\"}[30d])) - sum(increase(skbg_payment_dispute_total{outcome=~\"won|lost\"}[30d]))",
+              "legendFormat": "open disputes"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 1 },
+                  { "color": "red", "value": 5 }
+                ]
+              }
+            }
+          },
+          "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } }
+        },
+        {
+          "id": 17,
+          "title": "Notification Delivery Failures (per channel)",
+          "description": "Failures per notification channel. A flat line here is good; a spike means customers are not receiving critical comms.",
+          "type": "timeseries",
+          "gridPos": { "x": 18, "y": 47, "w": 6, "h": 7 },
+          "datasource": "Prometheus-SKBG",
+          "targets": [
+            {
+              "expr": "sum by (channel) (rate(skbg_notification_failure_total[5m]))",
+              "legendFormat": "{{channel}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red", "value": 0.1 }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }

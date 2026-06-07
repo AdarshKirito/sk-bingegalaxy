@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
@@ -193,7 +194,7 @@ public class RefundCalculationService {
     }
 
     private String nextNumber() {
-        return CN_PREFIX + "-" + LocalDateTime.now().format(YEAR) + "-" +
+        return CN_PREFIX + "-" + LocalDateTime.now(ZoneOffset.UTC).format(YEAR) + "-" +
             String.format("%07d", COUNTER.incrementAndGet()) + "-" +
             UUID.randomUUID().toString().substring(0, 4).toUpperCase();
     }

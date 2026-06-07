@@ -1,8 +1,10 @@
 package com.skbingegalaxy.auth.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.validation.constraints.*;
 import lombok.*;
 
+@JsonIgnoreProperties(ignoreUnknown = false)
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -49,4 +51,15 @@ public class RegisterRequest {
     private String country;
     @Pattern(regexp = "^$|^[A-Za-z0-9 \\-]{3,20}$", message = "Postal code must be 3-20 alphanumeric characters")
     private String postalCode;
+
+    /**
+     * DPDP / GDPR: explicit consent to data processing is required before the
+     * account can be created. Must be {@code true}; a {@code false} value (or
+     * missing field) returns 400 to prevent silent opt-out at registration.
+     */
+    @AssertTrue(message = "You must accept the terms and consent to data processing to register")
+    private boolean consentGiven;
+
+    /** Optional: whether the user opts in to marketing communications. Defaults false. */
+    private boolean consentMarketing;
 }

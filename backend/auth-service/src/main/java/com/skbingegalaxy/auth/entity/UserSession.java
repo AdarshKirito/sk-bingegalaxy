@@ -5,6 +5,7 @@ import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 /**
  * Tracks an active login (refresh-token grant) so a super admin or the user themselves
@@ -48,7 +49,7 @@ public class UserSession {
 
     @Column(name = "last_seen_at", nullable = false)
     @Builder.Default
-    private LocalDateTime lastSeenAt = LocalDateTime.now();
+    private LocalDateTime lastSeenAt = LocalDateTime.now(ZoneOffset.UTC);
 
     @Column(name = "expires_at", nullable = false)
     private LocalDateTime expiresAt;
@@ -63,17 +64,17 @@ public class UserSession {
     private String revokeReason;
 
     public boolean isActive() {
-        return revokedAt == null && expiresAt.isAfter(LocalDateTime.now());
+        return revokedAt == null && expiresAt.isAfter(LocalDateTime.now(ZoneOffset.UTC));
     }
 
     public void touch(String newJti, LocalDateTime newExpiresAt) {
         this.refreshJti = newJti;
         this.expiresAt = newExpiresAt;
-        this.lastSeenAt = LocalDateTime.now();
+        this.lastSeenAt = LocalDateTime.now(ZoneOffset.UTC);
     }
 
     public void revoke(Long byUserId, String reason) {
-        this.revokedAt = LocalDateTime.now();
+        this.revokedAt = LocalDateTime.now(ZoneOffset.UTC);
         this.revokedBy = byUserId;
         this.revokeReason = reason;
     }

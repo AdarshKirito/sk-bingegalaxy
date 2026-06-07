@@ -1,0 +1,165 @@
+# ── Postgres Maintenance CronJob — weekly REINDEX CONCURRENTLY ───────────────
+#
+# Why this exists:
+#   VACUUM reclaims dead tuple space in heap pages. It does NOT compact index
+#   pages — index bloat accumulates indefinitely on high-write tables (outbox,
+#   event_log, loyalty_ledger, waitlist). Over months, Postgres stops using
+#   those indexes (seq-scans become cheaper than bloated b-tree lookups) and
+#   p95 booking latency drifts upward silently.
+#
+#   REINDEX CONCURRENTLY rebuilds each index without holding an ACCESS EXCLUSIVE
+#   lock (Postgres 12+), so it runs without blocking reads or writes.
+#
+# Schedule: every Sunday at 02:30 UTC (low-traffic window).
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-reindex
+  namespace: sk-binge-galaxy
+  labels:
+    app: postgres-maintenance
+spec:
+  schedule: "30 2 * * 0"   # every Sunday 02:30 UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # Give the reindex up to 4 hours before Kubernetes kills it.
+      activeDeadlineSeconds: 14400
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: reindex
+              image: postgres:16-alpine
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: booking-db-creds
+                      key: password
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: booking-db-creds
+                      key: username
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  HOST=${POSTGRES_HOST:-postgres}
+                  DB=booking_db
+
+                  echo "$(date -u) Starting REINDEX CONCURRENTLY on ${DB}@${HOST}"
+
+                  # Reindex each bloat-prone table's indexes individually.
+                  # REINDEX CONCURRENTLY cannot run inside a transaction block,
+                  # so each statement runs in its own implicit transaction.
+                  for INDEX in \
+                    idx_outbox_event_status \
+                    idx_outbox_event_created \
+                    idx_booking_event_log_booking_id \
+                    idx_loyalty_ledger_wallet_id \
+                    idx_booking_waitlist_binge_date; do
+                    echo "$(date -u)  REINDEX CONCURRENTLY INDEX ${DB}.${INDEX}"
+                    psql -h "${HOST}" -U "${PGUSER}" -d "${DB}" \
+                      -c "REINDEX INDEX CONCURRENTLY ${INDEX};" \
+                      || echo "  WARNING: ${INDEX} not found or reindex failed — skipping"
+                  done
+
+                  echo "$(date -u) REINDEX complete."
+              resources:
+                requests:
+                  memory: "64Mi"
+                  cpu: "50m"
+                limits:
+                  memory: "128Mi"
+                  cpu: "200m"
+---
+# ── Postgres vacuum analyze CronJob — nightly ─────────────────────────────────
+# Runs VACUUM ANALYZE on the five high-write tables each night at 03:00 UTC
+# as a belt-and-suspenders complement to autovacuum. Autovacuum may miss a
+# burst-insert window; this job catches up within 24 hours.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-vacuum-analyze
+  namespace: sk-binge-galaxy
+  labels:
+    app: postgres-maintenance
+spec:
+  schedule: "0 3 * * *"    # nightly 03:00 UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 3600
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: vacuum
+              image: postgres:16-alpine
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: booking-db-creds
+                      key: password
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: booking-db-creds
+                      key: username
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  HOST=${POSTGRES_HOST:-postgres}
+                  DB=booking_db
+                  echo "$(date -u) VACUUM ANALYZE on high-write tables"
+                  psql -h "${HOST}" -U "${PGUSER}" -d "${DB}" <<'SQL'
+                    VACUUM ANALYZE outbox_event;
+                    VACUUM ANALYZE booking_event_log;
+                    VACUUM ANALYZE processed_event;
+                    VACUUM ANALYZE loyalty_ledger_entry;
+                    VACUUM ANALYZE booking_waitlist;
+                  SQL
+                  echo "$(date -u) Done."
+              resources:
+                requests:
+                  memory: "64Mi"
+                  cpu: "50m"
+                limits:
+                  memory: "128Mi"
+                  cpu: "200m"

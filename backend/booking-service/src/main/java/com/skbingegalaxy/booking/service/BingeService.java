@@ -28,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -64,6 +65,7 @@ public class BingeService {
     private final CustomerPricingProfileRepository customerPricingProfileRepository;
     private final ObjectMapper objectMapper;
     private final AdminNotificationService adminNotificationService;
+    private final VenueClockService venueClock;
 
     /** Hours an approved binge has to create its first event before auto-deactivation. */
     public static final int GRACE_PERIOD_HOURS = 24;
@@ -143,7 +145,7 @@ public class BingeService {
             throw new DuplicateResourceException("Binge", "name", request.getName());
         }
 
-        LocalDate opDate = clientDate != null ? clientDate : LocalDate.now();
+        LocalDate opDate = clientDate != null ? clientDate : LocalDate.now(venueClock.defaultZone());
         LocalTime openT = request.getOpenTime() != null ? request.getOpenTime() : LocalTime.of(10, 0);
         LocalTime closeT = request.getCloseTime() != null ? request.getCloseTime() : LocalTime.of(23, 0);
         validateOperatingHours(openT, closeT);
@@ -166,6 +168,7 @@ public class BingeService {
             .state(trimToNull(request.getState()))
             .country(trimToNull(request.getCountry()))
             .postalCode(trimToNull(request.getPostalCode()))
+            .timezone(resolveTimezone(request.getTimezone()))
             .adminId(adminId)
             .active(initialActive)
             .status(initialStatus)
@@ -184,7 +187,7 @@ public class BingeService {
             .build();
         if (isSuperAdmin) {
             binge.setApprovalDecidedBy(adminId);
-            binge.setApprovalDecidedAt(LocalDateTime.now());
+            binge.setApprovalDecidedAt(LocalDateTime.now(ZoneOffset.UTC));
         }
 
         binge = bingeRepository.save(binge);
@@ -223,7 +226,7 @@ public class BingeService {
         binge.setStatus(BingeApprovalStatus.APPROVED);
         binge.setActive(true);
         binge.setApprovalDecidedBy(superAdminId);
-        binge.setApprovalDecidedAt(LocalDateTime.now());
+        binge.setApprovalDecidedAt(LocalDateTime.now(ZoneOffset.UTC));
         binge.setApprovalRejectionReason(null);
         binge.setAutoDeactivatedAt(null);
         binge.setGraceWarningSentAt(null);
@@ -233,7 +236,7 @@ public class BingeService {
         // grace-period scheduler skips it.
         if (binge.getFirstEventCreatedAt() == null
                 && eventTypeRepository.findByBingeIdAndActiveTrue(binge.getId()).size() > 0) {
-            binge.setFirstEventCreatedAt(LocalDateTime.now());
+            binge.setFirstEventCreatedAt(LocalDateTime.now(ZoneOffset.UTC));
         }
         binge = bingeRepository.save(binge);
         log.info("Binge {} ('{}') approved by super-admin {}", id, binge.getName(), superAdminId);
@@ -284,7 +287,7 @@ public class BingeService {
         binge.setStatus(BingeApprovalStatus.REJECTED);
         binge.setActive(false);
         binge.setApprovalDecidedBy(superAdminId);
-        binge.setApprovalDecidedAt(LocalDateTime.now());
+        binge.setApprovalDecidedAt(LocalDateTime.now(ZoneOffset.UTC));
         binge.setApprovalRejectionReason(trimToNull(reason));
         binge = bingeRepository.save(binge);
         log.info("Binge {} ('{}') rejected by super-admin {} (reason='{}')",
@@ -319,7 +322,7 @@ public class BingeService {
         if (bingeId == null) return;
         bingeRepository.findById(bingeId).ifPresent(b -> {
             if (b.getFirstEventCreatedAt() == null) {
-                b.setFirstEventCreatedAt(LocalDateTime.now());
+                b.setFirstEventCreatedAt(LocalDateTime.now(ZoneOffset.UTC));
                 bingeRepository.save(b);
                 log.info("Binge {} ('{}') marked operational (first event created)",
                     bingeId, b.getName());
@@ -334,7 +337,7 @@ public class BingeService {
      */
     @Transactional
     public int enforceGracePeriod() {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         List<Binge> candidates = bingeRepository.findByStatusOrderByCreatedAtDesc(BingeApprovalStatus.APPROVED)
             .stream()
             .filter(b -> b.getFirstEventCreatedAt() == null)
@@ -414,6 +417,16 @@ public class BingeService {
         binge.setState(trimToNull(request.getState()));
         binge.setCountry(trimToNull(request.getCountry()));
         binge.setPostalCode(trimToNull(request.getPostalCode()));
+        if (request.getTimezone() != null && !request.getTimezone().isBlank()) {
+            try {
+                java.time.ZoneId.of(request.getTimezone()); // validate before persisting
+                binge.setTimezone(request.getTimezone().trim());
+                venueClock.evict(binge.getId()); // flush cached zone for this venue
+            } catch (java.time.DateTimeException e) {
+                throw new com.skbingegalaxy.common.exception.BusinessException(
+                    "Invalid timezone '" + request.getTimezone() + "'. Use an IANA zone ID such as 'Asia/Kolkata' or 'America/New_York'.");
+            }
+        }
         binge.setSupportEmail(trimToNull(request.getSupportEmail()));
         binge.setSupportPhone(trimToNull(request.getSupportPhone()));
         binge.setSupportPhoneCountryCode(trimToNull(request.getSupportPhoneCountryCode()));
@@ -763,6 +776,7 @@ public class BingeService {
             .state(b.getState())
             .country(b.getCountry())
             .postalCode(b.getPostalCode())
+            .timezone(b.getTimezone())
             .adminId(b.getAdminId())
             .active(b.isActive())
             .operationalDate(b.getOperationalDate())
@@ -792,6 +806,16 @@ public class BingeService {
             .graceWarningSentAt(b.getGraceWarningSentAt())
             .autoDeactivatedAt(b.getAutoDeactivatedAt())
             .build();
+    }
+
+    private String resolveTimezone(String requested) {
+        if (requested == null || requested.isBlank()) return venueClock.defaultZone().getId();
+        try {
+            return java.time.ZoneId.of(requested.trim()).getId();
+        } catch (java.time.DateTimeException e) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Invalid timezone '" + requested + "'. Use an IANA zone ID such as 'Asia/Kolkata' or 'America/New_York'.");
+        }
     }
 
     /**

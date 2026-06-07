@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
@@ -67,8 +68,8 @@ public class TemplateService {
                 .content(dto.getContent())
                 .subject(dto.getSubject())
                 .active(false)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
+                .createdAt(LocalDateTime.now(ZoneOffset.UTC))
+                .updatedAt(LocalDateTime.now(ZoneOffset.UTC))
                 .build();
 
         template = templateRepository.save(template);
@@ -87,7 +88,7 @@ public class TemplateService {
                 .filter(t -> t.isActive() && t.getVersion() != version)
                 .toList();
         if (!toDeactivate.isEmpty()) {
-            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
             toDeactivate.forEach(t -> {
                 t.setActive(false);
                 t.setUpdatedAt(now);
@@ -100,7 +101,7 @@ public class TemplateService {
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Template not found: name=" + name + " channel=" + channel + " version=" + version));
         target.setActive(true);
-        target.setUpdatedAt(LocalDateTime.now());
+        target.setUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
         templateRepository.save(target);
 
         log.info("Activated template: name={} channel={} version={}", name, channel, version);

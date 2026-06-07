@@ -6,6 +6,7 @@ import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -106,7 +107,7 @@ public class AuthorityGrant {
      */
     @Transient
     public boolean isActive() {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         return revokedAt == null && expiresAt != null && expiresAt.isAfter(now);
     }
 }

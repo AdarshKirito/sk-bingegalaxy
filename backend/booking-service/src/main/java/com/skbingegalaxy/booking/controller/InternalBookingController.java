@@ -37,11 +37,20 @@ public class InternalBookingController {
         BigDecimal remaining = booking.getTotalAmount().subtract(collected);
         if (remaining.compareTo(BigDecimal.ZERO) < 0) remaining = BigDecimal.ZERO;
 
+        // Expose the locked payment currency + rate so payment-service can validate a
+        // foreign-currency charge against the SAME rate the booking was created at.
+        // Defaults: base currency (INR) at rate 1 for ordinary domestic bookings.
+        String paymentCurrencyCode = booking.getPaymentCurrencyCode() != null
+            ? booking.getPaymentCurrencyCode() : "INR";
+        BigDecimal fxRate = booking.getFxRate() != null ? booking.getFxRate() : BigDecimal.ONE;
+
         return ResponseEntity.ok(ApiResponse.ok(Map.of(
             "totalAmount", booking.getTotalAmount(),
             "collectedAmount", collected,
             "remainingBalance", remaining,
-            "status", booking.getStatus().name()
+            "status", booking.getStatus().name(),
+            "paymentCurrencyCode", paymentCurrencyCode,
+            "fxRate", fxRate
         )));
     }
 }

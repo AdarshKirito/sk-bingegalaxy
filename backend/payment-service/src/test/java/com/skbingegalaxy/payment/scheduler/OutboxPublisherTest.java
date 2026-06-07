@@ -82,7 +82,7 @@ class OutboxPublisherTest {
     void publishesAllSuccessful() throws Exception {
         OutboxEvent e1 = event(1, "topicA");
         OutboxEvent e2 = event(2, "topicA");
-        when(outboxRepo.findTop100BySentFalseAndFailedPermanentFalseOrderByCreatedAtAsc())
+        when(outboxRepo.findPendingBatchWithLock())
                 .thenReturn(List.of(e1, e2));
         when(kafkaTemplate.send(anyString(), anyString(), any())).thenReturn(successFuture());
 
@@ -99,7 +99,7 @@ class OutboxPublisherTest {
         OutboxEvent e1 = event(1, "topicA");
         OutboxEvent e2 = event(2, "topicA");   // will fail
         OutboxEvent e3 = event(3, "topicA");
-        when(outboxRepo.findTop100BySentFalseAndFailedPermanentFalseOrderByCreatedAtAsc())
+        when(outboxRepo.findPendingBatchWithLock())
                 .thenReturn(List.of(e1, e2, e3));
         when(kafkaTemplate.send(eq("topicA"), eq("SKBG-1"), any())).thenReturn(successFuture());
         when(kafkaTemplate.send(eq("topicA"), eq("SKBG-2"), any())).thenReturn(failedFuture("kafka down"));
@@ -122,7 +122,7 @@ class OutboxPublisherTest {
     void marksPoisonedAfterMaxAttempts() throws Exception {
         OutboxEvent e1 = event(1, "topicA");
         e1.setAttempts(OutboxPublisher.MAX_ATTEMPTS - 1); // one more failure makes it poisoned
-        when(outboxRepo.findTop100BySentFalseAndFailedPermanentFalseOrderByCreatedAtAsc())
+        when(outboxRepo.findPendingBatchWithLock())
                 .thenReturn(List.of(e1));
         when(kafkaTemplate.send(anyString(), anyString(), any())).thenReturn(failedFuture("broker down"));
 
@@ -138,7 +138,7 @@ class OutboxPublisherTest {
     void truncatesLongErrors() throws Exception {
         OutboxEvent e1 = event(1, "topicA");
         String bigMessage = "x".repeat(5_000);
-        when(outboxRepo.findTop100BySentFalseAndFailedPermanentFalseOrderByCreatedAtAsc())
+        when(outboxRepo.findPendingBatchWithLock())
                 .thenReturn(List.of(e1));
         when(kafkaTemplate.send(anyString(), anyString(), any())).thenReturn(failedFuture(bigMessage));
 
@@ -151,7 +151,7 @@ class OutboxPublisherTest {
     @Test
     @DisplayName("Empty pending list does not call Kafka or save anything")
     void emptyBatchIsNoOp() {
-        when(outboxRepo.findTop100BySentFalseAndFailedPermanentFalseOrderByCreatedAtAsc())
+        when(outboxRepo.findPendingBatchWithLock())
                 .thenReturn(List.of());
 
         publisher.publishPendingEvents();

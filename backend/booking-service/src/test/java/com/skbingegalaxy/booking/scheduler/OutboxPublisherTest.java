@@ -77,7 +77,7 @@ class OutboxPublisherTest {
     void publishesAllSuccessful() throws Exception {
         OutboxEvent e1 = bookingEvent(1L, "SKBG25000001");
         OutboxEvent e2 = bookingEvent(2L, "SKBG25000002");
-        when(outboxEventRepository.findTop100BySentFalseAndFailedPermanentFalseOrderByCreatedAtAsc())
+        when(outboxEventRepository.findPendingBatchWithLock())
             .thenReturn(List.of(e1, e2));
         when(kafkaTemplate.send(any(String.class), any(String.class), any()))
             .thenReturn(CompletableFuture.completedFuture(null));
@@ -95,7 +95,7 @@ class OutboxPublisherTest {
     void failingEventDoesNotBlockOthers() throws Exception {
         OutboxEvent poison = bookingEvent(1L, "SKBG25POISON");
         OutboxEvent good = bookingEvent(2L, "SKBG25000002");
-        when(outboxEventRepository.findTop100BySentFalseAndFailedPermanentFalseOrderByCreatedAtAsc())
+        when(outboxEventRepository.findPendingBatchWithLock())
             .thenReturn(List.of(poison, good));
         // First send fails, second succeeds.
         when(kafkaTemplate.send(eq(KafkaTopics.BOOKING_CREATED), eq("SKBG25POISON"), any()))
@@ -117,7 +117,7 @@ class OutboxPublisherTest {
     void marksPoisonedAfterMaxAttempts() throws Exception {
         OutboxEvent poison = bookingEvent(1L, "SKBG25POISON");
         poison.setAttempts(9); // One more failure will hit the max.
-        when(outboxEventRepository.findTop100BySentFalseAndFailedPermanentFalseOrderByCreatedAtAsc())
+        when(outboxEventRepository.findPendingBatchWithLock())
             .thenReturn(List.of(poison));
         when(kafkaTemplate.send(any(String.class), any(String.class), any()))
             .thenReturn(failedFuture(new RuntimeException("still broken")));
@@ -131,7 +131,7 @@ class OutboxPublisherTest {
     @Test
     void truncatesLongErrors() throws Exception {
         OutboxEvent event = bookingEvent(1L, "SKBG25000003");
-        when(outboxEventRepository.findTop100BySentFalseAndFailedPermanentFalseOrderByCreatedAtAsc())
+        when(outboxEventRepository.findPendingBatchWithLock())
             .thenReturn(List.of(event));
         String hugeMessage = "x".repeat(5000);
         when(kafkaTemplate.send(any(String.class), any(String.class), any()))
@@ -144,7 +144,7 @@ class OutboxPublisherTest {
 
     @Test
     void emptyBatchIsNoOp() {
-        when(outboxEventRepository.findTop100BySentFalseAndFailedPermanentFalseOrderByCreatedAtAsc())
+        when(outboxEventRepository.findPendingBatchWithLock())
             .thenReturn(List.of());
 
         outboxPublisher.publishPendingEvents();
@@ -155,7 +155,7 @@ class OutboxPublisherTest {
     @Test
     void publishesSseEventAfterSuccessfulKafkaSend() throws Exception {
         OutboxEvent e = bookingEvent(1L, "SKBG25000001");
-        when(outboxEventRepository.findTop100BySentFalseAndFailedPermanentFalseOrderByCreatedAtAsc())
+        when(outboxEventRepository.findPendingBatchWithLock())
             .thenReturn(List.of(e));
         when(kafkaTemplate.send(any(String.class), any(String.class), any()))
             .thenReturn(CompletableFuture.completedFuture(null));

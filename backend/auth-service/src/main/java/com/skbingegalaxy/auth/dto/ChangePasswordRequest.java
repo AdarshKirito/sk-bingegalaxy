@@ -1,10 +1,12 @@
 package com.skbingegalaxy.auth.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.*;
 
+@JsonIgnoreProperties(ignoreUnknown = false)
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

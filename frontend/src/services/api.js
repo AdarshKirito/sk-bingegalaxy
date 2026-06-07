@@ -23,7 +23,29 @@ api.interceptors.request.use(async (config) => {
         : `idem-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
       config.headers['Idempotency-Key'] = uuid;
     }
+    // CSRF double-submit cookie: read the XSRF-TOKEN cookie set by the gateway and
+    // echo it as a request header so the gateway's CsrfProtectionFilter can validate
+    // that the request originated from the SPA, not a cross-origin forged form post.
+    const xsrfToken = document.cookie
+      .split('; ')
+      .find((row) => row.startsWith('XSRF-TOKEN='))
+      ?.split('=')[1];
+    if (xsrfToken) {
+      config.headers['X-XSRF-TOKEN'] = decodeURIComponent(xsrfToken);
+    }
   }
+
+  // Propagate Sentry trace context so backend Zipkin spans can be linked to the
+  // frontend Sentry error that triggered the request. This gives ops a shared
+  // identifier to correlate "React error in Sentry" ↔ "backend 422 in Zipkin".
+  // The header is advisory — backends log it in MDC if present, ignore otherwise.
+  try {
+    const activeSpan = Sentry.getActiveSpan();
+    if (activeSpan) {
+      const traceId = activeSpan.spanContext?.()?.traceId;
+      if (traceId) config.headers['X-Sentry-Trace-Id'] = traceId;
+    }
+  } catch (_) { /* Sentry may not be initialised in test environments */ }
 
   // Auto-attach selected binge for multi-tenancy
   const binge = localStorage.getItem('selectedBinge');

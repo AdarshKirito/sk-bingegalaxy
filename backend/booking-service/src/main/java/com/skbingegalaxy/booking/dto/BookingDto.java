@@ -76,6 +76,11 @@ public class BookingDto {
     // ── Tax ───
     private BigDecimal subtotalAmount;  // pre-tax subtotal
     private BigDecimal taxAmount;       // exclusive tax charged on top of subtotal
+    // Multi-currency payment: currency the booking is to be paid in (null/"INR" = domestic)
+    // and the locked FX rate (foreign units per 1 INR). Lets the payment screen present + charge
+    // the locked foreign amount = totalAmount * fxRate.
+    private String paymentCurrencyCode;
+    private BigDecimal fxRate;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

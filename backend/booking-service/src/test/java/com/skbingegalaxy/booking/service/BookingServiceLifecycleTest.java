@@ -23,6 +23,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -60,7 +61,7 @@ class BookingServiceLifecycleTest {
     @Mock private SagaOrchestrator sagaOrchestrator;
     @Mock private VenueRoomRepository venueRoomRepository;
     @Mock private BookingReviewRepository bookingReviewRepository;
-        @Mock private LoyaltyService loyaltyService;
+        @Mock private com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyMemberService loyaltyMemberService;
         @Mock private com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyMembershipRepository loyaltyMembershipRepository;
         @Mock private com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyConfigService loyaltyConfigService;
         @Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
@@ -71,6 +72,8 @@ class BookingServiceLifecycleTest {
         @Mock private com.skbingegalaxy.booking.service.BookingAnalyticsMetrics analyticsMetrics;
         @Mock private com.skbingegalaxy.booking.service.BookingRiskEvaluator bookingRiskEvaluator;
         @Mock private com.skbingegalaxy.booking.service.statemachine.BookingStateMachine stateMachineMock;
+        @Mock private VenueClockService venueClock;
+        @Mock private TaxService taxService;
 
     @InjectMocks private BookingService bookingService;
 
@@ -80,6 +83,17 @@ class BookingServiceLifecycleTest {
     @BeforeEach
     void setUp() {
         BingeContext.clear();
+        lenient().when(venueClock.zoneOf(any())).thenReturn(ZoneOffset.UTC);
+        lenient().when(venueClock.today(any())).thenReturn(LocalDate.now(ZoneOffset.UTC));
+        lenient().when(venueClock.defaultZone()).thenReturn(ZoneOffset.UTC);
+        lenient().when(taxService.compute(any(Long.class), any(BigDecimal.class), any(BigDecimal.class), any(BigDecimal.class), any(BigDecimal.class)))
+                .thenReturn(TaxComputationResult.builder()
+                        .subtotal(BigDecimal.ZERO).totalTax(BigDecimal.ZERO)
+                        .totalInclusiveTax(BigDecimal.ZERO).lines(List.of()).build());
+        lenient().when(taxService.compute(any(com.skbingegalaxy.booking.tax.provider.TaxContext.class), any(BigDecimal.class), any(BigDecimal.class), any(BigDecimal.class), any(BigDecimal.class)))
+                .thenReturn(TaxComputationResult.builder()
+                        .subtotal(BigDecimal.ZERO).totalTax(BigDecimal.ZERO)
+                        .totalInclusiveTax(BigDecimal.ZERO).lines(List.of()).build());
         ReflectionTestUtils.setField(bookingService, "availabilityClient", availabilityClient);
         ReflectionTestUtils.setField(bookingService, "eventPublisher", eventPublisher);
         // Replace mocked SM with a real one wired to the same mocked deps so
@@ -95,8 +109,8 @@ class BookingServiceLifecycleTest {
         ReflectionTestUtils.setField(bookingService, "maxBookingHorizonDays", 365);
         ReflectionTestUtils.setField(bookingService, "defaultOpeningHour", 10);
         ReflectionTestUtils.setField(bookingService, "defaultClosingHour", 23);
-                lenient().when(loyaltyService.redeemPoints(anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
-                        .thenReturn(new LoyaltyService.RedemptionResult(0L, BigDecimal.ZERO));
+                lenient().when(loyaltyMemberService.redeemForBooking(anyLong(), anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
+                        .thenReturn(new com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyMemberService.RedemptionResult(0L, BigDecimal.ZERO));
         lenient().when(bingeRepository.findById(anyLong())).thenAnswer(inv ->
             Optional.of(Binge.builder().id((Long) inv.getArgument(0)).build()));
         lenient().when(cancellationTierRepository.findByBingeIdOrderByHoursBeforeStartDesc(anyLong())).thenReturn(List.of());
@@ -125,8 +139,8 @@ class BookingServiceLifecycleTest {
                 .paymentStatus(PaymentStatus.PENDING)
                 .checkedIn(false)
                 .addOns(new ArrayList<>())
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
+                .createdAt(LocalDateTime.now(ZoneOffset.UTC))
+                .updatedAt(LocalDateTime.now(ZoneOffset.UTC))
                 .build();
     }
 
@@ -422,7 +436,7 @@ class BookingServiceLifecycleTest {
             when(bookingRepository.findByBookingRefAndBingeId("SKBG25123456", 11L))
                     .thenReturn(Optional.of(testBooking));
 
-            assertThatThrownBy(() -> bookingService.earlyCheckout("SKBG25123456", LocalDateTime.now()))
+            assertThatThrownBy(() -> bookingService.earlyCheckout("SKBG25123456", LocalDateTime.now(ZoneOffset.UTC)))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("CHECKED_IN");
         }
@@ -436,7 +450,7 @@ class BookingServiceLifecycleTest {
             when(bookingRepository.findByBookingRefAndBingeId("SKBG25123456", 11L))
                     .thenReturn(Optional.of(testBooking));
 
-            assertThatThrownBy(() -> bookingService.earlyCheckout("SKBG25123456", LocalDateTime.now()))
+            assertThatThrownBy(() -> bookingService.earlyCheckout("SKBG25123456", LocalDateTime.now(ZoneOffset.UTC)))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("Collect payment before checking out");
         }
@@ -450,7 +464,7 @@ class BookingServiceLifecycleTest {
             when(bookingRepository.findByBookingRefAndBingeId("SKBG25123456", 11L))
                     .thenReturn(Optional.of(testBooking));
 
-            assertThatThrownBy(() -> bookingService.earlyCheckout("SKBG25123456", LocalDateTime.now()))
+            assertThatThrownBy(() -> bookingService.earlyCheckout("SKBG25123456", LocalDateTime.now(ZoneOffset.UTC)))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("no valid payment");
         }
@@ -821,7 +835,7 @@ class BookingServiceLifecycleTest {
         @Test
         @DisplayName("earlyCheckout without binge throws")
         void earlyCheckout_noBinge_throws() {
-            assertThatThrownBy(() -> bookingService.earlyCheckout("SKBG25123456", LocalDateTime.now()))
+            assertThatThrownBy(() -> bookingService.earlyCheckout("SKBG25123456", LocalDateTime.now(ZoneOffset.UTC)))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("Select a binge");
         }

@@ -55,7 +55,7 @@ class PricingServiceComprehensiveTest {
         djSetup = AddOn.builder()
             .id(10L).bingeId(11L).name("DJ Setup")
             .price(BigDecimal.valueOf(2000))
-            .category("EXPERIENCE").active(true).build();
+            .categoryId(1L).active(true).build();
 
         vipCode = RateCode.builder()
             .id(7L).bingeId(11L).name("VIP").description("VIP Pricing")

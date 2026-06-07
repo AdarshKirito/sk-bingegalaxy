@@ -59,6 +59,10 @@ export const authService = {
   // ── Email verification ─────────────────────────────────────
   verifyEmail: (data) => api.post('/auth/verify-email', data),
   resendVerification: () => api.post('/auth/resend-verification'),
+  // ── Privacy / right-to-erasure (DPDP Act 2023 / GDPR) ──────
+  // Soft-deletes the account immediately, revokes all sessions, and schedules
+  // permanent PII anonymization after the retention window (30 days).
+  requestAccountDeletion: () => api.delete('/auth/privacy/me'),
   // ── Sessions (self) ────────────────────────────────────────
   getMySessions: () => api.get('/auth/sessions'),
   revokeMySession: (id) => api.delete(`/auth/sessions/${id}`),
@@ -197,6 +201,16 @@ export const currencyService = {
   remove: (code) => api.delete(`/bookings/admin/currencies/${code}`),
 };
 
+// ── Checkout (multi-currency quote + FX rate lock) ─────────
+// Used only when the customer chooses to pay in a foreign currency the super-admin
+// has enabled (CurrencyRate.supportsPayment). lockFx fixes the INR→currency rate for a
+// short window; the returned token is passed to createBooking, which records the locked
+// currency + rate so the payment is charged at exactly that rate.
+export const checkoutService = {
+  preview: (data) => api.post('/bookings/checkout/preview', data),
+  lockFx: (data) => api.post('/bookings/checkout/lock-fx', data),
+};
+
 // ── Notifications (customer + admin) ───────────────────────
 // Customer-facing endpoints rely on the X-User-Email header injected by the
 // gateway; admin/template endpoints require ROLE_ADMIN at the gateway.
@@ -250,6 +264,9 @@ export const adminService = {
   getUpcomingBookings: (page, size) => api.get('/bookings/admin/upcoming', { params: { page, size, clientDate: clientDate() } }),
   getBookingsByDate: (date, page, size) => api.get('/bookings/admin/by-date', { params: { date, page, size } }),
   getBookingsByStatus: (status, page, size) => api.get('/bookings/admin/by-status', { params: { status, page, size, clientDate: clientDate() } }),
+  // House accounts = every booking still awaiting payment, across all dates
+  // (the full accounts-receivable list, unlike the today-only "Pending Payment" sub-tab).
+  getHouseAccounts: (page, size) => api.get('/bookings/admin/house-accounts', { params: { page, size } }),
   searchBookings: (keyword) => api.get('/bookings/admin/search', { params: { q: keyword, clientDate: clientDate() } }),
   updateBooking: (ref, data) => api.patch(`/bookings/admin/${ref}`, data),
   cancelBooking: (ref, reason) => api.post(`/bookings/admin/${ref}/cancel`, { reason: reason || '' }),
@@ -379,6 +396,9 @@ export const adminService = {
   rejectApproval: (id, reason) => api.post(`/payments/admin/approvals/${id}/reject`, { reason }),
   cancelApproval: (id, reason) => api.post(`/payments/admin/approvals/${id}/cancel`, { reason }),
   executeApprovedRefundRetry: (id) => api.post(`/payments/admin/approvals/${id}/execute-refund-retry`),
+  // Global failed-refund queue (money owed to customers that didn't settle).
+  // Returns a Spring Page<RefundDto>; read .content / .totalElements.
+  getFailedRefunds: (params = { page: 0, size: 20 }) => api.get('/payments/admin/refunds/failed', { params }),
   // Retry a FAILED refund. Below threshold: completes immediately. Above
   // threshold: server creates an approval request and returns HTTP 202
   // with the approval id in the message body — caller must inspect the
@@ -503,6 +523,23 @@ export const adminSupportService = {
   goodwill: (ref, amount, reason) => api.post(`/bookings/admin/support/${ref}/goodwill`, { amount, reason }),
   // Per-row notification retry
   retryNotification: (id) => api.post(`/notifications/admin/${id}/retry`),
+};
+
+// ── Payment disputes / chargebacks (admin) ──────────────────────────────────
+// Razorpay chargebacks are ingested by payment-service's DisputeWebhookService
+// and triaged here. Every endpoint is binge-scoped server-side via the
+// X-Binge-Id header (auto-attached by api.js), so the selected binge must be set.
+// Disputes are money-at-risk with a hard Razorpay respond-by deadline, so the
+// list is sorted most-urgent-first and the count drives the dashboard alert.
+export const disputeService = {
+  // Open (non-terminal) disputes, sorted by respond-by deadline ASC.
+  listOpen: (params = { page: 0, size: 20 }) => api.get('/payments/admin/disputes', { params }),
+  // Full history including WON / LOST / ACCEPTED — for audit + win/loss reporting.
+  listAll: (params = { page: 0, size: 20 }) => api.get('/payments/admin/disputes/all', { params }),
+  // { openDisputes: N } — non-zero lights up the dashboard alert badge.
+  count: () => api.get('/payments/admin/disputes/count'),
+  // Append a timestamped ops note (evidence trail before responding to Razorpay).
+  updateNotes: (disputeId, notes) => api.patch(`/payments/admin/disputes/${disputeId}/notes`, { notes }),
 };
 
 // ── Risk flags (Item 23) ────────────────────────────────────────────────────

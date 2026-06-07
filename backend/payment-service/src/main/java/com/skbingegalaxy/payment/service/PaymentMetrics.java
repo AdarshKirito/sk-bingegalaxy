@@ -47,6 +47,13 @@ public class PaymentMetrics {
     public void duplicateInitiated()   { counter("skbg_payment_duplicate_attempts_total", "kind", "initiated").increment(); }
     public void duplicateSuccessful()  { counter("skbg_payment_duplicate_attempts_total", "kind", "already_succeeded").increment(); }
 
+    /**
+     * Customer re-initiates payment after a previous FAILED attempt on the same booking.
+     * Rate relative to total initiations = payment retry rate.
+     * High rate ⇒ gateway issues, card declines, or UX friction in the checkout flow.
+     */
+    public void paymentRetry() { counter("skbg_payment_retry_total").increment(); }
+
     // ── Webhook / callback outcomes ────────────────────────────────────────
     public void webhookFresh()            { counter("skbg_payment_webhook_total", "outcome", "fresh").increment(); }
     public void webhookDuplicate()        { counter("skbg_payment_webhook_total", "outcome", "duplicate").increment(); }
@@ -62,6 +69,11 @@ public class PaymentMetrics {
 
     // ── Saga compensation ──────────────────────────────────────────────────
     public void sagaCompensated() { counter("skbg_saga_compensation_total").increment(); }
+
+    // ── Dispute / chargeback ──────────────────────────────────────────────────
+    public void disputeOpened() { counter("skbg_payment_dispute_total", "outcome", "opened").increment(); }
+    public void disputeWon()    { counter("skbg_payment_dispute_total", "outcome", "won").increment(); }
+    public void disputeLost()   { counter("skbg_payment_dispute_total", "outcome", "lost").increment(); }
 
     // ── Fraud signals ──────────────────────────────────────────────────────
     public void cardTestingSuspected() { counter("skbg_card_testing_suspected_total").increment(); }

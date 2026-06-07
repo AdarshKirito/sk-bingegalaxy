@@ -1,0 +1,130 @@
+version: 2
+updates:
+  # ── Backend: Maven ────────────────────────────────────────────────────────
+  - package-ecosystem: "maven"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Kolkata"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "backend"
+      - "java"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      spring-boot:
+        patterns:
+          - "org.springframework.boot:*"
+          - "org.springframework:*"
+        update-types:
+          - "minor"
+          - "patch"
+      spring-cloud:
+        patterns:
+          - "org.springframework.cloud:*"
+        update-types:
+          - "minor"
+          - "patch"
+      kafka:
+        patterns:
+          - "org.apache.kafka:*"
+          - "org.springframework.kafka:*"
+        update-types:
+          - "minor"
+          - "patch"
+      security:
+        patterns:
+          - "org.springframework.security:*"
+          - "io.jsonwebtoken:*"
+          - "com.nimbusds:*"
+          - "org.bouncycastle:*"
+        update-types:
+          - "minor"
+          - "patch"
+      # Security patches always open individual PRs (no grouping) so they
+      # are easy to review and merge independently.
+    ignore:
+      # Major version bumps require manual review
+      - dependency-name: "org.springframework.boot:spring-boot-starter-parent"
+        update-types: ["version-update:semver-major"]
+
+  # ── Frontend: npm ─────────────────────────────────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:30"
+      timezone: "Asia/Kolkata"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "frontend"
+      - "javascript"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      react:
+        patterns:
+          - "react"
+          - "react-*"
+          - "@types/react*"
+        update-types:
+          - "minor"
+          - "patch"
+      vite:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+          - "vite-*"
+        update-types:
+          - "minor"
+          - "patch"
+      tanstack:
+        patterns:
+          - "@tanstack/*"
+        update-types:
+          - "minor"
+          - "patch"
+      radix-ui:
+        patterns:
+          - "@radix-ui/*"
+        update-types:
+          - "minor"
+          - "patch"
+      testing:
+        patterns:
+          - "@playwright/*"
+          - "playwright"
+          - "vitest*"
+          - "@testing-library/*"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # Major version bumps require manual review
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+
+  # ── Docker base images ────────────────────────────────────────────────────
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "07:00"
+      timezone: "Asia/Kolkata"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "chore(deps)"

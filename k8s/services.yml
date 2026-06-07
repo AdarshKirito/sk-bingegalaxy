@@ -63,7 +63,7 @@ spec:
                   name: auth-db-creds
                   key: password
             - name: JAVA_TOOL_OPTIONS
-              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=8m -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/heapdump.hprof -Duser.timezone=UTC"
           resources:
             requests:
               memory: "256Mi"
@@ -82,7 +82,7 @@ spec:
             httpGet:
               path: /actuator/health/readiness
               port: 8081
-            initialDelaySeconds: 5
+            initialDelaySeconds: 15
             periodSeconds: 10
           livenessProbe:
             httpGet:
@@ -179,7 +179,7 @@ spec:
                   name: availability-db-creds
                   key: password
             - name: JAVA_TOOL_OPTIONS
-              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=8m -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/heapdump.hprof -Duser.timezone=UTC"
           resources:
             requests:
               memory: "256Mi"
@@ -198,7 +198,7 @@ spec:
             httpGet:
               path: /actuator/health/readiness
               port: 8082
-            initialDelaySeconds: 5
+            initialDelaySeconds: 15
             periodSeconds: 10
           livenessProbe:
             httpGet:
@@ -295,7 +295,7 @@ spec:
                   name: booking-db-creds
                   key: password
             - name: JAVA_TOOL_OPTIONS
-              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=8m -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/heapdump.hprof -Duser.timezone=UTC"
           resources:
             requests:
               memory: "256Mi"
@@ -314,7 +314,7 @@ spec:
             httpGet:
               path: /actuator/health/readiness
               port: 8083
-            initialDelaySeconds: 5
+            initialDelaySeconds: 15
             periodSeconds: 10
           livenessProbe:
             httpGet:
@@ -418,8 +418,18 @@ spec:
                 secretKeyRef:
                   name: payment-db-creds
                   key: password
+            # Razorpay webhook signature secret — required for dispute/chargeback webhooks.
+            # Add RAZORPAY_WEBHOOK_SECRET to the app-secrets K8s Secret before enabling disputes.
+            # optional: true allows the pod to start while the secret is being provisioned;
+            # without it DisputeWebhookService rejects all webhooks with 403 (safe default).
+            - name: RAZORPAY_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: RAZORPAY_WEBHOOK_SECRET
+                  optional: true
             - name: JAVA_TOOL_OPTIONS
-              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=8m -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/heapdump.hprof -Duser.timezone=UTC"
           resources:
             requests:
               memory: "256Mi"
@@ -438,7 +448,7 @@ spec:
             httpGet:
               path: /actuator/health/readiness
               port: 8084
-            initialDelaySeconds: 5
+            initialDelaySeconds: 15
             periodSeconds: 10
           livenessProbe:
             httpGet:
@@ -527,7 +537,7 @@ spec:
                 name: mongo-secrets
           env:
             - name: JAVA_TOOL_OPTIONS
-              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC"
+              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=8m -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/heapdump.hprof -Duser.timezone=UTC"
           resources:
             requests:
               memory: "256Mi"
@@ -546,7 +556,7 @@ spec:
             httpGet:
               path: /actuator/health/readiness
               port: 8085
-            initialDelaySeconds: 5
+            initialDelaySeconds: 15
             periodSeconds: 10
           livenessProbe:
             httpGet:

@@ -47,7 +47,7 @@ class DashboardStatsTest {
     @Mock private PricingService pricingService;
     @Mock private BookingEventLogService eventLogService;
     @Mock private SagaOrchestrator sagaOrchestrator;
-    @Mock private LoyaltyService loyaltyService;
+    @Mock private com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyMemberService loyaltyMemberService;
     @Mock private com.skbingegalaxy.booking.service.CustomerFreezeService customerFreezeService;
     @Mock private com.skbingegalaxy.booking.repository.SlotHoldRepository slotHoldRepository;
     @Mock private com.skbingegalaxy.booking.service.BookingEventPublisher bookingEventPublisher;
@@ -62,8 +62,8 @@ class DashboardStatsTest {
 
     @BeforeEach
     void initLoyaltyMocks() {
-        lenient().when(loyaltyService.redeemPoints(anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
-            .thenReturn(new LoyaltyService.RedemptionResult(0L, BigDecimal.ZERO));
+        lenient().when(loyaltyMemberService.redeemForBooking(anyLong(), anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
+            .thenReturn(new com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyMemberService.RedemptionResult(0L, BigDecimal.ZERO));
         // Replace the @Mock SM with a real one wired to the same mocked
         // collaborators so the audit sweep transition() calls hit the real
         // logic and we still observe save() / logEventFull() on the mocks.

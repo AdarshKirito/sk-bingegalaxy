@@ -3,8 +3,13 @@ package com.skbingegalaxy.booking.tax.provider;
 import com.skbingegalaxy.booking.entity.TaxRule;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Comparator;
 import java.util.List;
+
+// Default fallback used only when no venue zone is available (e.g. anonymous preview).
+// Controlled by VenueClockService at runtime; this constant exists solely as a
+// last-resort guard inside a static utility that has no access to Spring beans.
 
 /**
  * Picks the most relevant tax rules from a candidate set, given a
@@ -34,8 +39,11 @@ public final class JurisdictionResolver {
      * (e.g. country mismatch) — the caller should drop those rules.
      */
     public static int score(TaxRule rule, TaxContext ctx) {
-        // Effective-date window
-        LocalDateTime now = LocalDateTime.now();
+        // Effective-date window — use the venue's timezone so rule windows are
+        // evaluated on the correct local business day regardless of where the
+        // server is running or which country the venue is in.
+        ZoneId zone = ctx.getVenueZone() != null ? ctx.getVenueZone() : ZoneId.of("Asia/Kolkata");
+        LocalDateTime now = LocalDateTime.now(zone);
         if (rule.getEffectiveFrom() != null && now.isBefore(rule.getEffectiveFrom())) return -1;
         if (rule.getEffectiveTo()   != null && now.isAfter(rule.getEffectiveTo()))   return -1;
 

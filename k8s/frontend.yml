@@ -1,3 +1,10 @@
+# NOTE: This Deployment is superseded by the Argo Rollout in argo-rollouts.yml.
+# When Argo Rollouts is installed, delete this Deployment and apply argo-rollouts.yml
+# instead. The Service and Ingress below remain in use by both paths.
+#
+# To migrate:
+#   kubectl delete deployment frontend -n sk-binge-galaxy
+#   kubectl apply -f k8s/argo-rollouts.yml
 apiVersion: apps/v1
 kind: Deployment
 metadata:

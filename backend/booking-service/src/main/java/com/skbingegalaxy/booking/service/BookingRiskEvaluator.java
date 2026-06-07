@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -110,7 +111,7 @@ public class BookingRiskEvaluator {
             }
 
             // Rule 3: repeated customer cancellations across binges.
-            LocalDateTime windowStart = LocalDateTime.now().minusDays(crossBingeWindowDays);
+            LocalDateTime windowStart = LocalDateTime.now(ZoneOffset.UTC).minusDays(crossBingeWindowDays);
             long cancels = bookingRepository.countCustomerCancelsAcrossBingesSince(booking.getCustomerId(), windowStart);
             if (cancels >= repeatedCancelsThreshold) {
                 record(booking, RuleCode.REPEATED_PENDING_CANCELLATIONS, Severity.HIGH,
@@ -138,7 +139,7 @@ public class BookingRiskEvaluator {
             }
 
             // Rule 6: rapid rebooking burst.
-            LocalDateTime burstStart = LocalDateTime.now().minusMinutes(rapidBurstWindowMinutes);
+            LocalDateTime burstStart = LocalDateTime.now(ZoneOffset.UTC).minusMinutes(rapidBurstWindowMinutes);
             long recent = bookingRepository.countByCustomerIdCreatedSince(booking.getCustomerId(), burstStart);
             if (recent >= rapidBurstThreshold) {
                 record(booking, RuleCode.RAPID_REBOOKING_BURST, Severity.MEDIUM,
@@ -201,7 +202,7 @@ public class BookingRiskEvaluator {
         }
         flag.setAcknowledged(true);
         flag.setAcknowledgedByAdminId(adminId);
-        flag.setAcknowledgedAt(LocalDateTime.now());
+        flag.setAcknowledgedAt(LocalDateTime.now(ZoneOffset.UTC));
         flag.setAcknowledgedNote(note);
         return BookingRiskFlagDto.from(riskFlagRepository.save(flag));
     }

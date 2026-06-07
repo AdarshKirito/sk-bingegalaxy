@@ -20,6 +20,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -53,7 +54,7 @@ class AuthControllerTest {
                         .id(1L).firstName("John").lastName("Doe")
                         .email("john@example.com").phone("9876543210").phoneCountryCode("+91")
                         .role(UserRole.CUSTOMER).active(true)
-                        .createdAt(LocalDateTime.now()).build())
+                        .createdAt(LocalDateTime.now(ZoneOffset.UTC)).build())
                 .build();
     }
 
@@ -66,7 +67,7 @@ class AuthControllerTest {
         RegisterRequest request = RegisterRequest.builder()
                 .firstName("John").lastName("Doe")
                 .email("john@example.com").phone("9876543210").phoneCountryCode("+91")
-                .password("Password@123").build();
+                .password("Password@123").consentGiven(true).build();
 
         mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -107,7 +108,7 @@ class AuthControllerTest {
         RegisterRequest request = RegisterRequest.builder()
                 .firstName("John").lastName("Doe")
                 .email("john@example.com").phone("9876543210").phoneCountryCode("+91")
-                .password("Password@123").build();
+                .password("Password@123").consentGiven(true).build();
 
         mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)

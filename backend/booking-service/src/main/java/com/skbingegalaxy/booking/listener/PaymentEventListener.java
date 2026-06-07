@@ -20,6 +20,8 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.ZoneOffset;
+
 /**
  * Saga participant: reacts to payment events with compensating actions.
  * All handlers are idempotent — duplicate events are safely skipped.
@@ -54,6 +56,20 @@ public class PaymentEventListener {
         // initiate a refund. The processed-event dedup at the top still
         // protects against duplicate deliveries.
         Booking pre = bookingService.getBookingEntityForSystem(event.getBookingRef());
+
+        // FX lock expiry audit: if an FX rate was committed at booking creation
+        // (fxLockedUntil is set) and that window has now passed, log a WARNING for
+        // reconciliation. In a well-functioning system this should never fire because
+        // consumeLock() at booking creation already validated the lock; this catches
+        // edge cases (clock skew, bypass, very long payment abandonment then retry).
+        if (pre.getFxLockedUntil() != null
+                && pre.getFxLockedUntil().isBefore(java.time.LocalDateTime.now(ZoneOffset.UTC))) {
+            log.warn("FX_RATE_EXPIRY_AT_PAYMENT: booking {} fxLockedUntil={} already passed "
+                + "before PAYMENT_SUCCESS arrived (txn {}). Possible rate mismatch — "
+                + "check invoice vs Razorpay settlement.",
+                event.getBookingRef(), pre.getFxLockedUntil(), event.getTransactionId());
+        }
+
         boolean terminal = pre.getStatus() == BookingStatus.CANCELLED
                         || pre.getStatus() == BookingStatus.NO_SHOW
                         || pre.getStatus() == BookingStatus.COMPLETED;
@@ -106,8 +122,9 @@ public class PaymentEventListener {
             return;
         }
 
-        if (booking.getTotalAmount() != null
-                && collected.compareTo(booking.getTotalAmount()) < 0) {
+        boolean fullyPaid = booking.getTotalAmount() == null
+                || collected.compareTo(booking.getTotalAmount()) >= 0;
+        if (!fullyPaid) {
             log.info("Partial payment for {}: collected={} of {}",
                 event.getBookingRef(), collected, booking.getTotalAmount());
             bookingService.updatePaymentStatus(event.getBookingRef(), PaymentStatus.PARTIALLY_PAID, event.getPaymentMethod());
@@ -117,6 +134,16 @@ public class PaymentEventListener {
 
         sagaOrchestrator.advanceTo(event.getBookingRef(),
             SagaState.SagaStatus.PAYMENT_RECEIVED, "PAYMENT_SUCCESS");
+        // On full payment, updatePaymentStatus() already drove the booking PENDING→CONFIRMED
+        // via the state machine. Advance the saga to CONFIRMED to match so its lifecycle isn't
+        // stuck at PAYMENT_RECEIVED, AND so the orchestrator's collected≥total underpayment
+        // guard actually executes (it was previously dead code — advanceTo(CONFIRMED) was
+        // never called anywhere). A partial payment leaves the booking PENDING, so the saga
+        // correctly stays at PAYMENT_RECEIVED until the balance is settled.
+        if (fullyPaid) {
+            sagaOrchestrator.advanceTo(event.getBookingRef(),
+                SagaState.SagaStatus.CONFIRMED, "BOOKING_CONFIRMED");
+        }
         analyticsMetrics.paymentSuccess();
         adminEventBus.publish(booking.getBingeId(), "booking", java.util.Map.of(
             "type", "payment.success", "ref", event.getBookingRef(), "ts", System.currentTimeMillis()));

@@ -50,6 +50,10 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         // by a fixed enum of stage names (Item 27).
         "/api/v1/bookings/analytics/funnel",
         "/api/v1/payments/callback",
+        // Razorpay dispute/chargeback webhooks — called directly by Razorpay with no JWT.
+        // Security is enforced by HMAC-SHA256 signature verification in DisputeWebhookService,
+        // not by JWT auth. Must be public so Razorpay's servers can reach this endpoint.
+        "/api/v1/payments/webhooks/",
         "/api/v1/site-content/public",
         // Booking-transfer recipient endpoints — token IS the bearer (magic-link
         // pattern). Recipient may not yet have an account; the token proves the
