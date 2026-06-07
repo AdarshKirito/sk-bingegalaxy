@@ -38,7 +38,7 @@
         <lombok.version>1.18.38</lombok.version>
         <mockito.version>5.14.2</mockito.version>
         <byte-buddy.version>1.15.10</byte-buddy.version>
-        <springdoc.version>2.5.0</springdoc.version>
+        <springdoc.version>3.0.3</springdoc.version>
     </properties>
 
     <dependencyManagement>
