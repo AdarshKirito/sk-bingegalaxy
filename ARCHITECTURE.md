@@ -249,6 +249,8 @@ Customer/public:
 ```
 [P]  GET  /binges · /binges/{id} · /binges/{id}/customer-dashboard · /binges/{id}/customer-about
 [P]  GET  /binges/nearby?lat&lng&radiusKm&limit   (proximity ranking, each result carries distanceKm)
+     ↳ two-stage like PostGIS/ES under the hood: (1) DB bounding-box filter on the
+       (latitude,longitude) index narrows candidates, (2) exact Haversine refine + sort
      ↳ all three anonymous /binges reads return the sanitized PublicBingeDto (no owner
        adminId, approval audit, or anti-abuse freeze thresholds — those stay admin-only)
      ↳ the by-id content reads (/binges/{id}, /customer-dashboard, /customer-about) 404

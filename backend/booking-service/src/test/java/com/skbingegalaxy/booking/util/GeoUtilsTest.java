@@ -45,6 +45,40 @@ class GeoUtilsTest {
     }
 
     @Test
+    void boundingBox_normalCase_isLongitudeBounded_andContainsRadius() {
+        // Bengaluru, 50 km radius.
+        GeoUtils.BoundingBox box = GeoUtils.boundingBox(12.9716, 77.5946, 50);
+        assertThat(box.isLongitudeBounded()).isTrue();
+        // ~0.45 deg of latitude for 50 km.
+        assertThat(box.maxLat() - box.minLat()).isCloseTo(0.90, org.assertj.core.data.Offset.offset(0.05));
+        // The point itself is inside the box.
+        assertThat(12.9716).isBetween(box.minLat(), box.maxLat());
+        assertThat(77.5946).isBetween(box.minLng(), box.maxLng());
+    }
+
+    @Test
+    void boundingBox_nearPole_dropsLongitudeBound() {
+        GeoUtils.BoundingBox box = GeoUtils.boundingBox(89.999, 10, 50);
+        assertThat(box.isLongitudeBounded()).isFalse();
+        assertThat(box.minLng()).isNull();
+        assertThat(box.maxLng()).isNull();
+    }
+
+    @Test
+    void boundingBox_acrossAntimeridian_dropsLongitudeBound() {
+        // Near +180 longitude, a 50 km box would spill past 180 -> latitude-band fallback.
+        GeoUtils.BoundingBox box = GeoUtils.boundingBox(0.0, 179.9, 50);
+        assertThat(box.isLongitudeBounded()).isFalse();
+    }
+
+    @Test
+    void boundingBox_clampsLatitudeToPoles() {
+        GeoUtils.BoundingBox box = GeoUtils.boundingBox(89.0, 0.0, 500);
+        assertThat(box.maxLat()).isLessThanOrEqualTo(90.0);
+        assertThat(box.minLat()).isGreaterThanOrEqualTo(-90.0);
+    }
+
+    @Test
     void validators_handleNullAndRange() {
         assertThat(GeoUtils.isValidLatitude(null)).isFalse();
         assertThat(GeoUtils.isValidLatitude(45.0)).isTrue();

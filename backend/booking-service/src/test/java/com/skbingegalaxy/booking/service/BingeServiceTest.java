@@ -33,6 +33,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
@@ -222,7 +223,10 @@ class BingeServiceTest {
         Binge delhi = Binge.builder().id(3L).name("Delhi").active(true)
             .latitude(28.6139).longitude(77.2090).build(); // ~1740 km away
         Binge ungeocoded = Binge.builder().id(4L).name("No coords").active(true).build();
-        when(bingeRepository.findCustomerVisibleBinges())
+        // The bounding-box stage returns a deliberately over-broad candidate set here
+        // (as if the box were loose) so we can prove the stage-2 exact refine still drops
+        // Delhi (beyond radius) and the null-coordinate guard still drops the un-geocoded venue.
+        when(bingeRepository.findVisibleGeocodedBingesInBox(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
             .thenReturn(List.of(mysore, ungeocoded, delhi, bangalore));
 
         // Query from Bengaluru centre, 200 km radius.
@@ -238,7 +242,8 @@ class BingeServiceTest {
     void getNearbyBinges_appliesLimit() {
         Binge a = Binge.builder().id(1L).name("A").active(true).latitude(12.97).longitude(77.59).build();
         Binge b = Binge.builder().id(2L).name("B").active(true).latitude(12.98).longitude(77.60).build();
-        when(bingeRepository.findCustomerVisibleBinges()).thenReturn(List.of(a, b));
+        when(bingeRepository.findVisibleGeocodedBingesInBox(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+            .thenReturn(List.of(a, b));
 
         List<PublicBingeDto> result = bingeService.getNearbyBinges(12.97, 77.59, 500, 1);
 

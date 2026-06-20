@@ -139,7 +139,19 @@ public class BingeService {
             : DEFAULT_NEARBY_RADIUS_KM;
         int cap = Math.min(Math.max(limit, 1), MAX_NEARBY_RESULTS);
 
-        return bingeRepository.findCustomerVisibleBinges().stream()
+        // Stage 1 — bounding box: let the DB index narrow to candidates near the point
+        // (an index range scan), instead of pulling every visible venue into the app.
+        GeoUtils.BoundingBox box = GeoUtils.boundingBox(lat, lng, radius);
+        List<Binge> candidates = box.isLongitudeBounded()
+            ? bingeRepository.findVisibleGeocodedBingesInBox(
+                box.minLat(), box.maxLat(), box.minLng(), box.maxLng())
+            : bingeRepository.findVisibleGeocodedBingesInLatBand(box.minLat(), box.maxLat());
+
+        // Stage 2 — exact refine: the box is a superset (its corners exceed the radius),
+        // so compute the true great-circle distance, keep only those within radius, sort
+        // nearest-first, and cap. The defensive coordinate check tolerates any row that
+        // slipped past the DB CHECK constraints rather than letting Haversine throw.
+        return candidates.stream()
             .filter(b -> GeoUtils.isValidLatitude(b.getLatitude())
                       && GeoUtils.isValidLongitude(b.getLongitude()))
             .map(b -> {

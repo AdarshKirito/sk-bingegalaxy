@@ -44,6 +44,61 @@ public final class GeoUtils {
         return Math.round(km * 10.0) / 10.0;
     }
 
+    /** Approximate kilometres per degree of latitude (constant; meridians are ~uniform). */
+    public static final double KM_PER_DEGREE_LAT = 111.32;
+
+    /**
+     * A latitude/longitude bounding box used as the cheap, index-friendly first stage
+     * of a proximity query: the DB returns only rows inside the box (an index range
+     * scan), then the caller refines with the exact {@link #haversineKm} distance. This
+     * is the same "filter by box, then refine" pattern PostGIS/Elasticsearch/H3 use
+     * under the hood — done here without any extra infrastructure.
+     *
+     * <p>{@code minLng}/{@code maxLng} are nullable: when the box cannot be cleanly
+     * bounded in longitude (near a pole, a radius large enough to wrap, or a box that
+     * crosses the antimeridian) they are {@code null} and the caller should filter by the
+     * latitude band only. The latitude band alone already eliminates the vast majority of
+     * rows, and the exact Haversine refine still guarantees correctness.
+     */
+    public record BoundingBox(double minLat, double maxLat, Double minLng, Double maxLng) {
+        public boolean isLongitudeBounded() {
+            return minLng != null && maxLng != null;
+        }
+    }
+
+    /**
+     * Compute the bounding box that fully contains the circle of {@code radiusKm} around
+     * ({@code lat},{@code lng}). Latitude is always bounded (and clamped to the poles).
+     * Longitude is bounded only when it is safe to do so (see {@link BoundingBox}).
+     */
+    public static BoundingBox boundingBox(double lat, double lng, double radiusKm) {
+        validateLatitude(lat);
+        validateLongitude(lng);
+        double safeRadius = Math.max(0.0, radiusKm);
+        double dLat = safeRadius / KM_PER_DEGREE_LAT;
+        double minLat = Math.max(-90.0, lat - dLat);
+        double maxLat = Math.min(90.0, lat + dLat);
+
+        double cosLat = Math.cos(Math.toRadians(lat));
+        // Near a pole the longitude span explodes — don't bound longitude.
+        if (cosLat < 1e-6) {
+            return new BoundingBox(minLat, maxLat, null, null);
+        }
+        double dLng = safeRadius / (KM_PER_DEGREE_LAT * cosLat);
+        // Radius wide enough to span half the globe in longitude — no useful bound.
+        if (dLng >= 180.0) {
+            return new BoundingBox(minLat, maxLat, null, null);
+        }
+        double minLng = lng - dLng;
+        double maxLng = lng + dLng;
+        // Box crosses the antimeridian (±180): fall back to a latitude-band scan rather
+        // than emit an inverted range. Correct, just slightly broader before the refine.
+        if (minLng < -180.0 || maxLng > 180.0) {
+            return new BoundingBox(minLat, maxLat, null, null);
+        }
+        return new BoundingBox(minLat, maxLat, minLng, maxLng);
+    }
+
     public static boolean isValidLatitude(Double lat) {
         return lat != null && Double.isFinite(lat) && lat >= -90.0 && lat <= 90.0;
     }
