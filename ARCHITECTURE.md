@@ -93,6 +93,7 @@ scheduling.
 | `availability-service` | `/api/v1/availability/**` | availability |
 | `booking-service-sse` | `/api/v1/bookings/admin/events/stream` | booking (SSE) |
 | `booking-service` | `/api/v1/bookings/**` | booking |
+| `booking-transfer-service` | `/api/v1/booking-transfers/**` | booking |
 | `booking-service-loyalty-v2` | `/api/v2/loyalty/**` | booking |
 | `payment-service` | `/api/v1/payments/**` | payment |
 | `notification-service` | `/api/v1/notifications/**` | notification |
@@ -247,6 +248,12 @@ All paths are gateway-prefixed. `[A]` = ADMIN, `[SA]` = SUPER_ADMIN (or delegate
 Customer/public:
 ```
 [P]  GET  /binges · /binges/{id} · /binges/{id}/customer-dashboard · /binges/{id}/customer-about
+[P]  GET  /binges/nearby?lat&lng&radiusKm&limit   (proximity ranking, each result carries distanceKm)
+     ↳ all three anonymous /binges reads return the sanitized PublicBingeDto (no owner
+       adminId, approval audit, or anti-abuse freeze thresholds — those stay admin-only)
+     ↳ the by-id content reads (/binges/{id}, /customer-dashboard, /customer-about) 404
+       for non-published venues (pending / rejected / deactivated) — same response as a
+       missing id, so a pending venue's existence is never disclosed by enumeration
 [P]  GET  /binges/{id}/reviews · /binges/{id}/reviews/summary · /binges/{id}/cancellation-tiers
 [P]  GET  /event-types · /add-ons · /event-categories · /addon-categories · /booked-slots · /slot-capacity
 [C]  POST /  (create)            GET /{bookingRef} · /my · /my/current · /my/past · /{bookingRef}/timeline
@@ -301,7 +308,8 @@ Loyalty v2 (`/api/v2/loyalty`):
 ### Notifications (`/api/v1/notifications`)
 ```
 [C]  GET  /my · /booking/{ref} · preferences
-[P]  POST /webhooks/delivery   (gateway delivery-status callbacks)
+[P]  POST /webhooks/delivery   (provider delivery-status callbacks; HMAC-SHA256 over raw body
+     via X-Webhook-Signature, fail-closed when NOTIFICATION_WEBHOOK_SECRET unset)
 [A]  POST /admin/retry-failed · /admin/{id}/retry
 [SA] templates (activate) · whatsapp-templates CRUD
 ```

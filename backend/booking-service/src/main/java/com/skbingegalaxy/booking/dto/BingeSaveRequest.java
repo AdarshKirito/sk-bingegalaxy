@@ -1,5 +1,7 @@
 package com.skbingegalaxy.booking.dto;
 
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -29,6 +31,20 @@ public class BingeSaveRequest {
     private String country;
     @Pattern(regexp = "^$|^[A-Za-z0-9 \\-]{3,20}$", message = "Postal code must be 3-20 alphanumeric characters")
     private String postalCode;
+
+    /**
+     * WGS-84 latitude in decimal degrees. Optional; when supplied (with {@link #longitude})
+     * the venue becomes discoverable through the "venues near me" proximity ranking.
+     * Both coordinates must be provided together — see {@code BingeService} validation.
+     */
+    @DecimalMin(value = "-90", message = "Latitude must be between -90 and 90")
+    @DecimalMax(value = "90", message = "Latitude must be between -90 and 90")
+    private Double latitude;
+
+    /** WGS-84 longitude in decimal degrees. See {@link #latitude}. */
+    @DecimalMin(value = "-180", message = "Longitude must be between -180 and 180")
+    @DecimalMax(value = "180", message = "Longitude must be between -180 and 180")
+    private Double longitude;
 
     /**
      * IANA timezone for this venue. Must be a valid {@link java.time.ZoneId} string

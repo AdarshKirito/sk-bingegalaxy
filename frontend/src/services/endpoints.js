@@ -118,7 +118,15 @@ export const bookingService = {
   getBookedSlots: (date) => api.get('/bookings/booked-slots', { params: { date } }),
   cancelBooking: (ref) => api.post(`/bookings/${ref}/cancel`),
   rescheduleBooking: (ref, data) => api.post(`/bookings/${ref}/reschedule`, data),
-  transferBooking: (ref, data) => api.post(`/bookings/${ref}/transfer`, data),
+  // Booking transfer — 2-phase flow: the owner sends a request; the recipient
+  // accepts or declines via an emailed magic link (handled on /transfers/:token).
+  requestTransfer: (ref, data) => api.post(`/bookings/${ref}/transfers`, data),
+  listTransfers: (ref) => api.get(`/bookings/${ref}/transfers`),
+  revokeTransfer: (ref, transferId) => api.post(`/bookings/${ref}/transfers/${transferId}/revoke`),
+  // Recipient-side magic-link endpoints — public; the token is the bearer.
+  previewTransferByToken: (token) => api.get(`/booking-transfers/by-token/${encodeURIComponent(token)}`),
+  acceptTransferByToken: (token) => api.post(`/booking-transfers/by-token/${encodeURIComponent(token)}/accept`),
+  declineTransferByToken: (token, reason) => api.post(`/booking-transfers/by-token/${encodeURIComponent(token)}/decline`, reason ? { reason } : {}),
   // Customer-safe lifecycle timeline (privacy-filtered, no internal IDs)
   getMyTimeline: (ref) => api.get(`/bookings/${ref}/timeline`),
   // Invoice PDF download — server returns application/pdf, so we ask axios
@@ -136,6 +144,9 @@ export const bookingService = {
   getMyWaitlist: () => api.get('/bookings/waitlist/my'),
   // Binge (public)
   getAllActiveBinges: () => api.get('/bookings/binges'),
+  // Proximity discovery — venues nearest to a point, nearest-first, each with distanceKm.
+  getNearbyBinges: (lat, lng, { radiusKm = 50, limit = 20 } = {}) =>
+    api.get('/bookings/binges/nearby', { params: { lat, lng, radiusKm, limit } }),
   getBingeById: (id) => api.get(`/bookings/binges/${id}`),
   getBingeDashboardExperience: (id) => api.get(`/bookings/binges/${id}/customer-dashboard`),
   getBingeAboutExperience: (id) => api.get(`/bookings/binges/${id}/customer-about`),

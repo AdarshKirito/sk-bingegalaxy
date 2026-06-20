@@ -47,6 +47,19 @@ public class Binge {
     private String postalCode;
 
     /**
+     * WGS-84 latitude in decimal degrees (-90..90). Null when the venue has not been
+     * geocoded yet. Together with {@link #longitude} it powers the proximity ranking
+     * behind {@code GET /api/v1/bookings/binges/nearby}. Un-geocoded venues never
+     * appear in proximity results; they remain reachable via the alphabetical listing.
+     */
+    @Column
+    private Double latitude;
+
+    /** WGS-84 longitude in decimal degrees (-180..180). See {@link #latitude}. */
+    @Column
+    private Double longitude;
+
+    /**
      * IANA timezone identifier for this venue (e.g. "Asia/Kolkata", "America/New_York",
      * "Europe/London"). Used by all booking-date validation, check-in window arithmetic,
      * and tax-rule effective-date evaluation. Never rely on the JVM default timezone.

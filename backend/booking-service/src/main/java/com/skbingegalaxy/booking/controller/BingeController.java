@@ -34,13 +34,34 @@ public class BingeController {
 
     // ── Public: list all active binges (for user selection) ──
     @GetMapping("/binges")
-    public ResponseEntity<ApiResponse<List<BingeDto>>> getAllActiveBinges() {
+    public ResponseEntity<ApiResponse<List<PublicBingeDto>>> getAllActiveBinges() {
         return ResponseEntity.ok(ApiResponse.ok(bingeService.getAllActiveBinges()));
+    }
+
+    /**
+     * Public: venues nearest to a point, nearest-first, each annotated with
+     * {@code distanceKm}. Powers the "find venues near me" experience — the SPA
+     * passes the browser-supplied geolocation. Declared before {@code /binges/{id}}
+     * so the literal {@code nearby} path takes precedence over the id pattern.
+     *
+     * @param lat      WGS-84 latitude  (-90..90), required
+     * @param lng      WGS-84 longitude (-180..180), required
+     * @param radiusKm search radius in km; clamped to {@code [0, 500]}, default 50
+     * @param limit    max results; clamped to {@code [1, 100]}, default 20
+     */
+    @GetMapping("/binges/nearby")
+    public ResponseEntity<ApiResponse<List<PublicBingeDto>>> getNearbyBinges(
+            @RequestParam double lat,
+            @RequestParam double lng,
+            @RequestParam(required = false, defaultValue = "50") double radiusKm,
+            @RequestParam(required = false, defaultValue = "20") int limit) {
+        return ResponseEntity.ok(ApiResponse.ok(
+            bingeService.getNearbyBinges(lat, lng, radiusKm, limit)));
     }
 
     // ── Public: get single binge ─────────────────────────────
     @GetMapping("/binges/{id}")
-    public ResponseEntity<ApiResponse<BingeDto>> getBinge(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<PublicBingeDto>> getBinge(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.ok(bingeService.getBingeById(id)));
     }
 
@@ -146,8 +167,12 @@ public class BingeController {
             @PathVariable Long id,
             @Valid @RequestBody BingeSaveRequest request,
             @RequestHeader("X-User-Id") Long adminId,
-            @RequestHeader("X-User-Role") String role) {
-        return ResponseEntity.ok(ApiResponse.ok("Binge updated", bingeService.updateBinge(id, request, adminId, role)));
+            @RequestHeader("X-User-Role") String role,
+            @RequestHeader(value = "X-Authority-Delegated", required = false) String delegatedHeader) {
+        // A delegated super-admin holds broad authority via Authority-Handover but is
+        // NOT a native super-admin — timezone changes still require an explicit grant.
+        boolean delegated = "true".equalsIgnoreCase(delegatedHeader);
+        return ResponseEntity.ok(ApiResponse.ok("Binge updated", bingeService.updateBinge(id, request, adminId, role, delegated)));
     }
 
     @GetMapping("/admin/binges/{id}/customer-dashboard")

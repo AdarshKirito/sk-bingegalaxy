@@ -20,6 +20,15 @@ public class BingeDto {
     private String state;
     private String country;
     private String postalCode;
+    /** WGS-84 latitude in decimal degrees; null when the venue is not geocoded. */
+    private Double latitude;
+    /** WGS-84 longitude in decimal degrees; null when the venue is not geocoded. */
+    private Double longitude;
+    /**
+     * Distance in kilometres from the query point, rounded to one decimal. Only
+     * populated by the proximity endpoint ({@code /binges/nearby}); null elsewhere.
+     */
+    private Double distanceKm;
     /** IANA timezone for this venue, e.g. "Asia/Kolkata", "America/New_York". */
     private String timezone;
     private Long adminId;

@@ -41,11 +41,26 @@ export interface Binge {
   location?: string;
   description?: string;
   address?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  postalCode?: string;
+  /** WGS-84 latitude in decimal degrees; present when the venue is geocoded. */
+  latitude?: number | null;
+  /** WGS-84 longitude in decimal degrees; present when the venue is geocoded. */
+  longitude?: number | null;
+  /** Distance in km from the query point; only set on proximity (/binges/nearby) results. */
+  distanceKm?: number | null;
   supportEmail?: string;
   supportPhone?: string;
+  supportPhoneCountryCode?: string;
   supportWhatsapp?: string;
+  supportWhatsappCountryCode?: string;
   customerCancellationEnabled?: boolean;
   customerCancellationCutoffMinutes?: number;
+  maxConcurrentBookings?: number;
   /** IANA timezone identifier (e.g. "Asia/Kolkata"). Governs opening/closing times and booking-date arithmetic. */
   timezone?: string;
   /** Per-binge opening time (HH:mm or HH:mm:ss); interpreted in the venue's timezone. */

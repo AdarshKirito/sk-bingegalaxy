@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { adminService, bookingService } from '../services/endpoints';
+import { adminService, bookingService, authorityService } from '../services/endpoints';
 import {
   createDashboardSlide,
   DASHBOARD_LAYOUT_OPTIONS,
@@ -15,12 +15,15 @@ import {
   sanitizeAboutExperienceForSave,
 } from '../services/aboutExperience';
 import { useBinge } from '../context/BingeContext';
+import { useAuth } from '../context/AuthContext';
+import TimezonePicker from '../components/TimezonePicker';
 import { toast } from 'react-toastify';
 import { FiActivity, FiArrowRight, FiClock, FiCompass, FiEdit2, FiMapPin, FiPlus, FiStar, FiToggleLeft, FiToggleRight, FiTrash2, FiUpload, FiX } from 'react-icons/fi';
 import './AdminPages.css';
 import BingeLoyaltySection from '../components/admin/BingeLoyaltySection';
 import AddressFields, { EMPTY_ADDRESS, validateAddress } from '../components/form/AddressFields';
 import PhoneField, { joinPhone, splitPhone, validatePhone } from '../components/form/PhoneField';
+import VenueCoordinatesField, { validateCoordinates } from '../components/form/VenueCoordinatesField';
 
 function StarRating({ avg, count }) {
   const rounded = Math.round((avg || 0) * 2) / 2;
@@ -42,6 +45,8 @@ export default function BingeManagement() {
   const emptyForm = {
     name: '',
     address: { ...EMPTY_ADDRESS },
+    latitude: '',
+    longitude: '',
     supportEmail: '',
     supportPhone: '',
     supportWhatsapp: '',
@@ -83,7 +88,33 @@ export default function BingeManagement() {
   const [policyForm, setPolicyForm] = useState(DEFAULT_POLICY);
   const [policySaving, setPolicySaving] = useState(false);  const [loyaltyEditor, setLoyaltyEditor] = useState({ open: false, binge: null });
   const { clearBinge, selectBinge, selectedBinge } = useBinge();
+  const { isSuperAdmin } = useAuth();
   const navigate = useNavigate();
+
+  // Whether the current admin may change the timezone of the binge being edited.
+  // Creating a new venue: the owner sets the zone freely. Editing an existing one:
+  // native super-admin always, otherwise only if a TIMEZONE_CHANGE grant exists for
+  // this binge or for ALL venues (mirrors the backend AuthorityLockGuard default-deny).
+  const [tzPermitted, setTzPermitted] = useState(true);
+  useEffect(() => {
+    if (!showForm) return;
+    if (!editId || isSuperAdmin) { setTzPermitted(true); return; }
+    let cancelled = false;
+    setTzPermitted(false); // fail-closed until a grant is confirmed
+    (async () => {
+      try {
+        const [bingeGrant, allGrant] = await Promise.all([
+          authorityService.lookupLock('TIMEZONE_CHANGE', String(editId)),
+          authorityService.lookupLock('TIMEZONE_CHANGE', 'ALL'),
+        ]);
+        const granted = !!(bingeGrant?.data?.data || allGrant?.data?.data);
+        if (!cancelled) setTzPermitted(granted);
+      } catch {
+        if (!cancelled) setTzPermitted(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [showForm, editId, isSuperAdmin]);
 
   const fetchBinges = async () => {
     try {
@@ -208,6 +239,8 @@ export default function BingeManagement() {
       toast.error(Object.values(addressErrors)[0]);
       return;
     }
+    const coordError = validateCoordinates({ latitude: form.latitude, longitude: form.longitude });
+    if (coordError) { toast.error(coordError); return; }
     const phoneError = validatePhone(form.supportPhone);
     if (phoneError) { toast.error(`Support phone: ${phoneError}`); return; }
     const waError = validatePhone(form.supportWhatsapp);
@@ -225,6 +258,8 @@ export default function BingeManagement() {
         state: form.address?.state || '',
         country: form.address?.country || '',
         postalCode: form.address?.postalCode || '',
+        latitude: String(form.latitude).trim() === '' ? null : Number(form.latitude),
+        longitude: String(form.longitude).trim() === '' ? null : Number(form.longitude),
         supportEmail: form.supportEmail,
         supportPhone: phoneSplit.phone,
         supportPhoneCountryCode: phoneSplit.phoneCountryCode,
@@ -254,7 +289,9 @@ export default function BingeManagement() {
       resetForm();
       fetchBinges();
     } catch (err) {
-      toast.error(err.userMessage || 'Failed to save binge');
+      // Surface the server message (e.g. the 423 timezone-permission error from
+      // AuthorityLockGuard) so a blocked admin gets the real reason, not a generic one.
+      toast.error(err.userMessage || err.response?.data?.message || 'Failed to save binge');
     }
   };
 
@@ -270,6 +307,8 @@ export default function BingeManagement() {
         country: b.country || '',
         postalCode: b.postalCode || '',
       },
+      latitude: b.latitude == null ? '' : String(b.latitude),
+      longitude: b.longitude == null ? '' : String(b.longitude),
       supportEmail: b.supportEmail || '',
       supportPhone: joinPhone(b.supportPhoneCountryCode, b.supportPhone),
       supportWhatsapp: joinPhone(b.supportWhatsappCountryCode, b.supportWhatsapp),
@@ -468,26 +507,8 @@ export default function BingeManagement() {
       toast.error(why, { autoClose: 7000 });
       return;
     }
-    selectBinge({
-      id: binge.id,
-      name: binge.name,
-      address: binge.address,
-      addressLine1: binge.addressLine1,
-      addressLine2: binge.addressLine2,
-      city: binge.city,
-      state: binge.state,
-      country: binge.country,
-      postalCode: binge.postalCode,
-      supportEmail: binge.supportEmail,
-      supportPhone: binge.supportPhone,
-      supportPhoneCountryCode: binge.supportPhoneCountryCode,
-      supportWhatsapp: binge.supportWhatsapp,
-      supportWhatsappCountryCode: binge.supportWhatsappCountryCode,
-      customerCancellationEnabled: binge.customerCancellationEnabled,
-      customerCancellationCutoffMinutes: binge.customerCancellationCutoffMinutes,
-      maxConcurrentBookings: binge.maxConcurrentBookings,
-      timezone: binge.timezone || 'Asia/Kolkata',
-    });
+    // The store normalises to the canonical selected-binge shape.
+    selectBinge(binge);
     toast.success(`Entered: ${binge.name}`);
     navigate('/admin/dashboard');
   };
@@ -573,6 +594,13 @@ export default function BingeManagement() {
                   onChange={(addr) => setForm({ ...form, address: addr })}
                 />
               </div>
+              <div className="input-group" style={{ gridColumn: '1 / -1' }}>
+                <VenueCoordinatesField
+                  value={{ latitude: form.latitude, longitude: form.longitude }}
+                  address={form.address}
+                  onChange={({ latitude, longitude }) => setForm({ ...form, latitude, longitude })}
+                />
+              </div>
               <PhoneField
                 label="Support Phone"
                 value={form.supportPhone}
@@ -610,51 +638,15 @@ export default function BingeManagement() {
                 <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>When Required, customers and admins must pick a venue room before booking.</span>
               </div>
               <div className="input-group" style={{ gridColumn: '1 / -1' }}>
-                <label>Venue Timezone *</label>
-                <select value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} required>
-                  <optgroup label="Asia">
-                    <option value="Asia/Kolkata">Asia/Kolkata (IST, UTC+5:30)</option>
-                    <option value="Asia/Dubai">Asia/Dubai (GST, UTC+4)</option>
-                    <option value="Asia/Singapore">Asia/Singapore (SGT, UTC+8)</option>
-                    <option value="Asia/Tokyo">Asia/Tokyo (JST, UTC+9)</option>
-                    <option value="Asia/Shanghai">Asia/Shanghai (CST, UTC+8)</option>
-                    <option value="Asia/Bangkok">Asia/Bangkok (ICT, UTC+7)</option>
-                    <option value="Asia/Karachi">Asia/Karachi (PKT, UTC+5)</option>
-                    <option value="Asia/Dhaka">Asia/Dhaka (BST, UTC+6)</option>
-                    <option value="Asia/Colombo">Asia/Colombo (SLST, UTC+5:30)</option>
-                  </optgroup>
-                  <optgroup label="Europe">
-                    <option value="Europe/London">Europe/London (GMT/BST)</option>
-                    <option value="Europe/Paris">Europe/Paris (CET/CEST, UTC+1/+2)</option>
-                    <option value="Europe/Berlin">Europe/Berlin (CET/CEST, UTC+1/+2)</option>
-                    <option value="Europe/Istanbul">Europe/Istanbul (TRT, UTC+3)</option>
-                    <option value="Europe/Moscow">Europe/Moscow (MSK, UTC+3)</option>
-                  </optgroup>
-                  <optgroup label="Americas">
-                    <option value="America/New_York">America/New_York (EST/EDT, UTC-5/-4)</option>
-                    <option value="America/Chicago">America/Chicago (CST/CDT, UTC-6/-5)</option>
-                    <option value="America/Denver">America/Denver (MST/MDT, UTC-7/-6)</option>
-                    <option value="America/Los_Angeles">America/Los_Angeles (PST/PDT, UTC-8/-7)</option>
-                    <option value="America/Sao_Paulo">America/Sao_Paulo (BRT, UTC-3)</option>
-                    <option value="America/Toronto">America/Toronto (EST/EDT, UTC-5/-4)</option>
-                  </optgroup>
-                  <optgroup label="Africa / Middle East">
-                    <option value="Africa/Cairo">Africa/Cairo (EET, UTC+2)</option>
-                    <option value="Africa/Nairobi">Africa/Nairobi (EAT, UTC+3)</option>
-                    <option value="Asia/Riyadh">Asia/Riyadh (AST, UTC+3)</option>
-                  </optgroup>
-                  <optgroup label="Pacific / Australia">
-                    <option value="Australia/Sydney">Australia/Sydney (AEST/AEDT)</option>
-                    <option value="Australia/Melbourne">Australia/Melbourne (AEST/AEDT)</option>
-                    <option value="Pacific/Auckland">Pacific/Auckland (NZST/NZDT)</option>
-                  </optgroup>
-                  <optgroup label="UTC">
-                    <option value="UTC">UTC</option>
-                  </optgroup>
-                </select>
-                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                  All booking times and schedules are interpreted in this timezone. Choose the local timezone of the venue.
-                </span>
+                <label htmlFor="venue-timezone">Venue Timezone *</label>
+                <TimezonePicker
+                  id="venue-timezone"
+                  value={form.timezone}
+                  onChange={(tz) => setForm({ ...form, timezone: tz })}
+                  required
+                  disabled={!tzPermitted}
+                  disabledReason="Only a super-admin can change an existing venue’s timezone. Ask a super-admin to grant timezone access in Authority Handover."
+                />
               </div>
               <div className="input-group">
                 <label>Opening Time</label>

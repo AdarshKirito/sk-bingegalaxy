@@ -9,6 +9,7 @@ import com.skbingegalaxy.booking.dto.CustomerAboutHighlightDto;
 import com.skbingegalaxy.booking.dto.CustomerAboutPolicyDto;
 import com.skbingegalaxy.booking.dto.CustomerDashboardExperienceDto;
 import com.skbingegalaxy.booking.dto.CustomerDashboardSlideDto;
+import com.skbingegalaxy.booking.dto.PublicBingeDto;
 import com.skbingegalaxy.booking.entity.Binge;
 import com.skbingegalaxy.booking.entity.BingeApprovalStatus;
 import com.skbingegalaxy.booking.repository.AddOnRepository;
@@ -17,6 +18,7 @@ import com.skbingegalaxy.booking.repository.BookingRepository;
 import com.skbingegalaxy.booking.repository.CustomerPricingProfileRepository;
 import com.skbingegalaxy.booking.repository.EventTypeRepository;
 import com.skbingegalaxy.booking.repository.RateCodeRepository;
+import com.skbingegalaxy.booking.util.GeoUtils;
 import com.skbingegalaxy.common.exception.BusinessException;
 import com.skbingegalaxy.common.exception.DuplicateResourceException;
 import com.skbingegalaxy.common.exception.ResourceNotFoundException;
@@ -31,6 +33,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 
@@ -66,6 +69,7 @@ public class BingeService {
     private final ObjectMapper objectMapper;
     private final AdminNotificationService adminNotificationService;
     private final VenueClockService venueClock;
+    private final AuthorityLockGuard authorityLockGuard;
 
     /** Hours an approved binge has to create its first event before auto-deactivation. */
     public static final int GRACE_PERIOD_HOURS = 24;
@@ -93,9 +97,61 @@ public class BingeService {
      * </ol>
      */
     @org.springframework.cache.annotation.Cacheable(value = "activeBinges")
-    public List<BingeDto> getAllActiveBinges() {
+    public List<PublicBingeDto> getAllActiveBinges() {
         return bingeRepository.findCustomerVisibleBinges()
-            .stream().map(this::toDto).toList();
+            .stream().map(this::toPublicDto).toList();
+    }
+
+    /** Largest radius a proximity query may request (km). Clamps hostile inputs. */
+    public static final double MAX_NEARBY_RADIUS_KM = 500.0;
+    /** Default radius when the caller does not specify one (km). */
+    public static final double DEFAULT_NEARBY_RADIUS_KM = 50.0;
+    /** Hard cap on results returned by a single proximity query. */
+    public static final int MAX_NEARBY_RESULTS = 100;
+
+    /**
+     * Proximity discovery — "venues near me".
+     *
+     * <p>Returns the same customer-visible venues as {@link #getAllActiveBinges()}
+     * (active + APPROVED + at least one active event), additionally restricted to
+     * venues that have been geocoded and fall within {@code radiusKm} of the query
+     * point, ordered nearest-first. Each returned DTO carries {@code distanceKm}.
+     *
+     * <p>Inputs are validated and clamped: out-of-range coordinates are rejected
+     * (400), while {@code radiusKm} and {@code limit} are clamped to sane bounds so
+     * a crafted request can never force an unbounded scan-and-sort. Un-geocoded
+     * venues are silently skipped — they remain reachable via the alphabetical list.
+     *
+     * <p>The candidate set is the small, already-indexed customer-visible listing,
+     * so the in-memory Haversine refinement is trivial. If per-deployment venue
+     * counts ever reach the tens of thousands, push the bounding-box filter into the
+     * repository (or PostGIS) without changing this method's contract.
+     */
+    public List<PublicBingeDto> getNearbyBinges(double lat, double lng, double radiusKm, int limit) {
+        if (!GeoUtils.isValidLatitude(lat)) {
+            throw new BusinessException("Latitude must be between -90 and 90", HttpStatus.BAD_REQUEST);
+        }
+        if (!GeoUtils.isValidLongitude(lng)) {
+            throw new BusinessException("Longitude must be between -180 and 180", HttpStatus.BAD_REQUEST);
+        }
+        double radius = Double.isFinite(radiusKm) && radiusKm > 0
+            ? Math.min(radiusKm, MAX_NEARBY_RADIUS_KM)
+            : DEFAULT_NEARBY_RADIUS_KM;
+        int cap = Math.min(Math.max(limit, 1), MAX_NEARBY_RESULTS);
+
+        return bingeRepository.findCustomerVisibleBinges().stream()
+            .filter(b -> GeoUtils.isValidLatitude(b.getLatitude())
+                      && GeoUtils.isValidLongitude(b.getLongitude()))
+            .map(b -> {
+                PublicBingeDto dto = toPublicDto(b);
+                dto.setDistanceKm(GeoUtils.roundKm(
+                    GeoUtils.haversineKm(lat, lng, b.getLatitude(), b.getLongitude())));
+                return dto;
+            })
+            .filter(dto -> dto.getDistanceKm() <= radius)
+            .sorted(Comparator.comparingDouble(PublicBingeDto::getDistanceKm))
+            .limit(cap)
+            .toList();
     }
 
     /** Super-admin-only: list every binge currently awaiting approval. */
@@ -113,15 +169,39 @@ public class BingeService {
             .stream().map(this::toDto).toList();
     }
 
-    public BingeDto getBingeById(Long id) {
-        return toDto(bingeRepository.findById(id)
-            .orElseThrow(() -> new ResourceNotFoundException("Binge", "id", id)));
+    /**
+     * Public single-venue lookup. Two layers of protection for anonymous callers:
+     * <ol>
+     *   <li>only <b>published</b> venues (active + APPROVED) resolve — pending,
+     *       rejected, and deactivated binges 404 (see {@link #requirePubliclyVisibleBinge}),
+     *       so their existence is never disclosed by id enumeration;</li>
+     *   <li>the result is the customer-safe {@link PublicBingeDto}, never the admin-only
+     *       {@link BingeDto}, so owner id, approval audit, and anti-abuse thresholds
+     *       never reach an unauthenticated caller.</li>
+     * </ol>
+     */
+    public PublicBingeDto getBingeById(Long id) {
+        return toPublicDto(requirePubliclyVisibleBinge(id));
+    }
+
+    /**
+     * Visibility gate for every anonymous "view binge by id" surface.
+     *
+     * <p>Returns the binge only if it is <b>published</b> — {@code active} and
+     * {@link BingeApprovalStatus#APPROVED}. Pending, rejected, and deactivated binges
+     * raise the same {@link ResourceNotFoundException} as a non-existent id, so the
+     * response never discloses that such a binge exists (no enumeration of pending
+     * venue names, addresses, or marketing config). Admin previews go through the
+     * {@code getManaged*} / {@code getAdmin*} ownership paths and are unaffected.
+     */
+    private Binge requirePubliclyVisibleBinge(Long id) {
+        return bingeRepository.findById(id)
+            .filter(b -> b.isActive() && b.getStatus() == BingeApprovalStatus.APPROVED)
+            .orElseThrow(() -> new ResourceNotFoundException("Binge", "id", id));
     }
 
     public CustomerDashboardExperienceDto getCustomerDashboardExperience(Long id) {
-        Binge binge = bingeRepository.findById(id)
-            .orElseThrow(() -> new ResourceNotFoundException("Binge", "id", id));
-        return readDashboardExperience(binge.getCustomerDashboardConfigJson());
+        return readDashboardExperience(requirePubliclyVisibleBinge(id).getCustomerDashboardConfigJson());
     }
 
     public CustomerDashboardExperienceDto getAdminCustomerDashboardExperience(Long id, Long adminId, String role) {
@@ -129,9 +209,7 @@ public class BingeService {
     }
 
     public CustomerAboutExperienceDto getCustomerAboutExperience(Long id) {
-        Binge binge = bingeRepository.findById(id)
-            .orElseThrow(() -> new ResourceNotFoundException("Binge", "id", id));
-        return readAboutExperience(binge.getCustomerAboutConfigJson());
+        return readAboutExperience(requirePubliclyVisibleBinge(id).getCustomerAboutConfigJson());
     }
 
     public CustomerAboutExperienceDto getAdminCustomerAboutExperience(Long id, Long adminId, String role) {
@@ -149,6 +227,7 @@ public class BingeService {
         LocalTime openT = request.getOpenTime() != null ? request.getOpenTime() : LocalTime.of(10, 0);
         LocalTime closeT = request.getCloseTime() != null ? request.getCloseTime() : LocalTime.of(23, 0);
         validateOperatingHours(openT, closeT);
+        validateCoordinatePair(request.getLatitude(), request.getLongitude());
 
         // SUPER_ADMIN-created binges go live immediately. Regular ADMIN-created
         // binges enter the pending-approval queue and stay invisible to customers
@@ -168,6 +247,8 @@ public class BingeService {
             .state(trimToNull(request.getState()))
             .country(trimToNull(request.getCountry()))
             .postalCode(trimToNull(request.getPostalCode()))
+            .latitude(request.getLatitude())
+            .longitude(request.getLongitude())
             .timezone(resolveTimezone(request.getTimezone()))
             .adminId(adminId)
             .active(initialActive)
@@ -406,7 +487,7 @@ public class BingeService {
 
     @Transactional
     @org.springframework.cache.annotation.CacheEvict(value = "activeBinges", allEntries = true)
-    public BingeDto updateBinge(Long id, BingeSaveRequest request, Long adminId, String role) {
+    public BingeDto updateBinge(Long id, BingeSaveRequest request, Long adminId, String role, boolean delegated) {
         Binge binge = getManagedBinge(id, adminId, role);
 
         binge.setName(request.getName());
@@ -417,14 +498,28 @@ public class BingeService {
         binge.setState(trimToNull(request.getState()));
         binge.setCountry(trimToNull(request.getCountry()));
         binge.setPostalCode(trimToNull(request.getPostalCode()));
+        validateCoordinatePair(request.getLatitude(), request.getLongitude());
+        binge.setLatitude(request.getLatitude());
+        binge.setLongitude(request.getLongitude());
         if (request.getTimezone() != null && !request.getTimezone().isBlank()) {
+            final String normalizedTz;
             try {
-                java.time.ZoneId.of(request.getTimezone()); // validate before persisting
-                binge.setTimezone(request.getTimezone().trim());
-                venueClock.evict(binge.getId()); // flush cached zone for this venue
+                // Validate AND canonicalize so the change-detection below compares
+                // like-for-like (e.g. trims whitespace, normalizes the ZoneId form).
+                normalizedTz = java.time.ZoneId.of(request.getTimezone().trim()).getId();
             } catch (java.time.DateTimeException e) {
                 throw new com.skbingegalaxy.common.exception.BusinessException(
                     "Invalid timezone '" + request.getTimezone() + "'. Use an IANA zone ID such as 'Asia/Kolkata' or 'America/New_York'.");
+            }
+            // Only an ACTUAL change is gated + re-evicts. Re-saving the same zone
+            // (common when the form round-trips every field) must not require the
+            // grant — otherwise routine venue edits would 423 for unprivileged admins.
+            if (!normalizedTz.equals(binge.getTimezone())) {
+                // High-blast-radius: changing the zone reinterprets every existing
+                // booking's wall-clock. Default-deny unless super-admin-granted.
+                authorityLockGuard.requireTimezoneChangePermitted(role, delegated, id);
+                binge.setTimezone(normalizedTz);
+                venueClock.evict(binge.getId()); // flush cached zone for this venue
             }
         }
         binge.setSupportEmail(trimToNull(request.getSupportEmail()));
@@ -776,6 +871,8 @@ public class BingeService {
             .state(b.getState())
             .country(b.getCountry())
             .postalCode(b.getPostalCode())
+            .latitude(b.getLatitude())
+            .longitude(b.getLongitude())
             .timezone(b.getTimezone())
             .adminId(b.getAdminId())
             .active(b.isActive())
@@ -805,6 +902,59 @@ public class BingeService {
             .firstEventCreatedAt(b.getFirstEventCreatedAt())
             .graceWarningSentAt(b.getGraceWarningSentAt())
             .autoDeactivatedAt(b.getAutoDeactivatedAt())
+            .build();
+    }
+
+    /**
+     * Coordinates are stored as an all-or-nothing pair: a venue is either geocoded
+     * (both latitude and longitude present and in range) or not (both null). A lone
+     * coordinate is a client bug that would silently exclude the venue from proximity
+     * results, so reject it loudly. Range is already enforced by bean validation on
+     * {@link BingeSaveRequest}; this re-checks defensively for non-HTTP callers.
+     */
+    private void validateCoordinatePair(Double latitude, Double longitude) {
+        if ((latitude == null) != (longitude == null)) {
+            throw new BusinessException(
+                "Latitude and longitude must be provided together", HttpStatus.BAD_REQUEST);
+        }
+        if (latitude != null && (!GeoUtils.isValidLatitude(latitude) || !GeoUtils.isValidLongitude(longitude))) {
+            throw new BusinessException(
+                "Coordinates are out of range (latitude -90..90, longitude -180..180)",
+                HttpStatus.BAD_REQUEST);
+        }
+    }
+
+    /**
+     * Map to the customer-safe projection used by every anonymous endpoint. Carries
+     * only fields a customer legitimately needs (identity, address, geo, support,
+     * timezone, hours, cancellation knobs) and drops all admin/lifecycle/anti-abuse
+     * fields present on {@link #toDto}.
+     */
+    private PublicBingeDto toPublicDto(Binge b) {
+        return PublicBingeDto.builder()
+            .id(b.getId())
+            .name(b.getName())
+            .address(b.getAddress())
+            .addressLine1(b.getAddressLine1())
+            .addressLine2(b.getAddressLine2())
+            .city(b.getCity())
+            .state(b.getState())
+            .country(b.getCountry())
+            .postalCode(b.getPostalCode())
+            .latitude(b.getLatitude())
+            .longitude(b.getLongitude())
+            .timezone(b.getTimezone())
+            .supportEmail(b.getSupportEmail())
+            .supportPhone(b.getSupportPhone())
+            .supportPhoneCountryCode(b.getSupportPhoneCountryCode())
+            .supportWhatsapp(b.getSupportWhatsapp())
+            .supportWhatsappCountryCode(b.getSupportWhatsappCountryCode())
+            .customerCancellationEnabled(b.isCustomerCancellationEnabled())
+            .customerCancellationCutoffMinutes(b.getCustomerCancellationCutoffMinutes())
+            .maxConcurrentBookings(b.getMaxConcurrentBookings())
+            .openTime(b.getOpenTime())
+            .closeTime(b.getCloseTime())
+            .roomSelectionRequired(b.isRoomSelectionRequired())
             .build();
     }
 

@@ -56,6 +56,13 @@ public class DataSeeder implements CommandLineRunner {
         Binge binge = Binge.builder()
                 .name(DEFAULT_BINGE_NAME)
                 .address("Hyderabad, Telangana, India")
+                .city("Hyderabad")
+                .state("Telangana")
+                .country("IN")
+                // Geocoded (Hyderabad city centre) so the "venues near me" proximity
+                // discovery has something to rank in a fresh out-of-the-box install.
+                .latitude(17.3850)
+                .longitude(78.4867)
                 .adminId(1L)                                // super-admin (first user seeded by auth-service)
                 .active(true)
                 .operationalDate(LocalDate.now())
