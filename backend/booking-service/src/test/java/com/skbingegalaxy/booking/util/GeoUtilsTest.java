@@ -57,6 +57,33 @@ class GeoUtilsTest {
     }
 
     @Test
+    void boundingBox_containsVenuesAtTheRadiusEdge_noFalseNegatives() {
+        // The whole point of the box: it must never exclude a venue that is actually
+        // within the radius. Probe the four cardinal points at ~radius distance and the
+        // box-corner latitude (where the longitude span is widest) and assert each is
+        // inside the box. A linear approximation would fail the east/west probes.
+        double lat = 28.6139, lng = 77.2090, radius = 200; // Delhi, higher latitude
+        GeoUtils.BoundingBox box = GeoUtils.boundingBox(lat, lng, radius);
+        assertThat(box.isLongitudeBounded()).isTrue();
+
+        // Probe at 99.5% of the radius: comfortably inside (so no float-equality flake at
+        // the exact edge) yet tight enough to catch the ~2% under-coverage the old linear
+        // approximation had — those probes would have fallen OUTSIDE the linear box.
+        double probe = 0.995 * radius;
+        double dLatDeg = Math.toDegrees(probe / GeoUtils.EARTH_RADIUS_KM);
+        assertThat(lat + dLatDeg).isBetween(box.minLat(), box.maxLat()); // due north
+        assertThat(lat - dLatDeg).isBetween(box.minLat(), box.maxLat()); // due south
+
+        double dLngDeg = Math.toDegrees(Math.asin(
+            Math.sin(probe / GeoUtils.EARTH_RADIUS_KM) / Math.cos(Math.toRadians(lat))));
+        assertThat(lng + dLngDeg).isBetween(box.minLng(), box.maxLng()); // due east
+        assertThat(lng - dLngDeg).isBetween(box.minLng(), box.maxLng()); // due west
+        // Sanity: the east probe really is ~radius away (great-circle).
+        assertThat(GeoUtils.haversineKm(lat, lng, lat, lng + dLngDeg))
+            .isCloseTo(probe, org.assertj.core.data.Offset.offset(2.0));
+    }
+
+    @Test
     void boundingBox_nearPole_dropsLongitudeBound() {
         GeoUtils.BoundingBox box = GeoUtils.boundingBox(89.999, 10, 50);
         assertThat(box.isLongitudeBounded()).isFalse();
