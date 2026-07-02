@@ -35,7 +35,7 @@
         <spring-cloud.version>2024.0.1</spring-cloud.version>
         <jjwt.version>0.12.5</jjwt.version>
         <mapstruct.version>1.6.3</mapstruct.version>
-        <lombok.version>1.18.38</lombok.version>
+        <lombok.version>1.18.46</lombok.version>
         <mockito.version>5.14.2</mockito.version>
         <byte-buddy.version>1.15.10</byte-buddy.version>
         <springdoc.version>2.5.0</springdoc.version>
