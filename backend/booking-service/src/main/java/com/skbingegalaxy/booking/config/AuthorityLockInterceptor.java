@@ -8,7 +8,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.lang.NonNull;
+import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 import java.util.List;
@@ -18,9 +20,13 @@ import java.util.Map;
  * Authority Handover — central enforcement of super-admin <em>capability</em> locks on
  * binge-admin mutations across {@code /api/v1/bookings/admin/**}.
  *
- * <p>Pricing is enforced inline in {@link com.skbingegalaxy.booking.controller.AdminPricingController}
- * (it has a single scope choke point), so {@code /pricing/} is intentionally NOT mapped here.
- * Every other lockable capability lives across the large {@code AdminBookingController} /
+ * <p>Pricing rate-codes / customer pricing are enforced inline in
+ * {@link com.skbingegalaxy.booking.controller.AdminPricingController} (it has a single scope
+ * choke point), so those {@code /pricing/} subpaths are intentionally NOT mapped here. Surge
+ * rules, however, live in {@code AdminBookingController} (not the pricing controller) and have
+ * no inline guard, so the specific {@code /pricing/surge-rules} subpath IS mapped here to PRICING
+ * — otherwise a PRICING lock would not freeze surge, contradicting the UI's "Pricing … surge"
+ * label. Every other lockable capability lives across the large {@code AdminBookingController} /
  * {@code AdminTaxController}, which mix many capabilities under one controller — a path-mapped
  * interceptor is the clean way to enforce them without editing dozens of endpoints.
  *
@@ -31,10 +37,14 @@ import java.util.Map;
  * super-admin actually places a lock — no behaviour change otherwise.
  */
 @Slf4j
+@Component
 @RequiredArgsConstructor
 public class AuthorityLockInterceptor implements HandlerInterceptor {
 
-    private final AuthorityLockGuard guard;
+    // ObjectProvider (not a hard dependency) so the interceptor still constructs in
+    // @WebMvcTest slices that don't load the AuthorityLockGuard @Service — there it
+    // resolves to null and no-ops. In the full app the guard is always present.
+    private final ObjectProvider<AuthorityLockGuard> guardProvider;
     private final ObjectMapper objectMapper;
 
     /**
@@ -49,7 +59,11 @@ public class AuthorityLockInterceptor implements HandlerInterceptor {
         Map.entry("/event-categories", "CATEGORIES"),
         Map.entry("/addon-categories", "CATEGORIES"),
         Map.entry("/venue-rooms", "VENUE_ROOMS"),
-        Map.entry("/cancellation", "CANCELLATION")
+        Map.entry("/cancellation", "CANCELLATION"),
+        // Surge rules live in AdminBookingController (not AdminPricingController), so the inline
+        // PRICING guard never sees them — map this one /pricing subpath here. Rate-codes and
+        // customer pricing are NOT mapped (handled inline) and won't match this fragment.
+        Map.entry("/pricing/surge-rules", "PRICING")
     );
 
     /** Resolve the lockable capability for a request URI, or {@code null} if none. */
@@ -73,8 +87,12 @@ public class AuthorityLockInterceptor implements HandlerInterceptor {
         String capability = resolveCapability(request.getRequestURI());
         if (capability == null) return true;                        // not a lockable capability
 
+        AuthorityLockGuard guard = guardProvider.getIfAvailable();
+        if (guard == null) return true;                             // guard not wired (test slice)
+
+        boolean delegated = "true".equalsIgnoreCase(request.getHeader("X-Authority-Delegated"));
         try {
-            guard.requireUnlocked(capability, request.getHeader("X-User-Role"));
+            guard.requireUnlocked(capability, request.getHeader("X-User-Role"), delegated);
             return true;
         } catch (BusinessException ex) {
             // Write the 423 directly rather than relying on @ControllerAdvice to resolve

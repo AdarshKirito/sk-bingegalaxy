@@ -4,9 +4,24 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
-const localTempDir = path.join(projectRoot, '.tmp');
 
-fs.mkdirSync(localTempDir, { recursive: true });
+function prepareWritableTempDir(primaryDir, fallbackDir) {
+  for (const dir of [primaryDir, fallbackDir]) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      const probeDir = fs.mkdtempSync(path.join(dir, 'probe-'));
+      fs.rmSync(probeDir, { recursive: true, force: true });
+      return dir;
+    } catch (error) {
+      if (dir === fallbackDir) throw error;
+    }
+  }
+}
+
+const localTempDir = prepareWritableTempDir(
+  path.join(projectRoot, '.tmp'),
+  path.join(projectRoot, '.vite-tmp')
+);
 
 for (const key of ['TMPDIR', 'TMP', 'TEMP']) {
   process.env[key] = localTempDir;

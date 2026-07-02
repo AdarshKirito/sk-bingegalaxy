@@ -76,6 +76,14 @@ public class AuthService {
     @Value("${app.otp.length:6}")
     private int otpLength;
 
+    /**
+     * How many logins an admin-issued temporary password is valid for before the
+     * customer must use "Forgot password". Default 2 (the front-desk admin
+     * "consumed" the first of three when they created and read out the password).
+     */
+    @Value("${app.temp-password.max-logins:2}")
+    private int tempPasswordMaxLogins;
+
     private static final int MAX_LOGIN_ATTEMPTS = 5;
     private static final int LOCKOUT_MINUTES = 15;
     /** After this many failures the client must present a solved CAPTCHA before we check credentials. */
@@ -88,6 +96,10 @@ public class AuthService {
     void initDummyHash() {
         this.dummyHash = passwordEncoder.encode("timing-safety-dummy-" + java.util.UUID.randomUUID());
     }
+
+    /** Same OAuth Web client id the frontend uses; blank means Google sign-in is not configured. */
+    @Value("${app.google.client-id:}")
+    private String googleClientId;
 
     @Value("${app.admin.email:admin@skbingegalaxy.com}")
     private String supportEmail;
@@ -104,6 +116,15 @@ public class AuthService {
     // ── Google OAuth login ───────────────────────────────────
     @Transactional
     public AuthResponse googleLogin(String credential) {
+        // Fail clearly when the server hasn't been given a Google client id — every
+        // token would otherwise fail audience verification and surface as a vague
+        // "Google login failed". Tell the user to use email sign-in instead.
+        if (googleClientId == null || googleClientId.isBlank()) {
+            log.warn("Rejected Google login attempt — Google sign-in is not configured (app.google.client-id is empty)");
+            throw new BusinessException(
+                "Google sign-in isn't available on this server. Please sign in with your email and password.",
+                HttpStatus.UNAUTHORIZED);
+        }
         try {
             GoogleIdToken idToken = googleIdTokenVerifier.verify(credential);
             if (idToken == null) {
@@ -223,7 +244,13 @@ public class AuthService {
     }
 
     // ── Customer login ───────────────────────────────────────
-    @Transactional
+    // noRollbackFor BusinessException: a failed login throws (bad creds / CAPTCHA / lockout)
+    // to set the HTTP status, but the failed-attempt increment + account lock + audit rows
+    // MUST persist. With the default rollback-on-RuntimeException, every throw would undo the
+    // increment, so the counter never grows and lockout/CAPTCHA would never trigger across
+    // requests (brute-force protection silently dead). CaptchaRequiredException extends
+    // BusinessException, so it is covered too.
+    @Transactional(noRollbackFor = BusinessException.class)
     public AuthResponse login(LoginRequest request) {
         // Constant-time login: always perform password check to prevent email enumeration via timing
         User user = userRepository.findByEmail(request.getEmail().toLowerCase()).orElse(null);
@@ -287,10 +314,35 @@ public class AuthService {
         }
 
         user.resetFailedAttempts();
+
+        // ── Temporary-password gate ──────────────────────────────────────────
+        // Admin-issued temp passwords are valid for a limited number of logins,
+        // and every such login forces a password change. Once the allowance is
+        // spent the temp password is dead and the customer must use Forgot-password.
+        boolean mustChange = false;
+        if (user.isMustChangePassword()) {
+            Integer remaining = user.getTempPasswordLoginsRemaining();
+            if (remaining != null && remaining <= 0) {
+                userRepository.save(user); // persist the failed-attempt reset
+                auditService.failure(AuthAuditService.EventType.LOGIN_FAILED, user.getId(), user.getRole(),
+                    user.getId(), user.getEmail(), "TEMP_PASSWORD_EXPIRED");
+                throw new BusinessException(
+                    "Your temporary password has expired. Please use \"Forgot password\" to set a new one.",
+                    HttpStatus.UNAUTHORIZED);
+            }
+            if (remaining != null) {
+                user.setTempPasswordLoginsRemaining(remaining - 1);
+            }
+            mustChange = true;
+        }
+
         userRepository.save(user);
-        log.info("Customer login: userId={}", user.getId());
-        auditService.success(AuthAuditService.EventType.LOGIN_SUCCESS, user.getId(), user.getRole(), user.getId(), user.getEmail(), null);
-        return buildAuthResponse(user);
+        log.info("Customer login: userId={}{}", user.getId(), mustChange ? " (temp password — change required)" : "");
+        auditService.success(AuthAuditService.EventType.LOGIN_SUCCESS, user.getId(), user.getRole(), user.getId(), user.getEmail(),
+            mustChange ? "temporary password" : null);
+        AuthResponse response = buildAuthResponse(user);
+        response.setMustChangePassword(mustChange);
+        return response;
     }
 
     // ── Refresh token ───────────────────────────────────────
@@ -351,7 +403,9 @@ public class AuthService {
     }
 
     // ── Admin login ──────────────────────────────────────────
-    @Transactional
+    // noRollbackFor BusinessException — see login(): the failed-attempt increment + lockout
+    // must survive the auth-failure throw, otherwise brute-force protection never engages.
+    @Transactional(noRollbackFor = BusinessException.class)
     public AuthResponse adminLogin(LoginRequest request) {
         // Constant-time login: always perform password check to prevent email enumeration via timing
         User user = userRepository.findByEmail(request.getEmail().toLowerCase()).orElse(null);
@@ -510,6 +564,7 @@ public class AuthService {
         String newHash = passwordEncoder.encode(request.getNewPassword());
         user.setPassword(newHash);
         user.setLastPasswordChangeAt(java.time.LocalDateTime.now(ZoneOffset.UTC));
+        clearTempPasswordState(user); // setting a real password ends the temp-password lifecycle
         userRepository.save(user);
         passwordHistoryService.record(user.getId(), newHash);
 
@@ -558,6 +613,7 @@ public class AuthService {
         String newHash = passwordEncoder.encode(request.getNewPassword());
         user.setPassword(newHash);
         user.setLastPasswordChangeAt(java.time.LocalDateTime.now(ZoneOffset.UTC));
+        clearTempPasswordState(user); // setting a real password ends the temp-password lifecycle
         userRepository.save(user);
         passwordHistoryService.record(user.getId(), newHash);
 
@@ -608,6 +664,7 @@ public class AuthService {
         String newHash = passwordEncoder.encode(request.getNewPassword());
         user.setPassword(newHash);
         user.setLastPasswordChangeAt(java.time.LocalDateTime.now(ZoneOffset.UTC));
+        clearTempPasswordState(user); // a real password ends the temporary-password lifecycle
         userRepository.save(user);
         passwordHistoryService.record(userId, newHash);
 
@@ -961,6 +1018,15 @@ public class AuthService {
     }
 
     // ── Admin: create customer ───────────────────────────────
+    /**
+     * Front-desk customer provisioning. The account is created with a
+     * <b>temporary</b> password (never a long-lived one the admin keeps): the
+     * customer is forced to change it on login and may only use it for
+     * {@link #tempPasswordMaxLogins} logins before "Forgot password" is required.
+     * The temp password is hashed for storage, returned once to the creating
+     * admin (so they can read it out), and delivered to the customer by email
+     * <i>and</i> SMS.
+     */
     @Transactional
     public UserDto adminCreateCustomer(AdminCreateCustomerRequest request) {
         String email = request.getEmail().toLowerCase();
@@ -972,8 +1038,9 @@ public class AuthService {
             throw new DuplicateResourceException("User", "phone", request.getPhone());
         }
 
-        // Generate a secure random password if none provided (admin-created customers)
-        String rawPassword = (request.getPassword() != null && !request.getPassword().isBlank())
+        // Admin-created customers ALWAYS get a temporary password (server-side
+        // generated when the admin didn't supply one).
+        String tempPassword = (request.getPassword() != null && !request.getPassword().isBlank())
             ? request.getPassword()
             : generateSecurePassword();
 
@@ -989,14 +1056,105 @@ public class AuthService {
             .state(trimToNull(request.getState()))
             .country(trimToNull(request.getCountry()))
             .postalCode(trimToNull(request.getPostalCode()))
-            .password(passwordEncoder.encode(rawPassword))
+            .password(passwordEncoder.encode(tempPassword))
             .role(UserRole.CUSTOMER)
             .active(true)
+            .mustChangePassword(true)
+            .tempPasswordLoginsRemaining(tempPasswordMaxLogins)
             .build();
 
         user = userRepository.save(user);
-        log.info("Admin created customer: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
-        return toDto(user);
+        log.info("Admin created customer with temporary password: {} (temp logins={})",
+            com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()), tempPasswordMaxLogins);
+        auditService.success(AuthAuditService.EventType.CUSTOMER_CREATED,
+            currentActorId(), currentActorRole(), user.getId(), user.getEmail(),
+            "admin-created customer (temporary password)");
+
+        sendTempPasswordNotification(user, tempPassword);
+
+        UserDto dto = toDto(user);
+        dto.setTemporaryPassword(tempPassword); // surfaced to the creating admin only
+        return dto;
+    }
+
+    /**
+     * Re-issues a fresh temporary password for an admin-created customer who
+     * never changed theirs (e.g. lost the email/SMS). Resets the login counter
+     * and re-sends by email + SMS. Returns the new temp password to the admin.
+     */
+    @Transactional
+    public UserDto regenerateTempPassword(Long userId) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+        if (user.getRole() != UserRole.CUSTOMER) {
+            throw new BusinessException("Temporary passwords can only be issued for customer accounts",
+                HttpStatus.BAD_REQUEST);
+        }
+        String tempPassword = generateSecurePassword();
+        user.setPassword(passwordEncoder.encode(tempPassword));
+        user.setMustChangePassword(true);
+        user.setTempPasswordLoginsRemaining(tempPasswordMaxLogins);
+        user.setLastPasswordChangeAt(java.time.LocalDateTime.now(ZoneOffset.UTC));
+        userRepository.save(user);
+        // Invalidate any live sessions so the old credential can't linger.
+        try { sessionService.revokeAllForUser(user.getId(), currentActorId(), "TEMP_PASSWORD_REISSUED"); }
+        catch (Exception e) { log.warn("Failed to revoke sessions on temp-password reissue for {}: {}", user.getId(), e.getMessage()); }
+        auditService.success(AuthAuditService.EventType.PASSWORD_RESET_COMPLETED,
+            currentActorId(), currentActorRole(), user.getId(), user.getEmail(),
+            "admin re-issued temporary password");
+        sendTempPasswordNotification(user, tempPassword);
+        log.info("Admin re-issued temporary password for customer {}",
+            com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
+        UserDto dto = toDto(user);
+        dto.setTemporaryPassword(tempPassword);
+        return dto;
+    }
+
+    /**
+     * Deliver a temporary password to the customer over both EMAIL and SMS
+     * (best-effort; failure to enqueue must not break account creation). The SMS
+     * event carries no email so the email-keyed dedup never suppresses it.
+     */
+    private void sendTempPasswordNotification(User user, String tempPassword) {
+        String name = user.getFirstName() != null ? user.getFirstName() : "there";
+        String emailBody = String.format(
+            "Hi %s,%n%nAn account was created for you at SK Binge Galaxy so we can manage your reservation.%n%n"
+            + "Email: %s%nTemporary password: %s%n%n"
+            + "Please sign in and you'll be asked to set your own password. For your security this temporary "
+            + "password only works for the next %d sign-in(s); after that use \"Forgot password\" to set a new one.%n%n"
+            + "Never share this password with anyone.",
+            name, user.getEmail(), tempPassword, tempPasswordMaxLogins);
+        String smsBody = String.format(
+            "SK Binge Galaxy: temporary password %s for %s. Valid for %d login(s); you'll be asked to change it.",
+            tempPassword, user.getEmail(), tempPasswordMaxLogins);
+        try {
+            NotificationEvent emailEv = NotificationEvent.builder()
+                .type("ACCOUNT_TEMP_PASSWORD")
+                .channel(NotificationChannel.EMAIL)
+                .recipientEmail(user.getEmail())
+                .recipientName(name)
+                .recipientPhone(user.getPhone())
+                .recipientPhoneCountryCode(user.getPhoneCountryCode())
+                .subject("Your SK Binge Galaxy temporary password")
+                .body(emailBody)
+                .build();
+            kafkaTemplate.send(KafkaTopics.NOTIFICATION_SEND, emailEv);
+            if (user.getPhone() != null && !user.getPhone().isBlank()) {
+                NotificationEvent smsEv = NotificationEvent.builder()
+                    .type("ACCOUNT_TEMP_PASSWORD")
+                    .channel(NotificationChannel.SMS)
+                    .recipientName(name)
+                    .recipientPhone(user.getPhone())
+                    .recipientPhoneCountryCode(user.getPhoneCountryCode())
+                    .subject("SK Binge Galaxy temporary password")
+                    .body(smsBody)
+                    .build();
+                kafkaTemplate.send(KafkaTopics.NOTIFICATION_SEND, smsEv);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to enqueue temporary-password notification for {}: {}",
+                com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()), e.getMessage());
+        }
     }
 
     // ── Admin register ────────────────────────────────────────
@@ -1025,6 +1183,11 @@ public class AuthService {
             .password(passwordEncoder.encode(request.getPassword()))
             .role(UserRole.ADMIN)
             .active(true)
+            // DPDP: the creating super-admin accepts the onboarding terms on the
+            // new admin's behalf (the Add-Admin form requires the consent checkbox),
+            // so record the consent timestamp like the customer register path does.
+            .consentGivenAt(java.time.LocalDateTime.now(ZoneOffset.UTC))
+            .consentMarketing(request.isConsentMarketing())
             .build();
 
         user = userRepository.save(user);
@@ -1152,6 +1315,7 @@ public class AuthService {
             .emailVerified(user.isEmailVerified())
             .mfaEnabled(user.isMfaEnabled())
             .lastPasswordChangeAt(user.getLastPasswordChangeAt())
+            .mustChangePassword(user.isMustChangePassword())
             .build();
     }
 
@@ -1290,6 +1454,12 @@ public class AuthService {
             // SHA-256 is mandatory in every JRE; this branch is unreachable.
             throw new IllegalStateException("SHA-256 unavailable", e);
         }
+    }
+
+    /** Ends the temporary-password lifecycle: the account now has a real, self-chosen password. */
+    private static void clearTempPasswordState(User user) {
+        user.setMustChangePassword(false);
+        user.setTempPasswordLoginsRemaining(null);
     }
 
     private String generateSecurePassword() {

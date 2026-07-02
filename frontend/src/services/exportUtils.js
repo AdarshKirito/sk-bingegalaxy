@@ -3,6 +3,8 @@
  * Pure client-side — no server round-trip required.
  */
 
+import { parseServerDate } from './timeFormat';
+
 /* ── CSV ─────────────────────────────────────────────── */
 
 /**
@@ -139,7 +141,7 @@ function normalizeBookings(bookings) {
     status: b.status || '',
     paymentStatus: b.paymentStatus || '',
     totalAmount: b.totalAmount != null ? String(b.totalAmount) : '',
-    createdAt: b.createdAt ? new Date(b.createdAt).toLocaleDateString() : '',
+    createdAt: b.createdAt ? (parseServerDate(b.createdAt)?.toLocaleDateString() || '') : '',
   }));
 }
 

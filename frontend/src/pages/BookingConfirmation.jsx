@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { bookingService } from '../services/endpoints';
+import { bookingService, toArray } from '../services/endpoints';
 import { formatTime12h, formatTimeRange12h } from '../utils/format';
+import { parseServerDate } from '../services/timeFormat';
 import SEO from '../components/SEO';
 import { toast } from 'react-toastify';
 import {
@@ -60,6 +61,7 @@ export default function BookingConfirmation() {
   const [error, setError] = useState(null);
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
+  const [pendingTransfer, setPendingTransfer] = useState(null);
   const [recurringGroupBookings, setRecurringGroupBookings] = useState(null);
   const [rescheduleForm, setRescheduleForm] = useState({ newBookingDate: '', newStartTime: '', newDurationMinutes: '' });
   const [transferForm, setTransferForm] = useState({ recipientName: '', recipientEmail: '', recipientPhone: '' });
@@ -102,6 +104,19 @@ export default function BookingConfirmation() {
     }
   };
 
+  const openTransferModal = async () => {
+    setTransferForm({ recipientName: '', recipientEmail: '', recipientPhone: '' });
+    setPendingTransfer(null);
+    setTransferOpen(true);
+    try {
+      const res = await bookingService.listTransfers(ref);
+      const transfers = toArray(res.data?.data);
+      setPendingTransfer(transfers.find(t => t.status === 'PENDING') || null);
+    } catch {
+      // Listing is best-effort UX; the backend rejects duplicate requests anyway.
+    }
+  };
+
   const handleTransfer = async () => {
     if (!transferForm.recipientName.trim() || !transferForm.recipientEmail.trim()) {
       toast.error('Recipient name and email are required.');
@@ -116,12 +131,26 @@ export default function BookingConfirmation() {
         recipientPhone: phoneParts.phone,
         recipientPhoneCountryCode: phoneParts.phoneCountryCode,
       };
-      const res = await bookingService.transferBooking(ref, payload);
-      setBooking(res.data.data);
-      toast.success('Booking transferred successfully');
+      const res = await bookingService.requestTransfer(ref, payload);
+      const transfer = res.data.data;
+      toast.success(`Transfer request sent to ${transfer?.toEmail || transferForm.recipientEmail}. The booking stays yours until they accept.`);
       setTransferOpen(false);
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to transfer');
+      toast.error(err.response?.data?.message || 'Failed to send transfer request');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRevokeTransfer = async () => {
+    if (!pendingTransfer) return;
+    setActionLoading(true);
+    try {
+      await bookingService.revokeTransfer(ref, pendingTransfer.id);
+      toast.success('Transfer request revoked');
+      setPendingTransfer(null);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to revoke transfer request');
     } finally {
       setActionLoading(false);
     }
@@ -161,7 +190,7 @@ export default function BookingConfirmation() {
   const earlyCheckoutDisplay = (() => {
     if (!booking.earlyCheckoutNote && !booking.actualCheckoutTime) return null;
     if (booking.actualCheckoutTime) {
-      const checkoutTime = new Date(booking.actualCheckoutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const checkoutTime = parseServerDate(booking.actualCheckoutTime)?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || '';
       const mins = booking.actualUsedMinutes;
       if (mins != null) {
         const h = Math.floor(mins / 60);
@@ -326,7 +355,7 @@ export default function BookingConfirmation() {
               </button>
             )}
             {booking.canCustomerTransfer && (
-              <button className="btn btn-secondary btn-sm" onClick={() => { setTransferForm({ recipientName: '', recipientEmail: '', recipientPhone: '' }); setTransferOpen(true); }}>
+              <button className="btn btn-secondary btn-sm" onClick={openTransferModal}>
                 <FiSend /> Transfer
               </button>
             )}
@@ -614,31 +643,54 @@ export default function BookingConfirmation() {
             <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
               {booking.bookingRef} — {eventLabel}
             </p>
-            <label style={{ display: 'block', marginBottom: '1rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Name</span>
-              <input type="text" className="form-control" placeholder="Full name of the new guest"
-                value={transferForm.recipientName}
-                onChange={(e) => setTransferForm(prev => ({ ...prev, recipientName: e.target.value }))} />
-            </label>
-            <label style={{ display: 'block', marginBottom: '1rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Email</span>
-              <input type="email" className="form-control" placeholder="name@example.com"
-                value={transferForm.recipientEmail}
-                onChange={(e) => setTransferForm(prev => ({ ...prev, recipientEmail: e.target.value }))} />
-            </label>
-            <label style={{ display: 'block', marginBottom: '1.5rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Phone (optional)</span>
-              <PhoneField
-                value={transferForm.recipientPhone}
-                onChange={(val) => setTransferForm(prev => ({ ...prev, recipientPhone: val || '' }))}
-              />
-            </label>
-            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-              <button className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => setTransferOpen(false)}>Cancel</button>
-              <button className="btn btn-primary btn-sm" disabled={actionLoading} onClick={handleTransfer}>
-                {actionLoading ? 'Transferring...' : 'Confirm Transfer'}
-              </button>
-            </div>
+            {pendingTransfer ? (
+              <>
+                <p style={{ fontSize: '0.9rem', marginBottom: '0.75rem' }}>
+                  A transfer request is already pending for <strong>{pendingTransfer.toEmail}</strong>.
+                </p>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
+                  The booking stays yours until they accept. Revoke this request if you want to send a new one.
+                </p>
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                  <button className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => setTransferOpen(false)}>Close</button>
+                  <button className="btn btn-danger btn-sm" disabled={actionLoading} onClick={handleRevokeTransfer}>
+                    {actionLoading ? 'Revoking...' : 'Revoke Request'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <label style={{ display: 'block', marginBottom: '1rem' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Name</span>
+                  <input type="text" className="form-control" placeholder="Full name of the new guest"
+                    value={transferForm.recipientName}
+                    onChange={(e) => setTransferForm(prev => ({ ...prev, recipientName: e.target.value }))} />
+                </label>
+                <label style={{ display: 'block', marginBottom: '1rem' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Email</span>
+                  <input type="email" className="form-control" placeholder="name@example.com"
+                    value={transferForm.recipientEmail}
+                    onChange={(e) => setTransferForm(prev => ({ ...prev, recipientEmail: e.target.value }))} />
+                </label>
+                <label style={{ display: 'block', marginBottom: '1rem' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Phone (optional)</span>
+                  <PhoneField
+                    value={transferForm.recipientPhone}
+                    onChange={(val) => setTransferForm(prev => ({ ...prev, recipientPhone: val || '' }))}
+                  />
+                </label>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
+                  The recipient will receive an email link to accept or decline. Your booking stays
+                  yours until they accept; the request expires automatically if they don't respond.
+                </p>
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                  <button className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => setTransferOpen(false)}>Cancel</button>
+                  <button className="btn btn-primary btn-sm" disabled={actionLoading} onClick={handleTransfer}>
+                    {actionLoading ? 'Sending...' : 'Send Transfer Request'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

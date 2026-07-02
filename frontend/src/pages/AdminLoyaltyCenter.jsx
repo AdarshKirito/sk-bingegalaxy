@@ -11,6 +11,7 @@ import SEO from '../components/SEO';
 import { useConfirm } from '../components/ui/ConfirmProvider';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import loyaltyV2 from '../services/loyaltyV2';
+import { parseServerDate } from '../services/timeFormat';
 import './AdminSecurity.css';
 
 /**
@@ -856,7 +857,7 @@ function StatusMatchTab() {
                         : <span style={{ color: 'var(--text-muted)' }} title={r.proofUrl || ''}>n/a</span>;
                     })()}
                   </td>
-                  <td>{new Date(r.createdAt).toLocaleDateString()}</td>
+                  <td>{parseServerDate(r.createdAt)?.toLocaleDateString() || ''}</td>
                   <td>
                     <div className="sec-row-actions">
                       <button className="sec-btn sec-btn-primary" onClick={() => approve(r)}>
@@ -1234,7 +1235,7 @@ function MembersTab() {
                           return (
                             <tr key={entry.id}>
                               <td style={{ whiteSpace: 'nowrap', fontSize: 12, color: 'var(--text-muted)' }}>
-                                {new Date(entry.createdAt).toLocaleDateString()}
+                                {parseServerDate(entry.createdAt)?.toLocaleDateString() || ''}
                               </td>
                               <td>
                                 <span style={{ fontSize: 13, fontWeight: 600 }}>

@@ -13,7 +13,7 @@ internal:
     # No default — boot fails fast if the shared Feign secret is not
     # provided via env, rather than silently running with a well-known
     # placeholder that would let anyone forge internal API calls.
-    secret: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET must be set}
+    secret: ${INTERNAL_API_SECRET}
 
 spring:
   application:
@@ -21,7 +21,7 @@ spring:
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/booking_db}
     username: ${SPRING_DATASOURCE_USERNAME:booking_svc}
-    password: ${SPRING_DATASOURCE_PASSWORD:?SPRING_DATASOURCE_PASSWORD must be set}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:8}
@@ -111,7 +111,9 @@ app:
     return-otp-in-response: ${CHECKIN_RETURN_OTP_IN_RESPONSE:true}
   no-show:
     enabled:              ${NO_SHOW_AUTOMATION_ENABLED:true}
-    grace-minutes:        ${NO_SHOW_GRACE_MINUTES:30}
+    # No-show fires once a reservation passes its midpoint (start + duration/2),
+    # venue-local. min-grace-minutes is only a safety floor; 0 = pure midpoint.
+    min-grace-minutes:    ${NO_SHOW_MIN_GRACE_MINUTES:0}
     check-interval-ms:    ${NO_SHOW_CHECK_INTERVAL_MS:900000}
   cqrs:
     reconciliation-cron: ${CQRS_RECONCILIATION_CRON:0 15 2 * * *}

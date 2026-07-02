@@ -1,9 +1,7 @@
 package com.skbingegalaxy.booking.config;
 
-import lombok.extern.slf4j.Slf4j;
 import com.skbingegalaxy.common.constants.KafkaTopics;
 import org.apache.kafka.clients.admin.NewTopic;
-import org.apache.kafka.common.TopicPartition;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.kafka.ConcurrentKafkaListenerContainerFactoryConfigurer;
 import org.springframework.context.annotation.Bean;
@@ -11,40 +9,14 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.config.TopicBuilder;
 import org.springframework.kafka.core.ConsumerFactory;
-import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
-import org.springframework.util.backoff.FixedBackOff;
 
-@Slf4j
+// The DLT consumer error handler (`kafkaErrorHandler`) is defined once in
+// common-lib's KafkaDlqErrorHandlerConfig and injected into the factory below.
+// Do NOT redefine it here — per-service copies collide on the bean name and
+// crash startup with BeanDefinitionOverrideException.
 @Configuration
 public class KafkaConfig {
-
-    /**
-     * Wire a {@link DefaultErrorHandler} that retries 3 times (2 s apart) then routes the
-     * poison message to the corresponding {@code <topic>-dlt} topic. This prevents a bad
-     * message from blocking the partition indefinitely while still giving transient failures
-     * (DB blip, downstream timeout) a chance to recover.
-     *
-     * Non-retryable exceptions (deserialization failures) skip retries entirely and go
-     * straight to the DLT — retrying a corrupt payload never helps.
-     */
-    @Bean
-    public DefaultErrorHandler kafkaErrorHandler(KafkaTemplate<String, Object> kafkaTemplate) {
-        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
-            kafkaTemplate,
-            (record, ex) -> {
-                log.error("kafka.dlt.publish topic={} partition={} offset={} ex={}",
-                    record.topic(), record.partition(), record.offset(), ex.getMessage());
-                return new TopicPartition(record.topic() + "-dlt", record.partition());
-            });
-        DefaultErrorHandler handler = new DefaultErrorHandler(recoverer, new FixedBackOff(2_000L, 3L));
-        handler.addNotRetryableExceptions(
-            org.springframework.kafka.support.serializer.DeserializationException.class,
-            org.apache.kafka.common.errors.SerializationException.class
-        );
-        return handler;
-    }
 
     /**
      * Override the auto-configured factory to attach our error handler while keeping all
@@ -100,6 +72,30 @@ public class KafkaConfig {
     @Bean
     public NewTopic bookingTransferredTopic() {
         return TopicBuilder.name(KafkaTopics.BOOKING_TRANSFERRED).partitions(3).replicas(1).build();
+    }
+
+    // V56/V57 room-lifecycle topics. These are published via the transactional outbox
+    // (publishRoomLifecycle / publishBlockLifecycle). The broker runs with
+    // auto-create disabled, so they MUST be declared here or the OutboxPublisher relay
+    // fails with UNKNOWN_TOPIC_OR_PARTITION and the outbox rows pile up unpublished.
+    @Bean
+    public NewTopic roomApprovedTopic() {
+        return TopicBuilder.name(KafkaTopics.ROOM_APPROVED).partitions(3).replicas(1).build();
+    }
+
+    @Bean
+    public NewTopic roomRejectedTopic() {
+        return TopicBuilder.name(KafkaTopics.ROOM_REJECTED).partitions(3).replicas(1).build();
+    }
+
+    @Bean
+    public NewTopic roomBlockedTopic() {
+        return TopicBuilder.name(KafkaTopics.ROOM_BLOCKED).partitions(3).replicas(1).build();
+    }
+
+    @Bean
+    public NewTopic roomUnblockedTopic() {
+        return TopicBuilder.name(KafkaTopics.ROOM_UNBLOCKED).partitions(3).replicas(1).build();
     }
 
     @Bean

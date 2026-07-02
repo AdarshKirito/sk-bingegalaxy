@@ -39,7 +39,12 @@ public class CheckoutController {
     @PostMapping("/lock-fx")
     public ResponseEntity<ApiResponse<FxLockResponse>> lockFx(
             @RequestBody FxLockRequest req,
-            @RequestHeader(value = "X-Customer-Id", required = false) Long customerId) {
+            @RequestHeader(value = "X-User-Id", required = false) Long userId,
+            @RequestHeader(value = "X-Customer-Id", required = false) Long legacyCustomerId) {
+        // The gateway injects X-User-Id (X-Customer-Id is a legacy fallback). Mirror
+        // /preview so the lock is bound to the authenticated customer — otherwise every
+        // lock is created with a null customerId and loses its ownership/audit binding.
+        Long customerId = userId != null ? userId : legacyCustomerId;
         FxLockResponse out = fxLockService.lockFx(
             req.getFromCurrency(), req.getToCurrency(),
             req.getBaseAmount(), req.getTtlMinutes(),

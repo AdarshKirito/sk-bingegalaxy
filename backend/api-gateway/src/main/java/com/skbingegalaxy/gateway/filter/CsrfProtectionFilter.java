@@ -84,10 +84,12 @@ public class CsrfProtectionFilter implements GlobalFilter, Ordered {
     );
 
     // Webhook paths called by external servers (no browser Origin header, no CSRF cookie).
-    // These endpoints authenticate via their own mechanism (Razorpay HMAC-SHA256 signature).
+    // These endpoints authenticate via their own mechanism (HMAC-SHA256 signatures over
+    // the raw body: Razorpay for payments, NOTIFICATION_WEBHOOK_SECRET for delivery events).
     private static final Set<String> WEBHOOK_PATHS = Set.of(
         "/api/v1/payments/callback",
-        "/api/v1/payments/webhooks/razorpay"
+        "/api/v1/payments/webhooks/razorpay",
+        "/api/v1/notifications/webhooks/delivery"
     );
 
     /**

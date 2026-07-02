@@ -407,6 +407,13 @@ services:
       SPRING_CLOUD_CONFIG_PASSWORD: ${CONFIG_SERVER_PASSWORD}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       JWT_SECRET: ${JWT_SECRET}
+      # Shared service-to-service secret consumed by InternalApiAuthFilter so
+      # other services (booking/payment/availability) can call auth's
+      # /internal/** endpoints (e.g. authority-lock lookups). Without this the
+      # config placeholder `${INTERNAL_API_SECRET:?...}` silently resolves to a
+      # bogus DEFAULT under Spring (':' is Spring's default separator, not the
+      # bash fail-if-unset operator), causing every internal call to 403.
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       # Local compose runs over HTTP, so secure cookies must be opt-in.

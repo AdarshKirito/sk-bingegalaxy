@@ -78,13 +78,33 @@ public class FxLockService {
         return toDto(lock);
     }
 
-    /** Consume an active lock; returns the row. Throws if missing/expired/already consumed. */
+    /** Consume an active lock with no ownership check (legacy/INR callers). */
     public FxRateLock consumeLock(String lockToken) {
+        return consumeLock(lockToken, null);
+    }
+
+    /**
+     * Consume an active lock; returns the row. Throws if missing/expired/already consumed.
+     *
+     * <p>When both the lock and {@code expectedCustomerId} carry a customer id, they must
+     * match — defense-in-depth so a lock bound to one account can't be replayed against
+     * another's booking. Null-tolerant on either side: legacy/anonymous locks (no
+     * customerId) and callers that don't supply one are not ownership-checked, so this
+     * never breaks the domestic-INR or admin booking paths.
+     */
+    public FxRateLock consumeLock(String lockToken, Long expectedCustomerId) {
         if (lockToken == null || lockToken.isBlank()) {
             throw new BusinessException("FX lock token is required");
         }
         FxRateLock lock = repo.findByLockToken(lockToken)
             .orElseThrow(() -> new ResourceNotFoundException("FxRateLock", "token", lockToken));
+        if (lock.getCustomerId() != null && expectedCustomerId != null
+                && !lock.getCustomerId().equals(expectedCustomerId)) {
+            log.warn("FX lock ownership mismatch token={} lockOwner={} attemptedBy={}",
+                lockToken, lock.getCustomerId(), expectedCustomerId);
+            throw new BusinessException("This FX rate lock belongs to a different account",
+                org.springframework.http.HttpStatus.FORBIDDEN);
+        }
         if (lock.getStatus() == FxRateLock.Status.CONSUMED) {
             throw new BusinessException("FX lock already consumed");
         }

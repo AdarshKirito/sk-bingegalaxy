@@ -19,7 +19,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.lang.reflect.Method;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Optional;
@@ -54,6 +56,8 @@ class AuthServiceTest {
     void setUp() {
         ReflectionTestUtils.setField(authService, "otpExpirationMinutes", 10);
         ReflectionTestUtils.setField(authService, "otpLength", 6);
+        ReflectionTestUtils.setField(authService, "tempPasswordMaxLogins", 2);
+        ReflectionTestUtils.setField(authService, "googleClientId", "test-client.apps.googleusercontent.com");
                 ReflectionTestUtils.setField(authService, "supportEmail", "support@example.com");
                 ReflectionTestUtils.setField(authService, "supportPhone", "9876543210");
                 ReflectionTestUtils.setField(authService, "supportHours", "10 AM to 8 PM IST");
@@ -133,6 +137,74 @@ class AuthServiceTest {
         AuthResponse response = authService.login(request);
 
         assertThat(response.getToken()).isEqualTo("jwt-token");
+        assertThat(response.isMustChangePassword()).isFalse();
+    }
+
+    @Test
+    void login_temporaryPassword_forcesChange_andDecrementsAllowance() {
+        testUser.setMustChangePassword(true);
+        testUser.setTempPasswordLoginsRemaining(2);
+        LoginRequest request = LoginRequest.builder()
+                .email("john@example.com").password("Temp@12345").build();
+
+        when(userRepository.findByEmail("john@example.com")).thenReturn(Optional.of(testUser));
+        when(passwordEncoder.matches("Temp@12345", "encodedPassword")).thenReturn(true);
+        when(jwtProvider.generateToken(testUser)).thenReturn("jwt-token");
+        when(jwtProvider.generateRefreshToken(testUser)).thenReturn("refresh-token");
+
+        AuthResponse response = authService.login(request);
+
+        assertThat(response.isMustChangePassword()).isTrue();
+        assertThat(response.getToken()).isEqualTo("jwt-token");
+        // One of the two allowed temp logins consumed.
+        assertThat(testUser.getTempPasswordLoginsRemaining()).isEqualTo(1);
+    }
+
+    @Test
+    void login_temporaryPasswordExhausted_isBlocked() {
+        testUser.setMustChangePassword(true);
+        testUser.setTempPasswordLoginsRemaining(0);
+        LoginRequest request = LoginRequest.builder()
+                .email("john@example.com").password("Temp@12345").build();
+
+        when(userRepository.findByEmail("john@example.com")).thenReturn(Optional.of(testUser));
+        when(passwordEncoder.matches("Temp@12345", "encodedPassword")).thenReturn(true);
+
+        assertThatThrownBy(() -> authService.login(request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Forgot password");
+    }
+
+    @Test
+    void googleLogin_notConfigured_throwsClearError() {
+        ReflectionTestUtils.setField(authService, "googleClientId", "");
+
+        assertThatThrownBy(() -> authService.googleLogin("any-credential"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Google sign-in isn't available");
+        // Verifier must never be consulted when the feature is unconfigured.
+        verifyNoInteractions(googleIdTokenVerifier);
+    }
+
+    @Test
+    void adminCreateCustomer_provisionsTemporaryPassword_andNotifies() {
+        AdminCreateCustomerRequest request = AdminCreateCustomerRequest.builder()
+                .firstName("Jane").lastName("Roe")
+                .email("jane@example.com").phone("9999988888").phoneCountryCode("+91")
+                .password("Temp@12345").build();
+
+        when(userRepository.existsByEmail("jane@example.com")).thenReturn(false);
+        when(userRepository.existsByPhone("9999988888")).thenReturn(false);
+        when(passwordEncoder.encode("Temp@12345")).thenReturn("encodedTemp");
+        when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        UserDto dto = authService.adminCreateCustomer(request);
+
+        assertThat(dto.isMustChangePassword()).isTrue();
+        // Temp password surfaced to the admin (so they can read it out).
+        assertThat(dto.getTemporaryPassword()).isEqualTo("Temp@12345");
+        // Delivered to the customer over email + SMS (phone supplied).
+        verify(kafkaTemplate, times(2)).send(anyString(), any());
     }
 
     @Test
@@ -327,6 +399,27 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.login(request))
                 .isInstanceOf(BusinessException.class);
         verify(userRepository).incrementFailedLoginAttempts(testUser.getId());
+    }
+
+    /**
+     * Regression guard for the brute-force-protection rollback bug: login()/adminLogin() throw a
+     * BusinessException to set the HTTP status on auth failure, but the failed-attempt increment +
+     * account lock MUST persist. With the default rollback-on-RuntimeException those writes are
+     * undone, so the counter never grows and lockout/CAPTCHA never engage. A Mockito test can't
+     * observe transaction rollback (mocks don't roll back — that's why the lockout tests above pass
+     * regardless), so we pin noRollbackFor here. If this fails, brute-force protection is broken.
+     */
+    @Test
+    void loginMethods_doNotRollbackFailedAttemptWritesOnBusinessException() throws Exception {
+        for (String name : new String[]{"login", "adminLogin"}) {
+            Method m = AuthService.class.getMethod(name, LoginRequest.class);
+            Transactional tx = m.getAnnotation(Transactional.class);
+            assertThat(tx).as("%s must be @Transactional", name).isNotNull();
+            assertThat(tx.noRollbackFor())
+                .as("%s must NOT roll back failed-attempt/lockout writes when it throws "
+                    + "BusinessException (brute-force protection depends on the counter persisting)", name)
+                .contains(BusinessException.class);
+        }
     }
 
     @Test

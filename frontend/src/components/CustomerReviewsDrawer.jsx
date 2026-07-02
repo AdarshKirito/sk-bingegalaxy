@@ -15,6 +15,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { adminService } from '../services/endpoints';
+import { parseServerDate } from '../services/timeFormat';
 import {
   FiX,
   FiStar,
@@ -144,15 +145,15 @@ function ReviewSummaryPanel({ summary, loading }) {
 
 function ReviewCard({ review }) {
   const dateStr = review.createdAt
-    ? new Date(review.createdAt).toLocaleDateString('en-IN', {
+    ? (parseServerDate(review.createdAt)?.toLocaleDateString('en-IN', {
         day: '2-digit', month: 'short', year: 'numeric',
-      })
+      }) || '—')
     : '—';
 
   const timeStr = review.createdAt
-    ? new Date(review.createdAt).toLocaleTimeString('en-IN', {
+    ? (parseServerDate(review.createdAt)?.toLocaleTimeString('en-IN', {
         hour: '2-digit', minute: '2-digit',
-      })
+      }) || '')
     : '';
 
   return (

@@ -117,7 +117,9 @@ export default function PlatformDashboard() {
 
   const handleSelect = (binge) => {
     saveRecentBinge(binge);
-    selectBinge({ id: binge.id, name: binge.name, address: binge.address });
+    // The store normalises to the canonical selected-binge shape — pass the
+    // full object so support contacts / timezone / policies aren't dropped.
+    selectBinge(binge);
     toast.success(`Selected: ${binge.name}`);
     navigate('/dashboard');
   };

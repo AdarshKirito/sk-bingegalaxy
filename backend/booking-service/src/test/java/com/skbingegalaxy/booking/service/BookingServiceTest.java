@@ -113,6 +113,9 @@ class BookingServiceTest {
                 .thenReturn(TaxComputationResult.builder()
                         .subtotal(BigDecimal.ZERO).totalTax(BigDecimal.ZERO)
                         .totalInclusiveTax(BigDecimal.ZERO).lines(List.of()).build());
+        lenient().when(taxService.venueContext(any())).thenAnswer(inv ->
+                com.skbingegalaxy.booking.tax.provider.TaxContext.builder()
+                        .bingeId(inv.getArgument(0)).customerType("B2C").productType("BOOKING"));
         lenient().when(loyaltyMemberService.redeemForBooking(anyLong(), anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
                         .thenReturn(new com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyMemberService.RedemptionResult(0L, BigDecimal.ZERO));
         lenient().when(bingeRepository.findById(anyLong())).thenAnswer(inv ->

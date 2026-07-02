@@ -383,7 +383,7 @@ public class BookingService {
         BigDecimal lockedFxRate = null;
         if (request.getFxLockToken() != null && !request.getFxLockToken().isBlank()) {
             com.skbingegalaxy.booking.entity.FxRateLock fxLock =
-                fxLockService.consumeLock(request.getFxLockToken());
+                fxLockService.consumeLock(request.getFxLockToken(), customerId);
             fxLockedUntil = fxLock.getLockedUntil();
             // Record WHICH currency and rate were locked so the payment path can
             // validate a foreign-currency charge against the same rate (the booking
@@ -643,22 +643,36 @@ public class BookingService {
             boolean wasCheckedInBefore = booking.isCheckedIn();
             if (request.getCheckedIn()) {
                 if (booking.getStatus() != BookingStatus.CHECKED_IN) {
+                    // Physical-occupancy guard: a room (or a room-less venue) can
+                    // only hold its capacity of simultaneously checked-in parties.
+                    // Blocks a back-to-back booking from checking in while the prior
+                    // guests are still physically present (CHECKED_IN, not yet out).
+                    enforceCheckInOccupancy(booking);
                     booking = stateMachine.transition(
                         booking, BookingTransitionEvent.CHECK_IN,
                         adminActorFromContext(), /*reason*/ null);
                 }
                 booking.setCheckedIn(true);
                 ZoneId venueZone = venueClock.zoneOf(booking.getBingeId());
+                // Audit instant stored in UTC (platform contract: point-in-time events
+                // are UTC; only business-meaningful wall-clock fields such as
+                // bookingDate/startTime are venue-local). Clients render it in their own
+                // locale. Storing it venue-local previously made the value ambiguous and
+                // skewed every downstream timestamp display by the viewer's UTC offset.
+                java.time.Instant nowInstant = java.time.Instant.now();
                 if (booking.getActualCheckInTime() == null) {
-                    booking.setActualCheckInTime(LocalDateTime.now(venueZone));
+                    booking.setActualCheckInTime(LocalDateTime.ofInstant(nowInstant, ZoneOffset.UTC));
                 }
-                // Late-arrival flag — set when the operational check-in time is
-                // after the scheduled start. Both QR/OTP and manual admin
-                // check-in funnel through this method, so the flag is set
-                // consistently regardless of channel.
-                LocalDateTime scheduledStart = LocalDateTime.of(
-                    booking.getBookingDate(), booking.getStartTime());
-                if (LocalDateTime.now(venueZone).isAfter(scheduledStart) && !booking.isLateArrival()) {
+                // Late-arrival flag — compare absolute instants so the result is
+                // timezone-robust for a multi-region deployment: real "now" vs the
+                // scheduled start resolved through the VENUE's zone (not the operator's
+                // browser zone, not the JVM default). Both QR/OTP and manual admin
+                // check-in funnel through this method, so the flag is set consistently
+                // regardless of channel.
+                java.time.Instant scheduledStartInstant = LocalDateTime.of(
+                        booking.getBookingDate(), booking.getStartTime())
+                    .atZone(venueZone).toInstant();
+                if (nowInstant.isAfter(scheduledStartInstant) && !booking.isLateArrival()) {
                     booking.setLateArrival(true);
                 }
                 // Emit booking.checked-in only on the transition (avoid double
@@ -2372,6 +2386,46 @@ public class BookingService {
         return false;
     }
 
+    /**
+     * Physical-occupancy guard applied at the moment of check-in. A room can hold
+     * its {@code capacity} of simultaneously present parties; a room-less venue is
+     * a single physical space (capacity 1). If the resource is already at capacity
+     * with currently CHECKED_IN reservations, the new check-in is rejected — you
+     * cannot put two parties in the same room.
+     *
+     * <p>Serialized with the same per-binge/date advisory slot lock used at
+     * booking creation so two concurrent check-ins can't both slip past the count.
+     */
+    private void enforceCheckInOccupancy(Booking booking) {
+        Long bid = booking.getBingeId();
+        LocalDate date = booking.getBookingDate();
+        Long excludeId = booking.getId() != null ? booking.getId() : -1L;
+        if (bid != null) {
+            bookingRepository.acquireSlotLock(slotLockKey(bid, date));
+        }
+        Long roomId = booking.getVenueRoomId();
+        if (roomId != null) {
+            VenueRoom room = venueRoomRepository.findById(roomId).orElse(null);
+            int capacity = room != null ? Math.max(room.getCapacity(), 1) : 1;
+            long occupied = bookingRepository.countActiveCheckInsInRoom(bid, date, roomId, excludeId);
+            if (occupied >= capacity) {
+                String name = room != null ? room.getName() : ("room " + roomId);
+                throw new BusinessException(capacity == 1
+                    ? "Room '" + name + "' is already occupied by a checked-in reservation. "
+                        + "Check the current guests out before checking another party in."
+                    : "Room '" + name + "' is at capacity (" + capacity
+                        + " checked-in reservations). Check a party out before checking another in.");
+            }
+        } else {
+            long occupied = bookingRepository.countActiveCheckInsInVenue(bid, date, excludeId);
+            if (occupied >= 1) {
+                throw new BusinessException(
+                    "This venue is already occupied by a checked-in reservation. "
+                    + "Check the current guests out before checking another party in.");
+            }
+        }
+    }
+
     /** Count active bookings that overlap with a given time range (for capacity enforcement). */
     @Transactional(readOnly = true)
     public int countOverlappingBookings(LocalDate date, int startMinute, int durationMinutes) {
@@ -2464,20 +2518,9 @@ public class BookingService {
      * the persist path consistent with {@code CheckoutQuoteService.preview()}.
      */
     private TaxContext buildBookingTaxContext(Long bingeId) {
-        TaxContext.TaxContextBuilder b = TaxContext.builder()
-            .bingeId(bingeId)
-            .customerType("B2C")
-            .productType("BOOKING")
-            .venueZone(venueClock.zoneOf(bingeId));
-        if (bingeId != null) {
-            bingeRepository.findById(bingeId).ifPresent(binge -> {
-                b.venueCountryCode(binge.getCountry())
-                 .venueStateCode(binge.getState())
-                 .venueCity(binge.getCity())
-                 .venuePostalCode(binge.getPostalCode());
-            });
-        }
-        return b.build();
+        // Single source of truth lives in TaxService so the customer preview,
+        // checkout quote and the persisted booking all resolve the SAME context.
+        return taxService.venueContext(bingeId).build();
     }
 
     private void syncPaymentStatusToBalance(Booking booking) {

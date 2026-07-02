@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { adminService, toArray } from '../services/endpoints';
+import { parseServerDate } from '../services/timeFormat';
 import { toast } from 'react-toastify';
 import { format, addDays } from 'date-fns';
 import { FiCalendar, FiClock, FiUsers, FiUser, FiMail, FiPhone, FiCheck, FiSend, FiXCircle, FiStar } from 'react-icons/fi';
@@ -238,9 +239,9 @@ export default function AdminWaitlist() {
                               </span>
                             )}
                           </td>
-                          <td>{entry.createdAt ? new Date(entry.createdAt).toLocaleString() : '—'}</td>
+                          <td>{entry.createdAt ? (parseServerDate(entry.createdAt)?.toLocaleString() || '—') : '—'}</td>
                           {status === 'OFFERED' && (
-                            <td>{entry.offerExpiresAt ? new Date(entry.offerExpiresAt).toLocaleString() : '—'}</td>
+                            <td>{entry.offerExpiresAt ? (parseServerDate(entry.offerExpiresAt)?.toLocaleString() || '—') : '—'}</td>
                           )}
                           {(status === 'CONVERTED' || status === 'BOOKED') && (
                             <td>

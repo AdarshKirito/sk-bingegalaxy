@@ -94,6 +94,10 @@ class BookingServiceLifecycleTest {
                 .thenReturn(TaxComputationResult.builder()
                         .subtotal(BigDecimal.ZERO).totalTax(BigDecimal.ZERO)
                         .totalInclusiveTax(BigDecimal.ZERO).lines(List.of()).build());
+        // TaxService now owns the venue-aware context builder; return a real builder.
+        lenient().when(taxService.venueContext(any())).thenAnswer(inv ->
+                com.skbingegalaxy.booking.tax.provider.TaxContext.builder()
+                        .bingeId(inv.getArgument(0)).customerType("B2C").productType("BOOKING"));
         ReflectionTestUtils.setField(bookingService, "availabilityClient", availabilityClient);
         ReflectionTestUtils.setField(bookingService, "eventPublisher", eventPublisher);
         // Replace mocked SM with a real one wired to the same mocked deps so
@@ -664,6 +668,47 @@ class BookingServiceLifecycleTest {
 
             assertThat(testBooking.getStatus()).isEqualTo(BookingStatus.CHECKED_IN);
             assertThat(testBooking.isCheckedIn()).isTrue();
+        }
+
+        @Test
+        @DisplayName("check-in blocked when a room-less venue is already occupied by a checked-in reservation")
+        void checkIn_blockedWhenVenueOccupied() {
+            BingeContext.setBingeId(11L);
+            testBooking.setStatus(BookingStatus.CONFIRMED);
+            testBooking.setVenueRoomId(null);
+            when(bookingRepository.findByBookingRefAndBingeId("SKBG25123456", 11L))
+                    .thenReturn(Optional.of(testBooking));
+            // Another party is physically present in the (room-less) venue.
+            when(bookingRepository.countActiveCheckInsInVenue(eq(11L), any(), eq(1L))).thenReturn(1L);
+
+            UpdateBookingRequest request = new UpdateBookingRequest();
+            request.setCheckedIn(true);
+
+            assertThatThrownBy(() -> bookingService.updateBooking("SKBG25123456", request))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("already occupied");
+            assertThat(testBooking.getStatus()).isEqualTo(BookingStatus.CONFIRMED);
+        }
+
+        @Test
+        @DisplayName("check-in blocked when the assigned room is already at capacity")
+        void checkIn_blockedWhenRoomAtCapacity() {
+            BingeContext.setBingeId(11L);
+            testBooking.setStatus(BookingStatus.CONFIRMED);
+            testBooking.setVenueRoomId(5L);
+            when(bookingRepository.findByBookingRefAndBingeId("SKBG25123456", 11L))
+                    .thenReturn(Optional.of(testBooking));
+            when(venueRoomRepository.findById(5L)).thenReturn(Optional.of(
+                    VenueRoom.builder().id(5L).bingeId(11L).name("Private Room").roomType("PRIVATE_ROOM").capacity(1).build()));
+            when(bookingRepository.countActiveCheckInsInRoom(eq(11L), any(), eq(5L), eq(1L))).thenReturn(1L);
+
+            UpdateBookingRequest request = new UpdateBookingRequest();
+            request.setCheckedIn(true);
+
+            assertThatThrownBy(() -> bookingService.updateBooking("SKBG25123456", request))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Private Room");
+            assertThat(testBooking.getStatus()).isEqualTo(BookingStatus.CONFIRMED);
         }
 
                 @Test

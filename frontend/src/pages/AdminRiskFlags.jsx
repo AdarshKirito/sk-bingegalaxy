@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { adminRiskService, toArray } from '../services/endpoints';
+import { parseServerDate } from '../services/timeFormat';
 import { toast } from 'react-toastify';
 import { FiAlertTriangle, FiCheckCircle, FiRefreshCw, FiFlag } from 'react-icons/fi';
 import { useBinge } from '../context/BingeContext';
@@ -139,7 +140,7 @@ export default function AdminRiskFlags() {
                   </td>
                   <td style={{ padding: '0.5rem 0.6rem', maxWidth: 380 }}>{f.reason || '—'}</td>
                   <td style={{ padding: '0.5rem 0.6rem', fontSize: '0.85em', color: 'var(--text-secondary)' }}>
-                    {f.createdAt ? new Date(f.createdAt).toLocaleString() : '—'}
+                    {f.createdAt ? (parseServerDate(f.createdAt)?.toLocaleString() || '—') : '—'}
                   </td>
                   <td style={{ padding: '0.5rem 0.6rem' }}>
                     {f.acknowledged ? (

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { FiCheckCircle, FiChevronDown, FiInfo, FiMapPin, FiMessageCircle, FiShield, FiStar } from 'react-icons/fi';
 import { bookingService } from '../services/endpoints';
+import { parseServerDate } from '../services/timeFormat';
 import { normalizeAboutExperience } from '../services/aboutExperience';
 import useBingeStore from '../stores/bingeStore';
 import DOMPurify from 'dompurify';
@@ -231,7 +232,7 @@ export default function AboutBinge() {
                     <div className="about-review-meta">
                       <span className="about-review-name">{r.customerName || 'Customer'}</span>
                       <span className="about-review-date">
-                        {r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : ''}
+                        {r.createdAt ? (parseServerDate(r.createdAt)?.toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) || '') : ''}
                       </span>
                     </div>
                     <StarRating rating={r.rating} size="0.9rem" />

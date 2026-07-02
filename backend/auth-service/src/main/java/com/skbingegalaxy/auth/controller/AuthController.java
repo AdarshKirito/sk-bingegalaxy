@@ -223,6 +223,17 @@ public class AuthController {
             .body(ApiResponse.ok("Customer created", user));
     }
 
+    /**
+     * Re-issue a fresh temporary password for an admin-created customer who lost
+     * theirs. Returns the new temp password (for the admin to read out) and
+     * re-sends it by email + SMS.
+     */
+    @PostMapping("/admin/customer/{id}/temp-password")
+    public ResponseEntity<ApiResponse<UserDto>> regenerateTempPassword(@PathVariable Long id) {
+        UserDto user = authService.regenerateTempPassword(id);
+        return ResponseEntity.ok(ApiResponse.ok("Temporary password re-issued", user));
+    }
+
     @PostMapping("/admin/register")
     public ResponseEntity<ApiResponse<AuthResponse>> adminRegister(@Valid @RequestBody RegisterRequest request,
                                                                     HttpServletRequest httpRequest,

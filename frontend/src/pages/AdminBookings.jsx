@@ -52,6 +52,7 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 export default function AdminBookings() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const confirm = useConfirm();
 
   // Read deep-link params from dashboard stat card clicks
   const initTab = searchParams.get('tab') || 'today';
@@ -222,8 +223,14 @@ export default function AdminBookings() {
   const reload = () => { fetchBookings(); fetchStats(); };
 
   // Reinstate: navigate to admin booking create with pre-filled data from the original booking
-  const handleReinstate = (booking) => {
-    if (!confirm(`Reinstate booking ${booking.bookingRef} as a new reservation?`)) return;
+  const handleReinstate = async (booking) => {
+    const ok = await confirm({
+      title: 'Reinstate booking?',
+      message: `Reinstate booking ${booking.bookingRef} as a new reservation?`,
+      confirmLabel: 'Reinstate',
+      variant: 'primary',
+    });
+    if (!ok) return;
     const prefill = {
       customerId: booking.customerId,
       customerName: booking.customerName,
@@ -771,7 +778,13 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
   };
 
   const handleReplayBooking = async () => {
-    if (!confirm(`Rebuild CQRS projection for ${b.bookingRef}? This re-derives the booking state from its event log.`)) return;
+    const ok = await confirm({
+      title: 'Rebuild projection?',
+      message: `Rebuild CQRS projection for ${b.bookingRef}? This re-derives the booking state from its event log.`,
+      confirmLabel: 'Rebuild',
+      variant: 'warning',
+    });
+    if (!ok) return;
     setReplaying(true);
     try {
       await adminService.replayBooking(b.bookingRef);
@@ -787,7 +800,13 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
     if (isNaN(amt) || amt <= 0) { toast.error('Enter a valid amount'); return; }
     const maxRefundable = refundModal.payment.remainingRefundable ?? refundModal.payment.amount;
     if (amt > maxRefundable) { toast.error(`Refund amount cannot exceed remaining refundable ₹${maxRefundable.toLocaleString()}`); return; }
-    if (!confirm(`Refund ₹${amt.toLocaleString()} to customer? This action cannot be undone.`)) return;
+    const ok = await confirm({
+      title: 'Initiate refund?',
+      message: `Refund ₹${amt.toLocaleString()} to customer? This action cannot be undone.`,
+      confirmLabel: 'Refund',
+      variant: 'danger',
+    });
+    if (!ok) return;
     setRefunding(true);
     try {
       await adminService.initiateRefund({
@@ -820,7 +839,13 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
 
   // ── Record cash payment ────────────────────────────────────
   const handleRecordCashPayment = async () => {
-    if (!confirm(`Record cash payment of ₹${b.totalAmount?.toLocaleString()} for booking ${b.bookingRef}?\nThis will create a payment record so you can issue refunds.`)) return;
+    const ok = await confirm({
+      title: 'Record cash payment?',
+      message: `Record cash payment of ₹${b.totalAmount?.toLocaleString()} for booking ${b.bookingRef}? This will create a payment record so you can issue refunds.`,
+      confirmLabel: 'Record Payment',
+      variant: 'primary',
+    });
+    if (!ok) return;
     setRecordingCash(true);
     try {
       await adminService.recordCashPayment({
@@ -896,7 +921,13 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
       `  1. Refund ₹${remaining.toLocaleString()} from the original ${payment.paymentMethod.replace('_', ' ')} payment\n` +
       `  2. Record a new ₹${remaining.toLocaleString()} ${changeMethodNewMethod} payment\n\n` +
       `Net effect: ₹0 change to balance (method swap only).\nContinue?`;
-    if (!confirm(confirmMsg)) return;
+    const ok = await confirm({
+      title: 'Change payment method?',
+      message: confirmMsg,
+      confirmLabel: 'Change Method',
+      variant: 'danger',
+    });
+    if (!ok) return;
     setChangingMethod(true);
     try {
       await adminService.initiateRefund({
@@ -1165,7 +1196,13 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
       toast.error('Please provide a reason for the price adjustment');
       return;
     }
-    if (!confirm(`Adjust total from ₹${oldTotal.toLocaleString()} to ₹${newTotal.toLocaleString()}?\n\nReason: ${priceForm.reason}\n\nThis will be recorded in the audit log.`)) return;
+    const ok = await confirm({
+      title: 'Adjust booking total?',
+      message: `Adjust total from ₹${oldTotal.toLocaleString()} to ₹${newTotal.toLocaleString()}? Reason: ${priceForm.reason}. This will be recorded in the audit log.`,
+      confirmLabel: 'Adjust Total',
+      variant: 'warning',
+    });
+    if (!ok) return;
     setSavingPrices(true);
     try {
       const res = await adminService.updateBooking(b.bookingRef, {
@@ -1386,9 +1423,9 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
             )}
             {b.status === 'CHECKED_IN' && (
               <>
-                {b.paymentStatus === 'REFUNDED' && (
+                {b.paymentStatus === 'REFUNDED' && (b.collectedAmount || 0) < 0.01 && (
                   <div className="ab-warning-banner ab-warning-banner--danger" style={{ width: '100%', marginBottom: '0.3rem' }}>
-                    ⚠️ Payment was <strong>fully refunded</strong> — ₹0 collected on a ₹{(b.totalAmount || 0).toLocaleString()} booking. You can still checkout, but no revenue will be recorded.
+                    ⚠️ Payment was <strong>fully refunded</strong> — ₹{(b.collectedAmount || 0).toLocaleString()} collected on a ₹{(b.totalAmount || 0).toLocaleString()} booking. You can still checkout, but no revenue will be recorded.
                   </div>
                 )}
                 {(() => {
@@ -1596,7 +1633,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
             </div>
           )}
           {b.actualCheckoutTime && !b.earlyCheckoutNote && (
-            <div style={rowStyle}><span style={labelStyle}>Checkout Time</span><span>{new Date(b.actualCheckoutTime).toLocaleString()}</span></div>
+            <div style={rowStyle}><span style={labelStyle}>Checkout Time</span><span>{formatServerDateTime(b.actualCheckoutTime)}</span></div>
           )}
 
           {/* Edit Reservation button — navigates to booking wizard for time/addon changes */}
@@ -1768,7 +1805,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                   </span>
                 </div>
                 {p.gatewayOrderId && <div style={rowStyle}><span style={labelStyle}>Gateway Order</span><span style={{ fontSize: '0.82rem' }}>{p.gatewayOrderId}</span></div>}
-                {p.paidAt && <div style={rowStyle}><span style={labelStyle}>Paid At</span><span>{new Date(p.paidAt).toLocaleString()}</span></div>}
+                {p.paidAt && <div style={rowStyle}><span style={labelStyle}>Paid At</span><span>{formatServerDateTime(p.paidAt)}</span></div>}
                 {p.refundCount > 0 && (
                   <>
                     <div style={rowStyle}><span style={labelStyle}>Total Refunded</span><span style={{ color: '#e74c3c' }}>₹{p.totalRefunded?.toLocaleString()}</span></div>
@@ -1789,11 +1826,17 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                         }}>
                         💳 {(p.remainingRefundable ?? p.amount) <= 0 ? 'Fully Refunded' : 'Refund Payment'}
                       </button>
-                      {(p.remainingRefundable ?? p.amount) > 0 && b.status !== 'COMPLETED' && b.status !== 'CANCELLED' && b.status !== 'NO_SHOW' && (
+                      {(p.remainingRefundable ?? p.amount) > 0 && b.status !== 'COMPLETED' && b.status !== 'CANCELLED' && b.status !== 'NO_SHOW' && !p.gatewayOrderId && (
                         <button className="btn btn-sm btn-secondary"
                           onClick={() => { setChangeMethodFor(changeMethodFor === p.id ? null : p.id); setChangeMethodNewMethod('CASH'); }}>
                           ⇄ Change Method
                         </button>
+                      )}
+                      {(p.remainingRefundable ?? p.amount) > 0 && b.status !== 'COMPLETED' && b.status !== 'CANCELLED' && b.status !== 'NO_SHOW' && p.gatewayOrderId && (
+                        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic' }}
+                          title="Changing method refunds and re-collects. For an online gateway payment that would issue a real refund to the customer's card — not allowed here. Refund explicitly if intended.">
+                          Method change unavailable — online gateway payment
+                        </span>
                       )}
                       {(p.remainingRefundable ?? p.amount) > 0 && (b.status === 'COMPLETED' || b.status === 'CANCELLED' || b.status === 'NO_SHOW') && (
                         <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
@@ -1876,7 +1919,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                             {' '}<span style={{ color: statusColor, fontWeight: 600 }}>· {r.refundStatus || 'UNKNOWN'}</span>
                           </span>
                           <span style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center' }}>
-                            <span style={{ color: 'var(--text-muted)' }}>{r.refundedAt ? new Date(r.refundedAt).toLocaleDateString() : ''} by {r.initiatedBy}</span>
+                            <span style={{ color: 'var(--text-muted)' }}>{r.refundedAt ? (parseServerDate(r.refundedAt)?.toLocaleDateString() || '') : ''} by {r.initiatedBy}</span>
                             {isFailed && (
                               <button className="btn btn-sm btn-secondary" onClick={onRetry}
                                 title="Retry this failed refund. Above the maker-checker threshold a second admin must approve.">

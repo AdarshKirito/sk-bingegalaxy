@@ -45,6 +45,8 @@ const AdminBlockedDates = lazy(() => import('./pages/AdminBlockedDates'));
 const AdminEventTypes = lazy(() => import('./pages/AdminEventTypes'));
 const AdminReports = lazy(() => import('./pages/AdminReports'));
 const AdminBookingCreate = lazy(() => import('./pages/AdminBookingCreate'));
+const AdminTermsEditor = lazy(() => import('./pages/AdminTermsEditor'));
+const Terms = lazy(() => import('./pages/Terms'));
 const AdminUsersConfig = lazy(() => import('./pages/AdminUsersConfig'));
 const AdminRateCodes = lazy(() => import('./pages/AdminRateCodes'));
 const AdminCustomerPricing = lazy(() => import('./pages/AdminCustomerPricing'));
@@ -73,6 +75,7 @@ const AdminEntranceDashboard = lazy(() => import('./pages/AdminEntranceDashboard
 const AdminAccount = lazy(() => import('./pages/AdminAccount'));
 const AdminAllUsers = lazy(() => import('./pages/AdminAllUsers'));
 const CompleteProfile = lazy(() => import('./pages/CompleteProfile'));
+const TransferAccept = lazy(() => import('./pages/TransferAccept'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 
 function PageLoader() {
@@ -155,11 +158,16 @@ function SuperAdminRoute({ children, scope }) {
   return <Navigate to="/admin/platform" replace />;
 }
 
-/* Requires binge selected — redirects to selector if not */
+/* Requires binge selected — redirects to selector if not.
+ * Separation of duties: staff (ADMIN/SUPER_ADMIN) accounts are bounced to the
+ * admin console rather than transacting through the customer booking / My
+ * Bookings / payments flow under their staff identity. A staff member who also
+ * wants to be a customer uses a SEPARATE customer account (different email). */
 function BingeRequired({ children }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isAdmin } = useAuth();
   const { selectedBinge } = useBinge();
   if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (isAdmin) return <Navigate to="/admin/platform" replace />;
   if (!selectedBinge) return <Navigate to="/platform" replace />;
   return children;
 }
@@ -199,6 +207,10 @@ function AppFrame() {
           <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPassword /></PublicOnlyRoute>} />
           <Route path="/reset-password" element={<PublicOnlyRoute><ResetPassword /></PublicOnlyRoute>} />
           <Route path="/verify-email" element={<VerifyEmail />} />
+          <Route path="/terms" element={<Terms />} />
+          {/* Booking-transfer magic link landing — public by design: the emailed
+              token is the credential and the recipient may not have an account. */}
+          <Route path="/transfers/:token" element={<TransferAccept />} />
           <Route path="/complete-profile" element={<CompleteProfileRoute><CompleteProfile /></CompleteProfileRoute>} />
           <Route path="/platform" element={<ProtectedRoute><PlatformDashboard /></ProtectedRoute>} />
           <Route path="/binges" element={<ProtectedRoute><BingeSelector /></ProtectedRoute>} />
@@ -214,7 +226,6 @@ function AppFrame() {
           <Route path="/account/notifications" element={<ProtectedRoute><CustomerNotifications /></ProtectedRoute>} />
           <Route path="/account/sessions" element={<ProtectedRoute><MySessions /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><CustomerSettings /></ProtectedRoute>} />
-          <Route path="/account/sessions" element={<ProtectedRoute><MySessions /></ProtectedRoute>} />
           <Route path="/account/security/mfa" element={<ProtectedRoute><MfaSetup /></ProtectedRoute>} />
           <Route path="/payment/:ref" element={<BingeRequired><PaymentPage /></BingeRequired>} />
 
@@ -228,6 +239,7 @@ function AppFrame() {
           {/* Authority Handover — native super-admin only (delegated admins must never grant authority to themselves) */}
           <Route path="/admin/super/authority" element={<SuperAdminRoute><AuthorityHandover /></SuperAdminRoute>} />
           <Route path="/admin/home-editor" element={<SuperAdminRoute scope="HOME_CMS"><AdminHomeEditor /></SuperAdminRoute>} />
+          <Route path="/admin/terms-editor" element={<SuperAdminRoute scope="HOME_CMS"><AdminTermsEditor /></SuperAdminRoute>} />
           <Route path="/admin/sessions" element={<AdminRoute><MySessions /></AdminRoute>} />
           <Route path="/admin/security/mfa" element={<AdminRoute><MfaSetup /></AdminRoute>} />
           <Route path="/admin/binges" element={<AdminRoute><BingeManagement /></AdminRoute>} />

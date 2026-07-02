@@ -1,0 +1,6 @@
+# Local-only patched Node base: trusts the AVG Web/Mail Shield MITM root CA so
+# in-container npm installs succeed behind AVG's HTTPS interception.
+# npm uses Node's TLS stack, which honours NODE_EXTRA_CA_CERTS — no apk/network needed.
+FROM node:20-alpine
+COPY avg-root-ca.crt /usr/local/share/ca-certificates/avg-root-ca.crt
+ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/avg-root-ca.crt

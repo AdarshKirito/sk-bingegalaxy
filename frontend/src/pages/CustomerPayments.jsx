@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { bookingService, paymentService } from '../services/endpoints';
 import { useFormatMoney } from '../context/CurrencyContext';
 import { formatTime12h } from '../utils/format';
+import { parseServerDate } from '../services/timeFormat';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import SEO from '../components/SEO';
 import { FiAlertCircle, FiCalendar, FiCheckCircle, FiCreditCard, FiFilter, FiRefreshCw, FiSearch, FiTrendingUp, FiX } from 'react-icons/fi';
@@ -219,7 +220,7 @@ export default function CustomerPayments() {
       .toLowerCase();
     const matchesQuery = !appliedQuery || searchTarget.includes(appliedQuery.toLowerCase());
     const matchesStatus = statusFilter === 'ALL' || payment.status === statusFilter;
-    const paymentTs = new Date(payment.createdAt || payment.paidAt || 0);
+    const paymentTs = parseServerDate(payment.createdAt || payment.paidAt) || new Date(0);
     const matchesFrom = !fromDate || paymentTs >= new Date(fromDate);
     const matchesTo = !toDate || paymentTs <= new Date(toDate + 'T23:59:59');
     return matchesQuery && matchesStatus && matchesFrom && matchesTo;

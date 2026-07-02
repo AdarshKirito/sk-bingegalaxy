@@ -3,7 +3,7 @@ package com.skbingegalaxy.common.config;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.kafka.core.KafkaOperations;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.serializer.DeserializationException;
 
@@ -28,8 +28,8 @@ class KafkaDlqErrorHandlerConfigTest {
 
     @BeforeEach
     void setUp() {
-        KafkaOperations<Object, Object> template = mock(KafkaOperations.class);
-        handler = new KafkaDlqErrorHandlerConfig().kafkaErrorHandler(template);
+        KafkaTemplate<String, Object> template = mock(KafkaTemplate.class);
+        handler = new KafkaDlqErrorHandlerConfig(new KafkaDlqProperties()).kafkaErrorHandler(template);
     }
 
     @Test

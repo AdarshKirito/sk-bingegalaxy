@@ -45,6 +45,7 @@ public class AuthAuditService {
         MFA_DISABLED,
         MFA_RECOVERY_USED,
         ADMIN_CREATED,
+        CUSTOMER_CREATED,
         ADMIN_UPDATED,
         USER_DELETED,
         USER_BULK_DELETED,

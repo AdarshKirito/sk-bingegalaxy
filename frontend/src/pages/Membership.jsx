@@ -9,6 +9,7 @@ import {
 import SEO from '../components/SEO';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import loyaltyV2 from '../services/loyaltyV2';
+import { parseServerDate } from '../services/timeFormat';
 import './Membership.css';
 
 /**
@@ -451,7 +452,7 @@ export default function Membership() {
                     </span>
                   </div>
                   <div className="sm-h-meta">
-                    <span className="sm-date">{new Date(r.createdAt).toLocaleDateString()}</span>
+                    <span className="sm-date">{parseServerDate(r.createdAt)?.toLocaleDateString() || ''}</span>
                     {isChallenge && r.challengeExpiresAt && (
                       <span className="sm-challenge-hint">
                         <FiClock style={{ verticalAlign: '-1px', marginRight: 3 }} />
@@ -506,7 +507,7 @@ function LedgerRow({ entry }) {
           <div className="ledger-desc">{entry.description}</div>
         )}
         <div className="ledger-sub">
-          <span>{new Date(entry.createdAt).toLocaleString()}</span>
+          <span>{parseServerDate(entry.createdAt)?.toLocaleString() || ''}</span>
           {entry.bookingRef && (
             <Link to={`/booking/${entry.bookingRef}`} className="ledger-booking-link">
               Booking {entry.bookingRef}

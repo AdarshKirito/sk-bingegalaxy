@@ -267,11 +267,15 @@ public class CheckInService {
                 + " — outside the current operational day (" + opDate + ")");
         }
 
-        // Window-of-validity guard
-        LocalDateTime windowStart = LocalDateTime.of(booking.getBookingDate(),
-            booking.getStartTime()).minusMinutes(windowEarlyMinutes);
-        LocalDateTime windowEnd = LocalDateTime.of(booking.getBookingDate(),
-            booking.getStartTime()).plusMinutes(windowLateMinutes);
+        // Window-of-validity guard. The late edge is aligned to the no-show
+        // threshold — the reservation midpoint (start + duration/2) — so a guest
+        // can always check in right up until the booking auto-no-shows, and the
+        // two rules can never contradict each other. {@code window-late-minutes}
+        // is retained only as a floor for very short reservations.
+        LocalDateTime startDateTime = LocalDateTime.of(booking.getBookingDate(), booking.getStartTime());
+        LocalDateTime windowStart = startDateTime.minusMinutes(windowEarlyMinutes);
+        int lateOffset = Math.max(effectiveDurationMinutes(booking) / 2, windowLateMinutes);
+        LocalDateTime windowEnd = startDateTime.plusMinutes(Math.max(lateOffset, 1));
         if (now.isBefore(windowStart)) {
             throw new BusinessException(
                 "Check-in opens at " + windowStart.toLocalTime() + " (" + windowEarlyMinutes
@@ -279,8 +283,8 @@ public class CheckInService {
         }
         if (now.isAfter(windowEnd)) {
             throw new BusinessException(
-                "Check-in closed at " + windowEnd.toLocalTime() + " (" + windowLateMinutes
-                + " min after start). Mark as no-show or contact support.");
+                "Check-in closed at " + windowEnd.toLocalTime()
+                + " (past the reservation midpoint). Mark as no-show or contact support.");
         }
 
         // Consume token first (race-safe under the pessimistic lock acquired by
@@ -317,6 +321,14 @@ public class CheckInService {
             RequestContext.currentUserAgent());
 
         return dto;
+    }
+
+    /** Scheduled reservation length in minutes (durationMinutes if set, else hours*60). */
+    private static int effectiveDurationMinutes(Booking booking) {
+        if (booking.getDurationMinutes() != null && booking.getDurationMinutes() > 0) {
+            return booking.getDurationMinutes();
+        }
+        return Math.max(booking.getDurationHours(), 0) * 60;
     }
 
     // ── Crypto helpers ───────────────────────────────────────────────────────

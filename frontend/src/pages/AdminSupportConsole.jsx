@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { adminService, adminSupportService, notificationService, toArray } from '../services/endpoints';
+import { parseServerDate } from '../services/timeFormat';
 import { toast } from 'react-toastify';
 import {
   FiSearch, FiSend, FiAlertTriangle, FiGift, FiXCircle, FiRefreshCw,
@@ -338,7 +339,7 @@ export default function AdminSupportConsole() {
                           {n.visibility}
                         </span>
                         {n.edited && <small style={{ color: 'var(--text-secondary)' }}>(edited)</small>}
-                        <small style={{ color: 'var(--text-secondary)' }}>{new Date(n.createdAt).toLocaleString()}</small>
+                        <small style={{ color: 'var(--text-secondary)' }}>{parseServerDate(n.createdAt)?.toLocaleString() || ''}</small>
                         <button type="button" className="btn btn-ghost btn-xs" title="Pin / Unpin" onClick={() => togglePin(n)}>
                           <FiBookmark />
                         </button>

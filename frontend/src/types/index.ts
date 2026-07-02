@@ -19,6 +19,8 @@ export interface User {
   conciergeSupport?: boolean;
   role: 'USER' | 'ADMIN' | 'SUPER_ADMIN';
   active?: boolean;
+  /** True while the account still holds an admin-issued temporary password. */
+  mustChangePassword?: boolean;
 }
 
 export interface SupportContact {

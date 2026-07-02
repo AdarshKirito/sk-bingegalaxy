@@ -137,6 +137,14 @@ public class JwtProvider {
         claims.put("phone", user.getPhone());
         claims.put("phoneCountryCode", user.getPhoneCountryCode());
         claims.put("token_type", tokenType);
+        // Restricted-session marker: a token minted while the account still holds an
+        // admin-issued temporary password. The gateway hard-limits such tokens to the
+        // change-password / logout / profile surface (server-side forced rotation),
+        // so the flag can't be bypassed by a hand-crafted API client. Cleared
+        // automatically once the user sets a real password (mustChangePassword=false).
+        if (user.isMustChangePassword()) {
+            claims.put("mustChangePassword", true);
+        }
 
         if (delegatedScopes != null && !delegatedScopes.isEmpty()) {
             // Comma-joined string keeps JWT compact and avoids Jackson List<Enum> quirks

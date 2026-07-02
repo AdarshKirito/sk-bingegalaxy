@@ -122,14 +122,17 @@ public class CheckoutQuoteService {
         BigDecimal platformFee = BigDecimal.ZERO; // future
 
         // ── Tax ──────────────────────────────────────────────────────
-        TaxContext ctx = TaxContext.builder()
-            .bingeId(bingeId)
+        // Start from the canonical venue-aware context (place of supply = venue),
+        // then layer the customer's billing address on top — billing wins over
+        // venue per TaxContext.resolvedState(). Previously this context omitted the
+        // venue jurisdiction entirely, so a GST/geo-scoped rule was dropped from the
+        // quote even though the booking applied it.
+        TaxContext ctx = taxService.venueContext(bingeId)
             .billingCountryCode(req.getBillingAddress() != null ? req.getBillingAddress().getCountryCode() : null)
             .billingStateCode(req.getBillingAddress() != null ? req.getBillingAddress().getStateCode() : null)
             .billingCity(req.getBillingAddress() != null ? req.getBillingAddress().getCity() : null)
             .billingPostalCode(req.getBillingAddress() != null ? req.getBillingAddress().getPostalCode() : null)
             .customerType(req.getCustomerType() != null ? req.getCustomerType() : "B2C")
-            .productType("BOOKING")
             .buyerHasTaxId(req.getBillingAddress() != null
                 && req.getBillingAddress().getTaxId() != null
                 && !req.getBillingAddress().getTaxId().isBlank())

@@ -1,5 +1,6 @@
 package com.skbingegalaxy.auth.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.skbingegalaxy.common.enums.UserRole;
 import lombok.*;
 
@@ -41,4 +42,17 @@ public class UserDto {
     private boolean emailVerified;
     private boolean mfaEnabled;
     private LocalDateTime lastPasswordChangeAt;
+
+    /** True while the account still holds an admin-issued temporary password. */
+    private boolean mustChangePassword;
+
+    /**
+     * The one-time temporary password, returned ONLY by the admin "create
+     * customer" / "resend temp password" responses so the front-desk admin can
+     * read it out at the counter. Null on every other DTO. Never persisted in
+     * plaintext — it is hashed for storage and the customer also receives it by
+     * email + SMS.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String temporaryPassword;
 }

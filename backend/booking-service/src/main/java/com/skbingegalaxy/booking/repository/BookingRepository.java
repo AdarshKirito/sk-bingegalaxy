@@ -201,16 +201,47 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     long countByBingeIdAndStatus(Long bingeId, BookingStatus status);
 
     /**
-     * Find bookings on {@code date} that are still PENDING/CONFIRMED and whose
-     * start time is at-or-before {@code cutoffTime} — i.e. the customer never
-     * showed up. Used by {@code NoShowAutomationScheduler} to mark NO_SHOW
-     * after the configured grace period.
+     * Candidate set for the no-show sweep: still-active (PENDING/CONFIRMED),
+     * not-yet-checked-in bookings whose {@code bookingDate} falls in
+     * {@code [from, to]}. The date range is only a coarse, index-friendly bound
+     * that brackets <em>every</em> venue timezone (±14h from UTC). The scheduler
+     * then resolves each booking's venue-local clock and only marks NO_SHOW once
+     * the reservation has passed its <b>midpoint</b> (start + duration/2) — never
+     * a fixed grace window — so the cutoff scales with the reservation length.
+     *
+     * <p>bookingDate/startTime are venue-local, so the precise time comparison
+     * MUST happen in the scheduler against {@code VenueClockService}, not here.
      */
-    @Query("SELECT b FROM Booking b WHERE b.bookingDate = :date AND b.status IN ('PENDING','CONFIRMED') AND b.startTime <= :cutoffTime")
-    List<Booking> findNoShowCandidates(@Param("date") LocalDate date, @Param("cutoffTime") LocalTime cutoffTime);
+    @Query("SELECT b FROM Booking b WHERE b.bookingDate BETWEEN :from AND :to "
+         + "AND b.status IN ('PENDING','CONFIRMED') AND b.checkedIn = false")
+    List<Booking> findNoShowSweepCandidates(@Param("from") LocalDate from, @Param("to") LocalDate to);
 
     @Query("SELECT COUNT(b) FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate = :date AND b.checkedIn = :ci AND b.status = 'CHECKED_IN'")
     long countByBingeAndDateAndCheckedIn(@Param("bid") Long bingeId, @Param("date") LocalDate date, @Param("ci") boolean checkedIn);
+
+    /**
+     * Physical-occupancy count for a specific room: bookings currently
+     * CHECKED_IN (i.e. guests physically present, not yet checked out) in
+     * {@code roomId} on {@code date}, excluding {@code excludeId}. Used to stop a
+     * second party being checked into a room that is already at capacity.
+     */
+    @Query("SELECT COUNT(b) FROM Booking b WHERE (:bid IS NULL OR b.bingeId = :bid) "
+         + "AND b.bookingDate = :date AND b.status = 'CHECKED_IN' "
+         + "AND b.venueRoomId = :roomId AND b.id <> :excludeId")
+    long countActiveCheckInsInRoom(@Param("bid") Long bingeId, @Param("date") LocalDate date,
+                                   @Param("roomId") Long roomId, @Param("excludeId") Long excludeId);
+
+    /**
+     * Physical-occupancy count for a room-less venue: bookings currently
+     * CHECKED_IN with no room assigned in this binge on {@code date}, excluding
+     * {@code excludeId}. A room-less venue is a single physical space, so any
+     * live check-in occupies it.
+     */
+    @Query("SELECT COUNT(b) FROM Booking b WHERE (:bid IS NULL OR b.bingeId = :bid) "
+         + "AND b.bookingDate = :date AND b.status = 'CHECKED_IN' "
+         + "AND b.venueRoomId IS NULL AND b.id <> :excludeId")
+    long countActiveCheckInsInVenue(@Param("bid") Long bingeId, @Param("date") LocalDate date,
+                                    @Param("excludeId") Long excludeId);
 
     // Revenue (binge-scoped)
     @Query("SELECT COALESCE(SUM(COALESCE(b.collectedAmount, 0)), 0) FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate = :date AND b.status <> 'CANCELLED' AND b.paymentStatus IN ('SUCCESS', 'PARTIALLY_PAID', 'PARTIALLY_REFUNDED')")

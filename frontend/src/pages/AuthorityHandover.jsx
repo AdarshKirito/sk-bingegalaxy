@@ -51,8 +51,22 @@ const ALL_SCOPES = Object.keys(SCOPE_LABELS);
 // matching mutation endpoints call authorityLockGuard.requireUnlocked(token, role).
 const LOCKABLE_CAPABILITIES = [
   { value: 'PRICING', label: 'Pricing — rate codes, customer pricing, surge' },
+  { value: 'TAXES', label: 'Taxes — tax rules' },
+  { value: 'EVENT_TYPES', label: 'Event Types' },
+  { value: 'ADD_ONS', label: 'Add-ons' },
+  { value: 'CATEGORIES', label: 'Categories — event & add-on categories' },
+  { value: 'VENUE_ROOMS', label: 'Venue Rooms — rooms & maintenance blocks' },
+  { value: 'CANCELLATION', label: 'Cancellation — tiers & policy' },
 ];
 const ALL_BINGES = 'ALL';
+
+// GRANT polarity (opposite of the locks above): a TIMEZONE_CHANGE row in the
+// shared resource-lock store means a binge admin is PERMITTED to change the venue
+// timezone (default is DENY). Managed in its own "Timezone permissions" tab with
+// grant/revoke language, and deliberately filtered OUT of the freeze "Resource
+// locks" table so the two polarities never get confused. Must match the backend
+// AuthorityLockGuard.TIMEZONE_CHANGE token.
+const TIMEZONE_CHANGE = 'TIMEZONE_CHANGE';
 
 const fmtTs = (iso) => {
   if (!iso) return '—';
@@ -101,7 +115,10 @@ export default function AuthorityHandover() {
     try {
       const res = await authorityService.listLocks({ page: 0, size: 100 });
       const body = res.data?.data;
-      setLocks(Array.isArray(body?.content) ? body.content : []);
+      // Exclude TIMEZONE_CHANGE rows — those are GRANTS (permissions), not freeze
+      // locks, and are managed in the dedicated "Timezone permissions" tab.
+      const rows = Array.isArray(body?.content) ? body.content : [];
+      setLocks(rows.filter(l => l.resourceType !== TIMEZONE_CHANGE));
     } catch (e) {
       toast.error(e?.response?.data?.message || 'Failed to load locks');
     } finally {
@@ -218,10 +235,11 @@ export default function AuthorityHandover() {
 
       <nav className="sec-tabs" role="tablist" aria-label="Authority sections">
         {[
-          ['active',  'Active grants'],
-          ['history', 'Grant history'],
-          ['locks',   'Resource locks'],
-          ['new',     'New grant'],
+          ['active',   'Active grants'],
+          ['history',  'Grant history'],
+          ['locks',    'Resource locks'],
+          ['timezone', 'Timezone permissions'],
+          ['new',      'New grant'],
         ].map(([key, label]) => (
           <button
             key={key}
@@ -295,6 +313,10 @@ export default function AuthorityHandover() {
         </>
       )}
 
+      {tab === 'timezone' && (
+        <TimezonePermissionsSection binges={binges} confirm={confirm} />
+      )}
+
       {tab === 'new' && (
         <NewGrantForm
           admins={admins}
@@ -302,6 +324,169 @@ export default function AuthorityHandover() {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Super-admin management of the venue-timezone GRANT (default-deny). Granting
+ * here writes a TIMEZONE_CHANGE row to the shared resource-lock store; the
+ * booking-service AuthorityLockGuard.requireTimezoneChangePermitted consults it
+ * before allowing a binge admin to change a venue's IANA zone. Native
+ * super-admins never need a grant.
+ */
+function TimezonePermissionsSection({ binges, confirm }) {
+  const [grants, setGrants] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [form, setForm] = useState({ bingeId: ALL_BINGES, reason: '' });
+  const [creating, setCreating] = useState(false);
+
+  const targetName = useCallback((resourceId) => (
+    resourceId === ALL_BINGES
+      ? 'All venues'
+      : (binges.find(b => String(b.id) === String(resourceId))?.name || `Binge #${resourceId}`)
+  ), [binges]);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await authorityService.listLocks({ type: TIMEZONE_CHANGE, page: 0, size: 100 });
+      const body = res.data?.data;
+      setGrants(Array.isArray(body?.content) ? body.content : []);
+    } catch (e) {
+      toast.error(e?.response?.data?.message || 'Failed to load timezone permissions');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => { reload(); }, [reload]);
+
+  const onGrant = async (e) => {
+    e.preventDefault();
+    const reason = (form.reason || '').trim();
+    if (reason.length < 4) { toast.error('A reason (min 4 chars) is required for the audit log'); return; }
+    setCreating(true);
+    try {
+      await authorityService.createLock({
+        resourceType: TIMEZONE_CHANGE,
+        resourceId: form.bingeId,        // a binge id, or "ALL" for every venue
+        reason,
+      });
+      toast.success(`Timezone-change permission granted for ${targetName(form.bingeId)}`);
+      setForm({ bingeId: ALL_BINGES, reason: '' });
+      reload();
+    } catch (err) {
+      // A unique (type,id) row already exists → already granted.
+      toast.error(err?.response?.data?.message || 'Failed to grant permission (it may already be granted)');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const onRevoke = async (g) => {
+    const result = await confirm({
+      title: `Revoke timezone permission for ${targetName(g.resourceId)}?`,
+      message: 'That venue’s admin will no longer be able to change its timezone. Native super-admins are unaffected.',
+      withReason: true,
+      reasonRequired: true,
+      reasonLabel: 'Reason',
+      reasonPlaceholder: 'e.g. Venue zone finalized, no further changes needed',
+      confirmLabel: 'Revoke',
+      variant: 'danger',
+    });
+    if (!result) return;
+    try {
+      await authorityService.releaseLock(g.id, result.reason);
+      toast.success('Timezone permission revoked');
+      reload();
+    } catch (e) {
+      toast.error(e?.response?.data?.message || 'Revoke failed');
+    }
+  };
+
+  return (
+    <section className="sec-card">
+      <header className="sec-card-head">
+        <div>
+          <h2><FiClock /> Venue timezone — change permissions</h2>
+          <p>
+            Changing a venue’s timezone reinterprets the wall-clock of every existing
+            booking, so it is <strong>super-admin only by default</strong>. Grant the
+            ability to a single venue or to <strong>all venues</strong>. You (native
+            super-admin) can always change any venue’s zone without a grant.
+          </p>
+        </div>
+        <button className="btn btn-ghost" onClick={reload} disabled={loading}>
+          <FiRefreshCw /> Refresh
+        </button>
+      </header>
+
+      <form onSubmit={onGrant} style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end', marginBottom: '1rem' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13 }}>
+          <span>Grant to</span>
+          <select value={form.bingeId} onChange={(e) => setForm(f => ({ ...f, bingeId: e.target.value }))}>
+            <option value={ALL_BINGES}>All venues</option>
+            {binges.map(b => (
+              <option key={b.id} value={String(b.id)}>{b.name || `Binge #${b.id}`}</option>
+            ))}
+          </select>
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13, flex: 1, minWidth: 240 }}>
+          <span>Reason (audit)</span>
+          <input type="text" maxLength={500} value={form.reason}
+            placeholder="e.g. Venue relocating to a new region; admin to set the zone"
+            onChange={(e) => setForm(f => ({ ...f, reason: e.target.value }))} />
+        </label>
+        <button type="submit" className="btn btn-primary" disabled={creating}>
+          <FiCheckCircle /> {creating ? 'Granting…' : 'Grant permission'}
+        </button>
+      </form>
+
+      {loading && <div className="sec-empty">Loading…</div>}
+      {!loading && grants.length === 0 && (
+        <div className="sec-empty"><FiLock /> No grants — only super-admins can change venue timezones.</div>
+      )}
+      {!loading && grants.length > 0 && (
+        <div className="sec-table-wrap">
+          <table className="sec-table">
+            <thead>
+              <tr>
+                <th>Permitted venue</th>
+                <th>Granted by</th>
+                <th>Granted at</th>
+                <th>Reason</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {grants.map(g => (
+                <tr key={g.id}>
+                  <td>
+                    <div style={{ fontWeight: 600 }}>
+                      <FiCheckCircle /> {targetName(g.resourceId)}
+                    </div>
+                    {g.resourceId === ALL_BINGES && (
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>every venue</div>
+                    )}
+                  </td>
+                  <td>
+                    <div style={{ fontSize: 13 }}>{g.lockedByName || ('User #' + g.lockedBy)}</div>
+                  </td>
+                  <td>{fmtTs(g.lockedAt)}</td>
+                  <td style={{ maxWidth: 320 }}>
+                    <div style={{ fontSize: 12, whiteSpace: 'normal', wordBreak: 'break-word' }}>{g.reason}</div>
+                  </td>
+                  <td>
+                    <button className="btn btn-danger btn-sm" onClick={() => onRevoke(g)}>
+                      <FiSlash /> Revoke
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 

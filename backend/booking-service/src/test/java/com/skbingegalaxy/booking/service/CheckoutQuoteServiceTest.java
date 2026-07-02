@@ -7,6 +7,8 @@ import com.skbingegalaxy.booking.loyalty.v2.engine.RedeemEngine;
 import com.skbingegalaxy.booking.loyalty.v2.service.EnrollmentService;
 import com.skbingegalaxy.booking.repository.AddOnRepository;
 import com.skbingegalaxy.booking.repository.EventTypeRepository;
+import com.skbingegalaxy.booking.tax.provider.TaxContext;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -19,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 /**
@@ -39,6 +42,14 @@ class CheckoutQuoteServiceTest {
     @Mock private RedeemEngine redeemEngine;
 
     @InjectMocks private CheckoutQuoteService checkoutQuoteService;
+
+    @BeforeEach
+    void stubVenueContext() {
+        // TaxService now centralises the venue-aware context; return a real builder
+        // so preview() can layer billing fields on top without NPEing on the mock.
+        lenient().when(taxService.venueContext(any())).thenAnswer(inv ->
+            TaxContext.builder().bingeId(inv.getArgument(0)).customerType("B2C").productType("BOOKING"));
+    }
 
     @Test
     void preview_computesBaseAndGuestUsingCanonicalFormula() {

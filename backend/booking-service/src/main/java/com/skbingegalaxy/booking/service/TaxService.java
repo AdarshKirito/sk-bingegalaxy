@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.skbingegalaxy.booking.dto.TaxComputationResult;
 import com.skbingegalaxy.booking.dto.TaxRuleDto;
 import com.skbingegalaxy.booking.entity.TaxRule;
+import com.skbingegalaxy.booking.repository.BingeRepository;
 import com.skbingegalaxy.booking.repository.TaxRuleRepository;
 import com.skbingegalaxy.booking.tax.provider.TaxContext;
 import com.skbingegalaxy.booking.tax.provider.TaxProvider;
@@ -38,18 +39,47 @@ public class TaxService {
     private final TaxRuleRepository taxRuleRepository;
     private final ObjectMapper objectMapper;
     private final TaxProvider taxProvider;
+    private final BingeRepository bingeRepository;
+    private final VenueClockService venueClock;
 
     private static final BigDecimal BPS_DIVISOR = new BigDecimal("10000");
 
-    /** Backward-compatible compute: delegates to {@link TaxProvider} with a
-     *  minimal context (binge-only). New callers should use
-     *  {@link #compute(TaxContext, BigDecimal, BigDecimal, BigDecimal, BigDecimal)}. */
+    /**
+     * Builds the canonical, <b>venue-aware</b> tax context for a binge. This is the
+     * single source of truth used by every tax entry point (customer preview,
+     * checkout quote, booking creation, admin booking, reschedule) so a
+     * jurisdiction-scoped rule (e.g. Indian GST with {@code countryCode=IN}) is
+     * resolved identically everywhere — never applied at booking time but dropped
+     * from the preview because the context lacked the venue's location.
+     *
+     * <p>Place-of-supply = the venue: country/state/city/postal are taken from the
+     * binge, and the venue timezone drives effective-date evaluation. Callers may
+     * override billing fields afterwards (a customer's GSTIN billing state wins
+     * over the venue per {@link TaxContext#resolvedState()}).
+     */
+    public TaxContext.TaxContextBuilder venueContext(Long bingeId) {
+        TaxContext.TaxContextBuilder b = TaxContext.builder()
+            .bingeId(bingeId)
+            .customerType("B2C")
+            .productType("BOOKING")
+            .venueZone(venueClock.zoneOf(bingeId));
+        if (bingeId != null) {
+            bingeRepository.findById(bingeId).ifPresent(binge ->
+                b.venueCountryCode(binge.getCountry())
+                 .venueStateCode(binge.getState())
+                 .venueCity(binge.getCity())
+                 .venuePostalCode(binge.getPostalCode()));
+        }
+        return b;
+    }
+
+    /** Venue-aware compute keyed only by binge — used by the customer tax preview. */
     public TaxComputationResult compute(Long bingeId,
                                         BigDecimal subtotal,
                                         BigDecimal baseAmount,
                                         BigDecimal addOnAmount,
                                         BigDecimal guestAmount) {
-        return compute(TaxContext.builder().bingeId(bingeId).build(),
+        return compute(venueContext(bingeId).build(),
             subtotal, baseAmount, addOnAmount, guestAmount);
     }
 

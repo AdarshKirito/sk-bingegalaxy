@@ -3,6 +3,7 @@ import { adminService, toArray } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import { FiEdit2, FiPlus, FiToggleLeft, FiToggleRight, FiTrash2, FiX, FiCheck, FiSlash, FiClock } from 'react-icons/fi';
 import useAuthStore from '../stores/authStore';
+import { useConfirm } from '../components/ui/ConfirmProvider';
 import './AdminPages.css';
 
 const ROOM_TYPES = ['MAIN_HALL', 'PRIVATE_ROOM', 'VIP_LOUNGE', 'OUTDOOR', 'MEETING_ROOM'];
@@ -26,6 +27,7 @@ const STATUS_BADGES = {
 
 export default function AdminVenueRooms() {
   const isSuperAdmin = useAuthStore(s => s.isSuperAdmin);
+  const confirm = useConfirm();
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -90,7 +92,13 @@ export default function AdminVenueRooms() {
   };
 
   const removeBlock = async (block) => {
-    if (!confirm(`Remove this block (${block.startAt} → ${block.endAt})?`)) return;
+    const ok = await confirm({
+      title: 'Remove block?',
+      message: `Remove this block (${block.startAt} → ${block.endAt})?`,
+      confirmLabel: 'Remove',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
       await adminService.deleteRoomBlock(block.id);
       toast.success('Block removed');
@@ -182,7 +190,13 @@ export default function AdminVenueRooms() {
 
   const handleDelete = async (room) => {
     if (room.active) { toast.error('Deactivate the room before deleting'); return; }
-    if (!confirm(`Delete room "${room.name}" permanently?`)) return;
+    const ok = await confirm({
+      title: 'Delete room?',
+      message: `Delete room "${room.name}" permanently? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
       await adminService.deleteVenueRoom(room.id);
       toast.success('Room deleted');
@@ -193,7 +207,13 @@ export default function AdminVenueRooms() {
   };
 
   const handleApprove = async (room) => {
-    if (!confirm(`Approve room "${room.name}"? It will become bookable immediately.`)) return;
+    const ok = await confirm({
+      title: 'Approve room?',
+      message: `Approve room "${room.name}"? It will become bookable immediately.`,
+      confirmLabel: 'Approve',
+      variant: 'primary',
+    });
+    if (!ok) return;
     try {
       await adminService.approveVenueRoom(room.id);
       toast.success('Room approved');
@@ -204,11 +224,18 @@ export default function AdminVenueRooms() {
   };
 
   const handleReject = async (room) => {
-    const reason = prompt(`Reject "${room.name}". Provide a reason (visible to admins):`);
-    if (reason === null) return;
-    if (!reason.trim()) { toast.error('Rejection reason is required'); return; }
+    const result = await confirm({
+      title: 'Reject room?',
+      message: `Reject "${room.name}". Provide a reason (visible to admins).`,
+      confirmLabel: 'Reject',
+      variant: 'danger',
+      withReason: true,
+      reasonLabel: 'Rejection reason',
+      reasonRequired: true,
+    });
+    if (!result) return;
     try {
-      await adminService.rejectVenueRoom(room.id, reason.trim());
+      await adminService.rejectVenueRoom(room.id, result.reason);
       toast.success('Room rejected');
       fetchRooms();
     } catch (err) {

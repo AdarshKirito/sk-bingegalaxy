@@ -20,6 +20,7 @@ import './FormFields.css';
 export default function PhoneField({
   value,
   onChange,
+  onBlur,
   defaultCountry = 'IN',
   label = 'Phone',
   required = false,
@@ -45,6 +46,7 @@ export default function PhoneField({
         defaultCountry={defaultCountry}
         value={value || ''}
         onChange={handleChange}
+        onBlur={onBlur}
         disabled={disabled}
         placeholder={placeholder}
         autoFocus={autoFocus}

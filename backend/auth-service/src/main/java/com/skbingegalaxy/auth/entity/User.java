@@ -149,6 +149,19 @@ public class User {
     @Column(name = "last_password_change_at")
     private LocalDateTime lastPasswordChangeAt;
 
+    // ── Temporary-password onboarding (V16) ──────────────────────────────────
+    // Set for admin-created customers who receive a one-time temp password by
+    // email + SMS. They are forced to change it on login, and the temp password
+    // is only valid for a limited number of logins before Forgot-password is
+    // required. Normal accounts: mustChangePassword=false, counter=null.
+
+    @Column(name = "must_change_password", nullable = false)
+    @Builder.Default
+    private boolean mustChangePassword = false;
+
+    @Column(name = "temp_password_logins_remaining")
+    private Integer tempPasswordLoginsRemaining;
+
     // ── FIDO2 / WebAuthn hardware security key (V15) ─────────────────────────
     // Required for SUPER_ADMIN accounts. Phishing-resistant by cryptographic design:
     // the authenticator signs a challenge bound to the origin domain, making

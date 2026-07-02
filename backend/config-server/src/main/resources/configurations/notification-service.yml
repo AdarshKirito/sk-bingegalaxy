@@ -70,6 +70,11 @@ app:
     # traffic; Kafka consumer threads back off when exceeded (30s wait then drop).
     # Raise via EMAIL_RATE_PER_MINUTE env if SMTP provider allows higher throughput.
     email-rate-limit-per-minute: ${EMAIL_RATE_PER_MINUTE:100}
+    # Shared secret for the provider delivery webhook (/api/v1/notifications/webhooks/delivery).
+    # The sender signs the raw request body with HMAC-SHA256 and puts the lowercase hex digest
+    # in X-Webhook-Signature. REQUIRED for delivery callbacks to work: the endpoint is publicly
+    # routed through the gateway and fail-closed rejects everything when this is unset.
+    webhook-secret: ${NOTIFICATION_WEBHOOK_SECRET:}
   sms:
     provider: ${SMS_PROVIDER:disabled}
     api-key: ${SMS_API_KEY:}

@@ -263,6 +263,11 @@ public class NotificationService {
     }
 
     private boolean dispatchNotification(Notification notification) {
+        // Clear any stale failure reason from a PRIOR attempt. Success is signalled by
+        // failureReason == null after this dispatch; on a retry the row still carries the
+        // previous failure's reason, so without this reset a genuinely successful re-dispatch
+        // would be mis-reported as failed — causing duplicate sends and a false BOUNCED.
+        notification.setFailureReason(null);
         try {
             switch (notification.getChannel()) {
                 case EMAIL -> {

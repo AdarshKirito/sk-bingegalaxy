@@ -5,6 +5,7 @@ import { useBinge } from '../context/BingeContext';
 import { useFormatMoney } from '../context/CurrencyContext';
 import { authService, bookingService, toArray } from '../services/endpoints';
 import { formatTime12h } from '../utils/format';
+import { parseServerDate } from '../services/timeFormat';
 import {
   buildSupportEmailHref,
   buildSupportWhatsAppHref,
@@ -110,6 +111,10 @@ export default function MyBookings() {
   const [waitlistEntries, setWaitlistEntries] = useState([]);
   const [rescheduleModal, setRescheduleModal] = useState(null);
   const [transferModal, setTransferModal] = useState(null);
+  const [pendingTransfer, setPendingTransfer] = useState(null);
+  // Tracks which booking's transfer modal is open so a slow listTransfers
+  // response can't attach another booking's pending transfer (see guard below).
+  const transferModalRef = useRef(null);
   const [rescheduleForm, setRescheduleForm] = useState({ newBookingDate: '', newStartTime: '', newDurationMinutes: '' });
   const [transferForm, setTransferForm] = useState({ recipientName: '', recipientEmail: '', recipientPhone: '' });
   const [actionLoading, setActionLoading] = useState(false);
@@ -215,7 +220,13 @@ export default function MyBookings() {
   const sortedPast = [...pastBookings].sort((left, right) => new Date(`${right.bookingDate}T${right.startTime || '00:00'}`) - new Date(`${left.bookingDate}T${left.startTime || '00:00'}`));
   const allBookings = [...sortedUpcoming, ...sortedPast];
   const support = mergeSupportContact(supportContact, selectedBinge);
-  const baseBookings = tab === 'upcoming' ? sortedUpcoming : tab === 'past' ? sortedPast : allBookings;
+  // When the customer is actively searching, scan EVERY reservation (upcoming +
+  // past) rather than only the active tab. Otherwise a search for a completed or
+  // cancelled booking while sitting on the "Upcoming" tab returns nothing and
+  // reads as "search is broken". With no query we respect the selected tab.
+  const baseBookings = debouncedQuery
+    ? allBookings
+    : (tab === 'upcoming' ? sortedUpcoming : tab === 'past' ? sortedPast : allBookings);
   const filteredBookings = useMemo(() => {
     const today = new Date();
     const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -355,9 +366,22 @@ export default function MyBookings() {
     }
   };
 
-  const openTransferModal = (booking) => {
+  const openTransferModal = async (booking) => {
     setTransferForm({ recipientName: '', recipientEmail: '', recipientPhone: '' });
+    setPendingTransfer(null);
     setTransferModal(booking);
+    transferModalRef.current = booking.bookingRef;
+    try {
+      const res = await bookingService.listTransfers(booking.bookingRef);
+      // Stale-response guard: the user may have closed this modal (or opened a
+      // different booking's) while the request was in flight. Attaching the
+      // wrong booking's pending transfer would point Revoke at the wrong row.
+      if (transferModalRef.current !== booking.bookingRef) return;
+      const transfers = toArray(res.data?.data);
+      setPendingTransfer(transfers.find(t => t.status === 'PENDING') || null);
+    } catch {
+      // Listing is best-effort UX; the backend rejects duplicate requests anyway.
+    }
   };
 
   const handleTransfer = async () => {
@@ -374,13 +398,26 @@ export default function MyBookings() {
         recipientPhone: phoneParts.phone,
         recipientPhoneCountryCode: phoneParts.phoneCountryCode,
       };
-      const res = await bookingService.transferBooking(transferModal.bookingRef, payload);
-      const updated = res.data.data;
-      setCurrentBookings(prev => prev.map(b => b.bookingRef === updated.bookingRef ? updated : b));
-      toast.success('Booking transferred successfully');
+      const res = await bookingService.requestTransfer(transferModal.bookingRef, payload);
+      const transfer = res.data.data;
+      toast.success(`Transfer request sent to ${transfer?.toEmail || transferForm.recipientEmail}. The booking stays yours until they accept.`);
       setTransferModal(null);
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to transfer booking');
+      toast.error(err.response?.data?.message || 'Failed to send transfer request');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRevokeTransfer = async () => {
+    if (!pendingTransfer) return;
+    setActionLoading(true);
+    try {
+      await bookingService.revokeTransfer(transferModal.bookingRef, pendingTransfer.id);
+      toast.success('Transfer request revoked');
+      setPendingTransfer(null);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to revoke transfer request');
     } finally {
       setActionLoading(false);
     }
@@ -691,6 +728,9 @@ export default function MyBookings() {
               {filteredBookings.length !== baseBookings.length && (
                 <> · filtered from {baseBookings.length}</>
               )}
+              {debouncedQuery && tab !== 'all' && (
+                <> · searching all reservations</>
+              )}
             </span>
             <span className="customer-hub-summary-actions">
               {activeFilterCount > 0 && (
@@ -743,7 +783,7 @@ export default function MyBookings() {
               </div>
               {entry.status === 'OFFERED' && entry.offerExpiresAt && (
                 <p style={{ fontSize: '0.85rem', color: 'var(--success)', fontWeight: 600, margin: '0.5rem 0' }}>
-                  A spot opened up! Offer expires at {new Date(entry.offerExpiresAt).toLocaleTimeString()}
+                  A spot opened up! Offer expires at {parseServerDate(entry.offerExpiresAt)?.toLocaleTimeString() || ''}
                 </p>
               )}
               <div className="customer-booking-actions">
@@ -870,7 +910,7 @@ export default function MyBookings() {
                   <button type="button" className="btn btn-secondary btn-sm" onClick={() => downloadBookingSummary(booking, { customerName, venueName: selectedBinge?.name })}>
                     <FiDownload /> Download Summary
                   </button>
-                  {(booking.paymentStatus === 'PAID' || booking.paymentStatus === 'PARTIALLY_REFUNDED' || booking.paymentStatus === 'REFUNDED') && (
+                  {['SUCCESS', 'PARTIALLY_REFUNDED', 'REFUNDED'].includes(booking.paymentStatus) && (
                     <button type="button" className="btn btn-secondary btn-sm"
                             onClick={() => triggerInvoiceDownload(booking.bookingRef)}
                             title="Download the official PDF invoice for this booking">
@@ -1026,31 +1066,54 @@ export default function MyBookings() {
             <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
               {transferModal.bookingRef} — {transferModal.eventType?.name ?? transferModal.eventType}
             </p>
-            <label style={{ display: 'block', marginBottom: '1rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Name</span>
-              <input type="text" className="form-control" placeholder="Full name of the new guest"
-                value={transferForm.recipientName}
-                onChange={(e) => setTransferForm(prev => ({ ...prev, recipientName: e.target.value }))} />
-            </label>
-            <label style={{ display: 'block', marginBottom: '1rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Email</span>
-              <input type="email" className="form-control" placeholder="name@example.com"
-                value={transferForm.recipientEmail}
-                onChange={(e) => setTransferForm(prev => ({ ...prev, recipientEmail: e.target.value }))} />
-            </label>
-            <label style={{ display: 'block', marginBottom: '1.5rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Phone (optional)</span>
-              <PhoneField
-                value={transferForm.recipientPhone}
-                onChange={(val) => setTransferForm(prev => ({ ...prev, recipientPhone: val || '' }))}
-              />
-            </label>
-            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-              <button className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => setTransferModal(null)}>Cancel</button>
-              <button className="btn btn-primary btn-sm" disabled={actionLoading} onClick={handleTransfer}>
-                {actionLoading ? 'Transferring...' : 'Confirm Transfer'}
-              </button>
-            </div>
+            {pendingTransfer ? (
+              <>
+                <p style={{ fontSize: '0.9rem', marginBottom: '0.75rem' }}>
+                  A transfer request is already pending for <strong>{pendingTransfer.toEmail}</strong>.
+                </p>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
+                  The booking stays yours until they accept. Revoke this request if you want to send a new one.
+                </p>
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                  <button className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => setTransferModal(null)}>Close</button>
+                  <button className="btn btn-danger btn-sm" disabled={actionLoading} onClick={handleRevokeTransfer}>
+                    {actionLoading ? 'Revoking...' : 'Revoke Request'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <label style={{ display: 'block', marginBottom: '1rem' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Name</span>
+                  <input type="text" className="form-control" placeholder="Full name of the new guest"
+                    value={transferForm.recipientName}
+                    onChange={(e) => setTransferForm(prev => ({ ...prev, recipientName: e.target.value }))} />
+                </label>
+                <label style={{ display: 'block', marginBottom: '1rem' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Email</span>
+                  <input type="email" className="form-control" placeholder="name@example.com"
+                    value={transferForm.recipientEmail}
+                    onChange={(e) => setTransferForm(prev => ({ ...prev, recipientEmail: e.target.value }))} />
+                </label>
+                <label style={{ display: 'block', marginBottom: '1rem' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Phone (optional)</span>
+                  <PhoneField
+                    value={transferForm.recipientPhone}
+                    onChange={(val) => setTransferForm(prev => ({ ...prev, recipientPhone: val || '' }))}
+                  />
+                </label>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
+                  The recipient will receive an email link to accept or decline. Your booking stays
+                  yours until they accept; the request expires automatically if they don't respond.
+                </p>
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                  <button className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => setTransferModal(null)}>Cancel</button>
+                  <button className="btn btn-primary btn-sm" disabled={actionLoading} onClick={handleTransfer}>
+                    {actionLoading ? 'Sending...' : 'Send Transfer Request'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

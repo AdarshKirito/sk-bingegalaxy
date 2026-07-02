@@ -1,18 +1,28 @@
-import { useState } from 'react';
-import { authService } from '../services/endpoints';
+import { useState, useEffect } from 'react';
+import { authService, siteContentService } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import { FiUserPlus, FiShield, FiSettings, FiEye, FiEyeOff } from 'react-icons/fi';
 import PhoneField, { splitPhone, validatePhone } from '../components/form/PhoneField';
+import { ADMIN_ONBOARDING_TERMS_SLUG, DEFAULT_ADMIN_TERMS_TITLE, parseTerms } from '../content/legalContent';
 import './Auth.css';
 
 export default function AdminRegister() {
-  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '', password: '', confirmPassword: '' });
+  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '', password: '', confirmPassword: '', consentGiven: false });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [touched, setTouched] = useState({});
   const [showPw, setShowPw] = useState(false);
   const [showCpw, setShowCpw] = useState(false);
   const [generatedPw, setGeneratedPw] = useState('');
+  const [terms, setTerms] = useState({ title: DEFAULT_ADMIN_TERMS_TITLE, body: '' });
+
+  useEffect(() => {
+    let cancelled = false;
+    siteContentService.getPublic(ADMIN_ONBOARDING_TERMS_SLUG)
+      .then((res) => { if (!cancelled) setTerms(parseTerms(res.data?.data?.contentJson, { title: DEFAULT_ADMIN_TERMS_TITLE, body: '' })); })
+      .catch(() => { /* terms box shows a fallback note */ });
+    return () => { cancelled = true; };
+  }, []);
 
   const generatePassword = () => {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*';
@@ -33,7 +43,9 @@ export default function AdminRegister() {
   const fieldErrors = {
     firstName: touched.firstName && !form.firstName.trim() ? 'First name is required' : '',
     email: touched.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email) ? 'Enter a valid email' : '',
-    phone: touched.phone && !validatePhone(form.phone) ? 'Enter a valid phone number' : '',
+    // validatePhone returns the error message ('' when valid) — use it directly.
+    // (The previous `!validatePhone(...)` inverted this, flagging valid numbers.)
+    phone: touched.phone ? validatePhone(form.phone, { required: true }) : '',
     password: touched.password ? (form.password.length < 10 ? 'Min 10 characters' : !PW_REGEX.test(form.password) ? 'Must include uppercase, lowercase, number & special character (@$!%*?&#)' : '') : '',
     confirmPassword: touched.confirmPassword && form.password !== form.confirmPassword ? 'Passwords do not match' : '',
   };
@@ -62,10 +74,16 @@ export default function AdminRegister() {
       return;
     }
     const phoneParts = splitPhone(form.phone);
-    if (!validatePhone(form.phone)) {
-      const message = 'Enter a valid phone number';
-      setError(message);
-      toast.error(message);
+    const phoneErr = validatePhone(form.phone, { required: true });
+    if (phoneErr) {
+      setError(phoneErr);
+      toast.error(phoneErr);
+      return;
+    }
+    if (!form.consentGiven) {
+      const msg = 'Please confirm the new admin accepts the administrator terms below.';
+      setError(msg);
+      toast.error(msg);
       return;
     }
     setLoading(true);
@@ -78,7 +96,7 @@ export default function AdminRegister() {
       };
       await authService.adminRegister(data);
       toast.success('New admin account created successfully!');
-      setForm({ firstName: '', lastName: '', email: '', phone: '', password: '', confirmPassword: '' });
+      setForm({ firstName: '', lastName: '', email: '', phone: '', password: '', confirmPassword: '', consentGiven: false });
       setTouched({});
       setError('');
       setGeneratedPw('');
@@ -147,16 +165,13 @@ export default function AdminRegister() {
                 <input type="email" name="email" value={form.email} onChange={handleChange} onBlur={handleBlur('email')} required placeholder="admin@example.com" />
                 {fieldErrors.email && <span className="field-error">{fieldErrors.email}</span>}
               </div>
-              <div className={`input-group ${fieldErrors.phone ? 'has-error' : ''}`}>
-                <label>Phone</label>
-                <PhoneField
-                  value={form.phone}
-                  onChange={(val) => setForm(f => ({ ...f, phone: val || '' }))}
-                  onBlur={handleBlur('phone')}
-                  required
-                />
-                {fieldErrors.phone && <span className="field-error">{fieldErrors.phone}</span>}
-              </div>
+              <PhoneField
+                value={form.phone}
+                onChange={(val) => setForm(f => ({ ...f, phone: val || '' }))}
+                onBlur={handleBlur('phone')}
+                required
+                error={fieldErrors.phone}
+              />
               <div className={`input-group ${fieldErrors.password ? 'has-error' : ''}`}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   Password
@@ -188,6 +203,27 @@ export default function AdminRegister() {
                 </div>
                 {fieldErrors.confirmPassword && <span className="field-error">{fieldErrors.confirmPassword}</span>}
               </div>
+
+              <div className="input-group" style={{ marginTop: '0.25rem' }}>
+                <label style={{ fontWeight: 600, marginBottom: '0.4rem' }}>{terms.title || DEFAULT_ADMIN_TERMS_TITLE}</label>
+                <div style={{
+                  maxHeight: '160px', overflowY: 'auto', padding: '0.7rem 0.85rem',
+                  border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                  background: 'var(--bg-input)', color: 'var(--text-secondary)',
+                  fontSize: '0.82rem', lineHeight: 1.5, whiteSpace: 'pre-wrap',
+                }}>
+                  {terms.body || 'No administrator terms have been published yet. A super-admin can add them under Terms & Legal Content.'}
+                </div>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.55rem', fontWeight: 400, cursor: 'pointer', marginTop: '0.6rem' }}>
+                  <input type="checkbox" checked={form.consentGiven}
+                    onChange={(e) => setForm({ ...form, consentGiven: e.target.checked })}
+                    style={{ marginTop: '0.2rem', width: 'auto' }} required />
+                  <span style={{ fontSize: '0.85rem', lineHeight: 1.4 }}>
+                    The new administrator has read and accepts the terms above and consents to data processing.
+                  </span>
+                </label>
+              </div>
+
               <button type="submit" className="btn btn-primary auth-btn" disabled={loading}>
                 {loading ? <><span className="btn-spinner" /> Creating...</> : 'Create Admin Account'}
               </button>

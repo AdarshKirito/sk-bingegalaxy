@@ -44,6 +44,7 @@ export const authService = {
   searchCustomers: (q) => api.get('/auth/admin/search-customers', { params: { q } }),
   getAllCustomers: () => api.get('/auth/admin/customers'),
   adminCreateCustomer: (data) => api.post('/auth/admin/create-customer', data),
+  regenerateTempPassword: (id) => api.post(`/auth/admin/customer/${id}/temp-password`),
   getCustomerById: (id) => api.get(`/auth/admin/customer/${id}`),
   adminUpdateCustomer: (id, data) => api.put(`/auth/admin/customer/${id}`, data),
   getAllAdmins: () => api.get('/auth/admin/admins'),

@@ -227,11 +227,35 @@ public class PaymentEventListener {
         if (isDuplicate(key)) return;
 
         log.info("Payment refunded event for booking: {}, status: {}", event.getBookingRef(), event.getStatus());
-        PaymentStatus status = PaymentStatus.PARTIALLY_REFUNDED.name().equals(event.getStatus())
-            ? PaymentStatus.PARTIALLY_REFUNDED
-            : PaymentStatus.REFUNDED;
-        bookingService.updatePaymentStatus(event.getBookingRef(), status, null);
+        // Apply the refund to the running collected total FIRST, then derive the
+        // booking-level payment status from the NET position (collected vs total) —
+        // never from the single payment's refund flag alone. This makes the status
+        // self-correcting regardless of the order in which payment.refunded and
+        // payment.success arrive, which is essential for the "change payment method"
+        // flow: it fires a full refund of the old payment AND an immediate
+        // re-collection under the new method, on two different Kafka topics with no
+        // cross-topic ordering guarantee. The previous logic set REFUNDED purely from
+        // event.getStatus(), so if the re-collection's payment.success was processed
+        // first, the booking stayed stuck at REFUNDED with collected == total — the
+        // phantom "fully refunded, ₹0 collected" banner on a fully-paid booking.
         bookingService.subtractFromCollectedAmount(event.getBookingRef(), event.getRefundAmount());
+
+        Booking netBooking = bookingService.getBookingEntityForSystem(event.getBookingRef());
+        java.math.BigDecimal collected = netBooking.getCollectedAmount() != null
+            ? netBooking.getCollectedAmount() : java.math.BigDecimal.ZERO;
+        java.math.BigDecimal total = netBooking.getTotalAmount() != null
+            ? netBooking.getTotalAmount() : java.math.BigDecimal.ZERO;
+        final java.math.BigDecimal epsilon = new java.math.BigDecimal("0.01");
+
+        PaymentStatus status;
+        if (collected.compareTo(epsilon) <= 0) {
+            status = PaymentStatus.REFUNDED;            // nothing left collected → genuinely refunded
+        } else if (total.signum() > 0 && collected.compareTo(total) >= 0) {
+            status = PaymentStatus.SUCCESS;             // still (or again) fully covered, e.g. a method swap
+        } else {
+            status = PaymentStatus.PARTIALLY_REFUNDED;  // some money refunded, a balance is still retained
+        }
+        bookingService.updatePaymentStatus(event.getBookingRef(), status, null);
 
         try {
             Booking refreshed = bookingService.getBookingEntityForSystem(event.getBookingRef());

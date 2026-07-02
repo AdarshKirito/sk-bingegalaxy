@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
+import { useBinge } from '../context/BingeContext';
 import {
   FiArrowRight, FiAward, FiBriefcase, FiCalendar, FiCamera, FiCheckCircle,
   FiChevronLeft, FiChevronRight, FiClock, FiFilm, FiGift, FiHeart, FiMapPin,
@@ -237,6 +238,11 @@ function BigBannerCarousel({ slides, autoplayMs = 6000 }) {
 
 export default function Home() {
   const { isAuthenticated, isAdmin } = useAuth();
+  const { selectedBinge } = useBinge();
+  // CTAs must not land users on a guard redirect: /book and /admin/dashboard
+  // both require a selected venue, so send venue-less users to the picker.
+  const customerCtaHref = selectedBinge ? '/book' : '/platform';
+  const adminCtaHref = selectedBinge ? '/admin/dashboard' : '/admin/platform';
   const { t } = useTranslation();
   const [content, setContent] = useState(defaultHomeContent);
 
@@ -275,11 +281,11 @@ export default function Home() {
             <div className="home-hero-actions">
               {isAuthenticated ? (
                 isAdmin ? (
-                  <Link to="/admin/dashboard" className="btn btn-primary home-cta-primary">
+                  <Link to={adminCtaHref} className="btn btn-primary home-cta-primary">
                     {t('home.cta_admin', 'Open Admin Dashboard')} <FiArrowRight />
                   </Link>
                 ) : (
-                  <Link to="/book" className="btn btn-primary home-cta-primary">
+                  <Link to={customerCtaHref} className="btn btn-primary home-cta-primary">
                     {t('home.cta_book', 'Book your event')} <FiArrowRight />
                   </Link>
                 )
@@ -399,11 +405,11 @@ export default function Home() {
         <div className="home-final-actions">
           {isAuthenticated ? (
             isAdmin ? (
-              <Link to="/admin/dashboard" className="btn btn-primary">
+              <Link to={adminCtaHref} className="btn btn-primary">
                 {t('home.cta_admin', 'Open Admin Dashboard')} <FiArrowRight />
               </Link>
             ) : (
-              <Link to="/book" className="btn btn-primary">
+              <Link to={customerCtaHref} className="btn btn-primary">
                 {t('home.cta_continue', 'Continue to Booking')} <FiArrowRight />
               </Link>
             )

@@ -54,6 +54,10 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         // Security is enforced by HMAC-SHA256 signature verification in DisputeWebhookService,
         // not by JWT auth. Must be public so Razorpay's servers can reach this endpoint.
         "/api/v1/payments/webhooks/",
+        // Email-provider delivery webhooks (SendGrid/Mailgun/SES) — server-to-server,
+        // no JWT. Security is HMAC-SHA256 over the raw body, verified fail-closed in
+        // DeliveryWebhookController (X-Webhook-Signature).
+        "/api/v1/notifications/webhooks/",
         "/api/v1/site-content/public",
         // Booking-transfer recipient endpoints — token IS the bearer (magic-link
         // pattern). Recipient may not yet have an account; the token proves the
@@ -147,6 +151,19 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
             if (role == null || !VALID_ROLES.contains(role)) {
                 log.warn("Invalid role '{}' in JWT for path {}", role, path);
                 exchange.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
+                return exchange.getResponse().setComplete();
+            }
+
+            // ── Forced password-change gate (server-side) ────────────────────────
+            // A token minted while the account still holds an admin-issued temporary
+            // password is restricted to the change-password / profile / logout surface.
+            // This is the authoritative enforcement — the SPA also forces the change at
+            // login, but a token can't be replayed against any other API behind it.
+            Boolean mustChangePassword = claims.get("mustChangePassword", Boolean.class);
+            if (Boolean.TRUE.equals(mustChangePassword) && !isPasswordChangeAllowedPath(path)) {
+                log.info("Blocking restricted (temp-password) token from {} — change required", path);
+                exchange.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
+                exchange.getResponse().getHeaders().add("X-Password-Change-Required", "true");
                 return exchange.getResponse().setComplete();
             }
 
@@ -257,6 +274,23 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
 
     private boolean isPublicPath(String path) {
         return PUBLIC_PATHS.stream().anyMatch(path::startsWith);
+    }
+
+    /**
+     * Endpoints a restricted (temporary-password) session may still reach: just
+     * enough to set a new password, read its own profile so the SPA can boot, and
+     * sign out. Everything else is blocked until the password is changed.
+     */
+    private static final List<String> PASSWORD_CHANGE_ALLOWED_PATHS = List.of(
+        "/api/v1/auth/change-password",
+        "/api/v1/auth/profile",
+        "/api/v1/auth/me",
+        "/api/v1/auth/logout"
+    );
+
+    private boolean isPasswordChangeAllowedPath(String path) {
+        String normalized = java.net.URI.create(path).normalize().getPath();
+        return PASSWORD_CHANGE_ALLOWED_PATHS.stream().anyMatch(normalized::startsWith);
     }
 
     /**

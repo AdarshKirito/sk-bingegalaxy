@@ -2,9 +2,19 @@
 node_modules/
 frontend/dist/
 frontend/.tmp/
+frontend/.vite-tmp/
+frontend/.npm-cache/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+### Test artifacts ###
+frontend/playwright-report/
+frontend/test-results/
+
+### Local secrets / scratch credentials ###
+admin_token.txt
+*_token.txt
 
 ### Java / Maven ###
 **/target/
@@ -44,3 +54,4 @@ spike.out
 smoke.out
 *.out
 k6_bin/
+k6.zip

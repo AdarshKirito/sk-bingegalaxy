@@ -280,5 +280,40 @@ class NotificationServiceTest {
 
             verify(notificationRepository, never()).save(any());
         }
+
+        @Test
+        @DisplayName("A retry that actually succeeds clears the stale failure reason and marks SENT")
+        void retrySucceeds_clearsStaleFailureReason_marksSent() {
+            // Regression: dispatch signals success via failureReason == null. On a retry the row
+            // still carries the PRIOR failure's reason, so without clearing it a successful
+            // re-dispatch was mis-reported as failed → duplicate sends + false BOUNCED.
+            com.skbingegalaxy.notification.provider.SmsProvider smsProvider =
+                    mock(com.skbingegalaxy.notification.provider.SmsProvider.class);
+            when(smsProvider.send(anyString(), anyString())).thenReturn("SID-OK");
+            NotificationService svc = new NotificationService(
+                    notificationRepository, null, templateEngine, preferenceService,
+                    templateService, whatsAppTemplateRepository, smsProvider, null, null,
+                    notificationMetrics);
+            ReflectionTestUtils.setField(svc, "maxRetries", 3);
+
+            Notification failed = Notification.builder()
+                    .id("f4").recipientPhone("9876543210").recipientPhoneCountryCode("+91")
+                    .type("BOOKING_CREATED").channel(NotificationChannel.SMS)
+                    .body("Your booking is confirmed.").sent(false).retryCount(1)
+                    .failureReason("Connection timeout")   // stale reason from the prior attempt
+                    .deliveryStatus(com.skbingegalaxy.notification.model.DeliveryStatus.PENDING)
+                    .build();
+            when(notificationRepository.findRetryableNotifications(eq(3), any(LocalDateTime.class), any(org.springframework.data.domain.Pageable.class)))
+                    .thenReturn(List.of(failed));
+
+            svc.retryFailedNotifications();
+
+            assertThat(failed.isSent()).isTrue();
+            assertThat(failed.getDeliveryStatus())
+                    .isEqualTo(com.skbingegalaxy.notification.model.DeliveryStatus.SENT);
+            assertThat(failed.getFailureReason()).isNull();
+            assertThat(failed.getNextRetryAt()).isNull();
+            verify(smsProvider, times(1)).send(anyString(), anyString());  // sent exactly once
+        }
     }
 }

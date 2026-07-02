@@ -18,6 +18,8 @@ export default function Register() {
     password: '',
     confirmPassword: '',
     address: { ...EMPTY_ADDRESS },
+    consentGiven: false,
+    consentMarketing: false,
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -52,6 +54,12 @@ export default function Register() {
       toast.error(msg);
       return;
     }
+    if (!form.consentGiven) {
+      const msg = 'Please accept the Terms of Service & Privacy Policy to create your account.';
+      setError(msg);
+      toast.error(msg);
+      return;
+    }
     setError('');
     setLoading(true);
     try {
@@ -69,6 +77,8 @@ export default function Register() {
         state: form.address.state || '',
         country: form.address.country || '',
         postalCode: form.address.postalCode || '',
+        consentGiven: form.consentGiven,
+        consentMarketing: form.consentMarketing,
       };
       await register(data);
       trackSignUp('email');
@@ -177,6 +187,28 @@ export default function Register() {
                 </div>
                 {fieldErrors.confirmPassword && <span className="field-error">{fieldErrors.confirmPassword}</span>}
               </div>
+
+              <div className="input-group" style={{ marginTop: '0.25rem' }}>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.55rem', fontWeight: 400, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={form.consentGiven}
+                    onChange={(e) => setForm({ ...form, consentGiven: e.target.checked })}
+                    style={{ marginTop: '0.2rem', width: 'auto' }} required />
+                  <span style={{ fontSize: '0.85rem', lineHeight: 1.4 }}>
+                    I agree to the{' '}
+                    <Link to="/terms" target="_blank" rel="noreferrer">Terms of Service &amp; Privacy Policy</Link>
+                    {' '}and consent to my data being processed to operate my bookings.
+                  </span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.55rem', fontWeight: 400, cursor: 'pointer', marginTop: '0.5rem' }}>
+                  <input type="checkbox" checked={form.consentMarketing}
+                    onChange={(e) => setForm({ ...form, consentMarketing: e.target.checked })}
+                    style={{ marginTop: '0.2rem', width: 'auto' }} />
+                  <span style={{ fontSize: '0.85rem', lineHeight: 1.4, color: 'var(--text-secondary)' }}>
+                    Send me offers, event ideas and reminders (optional).
+                  </span>
+                </label>
+              </div>
+
               <button type="submit" className="btn btn-primary auth-btn" disabled={loading}>
                 {loading ? <><span className="btn-spinner" /> Creating...</> : 'Create Account'}
               </button>

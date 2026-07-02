@@ -13,7 +13,7 @@ internal:
     # No default — boot fails fast if the shared Feign secret is not
     # provided via env, rather than silently running with a well-known
     # placeholder that would let anyone forge internal API calls.
-    secret: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET must be set}
+    secret: ${INTERNAL_API_SECRET}
 
 spring:
   application:
@@ -21,7 +21,7 @@ spring:
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/payment_db}
     username: ${SPRING_DATASOURCE_USERNAME:payment_svc}
-    password: ${SPRING_DATASOURCE_PASSWORD:?SPRING_DATASOURCE_PASSWORD must be set}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:8}

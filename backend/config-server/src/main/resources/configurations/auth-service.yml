@@ -21,7 +21,7 @@ internal:
     # allowing a delegated admin to mutate a locked resource). No default
     # — boot fails fast if not provided so we never silently run with a
     # well-known placeholder.
-    secret: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET must be set}
+    secret: ${INTERNAL_API_SECRET}
 
 spring:
   servlet:
@@ -33,7 +33,7 @@ spring:
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/auth_db}
     username: ${SPRING_DATASOURCE_USERNAME:auth_svc}
-    password: ${SPRING_DATASOURCE_PASSWORD:?SPRING_DATASOURCE_PASSWORD must be set}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:8}

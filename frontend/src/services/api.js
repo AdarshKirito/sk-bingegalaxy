@@ -238,6 +238,14 @@ api.interceptors.response.use(
         return Promise.reject(refreshErr);
       }
     } else if (err.response?.status === 403) {
+      // Restricted (temporary-password) session — the gateway blocks everything
+      // except the change-password surface. Send the user back to sign in so they
+      // can set a new password (or use "Forgot password" if the temp one is spent).
+      if (err.response.headers?.['x-password-change-required'] === 'true') {
+        err.userMessage = 'Please set a new password to continue.';
+        forcePasswordChange();
+        return Promise.reject(err);
+      }
       toast.error('You do not have permission to perform this action.');
     } else if (err.response?.status === 429) {
       const retryAfter = parseInt(
@@ -274,6 +282,17 @@ api.interceptors.response.use(
     return Promise.reject(err);
   }
 );
+
+function forcePasswordChange() {
+  localStorage.removeItem('user');
+  localStorage.removeItem('token_exp');
+  Sentry.setUser(null);
+  axios.post('/api/v1/auth/logout', {}, { withCredentials: true }).catch(() => {});
+  if (!window.location.pathname.endsWith('/login')) {
+    toast.info('Please sign in again to set a new password.');
+    window.location.href = '/login';
+  }
+}
 
 function forceLogout() {
   localStorage.removeItem('user');

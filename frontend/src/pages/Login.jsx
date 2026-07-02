@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { authService } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import { trackLogin, identifyUser } from '../services/analytics';
 import { FiCheckCircle, FiClock, FiEye, FiEyeOff, FiShield } from 'react-icons/fi';
@@ -36,6 +37,11 @@ export default function Login() {
   const [showPw, setShowPw] = useState(false);
   const [mfaRequired, setMfaRequired] = useState(false);
   const [mfaCode, setMfaCode] = useState('');
+  // Forced change-password step after signing in with an admin-issued temp password.
+  const [mustChange, setMustChange] = useState(false);
+  const [newPw, setNewPw] = useState('');
+  const [newPw2, setNewPw2] = useState('');
+  const [changing, setChanging] = useState(false);
   const [googleStatus, setGoogleStatus] = useState(GOOGLE_CLIENT_ID ? 'loading' : 'unavailable');
   const [googleHint, setGoogleHint] = useState(
     GOOGLE_CLIENT_ID
@@ -187,6 +193,11 @@ export default function Login() {
         toast.info('Enter the 6-digit code from your authenticator app');
         return;
       }
+      if (result?.mustChangePassword) {
+        setMustChange(true);
+        toast.info('Your temporary password must be changed before continuing.');
+        return;
+      }
       trackLogin('email');
       const u = JSON.parse(localStorage.getItem('user') || '{}');
       if (u.id) identifyUser(String(u.id), { role: u.role });
@@ -198,6 +209,35 @@ export default function Login() {
       toast.error(msg);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleForcedChange = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (newPw.length < 10 || !/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])/.test(newPw)) {
+      setError('Password must be 10+ characters with upper, lower, a number and a special character (@$!%*?&#).');
+      return;
+    }
+    if (newPw !== newPw2) { setError('Passwords do not match'); return; }
+    if (newPw === form.password) { setError('New password must be different from the temporary one'); return; }
+    setChanging(true);
+    try {
+      // The session cookie from the temp-password login authenticates this call.
+      await authService.changePassword({ currentPassword: form.password, newPassword: newPw });
+      // Finalize with a fresh login using the new password (clean tokens + state).
+      await login({ email: form.email.trim(), password: newPw });
+      trackLogin('email');
+      const u = JSON.parse(localStorage.getItem('user') || '{}');
+      if (u.id) identifyUser(String(u.id), { role: u.role });
+      toast.success('Password updated — welcome!');
+      // PublicOnlyRoute redirects once authenticated.
+    } catch (err) {
+      const msg = err.userMessage || err.response?.data?.message || 'Could not update your password. Please try again.';
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setChanging(false);
     }
   };
 
@@ -242,6 +282,31 @@ export default function Login() {
 
             {error && <div className="error-message">{error}</div>}
 
+            {mustChange ? (
+              <form onSubmit={handleForcedChange} noValidate>
+                <p className="auth-subtitle">Your temporary password must be changed. Set a new password to finish signing in.</p>
+                <div className="input-group">
+                  <label>New password</label>
+                  <div className="input-password-wrap">
+                    <input type={showPw ? 'text' : 'password'} required value={newPw}
+                      onChange={(e) => setNewPw(e.target.value)} placeholder="At least 10 characters" autoFocus />
+                    <button type="button" className="pw-toggle" onClick={() => setShowPw(v => !v)} aria-label={showPw ? 'Hide password' : 'Show password'} tabIndex={-1}>
+                      {showPw ? <FiEyeOff /> : <FiEye />}
+                    </button>
+                  </div>
+                  <small style={{ color: '#888' }}>Use upper &amp; lower case, a number and a special character (@$!%*?&amp;#).</small>
+                </div>
+                <div className="input-group">
+                  <label>Confirm new password</label>
+                  <input type={showPw ? 'text' : 'password'} required value={newPw2}
+                    onChange={(e) => setNewPw2(e.target.value)} placeholder="Re-enter new password" />
+                </div>
+                <button type="submit" className="btn btn-primary auth-btn" disabled={changing}>
+                  {changing ? <><span className="btn-spinner" /> Saving...</> : 'Set Password & Continue'}
+                </button>
+              </form>
+            ) : (
+            <>
             <form onSubmit={handleSubmit} noValidate>
               <div className="input-group">
                 <label>Email</label>
@@ -312,6 +377,8 @@ export default function Login() {
               <p className={`auth-google-hint${googleStatus === 'retry' || googleStatus === 'unavailable' ? ' is-warning' : ''}`}>
                 {googleHint}
               </p>
+            )}
+            </>
             )}
 
             <div className="auth-links">

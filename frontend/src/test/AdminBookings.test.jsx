@@ -74,12 +74,15 @@ vi.mock('../services/endpoints', () => ({
 }));
 
 import AdminBookings from '../pages/AdminBookings';
+import { ConfirmProvider } from '../components/ui/ConfirmProvider';
 
 function renderAdminBookings() {
   return render(
     <HelmetProvider>
       <MemoryRouter initialEntries={['/admin/bookings?tab=all']}>
-        <AdminBookings />
+        <ConfirmProvider>
+          <AdminBookings />
+        </ConfirmProvider>
       </MemoryRouter>
     </HelmetProvider>
   );

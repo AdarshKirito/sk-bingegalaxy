@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useBinge } from '../context/BingeContext';
 import { useConfirm } from '../components/ui/ConfirmProvider';
 import { adminService } from '../services/endpoints';
+import { parseServerDate } from '../services/timeFormat';
 import SEO from '../components/SEO';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import { toast } from 'react-toastify';
@@ -141,7 +142,9 @@ export default function AdminEntranceDashboard() {
 
   const handleSelect = (binge) => {
     saveRecentBinge(binge);
-    selectBinge({ id: binge.id, name: binge.name, address: binge.address });
+    // The store normalises to the canonical selected-binge shape — pass the
+    // full object so support contacts / timezone / policies aren't dropped.
+    selectBinge(binge);
     toast.success(`Entered: ${binge.name}`);
     navigate('/admin/dashboard');
   };
@@ -267,7 +270,7 @@ export default function AdminEntranceDashboard() {
                     {b.address && <p>{b.address}</p>}
                     <p style={{ fontSize: '0.85rem', opacity: 0.75 }}>
                       Requested by admin #{b.adminId}
-                      {b.createdAt && ` • ${new Date(b.createdAt).toLocaleString()}`}
+                      {b.createdAt && ` • ${parseServerDate(b.createdAt)?.toLocaleString() || ''}`}
                     </p>
                     <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
                       <button
@@ -421,6 +424,12 @@ export default function AdminEntranceDashboard() {
             <Link to="/admin/home-editor" className="entrance-nav-card">
               <h3><FiSettings /> Edit Home Page</h3>
               <p>Update hero, packages and gallery seen by every visitor</p>
+            </Link>
+          )}
+          {isSuperAdmin && (
+            <Link to="/admin/terms-editor" className="entrance-nav-card">
+              <h3><FiSettings /> Terms &amp; Legal Content</h3>
+              <p>Edit the Terms customers and new admins must accept at sign-up</p>
             </Link>
           )}
           <Link to="/admin/security/mfa" className="entrance-nav-card">

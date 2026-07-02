@@ -136,6 +136,115 @@ class JwtAuthenticationFilterTest {
             verify(chain).filter(any());
             assertThat(exchange.getResponse().getStatusCode()).isNotEqualTo(HttpStatus.UNAUTHORIZED);
         }
+
+        @Test
+        void notificationDeliveryWebhook_bypassesAuth() {
+            MockServerHttpRequest request = MockServerHttpRequest
+                    .post("/api/v1/notifications/webhooks/delivery").build();
+            MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+            filter.filter(exchange, chain).block();
+
+            verify(chain).filter(any());
+            assertThat(exchange.getResponse().getStatusCode()).isNotEqualTo(HttpStatus.UNAUTHORIZED);
+        }
+
+        @Test
+        void notificationNonWebhookPath_requiresAuth() {
+            MockServerHttpRequest request = MockServerHttpRequest
+                    .get("/api/v1/notifications/my").build();
+            MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+            filter.filter(exchange, chain).block();
+
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            verify(chain, never()).filter(any());
+        }
+
+        // ── Booking-transfer magic-link endpoints (token IS the bearer) ──
+
+        @Test
+        void transferByTokenPreview_bypassesAuth() {
+            MockServerHttpRequest request = MockServerHttpRequest
+                    .get("/api/v1/booking-transfers/by-token/some-opaque-token").build();
+            MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+            filter.filter(exchange, chain).block();
+
+            verify(chain).filter(any());
+            assertThat(exchange.getResponse().getStatusCode()).isNotEqualTo(HttpStatus.UNAUTHORIZED);
+        }
+
+        @Test
+        void transferByTokenAccept_bypassesAuth() {
+            MockServerHttpRequest request = MockServerHttpRequest
+                    .post("/api/v1/booking-transfers/by-token/some-opaque-token/accept").build();
+            MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+            filter.filter(exchange, chain).block();
+
+            verify(chain).filter(any());
+            assertThat(exchange.getResponse().getStatusCode()).isNotEqualTo(HttpStatus.UNAUTHORIZED);
+        }
+
+        @Test
+        void transferByTokenDecline_bypassesAuth() {
+            MockServerHttpRequest request = MockServerHttpRequest
+                    .post("/api/v1/booking-transfers/by-token/some-opaque-token/decline").build();
+            MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+            filter.filter(exchange, chain).block();
+
+            verify(chain).filter(any());
+            assertThat(exchange.getResponse().getStatusCode()).isNotEqualTo(HttpStatus.UNAUTHORIZED);
+        }
+
+        @Test
+        void bookingTransfersOutsideByToken_requiresAuth() {
+            MockServerHttpRequest request = MockServerHttpRequest
+                    .get("/api/v1/booking-transfers/123").build();
+            MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+            filter.filter(exchange, chain).block();
+
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            verify(chain, never()).filter(any());
+        }
+
+        @Test
+        void byTokenPrefixWithoutTrailingSlash_doesNotOverMatch() {
+            // The allowlist entry ends with a slash; a crafted sibling segment
+            // must not ride the public prefix.
+            MockServerHttpRequest request = MockServerHttpRequest
+                    .get("/api/v1/booking-transfers/by-token-evil/x").build();
+            MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+            filter.filter(exchange, chain).block();
+
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            verify(chain, never()).filter(any());
+        }
+
+        @Test
+        void transferByTokenAccept_stripsSpoofedIdentityHeaders() {
+            // The accept endpoint optionally reads X-User-Id to attribute the
+            // transfer to a signed-in recipient. An anonymous caller must not
+            // be able to inject it past the gateway.
+            MockServerHttpRequest request = MockServerHttpRequest
+                    .post("/api/v1/booking-transfers/by-token/some-opaque-token/accept")
+                    .header("X-User-Id", "999")
+                    .header("X-User-Role", "SUPER_ADMIN")
+                    .build();
+            MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+            filter.filter(exchange, chain).block();
+
+            verify(chain).filter(argThat(ex -> {
+                HttpHeaders headers = ex.getRequest().getHeaders();
+                return headers.getFirst("X-User-Id") == null
+                        && headers.getFirst("X-User-Role") == null;
+            }));
+        }
     }
 
     // ── Authentication tests ─────────────────────────────
@@ -300,6 +409,68 @@ class JwtAuthenticationFilterTest {
     @Test
     void order_isNegativeOne() {
         assertThat(filter.getOrder()).isEqualTo(-1);
+    }
+
+    // ── Forced password-change (temp-password) gate ──────────
+
+    @Nested
+    class PasswordChangeGateTests {
+
+        private String tempPasswordToken() {
+            SecretKey key = Keys.hmacShaKeyFor(Decoders.BASE64.decode(SECRET));
+            return Jwts.builder()
+                    .subject("7")
+                    .claim("role", "CUSTOMER")
+                    .claim("email", "temp@test.com")
+                    .claim("firstName", "Temp")
+                    .claim("mustChangePassword", true)
+                    .issuedAt(new Date())
+                    .expiration(new Date(System.currentTimeMillis() + 3600_000))
+                    .signWith(key)
+                    .compact();
+        }
+
+        @Test
+        void tempPasswordToken_blockedOnNormalPath_with403AndHeader() {
+            MockServerHttpRequest request = MockServerHttpRequest
+                    .get("/api/v1/bookings/my")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + tempPasswordToken())
+                    .build();
+            MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+            filter.filter(exchange, chain).block();
+
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+            assertThat(exchange.getResponse().getHeaders().getFirst("X-Password-Change-Required"))
+                    .isEqualTo("true");
+            verify(chain, never()).filter(any());
+        }
+
+        @Test
+        void tempPasswordToken_allowedOnChangePassword() {
+            MockServerHttpRequest request = MockServerHttpRequest
+                    .put("/api/v1/auth/change-password")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + tempPasswordToken())
+                    .build();
+            MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+            filter.filter(exchange, chain).block();
+
+            verify(chain).filter(any());
+        }
+
+        @Test
+        void tempPasswordToken_allowedOnProfile() {
+            MockServerHttpRequest request = MockServerHttpRequest
+                    .get("/api/v1/auth/profile")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + tempPasswordToken())
+                    .build();
+            MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+            filter.filter(exchange, chain).block();
+
+            verify(chain).filter(any());
+        }
     }
 
     @Nested

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { authService, adminService } from '../services/endpoints';
+import { parseServerDate } from '../services/timeFormat';
 import SEO from '../components/SEO';
 import { useConfirm } from '../components/ui/ConfirmProvider';
 import { toast } from 'react-toastify';
@@ -672,7 +673,7 @@ export default function AdminAllUsers() {
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                         {reviews.map((r, idx) => {
                           const dateStr = r.createdAt
-                            ? new Date(r.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                            ? (parseServerDate(r.createdAt)?.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) || '—')
                             : '—';
                           return (
                             <article key={r.id || idx} style={{
