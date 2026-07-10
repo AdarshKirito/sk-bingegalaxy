@@ -16,7 +16,7 @@
     "e2e:install": "playwright install --with-deps chromium"
   },
   "dependencies": {
-    "@sentry/react": "^9.15.0",
+    "@sentry/react": "^10.63.0",
     "@testing-library/dom": "^10.4.1",
     "axios": "^1.8.4",
     "country-state-city": "^3.2.1",
