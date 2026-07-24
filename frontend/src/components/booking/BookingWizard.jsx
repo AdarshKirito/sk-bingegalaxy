@@ -566,15 +566,19 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
       setLoyaltyQuote(null);
       return;
     }
+    // Debounce: a slider drag fires this on every pixel, so wait for the value
+    // to settle before hitting the server (the gateway rate-limits per user).
     let cancelled = false;
-    loyaltyV2.getRedeemQuote({
-      bingeId: selectedBinge.id,
-      bookingAmount,
-      points: Math.min(Number(form.redeemLoyaltyPoints) || 0, loyalty.currentBalance || 0),
-    })
-      .then((quote) => { if (!cancelled) setLoyaltyQuote(quote); })
-      .catch(() => { if (!cancelled) setLoyaltyQuote(null); });
-    return () => { cancelled = true; };
+    const t = setTimeout(() => {
+      loyaltyV2.getRedeemQuote({
+        bingeId: selectedBinge.id,
+        bookingAmount,
+        points: Math.min(Number(form.redeemLoyaltyPoints) || 0, loyalty.currentBalance || 0),
+      })
+        .then((quote) => { if (!cancelled) setLoyaltyQuote(quote); })
+        .catch(() => { if (!cancelled) setLoyaltyQuote(null); });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(t); };
   }, [
     isAdmin,
     loyalty,
@@ -592,7 +596,7 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
   // to this booking and the venue-country per-point value. Recomputed when the
   // bill (not the chosen points) changes, so dragging the slider never refetches.
   useEffect(() => {
-    if (isAdmin || !loyalty || !selectedBinge?.id) { setRedeemMax(null); return; }
+    if (isAdmin || !loyalty || !(loyalty.currentBalance > 0) || !selectedBinge?.id) { setRedeemMax(null); return; }
     const bookingAmount = calculateTotal();
     if (!bookingAmount || bookingAmount <= 0) { setRedeemMax(null); return; }
     let cancelled = false;
@@ -631,7 +635,8 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
     form.numberOfGuests,
     form.addOns,
     form.venueRoomId,
-    form.redeemLoyaltyPoints,
+    // NB: not form.redeemLoyaltyPoints — the discount enters via loyaltyQuote
+    // (debounced), so keying off it here would re-spam previewTaxes on every drag.
     activeSurge,
     resolvedPricing,
     loyaltyQuote,
