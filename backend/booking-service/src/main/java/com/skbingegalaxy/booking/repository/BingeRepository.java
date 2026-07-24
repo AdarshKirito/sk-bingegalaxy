@@ -17,6 +17,22 @@ public interface BingeRepository extends JpaRepository<Binge, Long> {
     List<Binge> findByStatusOrderByCreatedAtDesc(BingeApprovalStatus status);
 
     /**
+     * Lightweight approval-status lookup by id (no entity hydration) — used by the
+     * BingeApprovalInterceptor to freeze operations on a REJECTED venue. Empty when
+     * the binge does not exist.
+     */
+    @Query("SELECT b.status FROM Binge b WHERE b.id = :id")
+    java.util.Optional<BingeApprovalStatus> findStatusById(@Param("id") Long id);
+
+    /**
+     * Lightweight ISO-3166 alpha-2 country lookup by id (no entity hydration) —
+     * used by the loyalty redemption resolver to value points against the
+     * VENUE's country economics. Empty when the binge does not exist.
+     */
+    @Query("SELECT b.country FROM Binge b WHERE b.id = :id")
+    java.util.Optional<String> findCountryById(@Param("id") Long id);
+
+    /**
      * Customer-facing listing: only APPROVED + active binges that have at least
      * one active event type. Hides empty/freshly-created venues so customers
      * never land on a binge they can't actually book.

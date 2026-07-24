@@ -4,6 +4,7 @@ import com.skbingegalaxy.booking.loyalty.v2.entity.*;
 import com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyMembershipRepository;
 import com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyPointsWalletRepository;
 import com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyConfigService;
+import com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyConfigService.EffectiveRedemptionTerms;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -23,7 +24,9 @@ import static org.mockito.Mockito.*;
  *
  * <p>Exercises the quote pipeline — min-points guard, max-percent cap,
  * tier bonus application — and the burn path's idempotent write
- * through {@link PointsWalletService#debit}.
+ * through {@link PointsWalletService#debit}. The engine now consumes the
+ * resolved {@link EffectiveRedemptionTerms} (per-binge override → venue-country
+ * config → program default), so these tests stub that resolver directly.
  */
 class RedeemEngineTest {
 
@@ -66,8 +69,7 @@ class RedeemEngineTest {
 
     @Test
     void quote_converts_points_to_currency_at_base_rate_with_no_bonus() {
-        LoyaltyBingeRedemptionRule rule = rule(100L, 0L, new BigDecimal("100.00"), null);
-        when(configService.resolveRedemptionRule(eq(500L), any())).thenReturn(Optional.of(rule));
+        stubTerms(terms(100L, 0L, new BigDecimal("100.00"), null, "BINGE_RULE"));
 
         var q = engine.quote(new RedeemEngine.QuoteRequest(
                 42L, 7L, 10_000L, new BigDecimal("500.00"), LocalDateTime.now(ZoneOffset.UTC)));
@@ -79,9 +81,20 @@ class RedeemEngineTest {
     }
 
     @Test
+    void quote_uses_country_fallback_terms_when_no_binge_override() {
+        // No per-binge rule → resolver returns the venue's COUNTRY_CONFIG value.
+        stubTerms(terms(100L, 0L, new BigDecimal("100.00"), null, "COUNTRY_CONFIG"));
+
+        var q = engine.quote(new RedeemEngine.QuoteRequest(
+                42L, 7L, 10_000L, new BigDecimal("500.00"), LocalDateTime.now(ZoneOffset.UTC)));
+
+        assertThat(q.eligible()).isTrue();
+        assertThat(q.currencyValue()).isEqualByComparingTo(new BigDecimal("100.00"));
+    }
+
+    @Test
     void quote_rejects_when_below_min_redemption_points() {
-        LoyaltyBingeRedemptionRule rule = rule(100L, 5_000L, new BigDecimal("100.00"), null);
-        when(configService.resolveRedemptionRule(eq(500L), any())).thenReturn(Optional.of(rule));
+        stubTerms(terms(100L, 5_000L, new BigDecimal("100.00"), null, "BINGE_RULE"));
 
         var q = engine.quote(new RedeemEngine.QuoteRequest(
                 42L, 7L, 1_000L, new BigDecimal("500.00"), LocalDateTime.now(ZoneOffset.UTC)));
@@ -92,8 +105,7 @@ class RedeemEngineTest {
 
     @Test
     void quote_caps_at_max_redemption_percent_of_booking() {
-        LoyaltyBingeRedemptionRule rule = rule(100L, 0L, new BigDecimal("50.00"), null);  // 50 % cap
-        when(configService.resolveRedemptionRule(eq(500L), any())).thenReturn(Optional.of(rule));
+        stubTerms(terms(100L, 0L, new BigDecimal("50.00"), null, "BINGE_RULE"));  // 50 % cap
 
         // Requesting 20 000 pts = INR 200, but booking is INR 100 → 50 % cap = INR 50
         var q = engine.quote(new RedeemEngine.QuoteRequest(
@@ -108,8 +120,7 @@ class RedeemEngineTest {
 
     @Test
     void quote_rejects_when_wallet_balance_cannot_cover_effective_points() {
-        LoyaltyBingeRedemptionRule rule = rule(100L, 0L, new BigDecimal("100.00"), null);
-        when(configService.resolveRedemptionRule(eq(500L), any())).thenReturn(Optional.of(rule));
+        stubTerms(terms(100L, 0L, new BigDecimal("100.00"), null, "BINGE_RULE"));
         when(walletRepository.findByMembershipId(42L)).thenReturn(Optional.of(
                 LoyaltyPointsWallet.builder().id(1000L).membershipId(42L).currentBalance(999L).build()));
 
@@ -123,9 +134,8 @@ class RedeemEngineTest {
     @Test
     void quote_applies_tier_bonus_from_json() {
         // Gold gets 5 % extra value.
-        LoyaltyBingeRedemptionRule rule = rule(100L, 0L, new BigDecimal("100.00"),
-                "{\"GOLD\":\"5\",\"PLATINUM\":\"10\"}");
-        when(configService.resolveRedemptionRule(eq(500L), any())).thenReturn(Optional.of(rule));
+        stubTerms(terms(100L, 0L, new BigDecimal("100.00"),
+                "{\"GOLD\":\"5\",\"PLATINUM\":\"10\"}", "BINGE_RULE"));
 
         var q = engine.quote(new RedeemEngine.QuoteRequest(
                 42L, 7L, 10_000L, new BigDecimal("500.00"), LocalDateTime.now(ZoneOffset.UTC)));
@@ -147,9 +157,20 @@ class RedeemEngineTest {
     }
 
     @Test
+    void maxRedeemable_reports_ceiling_and_per_point_value() {
+        stubTerms(terms(100L, 0L, new BigDecimal("50.00"), null, "COUNTRY_CONFIG"));
+        // Balance 100k pts, booking 100 → 50% cap = 50 currency = 5,000 pts.
+        var max = engine.maxRedeemable(42L, 7L, new BigDecimal("100.00"), LocalDateTime.now(ZoneOffset.UTC));
+
+        assertThat(max.eligible()).isTrue();
+        assertThat(max.maxPoints()).isEqualTo(5_000L);
+        assertThat(max.maxDiscount()).isEqualByComparingTo(new BigDecimal("50.00"));
+        assertThat(max.pointsPerCurrencyUnit()).isEqualTo(100L);
+    }
+
+    @Test
     void burn_debits_wallet_and_recalcs_tier() {
-        LoyaltyBingeRedemptionRule rule = rule(100L, 0L, new BigDecimal("100.00"), null);
-        when(configService.resolveRedemptionRule(eq(500L), any())).thenReturn(Optional.of(rule));
+        stubTerms(terms(100L, 0L, new BigDecimal("100.00"), null, "BINGE_RULE"));
 
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         var res = engine.burn(new RedeemEngine.BurnRequest(
@@ -171,8 +192,7 @@ class RedeemEngineTest {
 
     @Test
     void burn_debits_only_the_capped_quote_points() {
-        LoyaltyBingeRedemptionRule rule = rule(100L, 0L, new BigDecimal("50.00"), null);
-        when(configService.resolveRedemptionRule(eq(500L), any())).thenReturn(Optional.of(rule));
+        stubTerms(terms(100L, 0L, new BigDecimal("50.00"), null, "BINGE_RULE"));
 
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         var res = engine.burn(new RedeemEngine.BurnRequest(
@@ -191,8 +211,7 @@ class RedeemEngineTest {
 
     @Test
     void burn_rejects_without_wallet_side_effects_when_not_eligible() {
-        LoyaltyBingeRedemptionRule rule = rule(100L, 5_000L, new BigDecimal("100.00"), null);
-        when(configService.resolveRedemptionRule(eq(500L), any())).thenReturn(Optional.of(rule));
+        stubTerms(terms(100L, 5_000L, new BigDecimal("100.00"), null, "BINGE_RULE"));
 
         var res = engine.burn(new RedeemEngine.BurnRequest(
                 42L, 7L, "BK-10", 1_000L, new BigDecimal("500.00"), LocalDateTime.now(ZoneOffset.UTC), "corr"));
@@ -203,15 +222,16 @@ class RedeemEngineTest {
         verifyNoInteractions(tierEngine);
     }
 
-    private LoyaltyBingeRedemptionRule rule(long pointsPerCurrencyUnit, long minPoints,
-                                            BigDecimal maxPct, String tierBonusJson) {
-        return LoyaltyBingeRedemptionRule.builder()
-                .id(2000L).bindingId(500L).tenantId(1L)
-                .pointsPerCurrencyUnit(pointsPerCurrencyUnit)
-                .minRedemptionPoints(minPoints)
-                .maxRedemptionPercent(maxPct)
-                .tierBonusPctJson(tierBonusJson)
-                .effectiveFrom(LocalDateTime.now(ZoneOffset.UTC).minusDays(30))
-                .build();
+    // ── helpers ──────────────────────────────────────────────────────────
+
+    private void stubTerms(EffectiveRedemptionTerms t) {
+        when(configService.resolveEffectiveRedemption(eq(500L), eq(7L), any())).thenReturn(t);
+    }
+
+    private EffectiveRedemptionTerms terms(long pointsPerCurrencyUnit, long minPoints,
+                                           BigDecimal maxPct, String tierBonusJson, String source) {
+        return new EffectiveRedemptionTerms(
+                pointsPerCurrencyUnit, minPoints, maxPct, tierBonusJson, source,
+                "COUNTRY_CONFIG".equals(source) ? "IN" : null);
     }
 }

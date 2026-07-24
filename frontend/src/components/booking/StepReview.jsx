@@ -1,25 +1,23 @@
+import { formatCurrency } from '../../utils/currency';
+
 export default function StepReview({
   form, setForm, isAdmin, selectedEvent, selectedCustomer,
   resolvedPricing, editBookingData, calculateTotal, calculateLoyaltyDiscount,
   fmtTime, fmtDuration,
   loading, onSubmit, onBack,
   capacityFull, onJoinWaitlist,
-  venueRooms, activeSurge, loyalty, loyaltyQuote,
-  taxPreview,
-  payableCurrencies = [], paymentCurrency = 'INR', setPaymentCurrency,
+  venueRooms, activeSurge, loyalty, loyaltyQuote, redeemMax,
+  taxPreview, earnQuote,
+  // Native per-binge currency: every price here is in the venue's own currency; the
+  // customer neither chooses nor converts it.
+  currency = 'INR',
 }) {
+  const money = (v) => formatCurrency(v, currency);
   const selectedRoom = venueRooms?.find(r => r.id === form.venueRoomId);
   const loyaltyDiscount = calculateLoyaltyDiscount ? calculateLoyaltyDiscount() : 0;
   const subtotal = calculateTotal();
   const taxAmount = taxPreview?.totalTax ? Number(taxPreview.totalTax) : 0;
   const finalTotal = Math.max(0, subtotal - loyaltyDiscount + taxAmount);
-  // Multi-currency: when the customer picks a foreign payment currency, preview the
-  // converted total at the current rate. The exact rate is locked at confirmation.
-  const payCcyObj = paymentCurrency === 'INR'
-    ? null
-    : (payableCurrencies.find(c => c.code === paymentCurrency) || null);
-  const payRate = payCcyObj ? (Number(payCcyObj.rateToBase) || 1) : 1;
-  const foreignTotal = finalTotal * payRate;
   const perBookingTotal = Math.max(0, finalTotal);
   const recurringTotal = form.recurringEnabled ? perBookingTotal * Number(form.recurringOccurrences || 1) : perBookingTotal;
 
@@ -57,7 +55,7 @@ export default function StepReview({
         {selectedRoom && Number(selectedRoom.priceAddition) > 0 && (
           <div className="review-row" style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
             <span>Room Charge ({selectedRoom.name})</span>
-            <span>+₹{Number(selectedRoom.priceAddition).toLocaleString()}</span>
+            <span>+{money(Number(selectedRoom.priceAddition))}</span>
           </div>
         )}
 
@@ -66,8 +64,8 @@ export default function StepReview({
           const ppg = rep ? rep.pricePerGuest : selectedEvent?.pricePerGuest;
           return ppg > 0 && form.numberOfGuests > 1 ? (
             <div className="review-row" style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-              <span>Guest Charge ({form.numberOfGuests - 1} extra × ₹{ppg.toLocaleString()})</span>
-              <span>₹{((form.numberOfGuests - 1) * ppg).toLocaleString()}</span>
+              <span>Guest Charge ({form.numberOfGuests - 1} extra × {money(ppg)})</span>
+              <span>{money((form.numberOfGuests - 1) * ppg)}</span>
             </div>
           ) : null;
         })()}
@@ -90,42 +88,90 @@ export default function StepReview({
 
         <hr style={{ borderColor: 'var(--border)', margin: '1rem 0' }} />
 
-        {/* Loyalty Points Redemption */}
-        {!isAdmin && loyalty && loyalty.currentBalance > 0 && (
-          <div className="loyalty-redeem-card">
-            <div className="loyalty-redeem-header">
-              <strong className="loyalty-redeem-title">Loyalty Points</strong>
-              <span className="loyalty-redeem-balance">
-                {loyalty.tierLevel} · {loyalty.currentBalance.toLocaleString()} pts available
-              </span>
+        {/* Loyalty Points Redemption — flexible slider: the customer chooses
+            exactly how many points to apply, up to what's redeemable on this
+            booking (venue-country point value, capped by the binge's max %). */}
+        {!isAdmin && loyalty && loyalty.currentBalance > 0 && (() => {
+          const loadingMax = redeemMax == null;
+          const maxPts = redeemMax?.eligible ? Number(redeemMax.maxPoints || 0) : 0;
+          const ppcu = Number(redeemMax?.pointsPerCurrencyUnit || 0);
+          const minNeeded = Number(redeemMax?.minRedemptionPoints || 0);
+          const chosen = Math.min(Number(form.redeemLoyaltyPoints) || 0, maxPts);
+          const clamp = (n) => Math.max(0, Math.min(Number(n) || 0, maxPts));
+          const setPts = (n) => setForm(f => ({ ...f, redeemLoyaltyPoints: clamp(n) }));
+          return (
+            <div className="loyalty-redeem-card">
+              <div className="loyalty-redeem-header">
+                <strong className="loyalty-redeem-title">Loyalty Points</strong>
+                <span className="loyalty-redeem-balance">
+                  {loyalty.tierLevel} · {loyalty.currentBalance.toLocaleString()} pts available
+                </span>
+              </div>
+
+              {loadingMax ? (
+                <p className="loyalty-redeem-hint">Checking how many points you can use…</p>
+              ) : maxPts > 0 ? (
+                <>
+                  <input
+                    type="range"
+                    min={0}
+                    max={maxPts}
+                    step={1}
+                    value={chosen}
+                    onChange={(e) => setPts(e.target.value)}
+                    className="loyalty-redeem-slider"
+                    aria-label="Points to redeem"
+                    aria-valuetext={`${chosen.toLocaleString()} of ${maxPts.toLocaleString()} points`}
+                  />
+                  <div className="loyalty-redeem-scale">
+                    <span>0</span>
+                    <span>Max {maxPts.toLocaleString()} pts</span>
+                  </div>
+                  <div className="loyalty-redeem-controls">
+                    <label htmlFor="redeem-pts">Use</label>
+                    <input
+                      id="redeem-pts"
+                      type="number"
+                      min={0}
+                      max={maxPts}
+                      value={form.redeemLoyaltyPoints || ''}
+                      onChange={(e) => setPts(e.target.value)}
+                      placeholder="0"
+                      className="loyalty-redeem-input"
+                    />
+                    <span className="loyalty-redeem-unit">pts</span>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPts(maxPts)}>
+                      Use max
+                    </button>
+                    {chosen > 0 && (
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPts(0)}>
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  {loyaltyDiscount > 0 ? (
+                    <p className="loyalty-redeem-discount">
+                      −{money(loyaltyDiscount)} off · {(loyaltyQuote?.pointsToBurn || chosen).toLocaleString()} pts applied
+                    </p>
+                  ) : (
+                    ppcu > 0 && (
+                      <p className="loyalty-redeem-hint">
+                        {ppcu.toLocaleString()} pts = {money(1)} at this venue
+                        {minNeeded > 0 ? ` · min ${minNeeded.toLocaleString()} pts` : ''}
+                      </p>
+                    )
+                  )}
+                </>
+              ) : (
+                <p className="loyalty-redeem-hint">
+                  {minNeeded > 0
+                    ? `You need at least ${minNeeded.toLocaleString()} points, on a large enough booking, to redeem here.`
+                    : 'Points can’t be applied to this booking.'}
+                </p>
+              )}
             </div>
-            <div className="loyalty-redeem-controls">
-              <label>Redeem:</label>
-              <input
-                type="number"
-                min="0"
-                max={loyalty.currentBalance}
-                value={form.redeemLoyaltyPoints || ''}
-                onChange={(e) => setForm(f => ({ ...f, redeemLoyaltyPoints: Math.min(Number(e.target.value) || 0, loyalty.currentBalance) }))}
-                placeholder="0"
-                className="loyalty-redeem-input"
-              />
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setForm(f => ({ ...f, redeemLoyaltyPoints: loyalty.currentBalance }))}>
-                Use all
-              </button>
-            </div>
-            {loyaltyDiscount > 0 && (
-              <p className="loyalty-redeem-discount">
-                Discount: -₹{loyaltyDiscount.toLocaleString()} ({(loyaltyQuote?.pointsToBurn || form.redeemLoyaltyPoints).toLocaleString()} pts)
-              </p>
-            )}
-            {form.redeemLoyaltyPoints > 0 && loyaltyQuote && !loyaltyQuote.eligible && (
-              <p className="loyalty-redeem-discount">
-                Points cannot be applied to this booking yet.
-              </p>
-            )}
-          </div>
-        )}
+          );
+        })()}
 
         {isAdmin ? (
           editBookingData && (editBookingData.paymentStatus === 'SUCCESS' || editBookingData.paymentStatus === 'PARTIALLY_REFUNDED') ? (
@@ -156,7 +202,7 @@ export default function StepReview({
                 </select>
               </div>
               {form.paymentMethod === 'CASH' && (
-                <p style={{ fontSize: '0.8rem', color: 'var(--success)', marginTop: '0.3rem' }}>Cash payment — booking will be auto-confirmed and recorded immediately</p>
+                <p style={{ fontSize: '0.8rem', color: 'var(--success-text)', marginTop: '0.3rem' }}>Cash payment — booking will be auto-confirmed and recorded immediately</p>
               )}
               {form.paymentMethod === 'COLLECT_LATER' && (
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>Booking will stay pending until you record a payment from the Bookings page.</p>
@@ -171,54 +217,42 @@ export default function StepReview({
         {(loyaltyDiscount > 0 || taxAmount > 0) && (
           <div className="review-row" style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
             <span>Subtotal</span>
-            <span>₹{subtotal.toLocaleString()}</span>
+            <span>{money(subtotal)}</span>
           </div>
         )}
         {loyaltyDiscount > 0 && (
-          <div className="review-row" style={{ color: 'var(--success)', fontSize: '0.9rem' }}>
+          <div className="review-row" style={{ color: 'var(--success-text)', fontSize: '0.9rem' }}>
             <span>Loyalty Discount</span>
-            <span>− ₹{loyaltyDiscount.toLocaleString()}</span>
+            <span>− {money(loyaltyDiscount)}</span>
           </div>
         )}
         {taxAmount > 0 && (
           <div className="review-row" style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
             <span>Tax</span>
-            <span>+ ₹{taxAmount.toLocaleString()}</span>
+            <span>+ {money(taxAmount)}</span>
           </div>
         )}
         <div className="review-row total">
           <span>{taxAmount > 0 ? 'Total (incl. tax)' : 'Estimated Total'}</span>
-          <span aria-live="polite">₹{finalTotal.toLocaleString()}</span>
+          <span aria-live="polite">{money(finalTotal)}</span>
         </div>
 
-        {/* Multi-currency payment — only shown when the venue has enabled payment
-            currencies beyond INR, and only for customer (non-recurring) bookings. */}
-        {!isAdmin && !form.recurringEnabled && payableCurrencies.length > 0 && (
-          <div className="review-row" style={{ alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' }}>
-            <span>Pay in</span>
-            <select
-              value={paymentCurrency}
-              onChange={(e) => setPaymentCurrency && setPaymentCurrency(e.target.value)}
-              aria-label="Payment currency"
-              style={{ padding: '0.4rem 0.6rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--text)', fontSize: '0.85rem' }}
-            >
-              <option value="INR">₹ INR — Indian Rupee</option>
-              {payableCurrencies.map(c => (
-                <option key={c.code} value={c.code}>{c.symbol} {c.code} — {c.name}</option>
-              ))}
-            </select>
-          </div>
-        )}
-        {!isAdmin && paymentCurrency !== 'INR' && payCcyObj && (
-          <div className="review-row total" style={{ color: 'var(--text)' }}>
-            <span>You pay (rate locked at confirm)</span>
-            <span aria-live="polite">
-              {payCcyObj.symbol}{foreignTotal.toLocaleString(undefined, {
-                minimumFractionDigits: payCcyObj.decimalDigits ?? 2,
-                maximumFractionDigits: payCcyObj.decimalDigits ?? 2,
-              })} {payCcyObj.code}
+        {earnQuote?.eligible && earnQuote.points > 0 && (
+          <div className="review-row" style={{ color: '#059669', fontSize: '0.9rem', border: 'none' }}>
+            <span>⭐ {isAdmin ? 'Customer earns' : "You'll earn"} ~{Number(earnQuote.points).toLocaleString()} points
+              {earnQuote.tierCode ? ` (${earnQuote.tierCode} tier)` : ''}</span>
+            <span title="Points are credited after the visit completes.">
+              {earnQuote.qualifyingCredits > 0 ? `+${Number(earnQuote.qualifyingCredits).toLocaleString()} tier credits` : ''}
             </span>
           </div>
+        )}
+
+        {/* Currency is fixed to this venue's country currency — no customer choice.
+            A foreign customer's own bank/card converts from their home currency at charge time. */}
+        {!isAdmin && (
+          <p className="review-row" style={{ color: 'var(--text-muted)', fontSize: '0.8rem', border: 'none' }}>
+            <span>Charged in {currency}. Your bank converts from your card's currency.</span>
+          </p>
         )}
       </div>
 
@@ -260,7 +294,7 @@ export default function StepReview({
                 </div>
               </div>
               <p className="recurring-summary">
-                {form.recurringOccurrences || 4} bookings × ₹{perBookingTotal.toLocaleString()} each = <strong>₹{recurringTotal.toLocaleString()} est. total</strong>
+                {form.recurringOccurrences || 4} bookings × {money(perBookingTotal)} each = <strong>{money(recurringTotal)} est. total</strong>
               </p>
               <p className="recurring-note">
                 Each booking is created independently. Dates without availability will be skipped automatically.

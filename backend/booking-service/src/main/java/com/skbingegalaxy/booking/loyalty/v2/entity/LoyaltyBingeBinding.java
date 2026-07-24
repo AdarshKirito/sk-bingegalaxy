@@ -67,6 +67,32 @@ public class LoyaltyBingeBinding {
     @Column(name = "effective_to")
     private LocalDateTime effectiveTo;
 
+    /**
+     * Goodwill sanction permission (super-admin granted). When true, this
+     * binge's admins may credit points to a customer after a bad experience,
+     * up to {@link #goodwillMonthlyCapPoints} per calendar month across all
+     * of the binge's grants.
+     */
+    @Column(name = "goodwill_enabled", nullable = false)
+    @Builder.Default
+    private boolean goodwillEnabled = false;
+
+    /** Monthly goodwill budget in points; 0 = no budget even if enabled. */
+    @Column(name = "goodwill_monthly_cap_points", nullable = false)
+    @Builder.Default
+    private long goodwillMonthlyCapPoints = 0L;
+
+    /**
+     * Super-admin governance lock on this binge's loyalty configuration. When
+     * true, the binge's own admins may NOT enable/disable the binding or change
+     * its earn/redeem/perk rules — only a super-admin can (they set the venue's
+     * loyalty economics during approval / oversight). Default false preserves the
+     * existing self-service behavior for binges the super-admin hasn't locked.
+     */
+    @Column(name = "admin_config_locked", nullable = false)
+    @Builder.Default
+    private boolean adminConfigLocked = false;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;

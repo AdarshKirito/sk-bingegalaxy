@@ -55,7 +55,7 @@
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--primary);
+  color: var(--primary-text);
   padding: 0.42rem 0.78rem;
   border-radius: 999px;
   border: 1px solid rgba(var(--gold-rgb), 0.18);
@@ -138,11 +138,11 @@
 }
 
 .step-label.active {
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .step-label.completed {
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .step-dot {
@@ -237,7 +237,7 @@
 }
 
 .et-price {
-  color: var(--primary);
+  color: var(--primary-text);
   font-weight: 700;
   margin-top: 0.75rem;
 }
@@ -297,7 +297,7 @@
 }
 
 .addon-price {
-  color: var(--primary);
+  color: var(--primary-text);
   font-weight: 600;
   margin-top: 0.5rem;
 }
@@ -344,7 +344,7 @@
 }
 
 .review-row.total span:last-child {
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 /* Prevent .card:hover from overriding selected state on event/addon cards */
@@ -484,7 +484,7 @@
   display: inline-block;
   font-size: 0.75rem;
   font-weight: 700;
-  color: var(--primary);
+  color: var(--primary-text);
   margin-top: 0.25rem;
 }
 .room-card.selected .room-card-price {
@@ -614,14 +614,97 @@
   font-size: 0.85rem;
 }
 
+.loyalty-redeem-unit {
+  font-size: 0.8rem;
+  color: #6d28d9;
+  margin-left: -0.4rem;
+}
+
+[data-theme="dark"] .loyalty-redeem-unit {
+  color: #c4b5fd;
+}
+
+/* Points redemption slider — the customer drags to choose how many points
+   to apply. Track/thumb use the loyalty purple so it reads as one control. */
+.loyalty-redeem-slider {
+  width: 100%;
+  margin: 0.5rem 0 0.15rem;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(124, 58, 237, 0.25);
+  outline: none;
+  cursor: pointer;
+}
+
+.loyalty-redeem-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #7c3aed;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+}
+
+.loyalty-redeem-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #7c3aed;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+}
+
+.loyalty-redeem-slider:focus-visible {
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.35);
+}
+
+[data-theme="dark"] .loyalty-redeem-slider {
+  background: rgba(139, 92, 246, 0.3);
+}
+
+[data-theme="dark"] .loyalty-redeem-slider::-webkit-slider-thumb,
+[data-theme="dark"] .loyalty-redeem-slider::-moz-range-thumb {
+  background: #a78bfa;
+  border-color: #1e1b2e;
+}
+
+.loyalty-redeem-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: #6d28d9;
+  margin: 0 0 0.6rem;
+}
+
+[data-theme="dark"] .loyalty-redeem-scale {
+  color: #c4b5fd;
+}
+
 .loyalty-redeem-discount {
   font-size: 0.8rem;
   color: #5b21b6;
   margin: 0.5rem 0 0;
+  font-weight: 600;
 }
 
 [data-theme="dark"] .loyalty-redeem-discount {
   color: #c4b5fd;
+}
+
+.loyalty-redeem-hint {
+  font-size: 0.78rem;
+  color: #6d28d9;
+  margin: 0.5rem 0 0;
+}
+
+[data-theme="dark"] .loyalty-redeem-hint {
+  color: #a78bfa;
 }
 
 /* Strikethrough original price */

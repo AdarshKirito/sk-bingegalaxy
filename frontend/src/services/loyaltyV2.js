@@ -79,6 +79,20 @@ export async function getRedeemQuote({ bingeId, bookingAmount, points }) {
   return unwrap(await v2.get('/me/redeem-quote', { params: { bingeId, bookingAmount, points } }));
 }
 
+// Redemption ceiling for the "use points" slider: max applicable points, the
+// floor, and the venue-country per-point value. Preview only — no state change.
+export async function getRedeemMax({ bingeId, bookingAmount }) {
+  return unwrap(await v2.get('/me/redeem-max', { params: { bingeId, bookingAmount } }));
+}
+
+// Booking-time "you'll earn ~X points" estimate (same math as the completion earn).
+// Admins pass customerId to preview what the customer they're booking for will earn.
+export async function getEarnQuote({ bingeId, bookingAmount, customerId }) {
+  return unwrap(await v2.get('/me/earn-quote', {
+    params: { bingeId, bookingAmount, ...(customerId ? { customerId } : {}) },
+  }));
+}
+
 export async function listMyStatusMatches() {
   return unwrap(await v2.get('/me/status-match'));
 }
@@ -88,6 +102,13 @@ export async function submitStatusMatch(body) {
 }
 
 // ── Admin (per-binge) ───────────────────────────────────────────────────
+
+// Desk registration: enroll the customer the admin just created so they get
+// the same welcome bonus a self-signup gets. Idempotent server-side; callers
+// treat it as best-effort (a miss self-heals on the customer's first booking).
+export async function adminEnrollCustomer(customerId) {
+  return unwrap(await v2.post('/admin/enrollments', { customerId }));
+}
 
 export async function getBinding(bingeId) {
   return unwrap(await v2.get(`/admin/bindings/${bingeId}`));
@@ -109,6 +130,15 @@ export async function getRedeemRule(bindingId) {
 }
 export async function upsertRedeemRule(bindingId, draft) {
   return unwrap(await v2.post(`/admin/bindings/${bindingId}/redeem-rule`, draft));
+}
+// The redemption economics that ACTUALLY apply now + where they came from
+// (per-binge override / venue-country config / program default).
+export async function getEffectiveRedeem(bindingId) {
+  return unwrap(await v2.get(`/admin/bindings/${bindingId}/effective-redeem`));
+}
+// Retire the per-binge override so the venue inherits its country's live value.
+export async function resetRedeemRule(bindingId) {
+  return unwrap(await v2.post(`/admin/bindings/${bindingId}/redeem-rule/reset`));
 }
 export async function upsertPerkOverride(bindingId, draft) {
   return unwrap(await v2.post(`/admin/bindings/${bindingId}/perks`, draft));
@@ -175,14 +205,48 @@ export async function listBindings() {
 export async function bulkSetBindingStatus(bindingIds, status) {
   return unwrap(await v2.post('/super-admin/bindings/bulk', { bindingIds, status }));
 }
+
+// ── Country earn/redeem economics (super-admin) ─────────────────────────
+// Per-country defaults consumed when new binges are auto-seeded: how much
+// LOCAL currency earns points, and points-per-currency-unit at redemption.
+export async function listCountryConfigs() {
+  return unwrap(await v2.get('/super-admin/country-configs'));
+}
+export async function upsertCountryConfig(body) {
+  return unwrap(await v2.post('/super-admin/country-configs', body));
+}
+export async function deleteCountryConfig(countryIso2) {
+  return unwrap(await v2.delete(`/super-admin/country-configs/${countryIso2}`));
+}
+
+// ── Goodwill (service-recovery) points ──────────────────────────────────
+// Super-admin grants a binge the permission + monthly budget; binge admins
+// then credit points to customers disappointed by an event.
+export async function setGoodwillSettings(bindingId, body) {
+  return unwrap(await v2.post(`/super-admin/bindings/${bindingId}/goodwill-settings`, body));
+}
+// Lock/unlock a binge's loyalty config to super-admin control. { locked: bool }
+export async function setBindingConfigLock(bindingId, locked) {
+  return unwrap(await v2.post(`/super-admin/bindings/${bindingId}/config-lock`, { locked }));
+}
+export async function getGoodwillBudget(bingeId) {
+  return unwrap(await v2.get(`/admin/goodwill/${bingeId}/budget`));
+}
+export async function grantGoodwill(bingeId, body) {
+  return unwrap(await v2.post(`/admin/goodwill/${bingeId}`, body));
+}
+
 export default {
   getMyMembership, getMyLegacyAccount, toLegacyAccount,
-  getMyLedger, getRedeemQuote, listMyStatusMatches, submitStatusMatch,
+  getMyLedger, getRedeemQuote, getRedeemMax, getEarnQuote, listMyStatusMatches, submitStatusMatch,
+  adminEnrollCustomer,
   getBinding, enableBinding, disableBinding, listEarnRules, upsertEarnRule,
-  getRedeemRule, upsertRedeemRule, upsertPerkOverride,
+  getRedeemRule, upsertRedeemRule, getEffectiveRedeem, resetRedeemRule, upsertPerkOverride,
   listPendingStatusMatches, approveStatusMatch, rejectStatusMatch,
   getCustomerAccount, adjustCustomerPoints, getCustomerLedger,
   getProgram, updateProgram, listTiers, upsertTier, retireTier,
   listPerks, savePerk, assignPerkToTier, removePerkFromTier, listTierPerks,
   listBindings, bulkSetBindingStatus,
+  listCountryConfigs, upsertCountryConfig, deleteCountryConfig,
+  setGoodwillSettings, setBindingConfigLock, getGoodwillBudget, grantGoodwill,
 };

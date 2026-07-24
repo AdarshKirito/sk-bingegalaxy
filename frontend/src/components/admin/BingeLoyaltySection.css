@@ -1,0 +1,122 @@
+/* Per-binge loyalty panel — help tooltips, lock banner, inherited-terms note.
+   Scoped to .lyl-* so it never collides with the shared .adm-* admin system. */
+
+.lyl-help {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.lyl-help-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--border, #cbd5e1);
+  background: var(--bg-input, #f1f5f9);
+  color: var(--text-muted, #64748b);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: help;
+  padding: 0;
+}
+
+.lyl-help-dot:hover,
+.lyl-help-dot:focus-visible {
+  border-color: #7c3aed;
+  color: #7c3aed;
+  outline: none;
+}
+
+.lyl-help-bubble {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 260px;
+  z-index: 50;
+  background: #1e293b;
+  color: #f8fafc;
+  font-size: 0.76rem;
+  font-weight: 400;
+  line-height: 1.4;
+  padding: 8px 10px;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  white-space: normal;
+  text-align: left;
+}
+
+.lyl-help-bubble::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: #1e293b;
+}
+
+[data-theme="dark"] .lyl-help-bubble {
+  background: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+/* Lock banner shown to a binge admin when the super-admin manages loyalty. */
+.lyl-lock-banner {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  color: #92400e;
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  font-size: 0.86rem;
+}
+
+[data-theme="dark"] .lyl-lock-banner {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+}
+
+/* Inherited (country / program-default) redemption note. */
+.lyl-inherit-note {
+  background: var(--bg-card, #f8fafc);
+  border: 1px dashed var(--border, #cbd5e1);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  font-size: 0.84rem;
+  color: var(--text, #334155);
+}
+
+.lyl-inherit-note strong { color: #6d28d9; }
+
+[data-theme="dark"] .lyl-inherit-note strong { color: #a78bfa; }
+
+.lyl-source-pill {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(124, 58, 237, 0.12);
+  color: #6d28d9;
+  margin-left: 8px;
+}
+
+[data-theme="dark"] .lyl-source-pill {
+  background: rgba(139, 92, 246, 0.2);
+  color: #c4b5fd;
+}

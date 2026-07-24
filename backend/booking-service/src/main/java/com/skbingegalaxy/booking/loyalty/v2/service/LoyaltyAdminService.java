@@ -237,6 +237,18 @@ public class LoyaltyAdminService {
         return saved;
     }
 
+    /**
+     * Retire the active per-binge redemption override (effective-dated close, no
+     * replacement) so the binge falls back to the LIVE country config resolved by
+     * {@link LoyaltyConfigService#resolveEffectiveRedemption}. No-op when the
+     * binge already has no override.
+     */
+    public void retireRedemptionRule(Long bindingId, LocalDateTime at) {
+        redemptionRuleRepository.findActive(bindingId, at)
+                .ifPresent(r -> { r.setEffectiveTo(at); redemptionRuleRepository.save(r); });
+        log.info("[loyalty-v2] redeem-rule reset to country default: binding={} at={}", bindingId, at);
+    }
+
     private void validateEarningRule(LoyaltyBingeEarningRule draft) {
         if (draft.getBindingId() == null) throw new IllegalArgumentException("bindingId is required");
         if (draft.getPointsNumerator() <= 0) throw new IllegalArgumentException("pointsNumerator must be > 0");

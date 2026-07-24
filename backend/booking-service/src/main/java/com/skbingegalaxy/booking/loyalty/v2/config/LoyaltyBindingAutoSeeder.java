@@ -4,11 +4,9 @@ import com.skbingegalaxy.booking.entity.Binge;
 import com.skbingegalaxy.booking.loyalty.v2.LoyaltyV2Constants;
 import com.skbingegalaxy.booking.loyalty.v2.entity.LoyaltyBingeBinding;
 import com.skbingegalaxy.booking.loyalty.v2.entity.LoyaltyBingeEarningRule;
-import com.skbingegalaxy.booking.loyalty.v2.entity.LoyaltyBingeRedemptionRule;
 import com.skbingegalaxy.booking.loyalty.v2.entity.LoyaltyProgram;
 import com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyBingeBindingRepository;
 import com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyBingeEarningRuleRepository;
-import com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyBingeRedemptionRuleRepository;
 import com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyConfigService;
 import com.skbingegalaxy.booking.repository.BingeRepository;
 import lombok.RequiredArgsConstructor;
@@ -53,18 +51,21 @@ import java.util.List;
 @Order(50) // run after Flyway and other schema init
 public class LoyaltyBindingAutoSeeder implements ApplicationRunner {
 
-    /** Chain-default earn rate for new binges. */
+    /**
+     * Chain-default earn rate — the INR baseline, used when the binge's country
+     * has no row in {@code loyalty_country_earn_config}. Countries WITH a config
+     * get their own economics so a point is worth roughly the same real value
+     * everywhere (a USD binge must NOT award 10 pts per $1 when an INR binge
+     * awards 10 pts per ₹1 — that's an ~83× disparity).
+     */
     private static final long DEFAULT_POINTS_NUMERATOR = 10L;
     private static final BigDecimal DEFAULT_AMOUNT_DENOMINATOR = new BigDecimal("1.00");
-    private static final long DEFAULT_POINTS_PER_CURRENCY_UNIT = 100L;
-    private static final long DEFAULT_MIN_REDEMPTION_POINTS = 100L;
-    private static final BigDecimal DEFAULT_MAX_REDEMPTION_PERCENT = new BigDecimal("50.00");
 
     private final BingeRepository bingeRepository;
     private final LoyaltyConfigService configService;
     private final LoyaltyBingeBindingRepository bindingRepository;
     private final LoyaltyBingeEarningRuleRepository earningRuleRepository;
-    private final LoyaltyBingeRedemptionRuleRepository redemptionRuleRepository;
+    private final com.skbingegalaxy.booking.loyalty.v2.repository.LoyaltyCountryEarnConfigRepository countryConfigRepository;
 
     @Override
     @Transactional
@@ -82,7 +83,6 @@ public class LoyaltyBindingAutoSeeder implements ApplicationRunner {
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         int seededBindings = 0;
         int seededRules = 0;
-        int seededRedemptionRules = 0;
         int thawedLegacyBindings = 0;
 
         for (Binge binge : binges) {
@@ -117,6 +117,13 @@ public class LoyaltyBindingAutoSeeder implements ApplicationRunner {
                         binge.getId(), binge.getName());
             }
 
+            // Country-aware defaults: the binge's country decides the earn/redeem
+            // economics; unconfigured countries use the INR baseline.
+            var countryConfig = binge.getCountry() == null ? null
+                    : countryConfigRepository
+                        .findByCountryIso2AndActiveTrue(binge.getCountry().trim().toUpperCase())
+                        .orElse(null);
+
             // Only seed a rule if the binding has no active universal rule.
             List<LoyaltyBingeEarningRule> activeRules =
                     earningRuleRepository.findActive(binding.getId(), now);
@@ -128,41 +135,37 @@ public class LoyaltyBindingAutoSeeder implements ApplicationRunner {
                         .tenantId(program.getTenantId())
                         .tierCode(null)
                         .ruleType("FLAT_PER_AMOUNT")
-                        .pointsNumerator(DEFAULT_POINTS_NUMERATOR)
-                        .amountDenominator(DEFAULT_AMOUNT_DENOMINATOR)
+                        .pointsNumerator(countryConfig != null
+                                ? countryConfig.getPointsNumerator() : DEFAULT_POINTS_NUMERATOR)
+                        .amountDenominator(countryConfig != null
+                                ? countryConfig.getAmountDenominator() : DEFAULT_AMOUNT_DENOMINATOR)
                         .tierMultiplier(BigDecimal.ONE)
                         .qcMultiplier(BigDecimal.ONE)
                         .effectiveFrom(now)
                         .build();
                 earningRuleRepository.save(rule);
                 seededRules++;
-                log.info("[loyalty-v2] auto-seeded universal earn rule for binding {} (binge {})",
-                        binding.getId(), binge.getId());
+                log.info("[loyalty-v2] auto-seeded universal earn rule for binding {} (binge {}, country={}, {} pts / {})",
+                        binding.getId(), binge.getId(), binge.getCountry(),
+                        rule.getPointsNumerator(), rule.getAmountDenominator());
             }
 
-            if (redemptionRuleRepository.findActive(binding.getId(), now).isEmpty()) {
-                LoyaltyBingeRedemptionRule redeemRule = LoyaltyBingeRedemptionRule.builder()
-                        .bindingId(binding.getId())
-                        .tenantId(program.getTenantId())
-                        .pointsPerCurrencyUnit(DEFAULT_POINTS_PER_CURRENCY_UNIT)
-                        .minRedemptionPoints(DEFAULT_MIN_REDEMPTION_POINTS)
-                        .maxRedemptionPercent(DEFAULT_MAX_REDEMPTION_PERCENT)
-                        .effectiveFrom(now)
-                        .build();
-                redemptionRuleRepository.save(redeemRule);
-                seededRedemptionRules++;
-                log.info("[loyalty-v2] auto-seeded redemption rule for binding {} (binge {})",
-                        binding.getId(), binge.getId());
-            }
+            // NOTE: redemption rules are intentionally NOT auto-seeded. A binge
+            // with no per-binge override now inherits its VENUE-COUNTRY economics
+            // live via LoyaltyConfigService.resolveEffectiveRedemption (country
+            // config → program default), so a super-admin edit in the Countries
+            // tab immediately re-values every inheriting venue. Admins opt into a
+            // fixed override by saving a redeem rule, and back out via the
+            // "reset to country default" action. (Earn rules still need a concrete
+            // row because the earn engine has no country fallback path.)
         }
 
-        if (seededBindings > 0 || seededRules > 0 || seededRedemptionRules > 0 || thawedLegacyBindings > 0) {
-            log.info("[loyalty-v2] auto-seed complete — bindings={} rules={} (over {} binges)",
-                    seededBindings, seededRules, binges.size());
-            log.info("[loyalty-v2] auto-seed details: thawedLegacyBindings={} redemptionRules={}",
-                    thawedLegacyBindings, seededRedemptionRules);
+        if (seededBindings > 0 || seededRules > 0 || thawedLegacyBindings > 0) {
+            log.info("[loyalty-v2] auto-seed complete — bindings={} earnRules={} thawedLegacy={} (over {} binges); "
+                            + "redemption inherits live country config",
+                    seededBindings, seededRules, thawedLegacyBindings, binges.size());
         } else {
-            log.debug("[loyalty-v2] auto-seed: every binge already has binding + universal earn/redeem rules");
+            log.debug("[loyalty-v2] auto-seed: every binge already has a binding + universal earn rule");
         }
     }
 }

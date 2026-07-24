@@ -5,12 +5,14 @@ import {
   FiBookOpen, FiRefreshCw, FiPlus, FiCheck, FiX,
   FiAlertTriangle, FiEdit2, FiTrash2, FiExternalLink, FiHelpCircle,
   FiTrendingUp, FiClock, FiDollarSign, FiArrowUp,
-  FiSearch, FiUsers, FiUser,
+  FiSearch, FiUsers, FiUser, FiGlobe, FiLock, FiUnlock,
 } from 'react-icons/fi';
+import { currencySymbol, formatCurrency } from '../utils/currency';
 import SEO from '../components/SEO';
 import { useConfirm } from '../components/ui/ConfirmProvider';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import loyaltyV2 from '../services/loyaltyV2';
+import { parseServerDate } from '../services/timeFormat';
 import './AdminSecurity.css';
 
 /**
@@ -66,6 +68,7 @@ export default function AdminLoyaltyCenter() {
 
   const TABS = [
     ['program',      'Program',      <FiSettings />],
+    ['countries',    'Countries',    <FiGlobe />],
     ['tiers',        'Tiers',        <FiLayers />],
     ['perks',        'Perks',        <FiGift />],
     ['binges',       'Binges',       <FiPackage />],
@@ -99,6 +102,7 @@ export default function AdminLoyaltyCenter() {
       </nav>
 
       {tab === 'program'      && <ProgramTab />}
+      {tab === 'countries'    && <CountryRatesTab />}
       {tab === 'tiers'        && <TiersTab />}
       {tab === 'perks'        && <PerksTab />}
       {tab === 'binges'       && <BindingsTab />}
@@ -175,6 +179,48 @@ function ProgramTab() {
             onChange={(e) => setProgram({ ...program, retroactiveCreditDays: Number(e.target.value) })}
           />
         </label>
+        <label>
+          Birthday bonus points
+          <input
+            type="number"
+            value={program.birthdayBonusPoints ?? 0}
+            onChange={(e) => setProgram({ ...program, birthdayBonusPoints: Number(e.target.value) })}
+          />
+        </label>
+        <label>
+          Status challenge length (days)
+          <input
+            type="number"
+            title="How long a status-match member has to defend the granted tier (the '90-day challenge')"
+            value={program.statusChallengeDays ?? 90}
+            onChange={(e) => setProgram({ ...program, statusChallengeDays: Number(e.target.value) })}
+          />
+        </label>
+        <label>
+          Devaluation notice (days)
+          <input
+            type="number"
+            title="Minimum advance notice before an earn-rate or threshold change may take effect"
+            value={program.devaluationNoticeDays ?? 90}
+            onChange={(e) => setProgram({ ...program, devaluationNoticeDays: Number(e.target.value) })}
+          />
+        </label>
+        <label className="sec-checkbox">
+          <input
+            type="checkbox"
+            checked={!!program.statusMatchEnabled}
+            onChange={(e) => setProgram({ ...program, statusMatchEnabled: e.target.checked })}
+          />
+          Status match program enabled (customers can submit competitor status for review)
+        </label>
+        <label className="sec-checkbox">
+          <input
+            type="checkbox"
+            checked={!!program.silentEnrollmentEnabled}
+            onChange={(e) => setProgram({ ...program, silentEnrollmentEnabled: e.target.checked })}
+          />
+          Silent enrollment on first booking
+        </label>
         <label className="sec-checkbox">
           <input
             type="checkbox"
@@ -189,6 +235,192 @@ function ProgramTab() {
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Country earn/redeem economics
+   ────────────────────────────────────────────────────────────── */
+/**
+ * Per-country loyalty economics. Points are a single platform-wide unit, so
+ * each country must define how much LOCAL currency earns points and what a
+ * point is worth at redemption — otherwise a USD binge pays out ~83× richer
+ * than an INR binge on the same "10 pts per 1.00" rule. These values seed the
+ * default earn/redeem rules of NEW binges in that country; existing binges
+ * keep their per-binge rules (edit those in the Binges tab to retro-change).
+ */
+const emptyCountryDraft = {
+  countryIso2: '', currencyCode: '', pointsNumerator: 10, amountDenominator: 1,
+  pointsPerCurrencyUnit: 100, minRedemptionPoints: 100, maxRedemptionPercent: 50,
+  active: true, notes: '',
+};
+
+function CountryRatesTab() {
+  const confirm = useConfirm();
+  const [configs, setConfigs] = useState([]);
+  const [draft, setDraft] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const reload = useCallback(
+    () => loyaltyV2.listCountryConfigs()
+      .then((res) => setConfigs(toArray(res)))
+      .catch(() => toast.error('Could not load country configs')),
+    [],
+  );
+  useEffect(() => { reload(); }, [reload]);
+
+  const save = async (e) => {
+    e.preventDefault();
+    if (!/^[A-Za-z]{2}$/.test(draft.countryIso2 || '')) { toast.error('Country must be a 2-letter ISO code'); return; }
+    if (!/^[A-Za-z]{3}$/.test(draft.currencyCode || '')) { toast.error('Currency must be a 3-letter ISO code'); return; }
+    setSaving(true);
+    try {
+      await loyaltyV2.upsertCountryConfig({
+        ...draft,
+        countryIso2: draft.countryIso2.toUpperCase(),
+        currencyCode: draft.currencyCode.toUpperCase(),
+        pointsNumerator: Number(draft.pointsNumerator),
+        amountDenominator: Number(draft.amountDenominator),
+        pointsPerCurrencyUnit: Number(draft.pointsPerCurrencyUnit),
+        minRedemptionPoints: Number(draft.minRedemptionPoints),
+        maxRedemptionPercent: Number(draft.maxRedemptionPercent),
+      });
+      toast.success('Country config saved');
+      setDraft(null);
+      reload();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Save failed');
+    } finally { setSaving(false); }
+  };
+
+  const remove = async (c) => {
+    const ok = await confirm({
+      title: `Remove ${c.countryIso2} loyalty economics?`,
+      message: 'New binges in this country will fall back to the INR baseline (10 pts / 1.00). Existing binge rules are unaffected.',
+      confirmLabel: 'Remove',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await loyaltyV2.deleteCountryConfig(c.countryIso2);
+      toast.success('Removed');
+      reload();
+    } catch { toast.error('Delete failed'); }
+  };
+
+  const upd = (k) => (e) => setDraft((d) => ({ ...d, [k]: e.target.value }));
+
+  return (
+    <div className="sec-card">
+      <div className="sec-card-head">
+        <div>
+          <h2>Country point value (earn &amp; redemption)</h2>
+          <p>
+            One platform point should be worth roughly the same everywhere. Set, per country,
+            how much local currency earns points and <strong>how many points equal one unit of
+            local currency at redemption</strong>. When a customer redeems, points are valued by
+            the <strong>venue's country</strong> — not the customer's — so a booking at a US venue
+            burns at the US rate, at an Indian venue the INR rate.
+          </p>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: 6 }}>
+            These rates are <strong>live</strong>: every venue that hasn't set its own custom
+            redemption rate follows its country value here, so editing a row instantly re-values
+            those venues. A venue keeps its own rate only if an admin set a custom one (they can
+            reset it back to the country default). Unlisted countries fall back to the baseline
+            (100 pts = ₹1).
+          </p>
+        </div>
+        <button className="sec-btn sec-btn-primary" onClick={() => setDraft({ ...emptyCountryDraft })}>
+          <FiPlus /> Add country
+        </button>
+      </div>
+
+      <div className="sec-table-wrap">
+        <table className="sec-table">
+          <thead>
+            <tr>
+              <th>Country</th><th>Currency</th><th>Earn rate</th><th>Redemption value</th>
+              <th>Min redeem</th><th>Max % of bill</th><th>Status</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {configs.map((c) => (
+              <tr key={c.countryIso2}>
+                <td><strong>{c.countryIso2}</strong>{c.notes && <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{c.notes}</div>}</td>
+                <td>{c.currencyCode} ({currencySymbol(c.currencyCode)})</td>
+                <td>{Number(c.pointsNumerator).toLocaleString()} pts / {formatCurrency(c.amountDenominator, c.currencyCode)}</td>
+                <td>
+                  {Number(c.pointsPerCurrencyUnit).toLocaleString()} pts = {formatCurrency(1, c.currencyCode)}
+                  {Number(c.pointsPerCurrencyUnit) > 0 && (
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      1,000 pts = {formatCurrency(1000 / Number(c.pointsPerCurrencyUnit), c.currencyCode)}
+                    </div>
+                  )}
+                </td>
+                <td>{Number(c.minRedemptionPoints).toLocaleString()} pts</td>
+                <td>{Number(c.maxRedemptionPercent)}%</td>
+                <td>
+                  <span className={`sec-pill ${c.active ? 'current' : ''}`}>{c.active ? 'ACTIVE' : 'OFF'}</span>
+                </td>
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  <button className="sec-btn" onClick={() => setDraft({ ...c })} title="Edit"><FiEdit2 /></button>{' '}
+                  <button className="sec-btn sec-btn-danger" onClick={() => remove(c)} title="Remove"><FiTrash2 /></button>
+                </td>
+              </tr>
+            ))}
+            {configs.length === 0 && (
+              <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 24 }}>
+                No country configs yet — every country uses the INR baseline.
+              </td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {draft && (
+        <form className="sec-form" onSubmit={save} style={{ marginTop: 20 }}>
+          <h3>{draft.createdAt ? `Edit ${draft.countryIso2}` : 'New country'}</h3>
+          <div className="sec-form-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+            <label>Country (ISO-2)
+              <input value={draft.countryIso2} onChange={upd('countryIso2')} maxLength={2}
+                placeholder="US" disabled={!!draft.createdAt} />
+            </label>
+            <label>Currency (ISO-4217)
+              <input value={draft.currencyCode} onChange={upd('currencyCode')} maxLength={3} placeholder="USD" />
+            </label>
+            <label>Points earned
+              <input type="number" min="1" value={draft.pointsNumerator} onChange={upd('pointsNumerator')} />
+            </label>
+            <label>Per amount spent ({draft.currencyCode ? currencySymbol(draft.currencyCode) : 'local'})
+              <input type="number" min="0.01" step="0.01" value={draft.amountDenominator} onChange={upd('amountDenominator')} />
+            </label>
+            <label>Points per 1 currency unit (redeem)
+              <input type="number" min="1" value={draft.pointsPerCurrencyUnit} onChange={upd('pointsPerCurrencyUnit')} />
+            </label>
+            <label>Min redemption (points)
+              <input type="number" min="0" value={draft.minRedemptionPoints} onChange={upd('minRedemptionPoints')} />
+            </label>
+            <label>Max redemption (% of bill)
+              <input type="number" min="1" max="100" value={draft.maxRedemptionPercent} onChange={upd('maxRedemptionPercent')} />
+            </label>
+            <label>Notes
+              <input value={draft.notes || ''} onChange={upd('notes')} maxLength={300} placeholder="e.g. Parity ~ ₹83 / USD" />
+            </label>
+          </div>
+          <label className="sec-checkbox">
+            <input type="checkbox" checked={!!draft.active}
+              onChange={(e) => setDraft((d) => ({ ...d, active: e.target.checked }))} />
+            Active (used when seeding new binges)
+          </label>
+          <div className="sec-form-actions">
+            <button type="button" className="sec-btn" onClick={() => setDraft(null)}>Cancel</button>
+            <button className="sec-btn sec-btn-primary" disabled={saving}>
+              {saving ? 'Saving…' : <><FiCheck /> Save country</>}
+            </button>
+          </div>
+        </form>
+      )}
     </div>
   );
 }
@@ -730,6 +962,8 @@ function BindingsTab() {
                 <th>Binge ID</th>
                 <th>Status</th>
                 <th>Legacy frozen</th>
+                <th>Goodwill</th>
+                <th title="When locked, only super admins can change this venue's loyalty config">Config lock</th>
                 <th>Enrolled at</th>
                 <th>By admin</th>
               </tr>
@@ -749,6 +983,12 @@ function BindingsTab() {
                     </span>
                   </td>
                   <td>{b.legacyFrozen ? <span className="sec-pill warn">Frozen</span> : '—'}</td>
+                  <td>
+                    <GoodwillCell binding={b} onSaved={reload} />
+                  </td>
+                  <td>
+                    <ConfigLockCell binding={b} onSaved={reload} />
+                  </td>
                   <td>{b.enrolledAt ? new Date(b.enrolledAt).toLocaleDateString() : '—'}</td>
                   <td>{b.enrolledByAdminId ? `#${b.enrolledByAdminId}` : '—'}</td>
                 </tr>
@@ -758,6 +998,107 @@ function BindingsTab() {
         </div>
       )}
     </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Goodwill permission cell (per binding)
+   ────────────────────────────────────────────────────────────── */
+/**
+ * Inline editor for a binge's goodwill sanction: whether the binge's admins
+ * may credit service-recovery points, and the monthly points budget. The
+ * budget is enforced server-side per calendar month via the loyalty ledger.
+ */
+function GoodwillCell({ binding, onSaved }) {
+  const [editing, setEditing] = useState(false);
+  const [enabled, setEnabled] = useState(!!binding.goodwillEnabled);
+  const [cap, setCap] = useState(binding.goodwillMonthlyCapPoints ?? 0);
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await loyaltyV2.setGoodwillSettings(binding.id, {
+        goodwillEnabled: enabled,
+        goodwillMonthlyCapPoints: Number(cap) || 0,
+      });
+      toast.success(`Goodwill ${enabled ? 'enabled' : 'disabled'} for binge #${binding.bingeId}`);
+      setEditing(false);
+      onSaved?.();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Save failed');
+    } finally { setBusy(false); }
+  };
+
+  if (!editing) {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+        {binding.goodwillEnabled
+          ? <span className="sec-pill success" title="Binge admins can credit service-recovery points">
+              {Number(binding.goodwillMonthlyCapPoints ?? 0).toLocaleString()} pts/mo
+            </span>
+          : <span className="sec-pill mfa-off">off</span>}
+        <button className="sec-btn" style={{ padding: '2px 6px' }} title="Edit goodwill settings"
+                onClick={() => { setEnabled(!!binding.goodwillEnabled); setCap(binding.goodwillMonthlyCapPoints ?? 0); setEditing(true); }}>
+          <FiEdit2 size={12} />
+        </button>
+      </span>
+    );
+  }
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.78rem' }}>
+        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> allow
+      </label>
+      <input type="number" min="0" value={cap} onChange={(e) => setCap(e.target.value)}
+             style={{ width: 90 }} title="Monthly budget (points)" />
+      <button className="sec-btn sec-btn-primary" style={{ padding: '2px 8px' }} disabled={busy} onClick={save}>
+        <FiCheck size={12} />
+      </button>
+      <button className="sec-btn" style={{ padding: '2px 8px' }} onClick={() => setEditing(false)}>
+        <FiX size={12} />
+      </button>
+    </span>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Config-lock cell (per binding)
+   ────────────────────────────────────────────────────────────── */
+/**
+ * Toggle whether a binge's own admins may change its loyalty configuration.
+ * When locked, only super admins can enable/disable the binding or edit its
+ * earn/redeem/perk rules — the venue's loyalty economics are governed centrally
+ * (typically set at binge approval). Enforced server-side in the admin loyalty
+ * controller; this is just the switch.
+ */
+function ConfigLockCell({ binding, onSaved }) {
+  const [busy, setBusy] = useState(false);
+  const locked = !!binding.adminConfigLocked;
+
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      await loyaltyV2.setBindingConfigLock(binding.id, !locked);
+      toast.success(!locked
+        ? `Loyalty config locked for binge #${binding.bingeId}`
+        : `Loyalty config unlocked for binge #${binding.bingeId}`);
+      onSaved?.();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Update failed');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      {locked
+        ? <span className="sec-pill warn" title="Only super admins can change this venue's loyalty">🔒 Locked</span>
+        : <span className="sec-pill" title="Binge admins can self-manage loyalty">Self-service</span>}
+      <button className="sec-btn" style={{ padding: '2px 8px' }} disabled={busy} onClick={toggle}
+              title={locked ? 'Unlock for binge admins' : 'Lock to super-admin control'}>
+        {locked ? <FiUnlock size={12} /> : <FiLock size={12} />}
+      </button>
+    </span>
   );
 }
 
@@ -850,13 +1191,13 @@ function StatusMatchTab() {
                     {(() => {
                       const safe = safeExternalHref(r.proofUrl);
                       return safe
-                        ? <a href={safe} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)', fontWeight: 600 }}>
+                        ? <a href={safe} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary-text)', fontWeight: 600 }}>
                             View <FiExternalLink style={{ verticalAlign: '-2px' }} />
                           </a>
                         : <span style={{ color: 'var(--text-muted)' }} title={r.proofUrl || ''}>n/a</span>;
                     })()}
                   </td>
-                  <td>{new Date(r.createdAt).toLocaleDateString()}</td>
+                  <td>{parseServerDate(r.createdAt)?.toLocaleDateString() || ''}</td>
                   <td>
                     <div className="sec-row-actions">
                       <button className="sec-btn sec-btn-primary" onClick={() => approve(r)}>
@@ -934,7 +1275,7 @@ function GuideTab() {
         <div className="sec-playbook-card">
           <h3><FiTrendingUp /> Earning &amp; climbing</h3>
           <ul>
-            <li>Every booking earns <strong>points</strong> (default 10 pts per ₹1) and <strong>qualifying credits</strong> from the active earn rule.</li>
+            <li>Every booking earns <strong>points</strong> and <strong>qualifying credits</strong> from the active earn rule — the rate depends on the binge's country (see the Countries tab; INR baseline is 10 pts per ₹1).</li>
             <li>Points are the spendable currency; qualifying credits drive tier promotions.</li>
             <li>Per-binge rules can add tier or campaign multipliers while preserving an auditable base earn rate.</li>
             <li>We look at a rolling <strong>12-month qualifying window</strong>. When a customer crosses a threshold, the new tier activates immediately.</li>
@@ -944,10 +1285,10 @@ function GuideTab() {
         <div className="sec-playbook-card">
           <h3><FiDollarSign /> Redeeming points</h3>
           <ul>
-            <li>Points are redeemed at booking checkout via the <code>redeem-quote</code> endpoint.</li>
-            <li>Default rate: <strong>100 points = ₹1</strong> off (configurable per binge via Redeem rules).</li>
-            <li>Redemptions deduct FIFO from the oldest earn lot, so nothing expires under-water.</li>
-            <li>Partial redemptions are allowed; caps can be set per binge (e.g. max 50% of bill).</li>
+            <li>At checkout the customer drags a <strong>slider</strong> to choose exactly how many points to apply, up to what's redeemable on that booking.</li>
+            <li>Value is set by the <strong>venue's country</strong> (Countries tab) — a US venue burns at the US rate, an Indian venue at the INR baseline (100 pts = ₹1). A venue only differs if an admin sets a custom Redeem rate; they can reset it back to the country default.</li>
+            <li>Country edits are <strong>live</strong> — every venue inheriting the country value re-prices immediately, no re-seeding.</li>
+            <li>Redemptions deduct FIFO from the oldest earn lot; partial redemptions are allowed and capped per binge (e.g. max 50% of bill).</li>
           </ul>
         </div>
 
@@ -1234,7 +1575,7 @@ function MembersTab() {
                           return (
                             <tr key={entry.id}>
                               <td style={{ whiteSpace: 'nowrap', fontSize: 12, color: 'var(--text-muted)' }}>
-                                {new Date(entry.createdAt).toLocaleDateString()}
+                                {parseServerDate(entry.createdAt)?.toLocaleDateString() || ''}
                               </td>
                               <td>
                                 <span style={{ fontSize: 13, fontWeight: 600 }}>

@@ -7,6 +7,7 @@ import com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyConfigService;
 import com.skbingegalaxy.booking.loyalty.v2.service.StatusMatchService;
 import com.skbingegalaxy.booking.service.AdminBingeScopeService;
 import com.skbingegalaxy.common.dto.ApiResponse;
+import com.skbingegalaxy.common.exception.BusinessException;
 import com.skbingegalaxy.common.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -46,11 +47,53 @@ public class LoyaltyV2AdminController {
     private final LoyaltyConfigService configService;
     private final StatusMatchService statusMatchService;
     private final AdminBingeScopeService adminBingeScopeService;
+    private final com.skbingegalaxy.booking.loyalty.v2.service.EnrollmentService enrollmentService;
+    private final com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyMemberService loyaltyMemberService;
 
     private final LoyaltyBingeBindingRepository bindingRepository;
     private final LoyaltyBingeEarningRuleRepository earningRuleRepository;
     private final LoyaltyBingeRedemptionRuleRepository redemptionRuleRepository;
     private final LoyaltyStatusMatchRequestRepository statusMatchRepository;
+
+    // ── Enrollment (desk registration) ───────────────────────────────────
+
+    /** Body for {@link #enrollCustomer}. */
+    public record EnrollCustomerRequest(@jakarta.validation.constraints.NotNull Long customerId) {}
+
+    /**
+     * Enroll a customer the admin just registered at the desk.
+     *
+     * <p>Gives desk-registered customers the exact same benefits a self-signup
+     * gets: Bronze membership, a member number, and the program's welcome
+     * bonus points on FIRST enrollment. Idempotent — re-posting for an already
+     * enrolled customer returns the existing membership with
+     * {@code alreadyEnrolled=true} and never double-awards the bonus.
+     *
+     * <p>Best-effort by design on the caller side: if the admin UI never makes
+     * this call (offline, crash), the customer is still enrolled lazily with
+     * the same welcome bonus on their first booking
+     * ({@code EnrollmentService.ensureEnrolledForBooking}).
+     */
+    @PostMapping("/enrollments")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> enrollCustomer(
+            @jakarta.validation.Valid @RequestBody EnrollCustomerRequest request) {
+        boolean alreadyEnrolled = enrollmentService.findForCustomer(request.customerId()).isPresent();
+        LoyaltyMembership membership = alreadyEnrolled
+                ? enrollmentService.findForCustomer(request.customerId()).get()
+                : enrollmentService.enrollExplicit(request.customerId(),
+                    com.skbingegalaxy.booking.loyalty.v2.LoyaltyV2Constants.ENROLL_ADMIN_REGISTRATION);
+        LoyaltyProgram program = configService.requireDefaultProgram();
+        java.util.Map<String, Object> body = new java.util.HashMap<>();
+        body.put("membershipId", membership.getId());
+        body.put("memberNumber", membership.getMemberNumber());
+        body.put("tierCode", membership.getCurrentTierCode());
+        body.put("alreadyEnrolled", alreadyEnrolled);
+        body.put("welcomeBonusPoints", alreadyEnrolled ? 0 : program.getWelcomeBonusPoints());
+        return ResponseEntity.status(alreadyEnrolled ? HttpStatus.OK : HttpStatus.CREATED)
+                .body(ApiResponse.ok(alreadyEnrolled
+                        ? "Customer is already a member"
+                        : "Customer enrolled in " + program.getDisplayName(), body));
+    }
 
     // ── Bindings ─────────────────────────────────────────────────────────
 
@@ -76,6 +119,10 @@ public class LoyaltyV2AdminController {
         // IDOR guard: verify the calling admin owns this binge
         adminBingeScopeService.requireBingeOwnership(bingeId, adminId, role, "enabling loyalty for binge");
         LoyaltyProgram program = configService.requireDefaultProgram();
+        // Governance gate: if a binding already exists and the super-admin locked
+        // its config, a regular admin can't flip it back on.
+        bindingRepository.findByProgramIdAndBingeId(program.getId(), bingeId)
+                .ifPresent(b -> assertMayConfigure(b, role));
         return ResponseEntity.ok(ApiResponse.ok(
                 adminService.enableBingeForLoyalty(program.getId(), bingeId, null, adminId)));
     }
@@ -89,8 +136,45 @@ public class LoyaltyV2AdminController {
         LoyaltyBingeBinding binding = bindingRepository.findById(bindingId)
             .orElseThrow(() -> new ResourceNotFoundException("LoyaltyBingeBinding", "id", bindingId));
         adminBingeScopeService.requireBingeOwnership(binding.getBingeId(), adminId, role, "disabling loyalty binding");
+        assertMayConfigure(binding, role);
         return ResponseEntity.ok(ApiResponse.ok(
                 adminService.disableBingeForLoyalty(bindingId, adminId)));
+    }
+
+    // ── Goodwill (service-recovery) points ───────────────────────────────
+
+    /** Remaining goodwill budget for this binge (drives the admin UI). */
+    @GetMapping("/goodwill/{bingeId}/budget")
+    public ResponseEntity<ApiResponse<com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyMemberService.GoodwillBudget>> goodwillBudget(
+            @PathVariable Long bingeId,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        adminBingeScopeService.requireBingeOwnership(bingeId, adminId, role, "reading goodwill budget");
+        return ResponseEntity.ok(ApiResponse.ok(loyaltyMemberService.goodwillBudget(bingeId)));
+    }
+
+    /** Body for {@link #grantGoodwill}. */
+    public record GoodwillGrantRequest(
+            @jakarta.validation.constraints.NotNull Long customerId,
+            @jakarta.validation.constraints.Positive long points,
+            @jakarta.validation.constraints.NotBlank String reason,
+            String bookingRef) {}
+
+    /**
+     * Credit goodwill points to a customer disappointed by an event at this
+     * binge. Requires the super-admin-granted goodwill permission on the
+     * binge's binding and is capped by its monthly budget.
+     */
+    @PostMapping("/goodwill/{bingeId}")
+    public ResponseEntity<ApiResponse<com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyMemberService.MemberProfile>> grantGoodwill(
+            @PathVariable Long bingeId,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role,
+            @jakarta.validation.Valid @RequestBody GoodwillGrantRequest request) {
+        adminBingeScopeService.requireBingeOwnership(bingeId, adminId, role, "granting goodwill points");
+        return ResponseEntity.ok(ApiResponse.ok("Goodwill points credited",
+                loyaltyMemberService.grantGoodwill(request.customerId(), bingeId,
+                        request.points(), request.reason(), request.bookingRef(), adminId)));
     }
 
     // ── Per-binge earning / redemption rules ─────────────────────────────
@@ -118,6 +202,7 @@ public class LoyaltyV2AdminController {
         LoyaltyBingeBinding binding = bindingRepository.findById(bindingId)
             .orElseThrow(() -> new ResourceNotFoundException("LoyaltyBingeBinding", "id", bindingId));
         adminBingeScopeService.requireBingeOwnership(binding.getBingeId(), adminId, role, "upserting earn rule");
+        assertMayConfigure(binding, role);
         draft.setBindingId(bindingId);
         return ResponseEntity.ok(ApiResponse.ok(
                 adminService.upsertEarningRule(draft, LocalDateTime.now(ZoneOffset.UTC))));
@@ -148,9 +233,48 @@ public class LoyaltyV2AdminController {
         LoyaltyBingeBinding binding = bindingRepository.findById(bindingId)
             .orElseThrow(() -> new ResourceNotFoundException("LoyaltyBingeBinding", "id", bindingId));
         adminBingeScopeService.requireBingeOwnership(binding.getBingeId(), adminId, role, "upserting redeem rule");
+        assertMayConfigure(binding, role);
         draft.setBindingId(bindingId);
         return ResponseEntity.ok(ApiResponse.ok(
                 adminService.upsertRedemptionRule(draft, LocalDateTime.now(ZoneOffset.UTC))));
+    }
+
+    /**
+     * Reset this binge's redemption to the LIVE country default: retire any
+     * per-binge override so the binge inherits its venue-country economics from
+     * the super-admin Countries tab (and tracks future edits there). Read the
+     * resolved terms with {@link #effectiveRedeem}.
+     */
+    @PostMapping("/bindings/{bindingId}/redeem-rule/reset")
+    public ResponseEntity<ApiResponse<Void>> resetRedeemRule(
+            @PathVariable Long bindingId,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        LoyaltyBingeBinding binding = bindingRepository.findById(bindingId)
+            .orElseThrow(() -> new ResourceNotFoundException("LoyaltyBingeBinding", "id", bindingId));
+        adminBingeScopeService.requireBingeOwnership(binding.getBingeId(), adminId, role, "resetting redeem rule");
+        assertMayConfigure(binding, role);
+        adminService.retireRedemptionRule(bindingId, LocalDateTime.now(ZoneOffset.UTC));
+        return ResponseEntity.ok(ApiResponse.ok(
+                "Redemption reset — this venue now inherits its country's live point value", null));
+    }
+
+    /**
+     * The redemption economics that ACTUALLY apply to this binge right now and
+     * where they come from (per-binge override, the venue's country config, or
+     * the program default). Drives the "currently inheriting …" banner in the
+     * binge loyalty panel.
+     */
+    @GetMapping("/bindings/{bindingId}/effective-redeem")
+    public ResponseEntity<ApiResponse<LoyaltyConfigService.EffectiveRedemptionTerms>> effectiveRedeem(
+            @PathVariable Long bindingId,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        LoyaltyBingeBinding binding = bindingRepository.findById(bindingId)
+            .orElseThrow(() -> new ResourceNotFoundException("LoyaltyBingeBinding", "id", bindingId));
+        adminBingeScopeService.requireBingeOwnership(binding.getBingeId(), adminId, role, "reading effective redeem terms");
+        return ResponseEntity.ok(ApiResponse.ok(configService.resolveEffectiveRedemption(
+                bindingId, binding.getBingeId(), LocalDateTime.now(ZoneOffset.UTC))));
     }
 
     // ── Perk overrides ───────────────────────────────────────────────────
@@ -165,6 +289,7 @@ public class LoyaltyV2AdminController {
         LoyaltyBingeBinding binding = bindingRepository.findById(bindingId)
             .orElseThrow(() -> new ResourceNotFoundException("LoyaltyBingeBinding", "id", bindingId));
         adminBingeScopeService.requireBingeOwnership(binding.getBingeId(), adminId, role, "upserting perk override");
+        assertMayConfigure(binding, role);
         draft.setBindingId(bindingId);
         return ResponseEntity.ok(ApiResponse.ok(adminService.upsertPerkOverride(draft)));
     }
@@ -202,6 +327,26 @@ public class LoyaltyV2AdminController {
 
     /** Inline request body — approving or rejecting a status-match. */
     public record StatusMatchApproveBody(String notes, Integer challengeDays) { }
+
+    // ── Config-lock enforcement ──────────────────────────────────────────
+
+    private static boolean isSuperAdmin(String role) {
+        return role != null && "SUPER_ADMIN".equalsIgnoreCase(role.trim());
+    }
+
+    /**
+     * Fail-closed governance gate: a binge admin may not change loyalty
+     * configuration on a binding the super-admin has locked. Super-admins always
+     * pass. Called on every admin WRITE to loyalty config (enable/disable/rules).
+     */
+    private void assertMayConfigure(LoyaltyBingeBinding binding, String role) {
+        if (binding != null && binding.isAdminConfigLocked() && !isSuperAdmin(role)) {
+            throw new BusinessException(
+                    "Loyalty configuration for this venue is managed by the super admin. "
+                            + "Ask a super admin to change it or to unlock self-service.",
+                    HttpStatus.FORBIDDEN);
+        }
+    }
 
     // Keep the import-usage of Optional from being pruned during
     // refactors — helper kept intentionally.

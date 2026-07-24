@@ -60,6 +60,7 @@ public class LoyaltyV2SuperAdminController {
     private final LoyaltyBingeBindingRepository bindingRepository;
     private final LoyaltyPointsWalletRepository walletRepository;
     private final LoyaltyLedgerEntryRepository ledgerRepository;
+    private final LoyaltyCountryEarnConfigRepository countryConfigRepository;
 
     // ── Program ──────────────────────────────────────────────────────────
 
@@ -153,6 +154,102 @@ public class LoyaltyV2SuperAdminController {
     }
 
     public record BulkBindingBody(List<Long> bindingIds, String status) {}
+
+    // ── Country earn/redeem economics ────────────────────────────────────
+
+    /**
+     * Per-country loyalty economics (earn rate + redemption value in LOCAL
+     * currency). Drives what NEW binges are auto-seeded with; existing binges
+     * keep their per-binge rules (edit those individually to retro-change).
+     */
+    @GetMapping("/country-configs")
+    public ResponseEntity<ApiResponse<List<LoyaltyCountryEarnConfig>>> listCountryConfigs() {
+        return ResponseEntity.ok(ApiResponse.ok(
+                countryConfigRepository.findAll(org.springframework.data.domain.Sort.by("countryIso2"))));
+    }
+
+    @PostMapping("/country-configs")
+    public ResponseEntity<ApiResponse<LoyaltyCountryEarnConfig>> upsertCountryConfig(
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestBody LoyaltyCountryEarnConfig body) {
+        if (body.getCountryIso2() == null || !body.getCountryIso2().trim().matches("(?i)[A-Z]{2}")) {
+            throw new BusinessException("countryIso2 must be a 2-letter ISO code");
+        }
+        if (body.getCurrencyCode() == null || body.getCurrencyCode().isBlank()) {
+            throw new BusinessException("currencyCode is required");
+        }
+        if (body.getPointsNumerator() <= 0) throw new BusinessException("pointsNumerator must be > 0");
+        if (body.getAmountDenominator() == null || body.getAmountDenominator().signum() <= 0) {
+            throw new BusinessException("amountDenominator must be > 0");
+        }
+        if (body.getPointsPerCurrencyUnit() <= 0) {
+            throw new BusinessException("pointsPerCurrencyUnit must be > 0");
+        }
+        if (body.getMaxRedemptionPercent() == null
+                || body.getMaxRedemptionPercent().signum() <= 0
+                || body.getMaxRedemptionPercent().compareTo(new java.math.BigDecimal("100")) > 0) {
+            throw new BusinessException("maxRedemptionPercent must be in (0, 100]");
+        }
+        body.setCountryIso2(body.getCountryIso2().trim().toUpperCase());
+        body.setCurrencyCode(body.getCurrencyCode().trim().toUpperCase());
+        body.setUpdatedByAdminId(adminId);
+        return ResponseEntity.ok(ApiResponse.ok("Country config saved",
+                countryConfigRepository.save(body)));
+    }
+
+    @DeleteMapping("/country-configs/{countryIso2}")
+    public ResponseEntity<ApiResponse<Void>> deleteCountryConfig(@PathVariable String countryIso2) {
+        countryConfigRepository.deleteById(countryIso2.trim().toUpperCase());
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
+    // ── Per-binge goodwill permission ────────────────────────────────────
+
+    /**
+     * Grant/revoke a binge's ability to sanction goodwill points, with a
+     * monthly budget. Body: {"goodwillEnabled": true, "goodwillMonthlyCapPoints": 50000}.
+     */
+    @PostMapping("/bindings/{bindingId}/goodwill-settings")
+    public ResponseEntity<ApiResponse<LoyaltyBingeBinding>> setGoodwillSettings(
+            @PathVariable Long bindingId,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestBody Map<String, Object> body) {
+        LoyaltyBingeBinding binding = bindingRepository.findById(bindingId)
+                .orElseThrow(() -> new BusinessException("Binding not found: " + bindingId));
+        if (body.get("goodwillEnabled") instanceof Boolean enabled) {
+            binding.setGoodwillEnabled(enabled);
+        }
+        if (body.get("goodwillMonthlyCapPoints") instanceof Number cap) {
+            if (cap.longValue() < 0) throw new BusinessException("Monthly cap must be >= 0");
+            binding.setGoodwillMonthlyCapPoints(cap.longValue());
+        }
+        LoyaltyBingeBinding saved = bindingRepository.save(binding);
+        return ResponseEntity.ok(ApiResponse.ok("Goodwill settings updated", saved));
+    }
+
+    // ── Per-binge loyalty configuration lock ─────────────────────────────
+
+    /**
+     * Lock/unlock a binge's loyalty configuration to super-admin control.
+     * Body: {"locked": true}. When locked, the binge's own admins can no longer
+     * enable/disable the binding or edit its earn/redeem/perk rules — the super
+     * admin owns the venue's loyalty economics (typically set at approval).
+     */
+    @PostMapping("/bindings/{bindingId}/config-lock")
+    public ResponseEntity<ApiResponse<LoyaltyBingeBinding>> setConfigLock(
+            @PathVariable Long bindingId,
+            @RequestBody Map<String, Object> body) {
+        LoyaltyBingeBinding binding = bindingRepository.findById(bindingId)
+                .orElseThrow(() -> new BusinessException("Binding not found: " + bindingId));
+        if (!(body.get("locked") instanceof Boolean locked)) {
+            throw new BusinessException("Request body must include boolean 'locked'");
+        }
+        binding.setAdminConfigLocked(locked);
+        LoyaltyBingeBinding saved = bindingRepository.save(binding);
+        return ResponseEntity.ok(ApiResponse.ok(
+                locked ? "Loyalty config locked to super-admin control"
+                       : "Loyalty config unlocked for binge admins", saved));
+    }
 
     // ── Per-customer wallet operations ───────────────────────────────────
 

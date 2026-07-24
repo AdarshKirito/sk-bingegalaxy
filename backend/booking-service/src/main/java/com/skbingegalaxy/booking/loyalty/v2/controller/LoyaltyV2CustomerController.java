@@ -40,6 +40,7 @@ public class LoyaltyV2CustomerController {
     private final EnrollmentService enrollmentService;
     private final LoyaltyMemberService loyaltyMemberService;
     private final RedeemEngine redeemEngine;
+    private final com.skbingegalaxy.booking.loyalty.v2.engine.EarnEngine earnEngine;
     private final StatusMatchService statusMatchService;
 
     private final LoyaltyPointsWalletRepository walletRepository;
@@ -139,6 +140,62 @@ public class LoyaltyV2CustomerController {
 
         RedeemEngine.RedeemQuote quote = redeemEngine.quote(new RedeemEngine.QuoteRequest(
                 m.getId(), bingeId, points, bookingAmount, java.time.LocalDateTime.now(ZoneOffset.UTC)));
+        return ResponseEntity.ok(ApiResponse.ok(quote));
+    }
+
+    // ── Redeem ceiling (slider bounds — preview only) ────────────────────
+    // Tells the "use points" slider its max stop, floor, and the venue-country
+    // per-point value so the customer can freely choose how many points to apply.
+
+    @Transactional(readOnly = true)
+    @GetMapping("/redeem-max")
+    public ResponseEntity<ApiResponse<RedeemEngine.RedeemMax>> redeemMax(
+            @RequestHeader("X-User-Id") Long customerId,
+            @RequestParam Long bingeId,
+            @RequestParam BigDecimal bookingAmount) {
+
+        LoyaltyMembership m = enrollmentService.findForCustomer(customerId).orElse(null);
+        if (m == null) {
+            return ResponseEntity.ok(ApiResponse.ok(RedeemEngine.RedeemMax.none()));
+        }
+        RedeemEngine.RedeemMax max = redeemEngine.maxRedeemable(
+                m.getId(), bingeId, bookingAmount, java.time.LocalDateTime.now(ZoneOffset.UTC));
+        return ResponseEntity.ok(ApiResponse.ok(max));
+    }
+
+    // ── Earn quote (preview only — "you'll earn ~X points") ─────────────
+    // Booking-time estimate using the exact earn-rule math that fires on
+    // completion. Optional customerId override lets ADMIN staff preview what a
+    // selected customer earns while creating a walk-in booking for them.
+
+    @Transactional(readOnly = true)
+    @GetMapping("/earn-quote")
+    public ResponseEntity<ApiResponse<com.skbingegalaxy.booking.loyalty.v2.engine.EarnEngine.EarnQuote>> quoteEarn(
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader(value = "X-User-Role", required = false) String role,
+            @RequestParam Long bingeId,
+            @RequestParam BigDecimal bookingAmount,
+            @RequestParam(required = false) Long customerId) {
+
+        // Admins may quote for the customer they're booking for; customers only themselves.
+        Long target = userId;
+        if (customerId != null && !customerId.equals(userId)) {
+            boolean staff = "ADMIN".equalsIgnoreCase(role) || "SUPER_ADMIN".equalsIgnoreCase(role);
+            if (!staff) {
+                throw new com.skbingegalaxy.common.exception.BusinessException(
+                    "Not authorised to quote for another customer",
+                    org.springframework.http.HttpStatus.FORBIDDEN);
+            }
+            target = customerId;
+        }
+
+        var membership = enrollmentService.findForCustomer(target).orElse(null);
+        if (membership == null) {
+            return ResponseEntity.ok(ApiResponse.ok(
+                com.skbingegalaxy.booking.loyalty.v2.engine.EarnEngine.EarnQuote.no("NOT_ENROLLED")));
+        }
+        var quote = earnEngine.quote(membership.getId(), bingeId, bookingAmount,
+            java.time.LocalDateTime.now(ZoneOffset.UTC));
         return ResponseEntity.ok(ApiResponse.ok(quote));
     }
 

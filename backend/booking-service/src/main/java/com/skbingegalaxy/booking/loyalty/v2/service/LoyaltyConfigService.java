@@ -56,6 +56,15 @@ public class LoyaltyConfigService {
     private final LoyaltyBingeEarningRuleRepository earningRuleRepository;
     private final LoyaltyBingeRedemptionRuleRepository redemptionRuleRepository;
     private final LoyaltyBingePerkOverrideRepository perkOverrideRepository;
+    private final LoyaltyCountryEarnConfigRepository countryConfigRepository;
+    private final com.skbingegalaxy.booking.repository.BingeRepository bingeRepository;
+
+    // Program-wide hard defaults — mirror LoyaltyBindingAutoSeeder. Used only as a
+    // last resort when a binge has neither a per-binge rule nor a country config.
+    private static final long DEFAULT_POINTS_PER_CURRENCY_UNIT = 100L;
+    private static final long DEFAULT_MIN_REDEMPTION_POINTS = 100L;
+    private static final java.math.BigDecimal DEFAULT_MAX_REDEMPTION_PERCENT =
+            new java.math.BigDecimal("50.00");
 
     // ── Program ──────────────────────────────────────────────────────────
 
@@ -148,6 +157,75 @@ public class LoyaltyConfigService {
 
     public Optional<LoyaltyBingeRedemptionRule> resolveRedemptionRule(Long bindingId, LocalDateTime at) {
         return redemptionRuleRepository.findActive(bindingId, at);
+    }
+
+    /**
+     * Resolve the redemption economics that <b>actually apply</b> to a booking,
+     * in priority order — the "award chart + property override" model real
+     * loyalty programs (Marriott Bonvoy, airline zone charts) use:
+     *
+     * <ol>
+     *   <li><b>Per-binge override</b> — an admin/super-admin explicitly set a
+     *       {@link LoyaltyBingeRedemptionRule} for this binge. Wins outright.</li>
+     *   <li><b>Country config</b> — the venue's country has a LIVE
+     *       {@link LoyaltyCountryEarnConfig}. This is why "points are valued by
+     *       the VENUE's country": a customer redeeming at a US venue burns at the
+     *       US rate, at an IN venue the IN rate — regardless of where the
+     *       customer is from. Because it is resolved live (not copied), editing a
+     *       country rate in the Loyalty Center immediately re-values every binge
+     *       that inherits (i.e. has no per-binge override).</li>
+     *   <li><b>Program default</b> — last-resort baseline (100 pts / unit).</li>
+     * </ol>
+     *
+     * <p>Never returns null. Redemption is still gated upstream by the binding
+     * being ENABLED and non-frozen, so a fallback here never enables points on a
+     * venue the super-admin turned off.
+     */
+    public EffectiveRedemptionTerms resolveEffectiveRedemption(Long bindingId, Long bingeId, LocalDateTime at) {
+        Optional<LoyaltyBingeRedemptionRule> rule = redemptionRuleRepository.findActive(bindingId, at);
+        if (rule.isPresent()) {
+            LoyaltyBingeRedemptionRule r = rule.get();
+            return new EffectiveRedemptionTerms(
+                    r.getPointsPerCurrencyUnit(), r.getMinRedemptionPoints(),
+                    r.getMaxRedemptionPercent(), r.getTierBonusPctJson(),
+                    "BINGE_RULE", null);
+        }
+        String country = bingeId == null ? null
+                : bingeRepository.findCountryById(bingeId).orElse(null);
+        if (country != null && !country.isBlank()) {
+            LoyaltyCountryEarnConfig cc = countryConfigRepository
+                    .findByCountryIso2AndActiveTrue(country.trim().toUpperCase()).orElse(null);
+            if (cc != null) {
+                return new EffectiveRedemptionTerms(
+                        cc.getPointsPerCurrencyUnit(), cc.getMinRedemptionPoints(),
+                        cc.getMaxRedemptionPercent(), null,
+                        "COUNTRY_CONFIG", cc.getCountryIso2());
+            }
+        }
+        return new EffectiveRedemptionTerms(
+                DEFAULT_POINTS_PER_CURRENCY_UNIT, DEFAULT_MIN_REDEMPTION_POINTS,
+                DEFAULT_MAX_REDEMPTION_PERCENT, null, "PROGRAM_DEFAULT", null);
+    }
+
+    /**
+     * The effective redemption economics for a binge and where they came from.
+     * {@code source} is one of {@code BINGE_RULE}, {@code COUNTRY_CONFIG},
+     * {@code PROGRAM_DEFAULT}; {@code countryIso2} is set only for COUNTRY_CONFIG.
+     */
+    public record EffectiveRedemptionTerms(
+            long pointsPerCurrencyUnit,
+            long minRedemptionPoints,
+            java.math.BigDecimal maxRedemptionPercent,
+            String tierBonusPctJson,
+            String source,
+            String countryIso2
+    ) {
+        /** Whether these terms permit any redemption at all. */
+        public boolean redeemable() {
+            return pointsPerCurrencyUnit > 0
+                    && maxRedemptionPercent != null
+                    && maxRedemptionPercent.signum() > 0;
+        }
     }
 
     /**
