@@ -82,6 +82,16 @@
             <artifactId>firebase-admin</artifactId>
             <version>9.4.2</version>
         </dependency>
+        <!-- Web Push (VAPID + RFC-8291 aes128gcm payload encryption). Powers browser
+             push notifications for the PWA so alerts reach users even when the tab is
+             closed. Pulls BouncyCastle (ECDH/HKDF crypto) and an Apache HttpClient
+             transitively; the send-response status is read defensively in WebPushService
+             so it is resilient to the HttpClient major version shipped by the library. -->
+        <dependency>
+            <groupId>nl.martijndwars</groupId>
+            <artifactId>web-push</artifactId>
+            <version>5.1.1</version>
+        </dependency>
         <dependency>
             <groupId>net.javacrumbs.shedlock</groupId>
             <artifactId>shedlock-spring</artifactId>

@@ -19,6 +19,8 @@ export interface User {
   conciergeSupport?: boolean;
   role: 'USER' | 'ADMIN' | 'SUPER_ADMIN';
   active?: boolean;
+  /** True while the account still holds an admin-issued temporary password. */
+  mustChangePassword?: boolean;
 }
 
 export interface SupportContact {
@@ -58,11 +60,15 @@ export interface Binge {
   supportPhoneCountryCode?: string;
   supportWhatsapp?: string;
   supportWhatsappCountryCode?: string;
+  /** V78: the public support phone doubles as the WhatsApp contact. */
+  supportPhoneIsWhatsapp?: boolean;
   customerCancellationEnabled?: boolean;
   customerCancellationCutoffMinutes?: number;
   maxConcurrentBookings?: number;
   /** IANA timezone identifier (e.g. "Asia/Kolkata"). Governs opening/closing times and booking-date arithmetic. */
   timezone?: string;
+  /** ISO-4217 currency this binge prices/charges in (derived from its country, e.g. "INR", "USD"). */
+  currency?: string;
   /** Per-binge opening time (HH:mm or HH:mm:ss); interpreted in the venue's timezone. */
   openTime?: string;
   /** Per-binge closing time (HH:mm or HH:mm:ss); interpreted in the venue's timezone. */

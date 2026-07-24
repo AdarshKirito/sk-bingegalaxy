@@ -1,0 +1,17 @@
+/* Currencies console — page-scoped polish on top of the shared admin-system.css.
+   Kept under .curr-page so nothing here leaks to other admin tables. */
+
+/* The table has 10 columns; give it a comfortable min-width so cells don't cram, and let
+   .admin-table-wrap scroll it horizontally on narrow screens instead of squashing text. */
+.curr-page .admin-table { min-width: 880px; }
+
+.curr-page .admin-table td:first-child strong { font-variant-numeric: tabular-nums; }
+
+/* Role capability chips (D / P / S) — even spacing, monospace so they line up. */
+.curr-page .admin-table td .badge { font-family: var(--font-mono, ui-monospace, monospace); }
+
+/* Rate-to-base reads as data — keep it on one line with aligned digits. */
+.curr-page .admin-table td:nth-child(4) { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Modal note paragraph. */
+.curr-page .modal-form > p { margin: 0.2rem 0 0; line-height: 1.4; }

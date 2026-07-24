@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react';
 import LazyImage from '../ui/LazyImage';
+import { formatCurrency } from '../../utils/currency';
 
 export default function StepEvent({
   eventTypes, form, setForm, resolvedPricing,
-  setImagePopup, isAdmin,
+  setImagePopup, isAdmin, currency = 'INR',
   onNext, onBack, onCancel,
 }) {
+  const money = (v) => formatCurrency(v, currency);
   // V55 — chip filter built from the event types we already have so we
   // don't need an extra round trip. "All" sentinel = null.
   const [activeCat, setActiveCat] = useState(null);
@@ -56,7 +58,7 @@ export default function StepEvent({
               const isCustom = rp && rp.source !== 'DEFAULT';
               return (
                 <p className="et-price">
-                  ₹{bp?.toLocaleString()} + ₹{hr}/hr
+                  {money(bp)} + {money(hr)}/hr
                   {isCustom && <span style={{ fontSize: '0.7rem', marginLeft: '0.4rem', color: '#818cf8' }}>({rp.source === 'RATE_CODE' ? resolvedPricing.rateCodeName : 'Custom'})</span>}
                 </p>
               );

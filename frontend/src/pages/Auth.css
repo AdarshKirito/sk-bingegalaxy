@@ -108,7 +108,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .auth-showcase h1,
@@ -409,7 +409,7 @@
 /* Inline field validation */
 .field-error {
   font-size: 0.78rem;
-  color: var(--danger);
+  color: var(--danger-text);
   margin-top: -0.1rem;
 }
 .input-group.has-error input {

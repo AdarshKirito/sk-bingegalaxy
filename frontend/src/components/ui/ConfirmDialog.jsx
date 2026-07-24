@@ -47,9 +47,9 @@ export default function ConfirmDialog({
   if (!open) return null;
 
   const colors = {
-    danger: { bg: 'var(--danger-bg)', color: 'var(--danger)', btnClass: 'btn-danger' },
-    warning: { bg: 'var(--warning-bg)', color: 'var(--warning)', btnClass: 'btn-primary' },
-    primary: { bg: 'var(--primary-bg)', color: 'var(--primary)', btnClass: 'btn-primary' },
+    danger: { bg: 'var(--danger-bg)', color: 'var(--danger-text)', btnClass: 'btn-danger' },
+    warning: { bg: 'var(--warning-bg)', color: 'var(--warning-text)', btnClass: 'btn-primary' },
+    primary: { bg: 'var(--primary-bg)', color: 'var(--primary-text)', btnClass: 'btn-primary' },
   };
   const c = colors[variant] || colors.danger;
 
@@ -89,7 +89,7 @@ export default function ConfirmDialog({
         {withReason ? (
           <div style={{ marginBottom: '1.25rem' }}>
             <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.4rem' }}>
-              {reasonLabel}{reasonRequired ? <span style={{ color: 'var(--danger)' }}> *</span> : null}
+              {reasonLabel}{reasonRequired ? <span style={{ color: 'var(--danger-text)' }}> *</span> : null}
             </label>
             <textarea
               ref={textareaRef}

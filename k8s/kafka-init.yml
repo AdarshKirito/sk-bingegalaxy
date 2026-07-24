@@ -29,7 +29,8 @@ spec:
               for topic in booking.created booking.confirmed booking.cancelled \
                            booking.cash-payment \
                            payment.success payment.failed payment.refunded \
-                           notification.send user.registered password.reset; do
+                           notification.send user.registered password.reset \
+                           user.anonymized; do
                 kafka-topics --bootstrap-server kafka-0.kafka:9092 --create --if-not-exists \
                   --topic $topic --partitions 3 --replication-factor 3 --config min.insync.replicas=2
                 echo "  -> $topic"

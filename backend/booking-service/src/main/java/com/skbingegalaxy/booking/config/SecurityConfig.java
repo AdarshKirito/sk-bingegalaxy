@@ -30,6 +30,12 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/v1/bookings/admin/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                 .requestMatchers("/api/v1/bookings/waitlist/admin/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
+                // Self-scoped message inbox for ANY authenticated user (customer/admin/super-admin).
+                // Every method filters by the caller's own X-User-Id in the service layer, so a user
+                // only ever sees their own mail. Deliberately NOT under /admin/** so CUSTOMER tokens
+                // can reach it. (Redundant with the anyRequest() fallback below, but explicit as
+                // defence-in-depth and to pin the intent against future matcher reordering.)
+                .requestMatchers("/api/v1/bookings/notifications/**").authenticated()
                 .requestMatchers("/api/v1/bookings/internal/**").hasRole("SYSTEM")
                 // Loyalty v2 super-admin endpoints — program-wide config (tier ladder,
                 // perks catalogue, program metadata). MUST be SUPER_ADMIN; the gateway
@@ -47,6 +53,12 @@ public class SecurityConfig {
                     "/api/v1/bookings/slot-capacity",
                     "/api/v1/bookings/venue-rooms",
                     "/api/v1/bookings/venue-rooms/available",
+                    // Public room rating/reviews (read-only, customer room detail modal).
+                    "/api/v1/bookings/venue-rooms/*/reviews",
+                    "/api/v1/bookings/venue-rooms/*/reviews/summary",
+                    // Uploaded venue/room/event photos are public, non-sensitive images —
+                    // must load for guests browsing the venue before logging in.
+                    "/api/v1/bookings/media/**",
                     "/api/v1/bookings/surge-rules",
                     // Funnel analytics ingest — wizard fires this for guests too.
                     // Controller is documented as "unauthenticated-friendly".

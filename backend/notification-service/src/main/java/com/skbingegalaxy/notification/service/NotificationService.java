@@ -50,7 +50,11 @@ public class NotificationService {
     private final SmsProvider smsProvider;
     private final WhatsAppProvider whatsAppProvider;
     private final PushProvider pushProvider;
+    private final WebPushService webPushService;
     private final NotificationMetrics metrics;
+
+    /** Types that must never fan out to browser push (security flow, potentially shared device). */
+    private static final java.util.Set<String> PUSH_SKIP_TYPES = java.util.Set.of("PASSWORD_RESET");
 
     @Value("${app.notification.from-email:noreply@skbingegalaxy.com}")
     private String fromEmail;
@@ -71,6 +75,7 @@ public class NotificationService {
             @Autowired(required = false) SmsProvider smsProvider,
             @Autowired(required = false) WhatsAppProvider whatsAppProvider,
             @Autowired(required = false) PushProvider pushProvider,
+            WebPushService webPushService,
             NotificationMetrics metrics) {
         this.notificationRepository = notificationRepository;
         this.mailSender = mailSender;
@@ -81,6 +86,7 @@ public class NotificationService {
         this.smsProvider = smsProvider;
         this.whatsAppProvider = whatsAppProvider;
         this.pushProvider = pushProvider;
+        this.webPushService = webPushService;
         this.metrics = metrics;
     }
 
@@ -109,6 +115,12 @@ public class NotificationService {
             String body,
             String bookingRef,
             Map<String, Object> metadata) {
+
+        // ── Browser push fan-out (parallel channel) ──
+        // Fired here, BEFORE the email-suppression branch, so a user who muted EMAIL still
+        // gets push (and vice-versa) — the two channels are independent. Best-effort:
+        // no-op when the user has no subscriptions or has muted PUSH, never throws.
+        maybeWebPush(type, recipientEmail, subject, body, metadata);
 
         // ── Check user preferences before persisting ──
         if (recipientEmail != null
@@ -263,6 +275,11 @@ public class NotificationService {
     }
 
     private boolean dispatchNotification(Notification notification) {
+        // Clear any stale failure reason from a PRIOR attempt. Success is signalled by
+        // failureReason == null after this dispatch; on a retry the row still carries the
+        // previous failure's reason, so without this reset a genuinely successful re-dispatch
+        // would be mis-reported as failed — causing duplicate sends and a false BOUNCED.
+        notification.setFailureReason(null);
         try {
             switch (notification.getChannel()) {
                 case EMAIL -> {
@@ -299,6 +316,15 @@ public class NotificationService {
     private void sendEmail(Notification notification) throws MessagingException {
         if (mailSender == null) {
             throw new IllegalStateException("Email delivery is not configured");
+        }
+        // Guest customer profiles carry a synthetic placeholder address on the RFC 2606
+        // reserved ".invalid" TLD — undeliverable by construction. Skip cleanly instead
+        // of attempting a send that can only bounce and hurt sender reputation.
+        String recipient = notification.getRecipientEmail();
+        if (recipient != null && recipient.toLowerCase().endsWith(".invalid")) {
+            log.info("Skipping email for guest placeholder address (type={}, bookingRef={})",
+                notification.getType(), notification.getBookingRef());
+            return;
         }
         MimeMessage mimeMessage = mailSender.createMimeMessage();
         MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, "UTF-8");
@@ -451,6 +477,37 @@ public class NotificationService {
         String msgId = pushProvider.sendRich(deviceToken, notification.getSubject(), notification.getBody(),
                 data, imageUrl, deepLinkUrl, actionButtons);
         log.info("Push dispatched via {} — messageId: {}", pushProvider.providerName(), msgId);
+    }
+
+    /**
+     * Deliver the notification to the user's browser-push subscriptions in parallel with
+     * the primary channel. Guarded by the PUSH-channel preference (so a mute is honoured)
+     * and a skip-list for security flows. Entirely best-effort — any failure is swallowed
+     * so it can never break email/in-app delivery.
+     */
+    private void maybeWebPush(String type, String email, String subject, String body,
+                              Map<String, Object> metadata) {
+        try {
+            if (email == null || email.isBlank()) return;
+            if (webPushService == null || !webPushService.isEnabled()) return;
+            if (PUSH_SKIP_TYPES.contains(type)) return;
+            if (preferenceService.isSuppressed(email, type, "PUSH")) return;
+            String url = extractString(metadata, "deepLinkUrl");
+            int n = webPushService.fanout(email, subject, toPushBody(body), url,
+                    type != null ? type : "skbg", type);
+            if (n > 0) {
+                log.info("Web push delivered to {} device(s): type={} email={}", n, type, email);
+            }
+        } catch (Exception e) {
+            log.debug("Web push fan-out skipped for {}: {}", email, e.getMessage());
+        }
+    }
+
+    /** Collapse a multi-line email body into a short single-line push body. */
+    private static String toPushBody(String body) {
+        if (body == null) return "";
+        String oneLine = body.replaceAll("\\s+", " ").trim();
+        return oneLine.length() > 180 ? oneLine.substring(0, 180) + "…" : oneLine;
     }
 
     private String extractString(Map<String, Object> metadata, String key) {

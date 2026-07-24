@@ -16,6 +16,14 @@ import java.time.LocalDateTime;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class PaymentEvent extends EventEnvelope {
     private String bookingRef;
+    /**
+     * Binge the payment row belongs to (SEC-011). Consumers verify this
+     * against the booking's own binge before mutating booking state, so a
+     * payment stamped with the wrong tenant can never move another tenant's
+     * booking. Nullable for events produced by older service versions —
+     * consumers must treat null as "unverifiable" and log, not reject.
+     */
+    private Long bingeId;
     private String transactionId;
     private BigDecimal amount;
     private String currency;

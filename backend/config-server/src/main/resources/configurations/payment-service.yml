@@ -13,7 +13,7 @@ internal:
     # No default — boot fails fast if the shared Feign secret is not
     # provided via env, rather than silently running with a well-known
     # placeholder that would let anyone forge internal API calls.
-    secret: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET must be set}
+    secret: ${INTERNAL_API_SECRET}
 
 spring:
   application:
@@ -21,7 +21,7 @@ spring:
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/payment_db}
     username: ${SPRING_DATASOURCE_USERNAME:payment_svc}
-    password: ${SPRING_DATASOURCE_PASSWORD:?SPRING_DATASOURCE_PASSWORD must be set}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:8}
@@ -72,9 +72,13 @@ spring:
     consumer:
       group-id: payment-group
       auto-offset-reset: earliest
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      # ErrorHandlingDeserializer wrap — a poison record must never block a
+      # partition forever (see booking-service.yml for the full rationale).
+      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       properties:
+        spring.deserializer.key.delegate.class: org.apache.kafka.common.serialization.StringDeserializer
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
         spring.json.trusted.packages: com.skbingegalaxy.*
     listener:
       observation-enabled: true
@@ -97,6 +101,26 @@ app:
     # REQUIRED for dispute handling to work. Without this, all dispute webhooks
     # are rejected with 403 to prevent spoofed chargebacks from corrupting state.
     webhook-secret: ${RAZORPAY_WEBHOOK_SECRET:}
+  # ── Stripe Connect ──────────────────────────────────────────────────────
+  # Venues are onboarded as Express connected accounts and charged with DIRECT
+  # charges, so the charge happens on the venue's account in the venue's country.
+  # That is what lets a customer anywhere pay an Indian venue by UPI.
+  # Leave secret-key empty to keep Stripe dormant: StripePaymentProvider then
+  # advertises no currencies and the registry never routes to it.
+  stripe:
+    secret-key: ${STRIPE_SECRET_KEY:}
+    # Publishable key (pk_…) — returned to the browser to initialise Stripe.js.
+    # Safe to expose; the secret key never leaves the server.
+    publishable-key: ${STRIPE_PUBLISHABLE_KEY:}
+    # Developers → Webhooks → <endpoint> → Signing secret (whsec_…).
+    # REQUIRED for Connect to work: without it every webhook is rejected 403,
+    # so accounts never flip to chargeable after KYC.
+    webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+    # Platform commission in basis points (100 = 1%), taken as application_fee_amount.
+    application-fee-bps: ${STRIPE_APPLICATION_FEE_BPS:0}
+    # Where Stripe returns the venue owner after hosted onboarding.
+    onboarding-return-url: ${STRIPE_ONBOARDING_RETURN_URL:http://localhost:5173/admin/binges}
+    onboarding-refresh-url: ${STRIPE_ONBOARDING_REFRESH_URL:http://localhost:5173/admin/binges}
 
 springdoc:
   api-docs:
@@ -127,6 +151,10 @@ resilience4j:
       booking-service:
         base-config: default
       razorpay:
+        base-config: default
+        wait-duration-in-open-state: 60s
+        slow-call-duration-threshold: 10s
+      stripe:
         base-config: default
         wait-duration-in-open-state: 60s
         slow-call-duration-threshold: 10s

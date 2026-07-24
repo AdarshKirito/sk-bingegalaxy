@@ -7,6 +7,7 @@ import { FiCalendar, FiDollarSign, FiUsers, FiTrendingUp, FiClock, FiClipboard, 
 import { SkeletonStatCard } from '../components/ui/Skeleton';
 import useRealtimeUpdates from '../hooks/useRealtimeUpdates';
 import './AdminDashboard.css';
+import { venueMoney, venueTimezone } from '../utils/venueLocale';
 
 export default function AdminDashboard() {
   const { isSuperAdmin } = useAuth();
@@ -127,8 +128,18 @@ export default function AdminDashboard() {
     </div>
   );
 
-  const dateStr = now.toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-  const timeStr = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+  // The dashboard clock shows the VENUE's local time (its assigned timezone),
+  // not the admin's browser time — ops decisions (audit runs, no-shows, slot
+  // cutoffs) are all anchored to the venue's wall clock.
+  const venueTz = venueTimezone();
+  let dateStr, timeStr;
+  try {
+    dateStr = now.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: venueTz });
+    timeStr = now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: venueTz });
+  } catch {
+    dateStr = now.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    timeStr = now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+  }
 
   const handleRunAudit = async () => {
     if (!confirm('Run end-of-day audit? This will resolve no-shows and finalize today\'s bookings.')) return;
@@ -216,7 +227,7 @@ export default function AdminDashboard() {
           <FiClock size={28} className="admin-dash-banner-icon" />
           <div>
             <div className="admin-dash-banner-time">{timeStr}</div>
-            <div className="admin-dash-banner-date">{dateStr}</div>
+            <div className="admin-dash-banner-date">{dateStr} <span style={{ opacity: 0.7, fontSize: '0.8em' }}>· Venue time ({venueTz.replace(/_/g, ' ')})</span></div>
           </div>
           {operationalDate && (
             <div className="admin-dash-banner-meta">
@@ -258,11 +269,11 @@ export default function AdminDashboard() {
         <StatCard icon={<FiCalendar />} label="Today's Bookings" value={stats?.todayTotal || 0} color="var(--primary)" to="/admin/bookings?tab=today&sub=all" />
         <StatCard icon={<FiUsers />} label="Pending" value={stats?.todayPending || 0} color="var(--warning)" to="/admin/bookings?tab=today&sub=pending" />
         <StatCard icon={<FiTrendingUp />} label="Confirmed" value={stats?.todayConfirmed || 0} color="var(--success)" to="/admin/bookings?tab=today&sub=confirmed" />
-        <StatCard icon={<FiDollarSign />} label="Today's Revenue" value={`₹${(stats?.todayRevenue ?? 0).toLocaleString()}`} color="var(--secondary)" to="/admin/reports" />
+        <StatCard icon={<FiDollarSign />} label="Today's Revenue" value={`${venueMoney((stats?.todayRevenue ?? 0))}`} color="var(--secondary)" to="/admin/reports" />
       </div>
 
       <div className="grid-4 stat-cards" style={{ marginTop: '0.75rem' }}>
-        <StatCard icon={<FiTrendingUp />} label="Estimated Today's Revenue" value={`₹${(stats?.todayEstimatedRevenue ?? 0).toLocaleString()}`} color="var(--primary)" to="/admin/reports" />
+        <StatCard icon={<FiTrendingUp />} label="Estimated Today's Revenue" value={`${venueMoney((stats?.todayEstimatedRevenue ?? 0))}`} color="var(--primary)" to="/admin/reports" />
         <StatCard icon={<FiCalendar />} label="Checked In" value={stats?.todayCheckedIn || 0} color="var(--success)" to="/admin/bookings?tab=today&sub=checkedIn" />
         <StatCard icon={<FiCalendar />} label="Completed Today" value={stats?.todayCompleted || 0} color="var(--info, #0984e3)" to="/admin/bookings?tab=today&sub=completed" />
         <StatCard icon={<FiDollarSign />} label="Cancelled Today" value={stats?.todayCancelled || 0} color="var(--danger)" to="/admin/bookings?tab=today&sub=cancelled" />
@@ -303,13 +314,13 @@ export default function AdminDashboard() {
       {isSuperAdmin && (failedSagas.length > 0 || compensatingSagas.length > 0) && (
         <div style={{ marginTop: '1.5rem' }}>
           <h2 style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>
-            <FiAlertTriangle style={{ verticalAlign: '-2px', marginRight: 6, color: 'var(--warning)' }} />
+            <FiAlertTriangle style={{ verticalAlign: '-2px', marginRight: 6, color: 'var(--warning-text)' }} />
             System Health
           </h2>
           <div className="grid-4 stat-cards">
             {failedSagas.length > 0 && (
               <div className="card stat-card" style={{ borderLeft: '3px solid var(--danger, #e74c3c)' }}>
-                <div className="stat-icon" style={{ color: 'var(--danger)' }}><FiAlertTriangle /></div>
+                <div className="stat-icon" style={{ color: 'var(--danger-text)' }}><FiAlertTriangle /></div>
                 <div>
                   <p className="stat-value">{failedSagas.length}</p>
                   <p className="stat-label">Failed Sagas</p>
@@ -318,7 +329,7 @@ export default function AdminDashboard() {
             )}
             {compensatingSagas.length > 0 && (
               <div className="card stat-card" style={{ borderLeft: '3px solid var(--warning, orange)' }}>
-                <div className="stat-icon" style={{ color: 'var(--warning)' }}><FiRefreshCw /></div>
+                <div className="stat-icon" style={{ color: 'var(--warning-text)' }}><FiRefreshCw /></div>
                 <div>
                   <p className="stat-value">{compensatingSagas.length}</p>
                   <p className="stat-label">Compensating Sagas</p>

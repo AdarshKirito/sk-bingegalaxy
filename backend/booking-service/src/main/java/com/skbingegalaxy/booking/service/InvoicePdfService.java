@@ -33,6 +33,7 @@ public class InvoicePdfService {
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("hh:mm a");
 
     private final BookingService bookingService;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     /**
      * Generate a PDF invoice for the given booking reference.
@@ -96,8 +97,33 @@ public class InvoicePdfService {
             pricing.setHorizontalAlignment(Element.ALIGN_LEFT);
             pricing.setSpacingAfter(15);
 
-            addRow(pricing, "Total Amount", formatINR(booking.getTotalAmount()));
-            addRow(pricing, "Collected", formatINR(booking.getCollectedAmount()));
+            if (booking.getBaseAmount() != null && booking.getBaseAmount().signum() > 0) {
+                addRow(pricing, "Base", formatMoney(booking, booking.getBaseAmount()));
+            }
+            if (booking.getAddOnAmount() != null && booking.getAddOnAmount().signum() > 0) {
+                addRow(pricing, "Add-ons", formatMoney(booking, booking.getAddOnAmount()));
+            }
+            if (booking.getGuestAmount() != null && booking.getGuestAmount().signum() > 0) {
+                addRow(pricing, "Guests", formatMoney(booking, booking.getGuestAmount()));
+            }
+            if (booking.getLoyaltyDiscountAmount() != null && booking.getLoyaltyDiscountAmount().signum() > 0) {
+                addRow(pricing, "Loyalty discount", "- " + formatMoney(booking, booking.getLoyaltyDiscountAmount()));
+            }
+            if (booking.getSubtotalAmount() != null) {
+                addRow(pricing, "Subtotal (pre-tax)", formatMoney(booking, booking.getSubtotalAmount()));
+            }
+
+            // Itemised taxes — one line per rule, so the guest sees WHAT each
+            // charge is (e.g. "GST 18% — IN/KA", "Occupancy fee — flat × 2h").
+            for (TaxLineView t : parseTaxLines(booking.getTaxBreakdownJson())) {
+                addRow(pricing, "  " + t.label(), formatMoney(booking, t.amount()));
+            }
+            if (booking.getTaxAmount() != null && booking.getTaxAmount().signum() > 0) {
+                addRow(pricing, "Total tax", formatMoney(booking, booking.getTaxAmount()));
+            }
+
+            addRow(pricing, "Total Amount", formatMoney(booking, booking.getTotalAmount()));
+            addRow(pricing, "Collected", formatMoney(booking, booking.getCollectedAmount()));
             addRow(pricing, "Payment Status",
                     booking.getPaymentStatus() != null ? booking.getPaymentStatus().name() : "PENDING");
 
@@ -150,9 +176,59 @@ public class InvoicePdfService {
         return clean.length() > 500 ? clean.substring(0, 500) + "…" : clean;
     }
 
-    private String formatINR(BigDecimal amount) {
-        if (amount == null) return "₹0.00";
-        return "₹" + amount.setScale(2, RoundingMode.HALF_UP).toPlainString();
+    /** Minimal view of one persisted tax line for invoice rendering. */
+    private record TaxLineView(String label, BigDecimal amount) {}
+
+    /**
+     * Parse the persisted per-rule breakdown (JSON array of TaxLine) into
+     * printable label/amount pairs. Defensive: legacy bookings may have a null
+     * or malformed breakdown — the invoice then just shows the tax total.
+     */
+    private java.util.List<TaxLineView> parseTaxLines(String breakdownJson) {
+        if (breakdownJson == null || breakdownJson.isBlank()) return java.util.List.of();
+        try {
+            com.fasterxml.jackson.databind.JsonNode arr = objectMapper.readTree(breakdownJson);
+            if (!arr.isArray()) return java.util.List.of();
+            java.util.List<TaxLineView> out = new java.util.ArrayList<>();
+            for (com.fasterxml.jackson.databind.JsonNode n : arr) {
+                String name = n.path("name").asText("Tax");
+                String taxType = n.path("taxType").asText("");
+                String jurisdiction = n.path("jurisdiction").asText("");
+                String calcMethod = n.path("calcMethod").asText("");
+                StringBuilder label = new StringBuilder(name);
+                if ("FLAT_PER_HOUR".equals(calcMethod) && n.hasNonNull("units")) {
+                    label.append(" (flat x ").append(n.path("units").asInt()).append("h)");
+                } else if ("FLAT_PER_BOOKING".equals(calcMethod)) {
+                    label.append(" (flat)");
+                } else if (n.hasNonNull("rateBps")) {
+                    label.append(" (").append(new BigDecimal(n.path("rateBps").asInt())
+                        .divide(new BigDecimal(100)).stripTrailingZeros().toPlainString()).append("%)");
+                }
+                if (!taxType.isBlank() && !"GENERIC".equals(taxType)) label.append(" ").append(taxType);
+                if (!jurisdiction.isBlank() && !"GLOBAL".equals(jurisdiction)) {
+                    label.append(" - ").append(jurisdiction);
+                }
+                if (n.path("inclusive").asBoolean(false)) label.append(" [incl.]");
+                out.add(new TaxLineView(label.toString(), n.path("amount").decimalValue()));
+            }
+            return out;
+        } catch (Exception e) {
+            log.debug("Unparseable tax breakdown on invoice: {}", e.getMessage());
+            return java.util.List.of();
+        }
+    }
+
+    /**
+     * Formats an amount in the BOOKING's own currency (native per-binge model).
+     * Uses the ISO code rather than a symbol: the built-in Helvetica font is
+     * Latin-1 only, so non-Latin symbols like ₹ cannot render in the PDF — the
+     * old hardcoded "₹" printed as an empty box.
+     */
+    private String formatMoney(Booking booking, BigDecimal amount) {
+        String code = booking.getPaymentCurrencyCode() != null
+            ? booking.getPaymentCurrencyCode() : "INR";
+        BigDecimal v = amount == null ? BigDecimal.ZERO : amount;
+        return code + " " + v.setScale(2, RoundingMode.HALF_UP).toPlainString();
     }
 
     private String resolveDuration(Booking booking) {

@@ -85,7 +85,7 @@
 }
 .cn-tab:hover { color: var(--text); }
 .cn-tab.is-active {
-  color: var(--primary);
+  color: var(--primary-text);
   border-bottom-color: var(--primary);
   font-weight: 600;
 }
@@ -263,7 +263,7 @@
 .cn-card-actions a {
   font-size: 0.78rem;
   text-decoration: none;
-  color: var(--primary);
+  color: var(--primary-text);
 }
 .cn-card-actions a:hover { text-decoration: underline; }
 

@@ -34,6 +34,17 @@ public class Refund {
 
     private String gatewayRefundId;
 
+    /**
+     * Stable idempotency receipt for the provider leg (PAY-006). Written when
+     * the refund INTENT is persisted — BEFORE the gateway is called — and sent
+     * to Razorpay as the refund {@code receipt}. If the provider call times
+     * out or the process crashes, reconciliation looks this receipt up at the
+     * provider to learn whether money actually moved, instead of blindly
+     * retrying and refunding twice. Unique per attempt.
+     */
+    @Column(name = "gateway_receipt", length = 64)
+    private String gatewayReceipt;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private PaymentStatus status;

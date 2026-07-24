@@ -85,26 +85,27 @@ export default function AdminLogin() {
 
             <form onSubmit={handleSubmit}>
               <div className="input-group">
-                <label>Email</label>
-                <input type="email" required value={form.email}
+                <label htmlFor="admin-login-email">Email</label>
+                <input id="admin-login-email" type="email" required value={form.email}
                   onChange={(e) => setForm({ ...form, email: e.target.value })}
                   placeholder="admin@skbingegalaxy.com" autoFocus />
               </div>
               <div className="input-group">
-                <label>Password</label>
+                <label htmlFor="admin-login-password">Password</label>
                 <div className="input-password-wrap">
-                  <input type={showPw ? 'text' : 'password'} required value={form.password}
+                  <input id="admin-login-password" type={showPw ? 'text' : 'password'} required value={form.password}
                     onChange={(e) => setForm({ ...form, password: e.target.value })}
                     placeholder="••••••••" />
-                  <button type="button" className="pw-toggle" onClick={() => setShowPw(v => !v)} aria-label={showPw ? 'Hide password' : 'Show password'} tabIndex={-1}>
+                  <button type="button" className="pw-toggle" onClick={() => setShowPw(v => !v)} aria-label={showPw ? 'Hide password' : 'Show password'}>
                     {showPw ? <FiEyeOff /> : <FiEye />}
                   </button>
                 </div>
               </div>
               {mfaRequired && (
                 <div className="input-group">
-                  <label>Authenticator code</label>
+                  <label htmlFor="admin-login-mfa">Authenticator code</label>
                   <input
+                    id="admin-login-mfa"
                     type="text"
                     inputMode="numeric"
                     autoComplete="one-time-code"
@@ -112,9 +113,10 @@ export default function AdminLogin() {
                     value={mfaCode}
                     onChange={(e) => setMfaCode(e.target.value)}
                     placeholder="6-digit code"
+                    aria-describedby="admin-login-mfa-hint"
                     autoFocus
                   />
-                  <small style={{ color: '#888' }}>Enter the code from your authenticator app or a recovery code.</small>
+                  <small id="admin-login-mfa-hint" style={{ color: '#888' }}>Enter the code from your authenticator app or a recovery code.</small>
                 </div>
               )}
               <button type="submit" className="btn btn-primary auth-btn" disabled={loading}>

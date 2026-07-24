@@ -18,7 +18,14 @@ const APPLIES_TO_OPTIONS = [
   { value: 'ADDONS', label: 'Add-ons only',          hint: 'Only the add-ons portion is taxed' },
   { value: 'GUEST',  label: 'Guest fees only',       hint: 'Only the per-guest surcharge is taxed' },
 ];
-const TAX_TYPES = ['GENERIC', 'GST', 'VAT', 'SALES_TAX', 'SERVICE_TAX'];
+const TAX_TYPES = ['GENERIC', 'GST', 'VAT', 'SALES_TAX', 'SERVICE_TAX', 'OCCUPANCY', 'AMUSEMENT', 'CITY_FEE', 'COUNTY_FEE'];
+
+// Backend enum: TaxRule.CalcMethod — how the amount is computed.
+const CALC_METHODS = [
+  { value: 'PERCENT',          label: 'Percentage of price',    hint: 'rate % applied to the "applies to" base' },
+  { value: 'FLAT_PER_BOOKING', label: 'Flat fee per reservation', hint: 'fixed amount charged once (e.g. county amusement fee)' },
+  { value: 'FLAT_PER_HOUR',    label: 'Flat fee per hour',       hint: 'fixed amount × booked hours (occupancy-style)' },
+];
 const PRODUCT_TYPES = [
   { value: '', label: '— Any product —' },
   { value: 'BOOKING',   label: 'Booking' },
@@ -37,6 +44,8 @@ const emptyForm = {
   name: '',
   description: '',
   ratePercent: '18.00',
+  calcMethod: 'PERCENT',
+  flatAmount: '',
   appliesTo: 'TOTAL',
   inclusive: false,
   taxType: 'GENERIC',
@@ -60,6 +69,12 @@ const emptyPreview = { subtotal: '5000', baseAmount: '', addOnAmount: '', guestA
 /* ────────────────────────────────────────────────────────────────────────── */
 
 const fmtRate = (bps) => `${(Number(bps || 0) / 100).toFixed(2)}%`;
+// One-cell summary of how the rule charges: "18.00%", "5.00 / booking", "1.50 / hour".
+const fmtCharge = (r) => {
+  if (r.calcMethod === 'FLAT_PER_BOOKING') return `${Number(r.flatAmount || 0).toFixed(2)} / booking`;
+  if (r.calcMethod === 'FLAT_PER_HOUR')    return `${Number(r.flatAmount || 0).toFixed(2)} / hour`;
+  return fmtRate(r.rateBps);
+};
 const fmtJurisdiction = (r) => {
   const parts = [r.countryCode, r.stateCode || r.regionCode, r.city, r.postalCode].filter(Boolean);
   return parts.length ? parts.join(' / ') : 'Anywhere';
@@ -127,6 +142,8 @@ export default function AdminTaxes() {
       name: rule.name || '',
       description: rule.description || '',
       ratePercent: ((Number(rule.rateBps || 0)) / 100).toFixed(2),
+      calcMethod: rule.calcMethod || 'PERCENT',
+      flatAmount: rule.flatAmount != null ? String(rule.flatAmount) : '',
       appliesTo: rule.appliesTo || 'TOTAL',
       inclusive: !!rule.inclusive,
       taxType: rule.taxType || 'GENERIC',
@@ -151,12 +168,15 @@ export default function AdminTaxes() {
 
   const buildPayload = () => {
     const pct = Number(form.ratePercent);
+    const flat = form.calcMethod !== 'PERCENT';
     return {
       name: form.name.trim(),
       description: form.description.trim() || null,
-      rateBps: Math.round(pct * 100),
+      rateBps: flat ? 0 : Math.round(pct * 100),
+      calcMethod: form.calcMethod || 'PERCENT',
+      flatAmount: flat ? Number(form.flatAmount) : null,
       appliesTo: form.appliesTo,
-      inclusive: !!form.inclusive,
+      inclusive: flat ? false : !!form.inclusive,
       taxType: form.taxType || 'GENERIC',
       countryCode: form.countryCode.trim().toUpperCase() || null,
       regionCode:  form.regionCode.trim().toUpperCase()  || null,
@@ -175,9 +195,16 @@ export default function AdminTaxes() {
   const handleSave = async (e) => {
     e.preventDefault();
     if (!form.name.trim()) { toast.error('Name is required'); return; }
-    const pct = Number(form.ratePercent);
-    if (Number.isNaN(pct) || pct < 0 || pct > 100) {
-      toast.error('Rate % must be between 0 and 100'); return;
+    if (form.calcMethod === 'PERCENT') {
+      const pct = Number(form.ratePercent);
+      if (Number.isNaN(pct) || pct < 0 || pct > 100) {
+        toast.error('Rate % must be between 0 and 100'); return;
+      }
+    } else {
+      const flat = Number(form.flatAmount);
+      if (Number.isNaN(flat) || flat <= 0) {
+        toast.error('Flat amount must be greater than 0'); return;
+      }
     }
     if (form.effectiveFrom && form.effectiveTo
         && new Date(form.effectiveFrom) > new Date(form.effectiveTo)) {
@@ -212,6 +239,8 @@ export default function AdminTaxes() {
         name: rule.name,
         description: rule.description,
         rateBps: rule.rateBps,
+        calcMethod: rule.calcMethod || 'PERCENT',
+        flatAmount: rule.flatAmount,
         appliesTo: rule.appliesTo,
         inclusive: rule.inclusive,
         taxType: rule.taxType,
@@ -379,7 +408,7 @@ function RulesTab({
         </div>
         <div className="adm-stat">
           <div className="adm-stat-label">Active</div>
-          <div className="adm-stat-value" style={{ color: 'var(--success)' }}>{stats.active}</div>
+          <div className="adm-stat-value" style={{ color: 'var(--success-text)' }}>{stats.active}</div>
         </div>
         <div className="adm-stat">
           <div className="adm-stat-label">Binge-scoped</div>
@@ -458,7 +487,7 @@ function RulesTab({
                     <span className="adm-badge adm-badge-info">{r.taxType || 'GENERIC'}</span>
                   </td>
                   <td>
-                    <strong>{fmtRate(r.rateBps)}</strong>
+                    <strong>{fmtCharge(r)}</strong>
                     {r.inclusive && (
                       <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>inclusive</div>
                     )}
@@ -579,7 +608,7 @@ function CalculatorTab({ calc, setCalc, result, loading, onRun }) {
               </div>
               <div className="adm-stat">
                 <div className="adm-stat-label">Total tax</div>
-                <div className="adm-stat-value" style={{ color: 'var(--success)' }}>
+                <div className="adm-stat-value" style={{ color: 'var(--success-text)' }}>
                   +{Number(result.totalTax || 0).toFixed(2)}
                 </div>
               </div>
@@ -606,7 +635,13 @@ function CalculatorTab({ calc, setCalc, result, loading, onRun }) {
                           </span>
                         )}
                       </td>
-                      <td>{fmtRate(l.rateBps)}</td>
+                      <td>
+                        {l.calcMethod === 'FLAT_PER_HOUR'
+                          ? `${Number(l.flatAmount || 0).toFixed(2)} × ${l.units ?? 1}h`
+                          : l.calcMethod === 'FLAT_PER_BOOKING'
+                            ? `${Number(l.flatAmount || 0).toFixed(2)} flat`
+                            : fmtRate(l.rateBps)}
+                      </td>
                       <td>{Number(l.taxableAmount || 0).toFixed(2)}</td>
                       <td><strong>{Number(l.amount || 0).toFixed(2)}</strong></td>
                       <td>
@@ -685,11 +720,31 @@ function RuleModal({ mode, form, setForm, saving, isGlobal, onClose, onSave }) {
             Rate & structure
           </h4>
           <div className="adm-form-grid">
-            <label className="adm-form-field">
-              <span>Rate % *</span>
-              <input type="number" step="0.01" min="0" max="100" required
-                value={form.ratePercent} onChange={upd('ratePercent')} />
+            <label className="adm-form-field" style={{ gridColumn: 'span 2' }}>
+              <span>Charge method</span>
+              <select value={form.calcMethod} onChange={upd('calcMethod')}>
+                {CALC_METHODS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              <small style={{ color: 'var(--text-muted)', fontSize: '0.72rem', marginTop: 4 }}>
+                {CALC_METHODS.find(o => o.value === form.calcMethod)?.hint}
+              </small>
             </label>
+            {form.calcMethod === 'PERCENT' ? (
+              <label className="adm-form-field">
+                <span>Rate % *</span>
+                <input type="number" step="0.01" min="0" max="100" required
+                  value={form.ratePercent} onChange={upd('ratePercent')} />
+              </label>
+            ) : (
+              <label className="adm-form-field">
+                <span>Flat amount * <span style={{ textTransform: 'none', fontWeight: 400 }}>(binge currency)</span></span>
+                <input type="number" step="0.01" min="0.01" required
+                  value={form.flatAmount} onChange={upd('flatAmount')}
+                  placeholder={form.calcMethod === 'FLAT_PER_HOUR' ? 'per hour' : 'per reservation'} />
+              </label>
+            )}
             <label className="adm-form-field">
               <span>Tax type</span>
               <select value={form.taxType} onChange={upd('taxType')}>
@@ -707,13 +762,15 @@ function RuleModal({ mode, form, setForm, saving, isGlobal, onClose, onSave }) {
                 {APPLIES_TO_OPTIONS.find(o => o.value === form.appliesTo)?.hint}
               </small>
             </label>
-            <label className="adm-form-field" style={{ gridColumn: '1 / -1', flexDirection: 'row',
-                       alignItems: 'center', gap: '0.5rem' }}>
-              <input type="checkbox" checked={form.inclusive} onChange={updBool('inclusive')} />
-              <span style={{ textTransform: 'none', letterSpacing: 0, fontSize: '0.85rem' }}>
-                Inclusive — price already contains this tax (display-only breakdown)
-              </span>
-            </label>
+            {form.calcMethod === 'PERCENT' && (
+              <label className="adm-form-field" style={{ gridColumn: '1 / -1', flexDirection: 'row',
+                         alignItems: 'center', gap: '0.5rem' }}>
+                <input type="checkbox" checked={form.inclusive} onChange={updBool('inclusive')} />
+                <span style={{ textTransform: 'none', letterSpacing: 0, fontSize: '0.85rem' }}>
+                  Inclusive — price already contains this tax (display-only breakdown)
+                </span>
+              </label>
+            )}
           </div>
 
           {/* Jurisdiction */}

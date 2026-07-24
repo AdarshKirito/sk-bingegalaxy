@@ -59,4 +59,15 @@ public class UpdateBookingRequest {
     private BigDecimal guestAmount;
     @Size(max = 500, message = "Adjustment reason must be under 500 characters")
     private String priceAdjustmentReason;
+
+    /**
+     * Operator remarks explaining WHY the reservation was modified. Enforced
+     * server-side: mandatory whenever the request actually changes a
+     * customer-visible reservation field (schedule, event type, guests,
+     * add-ons, contact details, special notes, price). Recorded verbatim in
+     * the booking event log so the audit trail answers "who changed what and
+     * why" without hunting through admin notes.
+     */
+    @Size(max = 500, message = "Remarks must be under 500 characters")
+    private String remarks;
 }

@@ -3,6 +3,7 @@ package com.skbingegalaxy.booking.dto;
 import com.skbingegalaxy.booking.entity.TaxRule;
 import lombok.*;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
@@ -15,6 +16,8 @@ public class TaxRuleDto {
     private String name;
     private String description;
     private Integer rateBps;
+    private TaxRule.CalcMethod calcMethod;
+    private BigDecimal flatAmount;
     private TaxRule.AppliesTo appliesTo;
     private boolean inclusive;
     private String countryCode;

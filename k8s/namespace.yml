@@ -11,7 +11,11 @@ metadata:
   name: app-config
   namespace: sk-binge-galaxy
 data:
-  SPRING_PROFILES_ACTIVE: "kubernetes"
+  # `production` is listed explicitly AND mapped via spring.profiles.group in
+  # every service's application.yml — either alone is sufficient; both are kept
+  # so a regression in one cannot silently disable the production-only beans
+  # (captcha validation, payment FATAL guards, real notification providers).
+  SPRING_PROFILES_ACTIVE: "kubernetes,production"
   SPRING_CLOUD_CONFIG_URI: "http://config-server:8888"
   SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
   SPRING_DATA_REDIS_HOST: "redis"

@@ -47,6 +47,39 @@ public class SurgePricingRule {
     @Column(length = 100)
     private String label;
 
+    /** Seasonal/event window (inclusive). Null = no date restriction. */
+    @Column(name = "date_from")
+    private java.time.LocalDate dateFrom;
+
+    @Column(name = "date_to")
+    private java.time.LocalDate dateTo;
+
+    /**
+     * Last-minute premium: rule applies only when the booking starts within
+     * this many hours of "now" (venue clock). Null = no lead-time ceiling.
+     */
+    @Column(name = "lead_time_max_hours")
+    private Integer leadTimeMaxHours;
+
+    /**
+     * Early-bird window: rule applies only when the booking is made at least
+     * this many hours ahead. Pair with a multiplier &lt; 1 for a discount.
+     */
+    @Column(name = "lead_time_min_hours")
+    private Integer leadTimeMinHours;
+
+    /**
+     * Demand trigger: rule applies only once the booking date is at least this
+     * % occupied (booked minutes ÷ operating-window capacity). Null = always.
+     */
+    @Column(name = "occupancy_threshold_pct")
+    private Integer occupancyThresholdPct;
+
+    /** Winner among overlapping rules: lowest priority number wins; ties → highest multiplier. */
+    @Column(nullable = false)
+    @Builder.Default
+    private Integer priority = 100;
+
     @Column(nullable = false)
     @Builder.Default
     private boolean active = true;

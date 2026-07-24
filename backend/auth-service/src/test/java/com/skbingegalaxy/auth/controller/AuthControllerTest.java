@@ -42,6 +42,8 @@ class AuthControllerTest {
     @MockBean private com.skbingegalaxy.auth.service.TokenRevocationService tokenRevocationService;
     @MockBean private com.skbingegalaxy.auth.service.AuthAuditService auditService;
     @MockBean private com.skbingegalaxy.auth.security.JwtProvider jwtProvider;
+    @MockBean private com.skbingegalaxy.auth.service.UserSessionService userSessionService;
+    @MockBean private com.skbingegalaxy.auth.client.BookingModulePermissionClient modulePermissions;
 
     private AuthResponse successResponse;
 

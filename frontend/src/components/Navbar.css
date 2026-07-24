@@ -28,7 +28,7 @@
 }
 
 .navbar-home .brand-meta {
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .navbar-home .nav-link {
@@ -37,7 +37,7 @@
 
 .navbar-home .nav-link:hover,
 .navbar-home .nav-link-active {
-  color: var(--primary);
+  color: var(--primary-text);
   background: var(--primary-bg);
 }
 
@@ -49,7 +49,7 @@
 
 .navbar-home .theme-toggle:hover,
 .navbar-home .hamburger-btn:hover {
-  color: var(--primary);
+  color: var(--primary-text);
   background: var(--primary-bg);
 }
 
@@ -81,7 +81,7 @@
 
 .navbar-customer .nav-link:hover,
 .navbar-customer .nav-link-active {
-  color: var(--primary);
+  color: var(--primary-text);
   background:
     linear-gradient(135deg, rgba(var(--primary-rgb), 0.1), rgba(var(--accent-rgb), 0.04));
 }
@@ -147,7 +147,7 @@
 }
 
 .navbar-admin .brand-meta {
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .navbar-admin .navbar-inner {
@@ -292,22 +292,22 @@
 
 .nav-group-item:hover {
   background: var(--primary-bg);
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .nav-group-item:hover .nav-group-item-icon {
   background: rgba(var(--primary-rgb), 0.12);
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .nav-group-item-active {
-  color: var(--primary);
+  color: var(--primary-text);
   background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.1), rgba(var(--accent-rgb), 0.04));
 }
 
 .nav-group-item-active .nav-group-item-icon {
   background: rgba(var(--primary-rgb), 0.12);
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 [data-theme="dark"] .nav-group-dropdown {
@@ -423,7 +423,7 @@
 
 .navbar-admin .nav-link:hover,
 .navbar-admin .nav-link-active {
-  color: var(--primary);
+  color: var(--primary-text);
   background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.1), rgba(var(--accent-rgb), 0.05));
 }
 
@@ -506,7 +506,7 @@
   align-items: center;
   gap: 0.55rem;
   font-size: 0.85rem;
-  color: var(--primary);
+  color: var(--primary-text);
   font-weight: 600;
   border: 1px solid rgba(var(--primary-rgb), 0.14);
   background: rgba(var(--primary-rgb), 0.06);
@@ -553,7 +553,7 @@
 }
 .hamburger-btn:hover {
   background: var(--primary-bg);
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .navbar-right {
@@ -572,7 +572,7 @@
   border: 1px solid rgba(var(--primary-rgb), 0.14);
   cursor: pointer;
   font-size: 1.15rem;
-  color: var(--primary);
+  color: var(--primary-text);
   width: 38px;
   height: 38px;
   border-radius: var(--radius-sm);
@@ -604,7 +604,7 @@
   cursor: pointer;
   font-size: 0.75rem;
   font-weight: 700;
-  color: var(--primary);
+  color: var(--primary-text);
   width: 38px;
   height: 38px;
   border-radius: var(--radius-sm);
@@ -678,12 +678,12 @@
 }
 
 .nav-link:hover {
-  color: var(--primary);
+  color: var(--primary-text);
   background: var(--primary-bg);
 }
 
 .nav-link-active {
-  color: var(--primary);
+  color: var(--primary-text);
   background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.12), rgba(var(--accent-rgb), 0.08));
   box-shadow: inset 0 0 0 1px rgba(var(--primary-rgb), 0.16);
 }
@@ -709,7 +709,7 @@
 }
 
 .nav-auth-link:hover {
-  color: var(--primary);
+  color: var(--primary-text);
   background: var(--primary-bg);
   border-color: rgba(var(--primary-rgb), 0.22);
 }
@@ -770,14 +770,14 @@
 
 .nav-logout-btn {
   padding-inline: 0.65rem;
-  color: var(--danger);
+  color: var(--danger-text);
   font-size: 1.1rem;
   border-radius: var(--radius-sm);
   transition: var(--transition);
 }
 .nav-logout-btn:hover {
   background: var(--danger-bg);
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .nav-action-label {
@@ -1092,20 +1092,20 @@
 
 .nav-more-item:hover {
   background: var(--primary-bg);
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .nav-more-item:hover svg {
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .nav-more-item-active {
-  color: var(--primary);
+  color: var(--primary-text);
   background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.1), rgba(var(--accent-rgb), 0.05));
 }
 
 .nav-more-item-active svg {
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 [data-theme="dark"] .nav-more-dropdown {
@@ -1238,7 +1238,7 @@
 
 .admin-sidebar .nav-link.nav-link-active {
   background: var(--primary-bg);
-  color: var(--primary);
+  color: var(--primary-text);
   font-weight: 600;
   box-shadow: inset 2px 0 0 var(--primary);
 }

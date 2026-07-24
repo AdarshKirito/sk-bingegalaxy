@@ -30,7 +30,12 @@ public class BingeSiteContent {
     @Column(length = 64)
     private String slug;
 
-    @Lob
+    /**
+     * NO {@code @Lob} here: the column is plain TEXT holding the JSON string.
+     * With PostgreSQL, Hibernate 6 maps {@code @Lob String} to a large-object
+     * OID and reads it via {@code getLong()} — loads then fail with
+     * "Bad value for type long: {json}" (same bug as auth's SiteContent).
+     */
     @Column(name = "content_json", nullable = false, columnDefinition = "TEXT")
     private String contentJson;
 

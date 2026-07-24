@@ -470,7 +470,7 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  color: var(--primary);
+  color: var(--primary-text);
   font-weight: 600;
   text-decoration: none;
   transition: opacity 140ms ease;
@@ -511,7 +511,7 @@
   padding: 2px 10px;
   border-radius: 999px;
   background: var(--primary-bg);
-  color: var(--primary);
+  color: var(--primary-text);
 }
 .sm-h-meta {
   display: flex;
@@ -523,7 +523,7 @@
   width: 100%;
 }
 .sm-challenge-hint {
-  color: var(--primary);
+  color: var(--primary-text);
   font-weight: 600;
 }
 .sm-review-notes {
@@ -538,7 +538,7 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  color: var(--primary);
+  color: var(--primary-text);
   text-decoration: none;
   font-weight: 600;
 }

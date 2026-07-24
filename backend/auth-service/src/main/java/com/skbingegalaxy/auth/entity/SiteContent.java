@@ -17,7 +17,13 @@ public class SiteContent {
     @Column(length = 64)
     private String slug;
 
-    @Lob
+    /**
+     * NO {@code @Lob} here: the column is plain TEXT holding the JSON string.
+     * With PostgreSQL, Hibernate 6 maps {@code @Lob String} to a large-object
+     * OID and reads it via {@code getLong()} — every {@code findById} then
+     * blew up with "Bad value for type long: {json}", so the Terms pages
+     * 500'd and existing rows could never be updated.
+     */
     @Column(name = "content_json", nullable = false, columnDefinition = "TEXT")
     private String contentJson;
 

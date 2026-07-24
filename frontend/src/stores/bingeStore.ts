@@ -32,12 +32,16 @@ export function normalizeSelectedBinge(binge: Partial<Binge> & { id: Binge['id']
     supportPhoneCountryCode: binge.supportPhoneCountryCode,
     supportWhatsapp: binge.supportWhatsapp,
     supportWhatsappCountryCode: binge.supportWhatsappCountryCode,
+    supportPhoneIsWhatsapp: binge.supportPhoneIsWhatsapp,
     customerCancellationEnabled: binge.customerCancellationEnabled,
     customerCancellationCutoffMinutes: binge.customerCancellationCutoffMinutes,
     maxConcurrentBookings: binge.maxConcurrentBookings,
     // Venue-local time governs slot arithmetic; fall back to the platform's
     // home timezone rather than persisting "no timezone".
     timezone: binge.timezone || 'Asia/Kolkata',
+    // Every price for this venue is denominated in ITS currency — pages must
+    // format money with this, never a hardcoded symbol or the browser locale.
+    currency: (binge.currency || 'INR').toUpperCase(),
   };
 }
 
@@ -59,11 +63,19 @@ const useBingeStore = create<BingeState>((set) => ({
     const normalized = normalizeSelectedBinge(binge);
     localStorage.setItem('selectedBinge', JSON.stringify(normalized));
     set({ selectedBinge: normalized });
+    // SEC-009: a binge switch changes the tenant behind identical API URLs —
+    // any runtime API cache left by an older service-worker build must go.
+    try {
+      if (typeof caches !== 'undefined') void caches.delete('api-cache');
+    } catch { /* best-effort */ }
   },
 
   clearBinge: () => {
     localStorage.removeItem('selectedBinge');
     set({ selectedBinge: null });
+    try {
+      if (typeof caches !== 'undefined') void caches.delete('api-cache');
+    } catch { /* best-effort */ }
   },
 }));
 

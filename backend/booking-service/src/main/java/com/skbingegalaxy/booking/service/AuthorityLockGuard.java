@@ -41,6 +41,18 @@ public class AuthorityLockGuard {
     /** Sentinel resourceId meaning "every binge". */
     public static final String ALL_BINGES = "ALL";
 
+    /**
+     * Capability token for the venue-timezone GRANT (note: grant polarity, not a
+     * lock). Unlike every other token in this system — which are <em>locks</em>
+     * (default-allow, a row means "frozen") — a {@code TIMEZONE_CHANGE} row in the
+     * shared resource-lock store means "this binge's admin is PERMITTED to change
+     * the venue timezone". Default is DENY: changing the zone reinterprets the
+     * wall-clock of every existing booking, so it's least-privilege by default and
+     * a super-admin grants it explicitly per-binge or for ALL binges. Keep this
+     * value in sync with the frontend {@code TIMEZONE_CHANGE} constant.
+     */
+    public static final String TIMEZONE_CHANGE = "TIMEZONE_CHANGE";
+
     private final HttpAuthorityLockClient lockClient;
 
     private static boolean isSuperAdmin(String role) {
@@ -49,14 +61,22 @@ public class AuthorityLockGuard {
 
     /**
      * Throw {@code 423 Locked} if {@code capability} is locked for the currently selected
-     * binge (or for all binges) and the caller is not a native super-admin.
+     * binge (or for all binges) and the caller is not a <em>native</em> super-admin.
+     *
+     * <p>A <b>delegated</b> admin holds effective {@code SUPER_ADMIN} via a temporary
+     * Authority-Handover grant (gateway sets {@code X-User-Role=SUPER_ADMIN} +
+     * {@code X-Authority-Delegated=true}), but is STILL bound by locks — that is the whole
+     * point of locks vs grants: a super-admin can hand over broad authority yet fence off
+     * specific capabilities. Only a native super-admin (not delegated) bypasses.
      *
      * @param capability capability token, e.g. {@code "PRICING"}
-     * @param role       caller role from {@code X-User-Role}
+     * @param role       caller effective role from {@code X-User-Role}
+     * @param delegated  {@code true} when the caller's authority is delegated (from
+     *                   {@code X-Authority-Delegated})
      */
-    public void requireUnlocked(String capability, String role) {
-        // Native super-admins can always change — they own and release the locks.
-        if (isSuperAdmin(role)) return;
+    public void requireUnlocked(String capability, String role, boolean delegated) {
+        // Only a NATIVE super-admin bypasses — they own and release the locks.
+        if (isSuperAdmin(role) && !delegated) return;
 
         Long bingeId = BingeContext.getBingeId();
         ResourceLockSummary lock = bingeId != null
@@ -74,6 +94,54 @@ public class AuthorityLockGuard {
             "\"" + capability + "\" is locked by " + owner
                 + (lock.getReason() != null ? " — " + lock.getReason() : "")
                 + ". Ask them to release it via the Authority Handover console.",
+            HttpStatus.LOCKED);
+    }
+
+    /**
+     * Default-DENY grant check for changing a venue's timezone. Throws
+     * {@code 423 Locked} unless the caller is permitted.
+     *
+     * <p>Permitted when EITHER:
+     * <ul>
+     *   <li>the caller is a <b>native</b> super-admin (they own grants), or</li>
+     *   <li>a {@code TIMEZONE_CHANGE} grant row exists for this {@code bingeId}
+     *       <em>or</em> for {@link #ALL_BINGES}.</li>
+     * </ul>
+     *
+     * <p><b>Why default-deny:</b> changing a venue's IANA zone retroactively
+     * reinterprets the wall-clock of every existing booking (and check-in
+     * windows, operational-day rollover, late-arrival), so it's a high-blast-radius
+     * setting. Least-privilege: a binge admin cannot touch it until a super-admin
+     * explicitly grants the capability.
+     *
+     * <p><b>Fail-closed:</b> the lock client returns {@code null} on an
+     * auth-service outage; for a grant that means "no grant proven" → deny. Only a
+     * native super-admin can change the zone while auth-service is unreachable.
+     * This is the opposite posture to {@link #requireUnlocked} (which fails open)
+     * and is intentional given the sensitivity.
+     *
+     * @param role      effective caller role ({@code X-User-Role})
+     * @param delegated whether authority is delegated ({@code X-Authority-Delegated})
+     * @param bingeId   the binge whose timezone is being changed (the path id, NOT
+     *                  the ambient {@code BingeContext} — a super-admin may edit a
+     *                  binge other than their currently selected one)
+     */
+    public void requireTimezoneChangePermitted(String role, boolean delegated, Long bingeId) {
+        // Native super-admin always permitted — they issue and revoke the grants.
+        if (isSuperAdmin(role) && !delegated) return;
+
+        if (bingeId != null) {
+            ResourceLockSummary bingeGrant = lockClient.lookup(TIMEZONE_CHANGE, String.valueOf(bingeId));
+            if (bingeGrant != null) return;
+        }
+        ResourceLockSummary allGrant = lockClient.lookup(TIMEZONE_CHANGE, ALL_BINGES);
+        if (allGrant != null) return;
+
+        log.info("authority.timezone.denied binge={} role={} delegated={} reason=no-grant",
+            bingeId, role, delegated);
+        throw new BusinessException(
+            "Changing the venue timezone requires super-admin permission. "
+                + "Ask a super-admin to grant timezone access for this venue via the Authority Handover console.",
             HttpStatus.LOCKED);
     }
 }

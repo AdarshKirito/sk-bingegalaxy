@@ -53,6 +53,30 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
         BigDecimal getTotalSuccessfulPaymentsByBingeId(@Param("bingeId") Long bingeId);
 
     /**
+     * Ledger-semantics gross (PAY-010): everything the gateway EVER captured,
+     * regardless of the payment's current presentation status. A refunded
+     * parent moves to REFUNDED/PARTIALLY_REFUNDED but its captured amount must
+     * stay in gross — refunds are subtracted exactly once, from the refund
+     * ledger, never implicitly a second time by falling out of this sum.
+     */
+    @Query("SELECT COALESCE(SUM(p.amount), 0) FROM Payment p WHERE p.status IN :statuses")
+    BigDecimal sumAmountByStatusIn(@Param("statuses") List<PaymentStatus> statuses);
+
+    @Query("SELECT COALESCE(SUM(p.amount), 0) FROM Payment p WHERE p.status IN :statuses AND p.bingeId = :bingeId")
+    BigDecimal sumAmountByStatusInAndBingeId(@Param("statuses") List<PaymentStatus> statuses,
+                                             @Param("bingeId") Long bingeId);
+
+    // Customer lifetime aggregates (FE-001) — server-side SUM/COUNT over all
+    // rows; the UI must never derive lifetime totals from a single page.
+    @Query("SELECT COALESCE(SUM(p.amount), 0) FROM Payment p WHERE p.customerId = :customerId AND p.status IN :statuses")
+    BigDecimal sumAmountByCustomerIdAndStatusIn(@Param("customerId") Long customerId,
+                                                @Param("statuses") List<PaymentStatus> statuses);
+
+    long countByCustomerId(Long customerId);
+
+    long countByCustomerIdAndStatusIn(Long customerId, List<PaymentStatus> statuses);
+
+    /**
      * Acquires a pessimistic write lock on the payment row to prevent concurrent
      * over-refund from parallel requests.
      */

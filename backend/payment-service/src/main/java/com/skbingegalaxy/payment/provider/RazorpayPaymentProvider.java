@@ -36,6 +36,25 @@ public class RazorpayPaymentProvider implements PaymentProvider {
     @Override
     public Set<String> supportedCurrencies() { return SUPPORTED; }
 
+    /**
+     * Razorpay's domestic Indian rails (UPI / netbanking / wallets) are only
+     * available when the venue — and therefore the settlement account — is in
+     * India. For a venue anywhere else it runs as an international card gateway,
+     * so we must not advertise UPI to, say, a US venue: the order would be
+     * created and then fail at checkout.
+     */
+    @Override
+    public Set<com.skbingegalaxy.common.enums.PaymentMethod> supportedMethods(String countryIso2) {
+        if (countryIso2 != null && "IN".equalsIgnoreCase(countryIso2.trim())) {
+            return Set.of(
+                com.skbingegalaxy.common.enums.PaymentMethod.UPI,
+                com.skbingegalaxy.common.enums.PaymentMethod.CARD,
+                com.skbingegalaxy.common.enums.PaymentMethod.BANK_TRANSFER,
+                com.skbingegalaxy.common.enums.PaymentMethod.WALLET);
+        }
+        return Set.of(com.skbingegalaxy.common.enums.PaymentMethod.CARD);
+    }
+
     @Override
     public CreateOrderResponse createOrder(CreateOrderRequest req) {
         if (!supportsCurrency(req.currency())) {
@@ -56,28 +75,26 @@ public class RazorpayPaymentProvider implements PaymentProvider {
 
     @Override
     public CallbackVerificationResult verifyCallback(Map<String, String> params) {
-        // Existing webhook verification code lives in PaymentService /
-        // RazorpayGatewayClient; we keep this stub minimal for the abstraction.
-        // Production callers should keep using the existing dedicated path
-        // until the migration to provider.verifyCallback() is complete.
-        boolean valid = params != null
-            && params.containsKey("razorpay_payment_id")
-            && params.containsKey("razorpay_signature");
+        if (params == null) {
+            return new CallbackVerificationResult(false, null, null, "no-params");
+        }
+        String orderId = params.get("razorpay_order_id");
+        String paymentId = params.get("razorpay_payment_id");
+        String signature = params.get("razorpay_signature");
+        // Cryptographic verification — HMAC-SHA256(order|payment) with the API
+        // key secret. Field presence alone is NOT verification.
+        boolean valid = orderId != null
+            && razorpay.verifyCheckoutSignature(orderId, paymentId, signature);
         return new CallbackVerificationResult(
-            valid,
-            params == null ? null : params.get("razorpay_payment_id"),
-            params == null ? null : params.get("razorpay_order_id"),
-            valid ? "signature-fields-present" : "missing-signature-fields"
-        );
+            valid, paymentId, orderId,
+            valid ? "hmac-verified" : "hmac-verification-failed");
     }
 
     @Override
     public RefundResponse refund(RefundRequest req) {
-        // Razorpay refund is currently driven from PaymentService directly.
-        // Surface a clear "not yet wired" so callers using the abstraction
-        // know to keep using the legacy path until refund is migrated here.
-        log.warn("RazorpayPaymentProvider.refund() called but not yet implemented — "
-            + "use PaymentService.refundPayment() until the migration completes");
-        return new RefundResponse(name(), null, req.amount(), req.currency(), "NOT_IMPLEMENTED");
+        var result = razorpay.createRefund(
+            req.gatewayPaymentId(), req.amount(), req.currency(),
+            req.metadata() != null ? req.metadata().get("internal_ref") : null);
+        return new RefundResponse(name(), result.refundId(), req.amount(), req.currency(), result.status());
     }
 }

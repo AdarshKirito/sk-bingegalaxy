@@ -59,7 +59,7 @@
   letter-spacing: 0.16em;
   font-size: 11px;
   font-weight: 700;
-  color: var(--primary);
+  color: var(--primary-text);
   background: var(--primary-bg);
   padding: 4px 10px;
   border-radius: 999px;
@@ -178,7 +178,7 @@
   display: grid;
   place-items: center;
   background: var(--primary-bg);
-  color: var(--primary);
+  color: var(--primary-text);
   font-size: 16px;
 }
 
@@ -333,7 +333,7 @@
   transition: all 120ms ease;
   text-decoration: none;
 }
-.mfa2-btn:hover { border-color: var(--primary); color: var(--primary); }
+.mfa2-btn:hover { border-color: var(--primary); color: var(--primary-text); }
 .mfa2-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;

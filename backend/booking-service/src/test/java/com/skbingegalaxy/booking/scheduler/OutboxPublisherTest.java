@@ -6,6 +6,7 @@ import com.skbingegalaxy.booking.entity.OutboxEvent;
 import com.skbingegalaxy.booking.repository.OutboxEventRepository;
 import com.skbingegalaxy.common.constants.KafkaTopics;
 import com.skbingegalaxy.common.event.BookingEvent;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -56,6 +57,15 @@ class OutboxPublisherTest {
         return f;
     }
 
+    /**
+     * Booking-shaped topics are sent as a ProducerRecord (so the publisher can
+     * stamp the __TypeId__ header for header-driven consumers) — NOT via the
+     * 3-arg send(topic, key, payload). Stub accordingly, keyed by record key.
+     */
+    private org.mockito.stubbing.OngoingStubbing<CompletableFuture<SendResult<String, Object>>> whenSendRecord() {
+        return when(kafkaTemplate.send(org.mockito.ArgumentMatchers.<ProducerRecord<String, Object>>any()));
+    }
+
     private OutboxEvent bookingEvent(long id, String ref) throws Exception {
         BookingEvent be = BookingEvent.builder()
             .bookingRef(ref)
@@ -79,8 +89,7 @@ class OutboxPublisherTest {
         OutboxEvent e2 = bookingEvent(2L, "SKBG25000002");
         when(outboxEventRepository.findPendingBatchWithLock())
             .thenReturn(List.of(e1, e2));
-        when(kafkaTemplate.send(any(String.class), any(String.class), any()))
-            .thenReturn(CompletableFuture.completedFuture(null));
+        whenSendRecord().thenReturn(CompletableFuture.completedFuture(null));
 
         outboxPublisher.publishPendingEvents();
 
@@ -97,11 +106,13 @@ class OutboxPublisherTest {
         OutboxEvent good = bookingEvent(2L, "SKBG25000002");
         when(outboxEventRepository.findPendingBatchWithLock())
             .thenReturn(List.of(poison, good));
-        // First send fails, second succeeds.
-        when(kafkaTemplate.send(eq(KafkaTopics.BOOKING_CREATED), eq("SKBG25POISON"), any()))
-            .thenReturn(failedFuture(new RuntimeException("broker down")));
-        when(kafkaTemplate.send(eq(KafkaTopics.BOOKING_CREATED), eq("SKBG25000002"), any()))
-            .thenReturn(CompletableFuture.completedFuture(null));
+        // First send fails, second succeeds — dispatch on the record key.
+        whenSendRecord().thenAnswer(inv -> {
+            ProducerRecord<String, Object> record = inv.getArgument(0);
+            return "SKBG25POISON".equals(record.key())
+                ? failedFuture(new RuntimeException("broker down"))
+                : CompletableFuture.completedFuture(null);
+        });
 
         outboxPublisher.publishPendingEvents();
 
@@ -119,8 +130,7 @@ class OutboxPublisherTest {
         poison.setAttempts(9); // One more failure will hit the max.
         when(outboxEventRepository.findPendingBatchWithLock())
             .thenReturn(List.of(poison));
-        when(kafkaTemplate.send(any(String.class), any(String.class), any()))
-            .thenReturn(failedFuture(new RuntimeException("still broken")));
+        whenSendRecord().thenReturn(failedFuture(new RuntimeException("still broken")));
 
         outboxPublisher.publishPendingEvents();
 
@@ -134,8 +144,7 @@ class OutboxPublisherTest {
         when(outboxEventRepository.findPendingBatchWithLock())
             .thenReturn(List.of(event));
         String hugeMessage = "x".repeat(5000);
-        when(kafkaTemplate.send(any(String.class), any(String.class), any()))
-            .thenReturn(failedFuture(new RuntimeException(hugeMessage)));
+        whenSendRecord().thenReturn(failedFuture(new RuntimeException(hugeMessage)));
 
         outboxPublisher.publishPendingEvents();
 
@@ -157,8 +166,7 @@ class OutboxPublisherTest {
         OutboxEvent e = bookingEvent(1L, "SKBG25000001");
         when(outboxEventRepository.findPendingBatchWithLock())
             .thenReturn(List.of(e));
-        when(kafkaTemplate.send(any(String.class), any(String.class), any()))
-            .thenReturn(CompletableFuture.completedFuture(null));
+        whenSendRecord().thenReturn(CompletableFuture.completedFuture(null));
 
         outboxPublisher.publishPendingEvents();
 

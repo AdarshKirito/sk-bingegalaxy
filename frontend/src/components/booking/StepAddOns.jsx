@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react';
 import LazyImage from '../ui/LazyImage';
+import { formatCurrency } from '../../utils/currency';
 
 export default function StepAddOns({
   addOns, form, setForm, isAdmin, resolvedPricing,
-  toggleAddOn, setImagePopup,
+  toggleAddOn, setImagePopup, currency = 'INR',
   onNext, onBack,
 }) {
+  const money = (v) => formatCurrency(v, currency);
   // V58 — chip filter. The legacy free-text `category` string is gone;
   // categorization is now keyed by `categoryId` with `categoryName` as the
   // display label. Uncategorized add-ons surface only under the "All" tab.
@@ -62,7 +64,7 @@ export default function StepAddOns({
                 const isCustom = rap && rap.source !== 'DEFAULT';
                 return (
                   <p className="addon-price">
-                    ₹{ap?.toLocaleString()}
+                    {money(ap)}
                     {isCustom && <span style={{ fontSize: '0.7rem', marginLeft: '0.4rem', color: '#818cf8' }}>({rap.source === 'RATE_CODE' ? resolvedPricing.rateCodeName : 'Custom'})</span>}
                   </p>
                 );

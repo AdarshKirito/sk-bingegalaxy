@@ -8,6 +8,9 @@ import com.skbingegalaxy.booking.service.PricingService;
 import com.skbingegalaxy.common.dto.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -162,18 +165,12 @@ public class BookingController {
         return ResponseEntity.ok(ApiResponse.ok("Booking rescheduled successfully", rescheduled));
     }
 
-    @PostMapping("/{bookingRef}/transfer")
-    public ResponseEntity<ApiResponse<BookingDto>> transferMyBooking(
-            @PathVariable String bookingRef,
-            @RequestHeader("X-User-Id") Long userId,
-            @Valid @RequestBody TransferBookingRequest request,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
-        BookingDto transferred = idempotencyService.execute(
-            idempotencyKey, "POST", "/api/v1/bookings/" + bookingRef + "/transfer", userId,
-            request, BookingDto.class,
-            () -> bookingService.transferBooking(bookingRef, userId, request));
-        return ResponseEntity.ok(ApiResponse.ok("Booking transferred successfully", transferred));
-    }
+    // API-002: the legacy singular POST /{bookingRef}/transfer endpoint was
+    // REMOVED. It rewrote the recipient's identity immediately — bypassing the
+    // recipient-consent (magic-link) flow at /{bookingRef}/transfers — and was
+    // never called by the SPA. The underlying mutation now runs exclusively
+    // from BookingTransferService AFTER the recipient accepts a valid,
+    // unexpired transfer token.
 
     @PostMapping("/recurring")
     public ResponseEntity<ApiResponse<RecurringBookingResult>> createRecurringBookings(
@@ -254,11 +251,46 @@ public class BookingController {
         return ResponseEntity.ok(ApiResponse.ok(bookingService.getAvailableRooms(date, startMinute, durationMinutes)));
     }
 
+    // ── Public: room rating summary + reviews (derived from bookings in that room) ──
+    @GetMapping("/venue-rooms/{roomId}/reviews/summary")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> getRoomReviewSummary(@PathVariable Long roomId) {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.getRoomReviewSummary(roomId)));
+    }
+
+    @GetMapping("/venue-rooms/{roomId}/reviews")
+    public ResponseEntity<ApiResponse<Page<BookingReviewDto>>> getRoomReviews(
+            @PathVariable Long roomId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        return ResponseEntity.ok(ApiResponse.ok(
+            bookingService.getRoomPublicReviews(roomId, PageRequest.of(page, Math.min(size, 50),
+                Sort.by(Sort.Direction.DESC, "createdAt")))));
+    }
+
     // ── Surge Pricing (public read) ──────────────────────────
 
     @GetMapping("/surge-rules")
     public ResponseEntity<ApiResponse<java.util.List<SurgePricingRuleDto>>> getActiveSurgeRules() {
         return ResponseEntity.ok(ApiResponse.ok(pricingService.getActiveSurgeRules()));
+    }
+
+    /**
+     * Server-resolved surge for a date + start time — the single source of
+     * pricing truth for the booking wizard's preview. Rules now carry triggers
+     * the client cannot evaluate (occupancy %, venue-clock lead times, priority
+     * tie-breaks), so the client must never re-implement the matcher: what this
+     * returns is exactly what {@code createBooking} will apply. Null data =
+     * no surge for that slot.
+     */
+    @GetMapping("/surge/quote")
+    public ResponseEntity<ApiResponse<com.skbingegalaxy.booking.service.PricingService.SurgeResult>> quoteSurge(
+            @RequestParam("date") @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate date,
+            @RequestParam("startMinute") int startMinute) {
+        if (startMinute < 0 || startMinute > 1439) {
+            throw new com.skbingegalaxy.common.exception.BusinessException("startMinute must be 0–1439");
+        }
+        java.time.LocalTime startTime = java.time.LocalTime.of(startMinute / 60, startMinute % 60);
+        return ResponseEntity.ok(ApiResponse.ok(pricingService.resolveSurge(date, startTime)));
     }
 
     // ── Customer-facing timeline ─────────────────────────────

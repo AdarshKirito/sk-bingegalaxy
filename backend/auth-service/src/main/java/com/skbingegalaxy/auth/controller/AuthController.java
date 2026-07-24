@@ -4,6 +4,7 @@ import com.skbingegalaxy.auth.dto.*;
 import com.skbingegalaxy.auth.service.AuthAuditService;
 import com.skbingegalaxy.auth.service.AuthService;
 import com.skbingegalaxy.auth.service.TokenRevocationService;
+import com.skbingegalaxy.auth.service.UserSessionService;
 import com.skbingegalaxy.auth.security.JwtProvider;
 import com.skbingegalaxy.common.dto.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
@@ -26,6 +27,8 @@ public class AuthController {
     private final TokenRevocationService tokenRevocationService;
     private final AuthAuditService auditService;
     private final JwtProvider jwtProvider;
+    private final UserSessionService userSessionService;
+    private final com.skbingegalaxy.auth.client.BookingModulePermissionClient modulePermissions;
 
     @Value("${app.jwt.expiration-ms:3600000}")
     private long jwtExpirationMs;
@@ -103,6 +106,13 @@ public class AuthController {
         // Revoke the refresh token so it can't be replayed against /auth/refresh.
         if (cookieRefreshToken != null && !cookieRefreshToken.isBlank()) {
             tokenRevocationService.revoke(cookieRefreshToken);
+            // Also close the session row so My Sessions stops listing this device
+            // as active, and denylist its sid at the gateway.
+            try {
+                userSessionService.recordLogout(jwtProvider.getJtiFromToken(cookieRefreshToken));
+            } catch (Exception ignored) {
+                // Malformed/expired refresh cookie — nothing to close.
+            }
         }
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             tokenRevocationService.revoke(authHeader.substring(7));
@@ -162,6 +172,41 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.ok("Email changed. Please verify your new address.", updated));
     }
 
+    // ── Verified email change (settings): password re-auth → OTP to the NEW
+    // address → confirm applies the switch already-verified. Preferred over the
+    // legacy PUT /change-email immediate switch above.
+    @PostMapping("/change-email/request")
+    public ResponseEntity<ApiResponse<Void>> requestEmailChange(
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestBody java.util.Map<String, String> body) {
+        authService.requestEmailChange(userId,
+            body == null ? null : body.get("newEmail"),
+            body == null ? null : body.get("currentPassword"));
+        return ResponseEntity.ok(ApiResponse.ok(
+            "Verification code sent to the new email address", null));
+    }
+
+    @PostMapping("/change-email/confirm")
+    public ResponseEntity<ApiResponse<UserDto>> confirmEmailChange(
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestBody java.util.Map<String, String> body) {
+        UserDto updated = authService.confirmEmailChange(userId,
+            body == null ? null : body.get("otp"));
+        return ResponseEntity.ok(ApiResponse.ok("Email changed and verified", updated));
+    }
+
+    /** Verified phone change — requires the current password (re-auth). */
+    @PutMapping("/change-phone")
+    public ResponseEntity<ApiResponse<UserDto>> changePhone(
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestBody java.util.Map<String, String> body) {
+        UserDto updated = authService.changePhone(userId,
+            body == null ? null : body.get("phone"),
+            body == null ? null : body.get("phoneCountryCode"),
+            body == null ? null : body.get("currentPassword"));
+        return ResponseEntity.ok(ApiResponse.ok("Phone number updated", updated));
+    }
+
     @PutMapping("/profile/preferences")
     public ResponseEntity<ApiResponse<UserDto>> updateAccountPreferences(
             @RequestHeader("X-User-Id") Long userId,
@@ -195,23 +240,52 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.ok(authService.searchCustomers(q, pageable)));
     }
 
+    /** Staff directory search (ADMIN + SUPER_ADMIN) for the messaging recipient picker. */
+    @GetMapping("/admin/search-staff")
+    public ResponseEntity<ApiResponse<org.springframework.data.domain.Page<UserDto>>> searchStaff(
+            @RequestParam(defaultValue = "") String q,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(page, Math.min(size, 100));
+        return ResponseEntity.ok(ApiResponse.ok(authService.searchStaff(q, pageable)));
+    }
+
+    // ── Customer directory = the binge "Users" menu option (V71 matrix). ──
+    // These four endpoints power AdminUsersConfig, so they honour the per-binge
+    // USERS module the super-admin manages in booking-service. search-customers
+    // and create-customer are deliberately NOT gated: they belong to the admin
+    // booking wizard (customer selection), not the Users administration page.
+
     @GetMapping("/admin/customers")
     public ResponseEntity<ApiResponse<org.springframework.data.domain.Page<UserDto>>> getAllCustomers(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "50") int size) {
+            @RequestParam(defaultValue = "50") int size,
+            @RequestHeader(value = "X-User-Id", required = false) Long actorId,
+            @RequestHeader(value = "X-User-Role", required = false) String actorRole,
+            @RequestHeader(value = "X-Binge-Id", required = false) Long bingeId) {
+        modulePermissions.requireModuleAllowed(actorId, actorRole, bingeId, "USERS");
         org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(page, Math.min(size, 200));
         return ResponseEntity.ok(ApiResponse.ok(authService.getAllCustomers(pageable)));
     }
 
     @GetMapping("/admin/customer/{id}")
-    public ResponseEntity<ApiResponse<UserDto>> getCustomerById(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<UserDto>> getCustomerById(
+            @PathVariable Long id,
+            @RequestHeader(value = "X-User-Id", required = false) Long actorId,
+            @RequestHeader(value = "X-User-Role", required = false) String actorRole,
+            @RequestHeader(value = "X-Binge-Id", required = false) Long bingeId) {
+        modulePermissions.requireModuleAllowed(actorId, actorRole, bingeId, "USERS");
         return ResponseEntity.ok(ApiResponse.ok(authService.getCustomerById(id)));
     }
 
     @PutMapping("/admin/customer/{id}")
     public ResponseEntity<ApiResponse<UserDto>> updateCustomer(
             @PathVariable Long id,
-            @Valid @RequestBody UpdateCustomerRequest request) {
+            @Valid @RequestBody UpdateCustomerRequest request,
+            @RequestHeader(value = "X-User-Id", required = false) Long actorId,
+            @RequestHeader(value = "X-User-Role", required = false) String actorRole,
+            @RequestHeader(value = "X-Binge-Id", required = false) Long bingeId) {
+        modulePermissions.requireModuleAllowed(actorId, actorRole, bingeId, "USERS");
         UserDto user = authService.adminUpdateCustomer(id, request);
         return ResponseEntity.ok(ApiResponse.ok("Customer updated", user));
     }
@@ -221,6 +295,22 @@ public class AuthController {
         UserDto user = authService.adminCreateCustomer(request);
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(ApiResponse.ok("Customer created", user));
+    }
+
+    /**
+     * Re-issue a fresh temporary password for an admin-created customer who lost
+     * theirs. Returns the new temp password (for the admin to read out) and
+     * re-sends it by email + SMS.
+     */
+    @PostMapping("/admin/customer/{id}/temp-password")
+    public ResponseEntity<ApiResponse<UserDto>> regenerateTempPassword(
+            @PathVariable Long id,
+            @RequestHeader(value = "X-User-Id", required = false) Long actorId,
+            @RequestHeader(value = "X-User-Role", required = false) String actorRole,
+            @RequestHeader(value = "X-Binge-Id", required = false) Long bingeId) {
+        modulePermissions.requireModuleAllowed(actorId, actorRole, bingeId, "USERS");
+        UserDto user = authService.regenerateTempPassword(id);
+        return ResponseEntity.ok(ApiResponse.ok("Temporary password re-issued", user));
     }
 
     @PostMapping("/admin/register")
@@ -288,14 +378,16 @@ public class AuthController {
     @PostMapping("/mfa/confirm")
     public ResponseEntity<ApiResponse<Void>> confirmMfa(@RequestHeader("X-User-Id") Long userId,
                                                          @Valid @RequestBody MfaConfirmRequest request) {
-        authService.confirmMfaEnrollment(userId, request.getCode(), request.getRecoveryCodes());
+        // recoveryCodes on the request are ignored — they are generated, hashed and
+        // stored server-side at enrolment and are never taken from the client.
+        authService.confirmMfaEnrollment(userId, request.getCode());
         return ResponseEntity.ok(ApiResponse.ok("MFA enabled", null));
     }
 
     @PostMapping("/mfa/disable")
     public ResponseEntity<ApiResponse<Void>> disableMfa(@RequestHeader("X-User-Id") Long userId,
                                                          @Valid @RequestBody MfaCodeRequest request) {
-        authService.disableMfa(userId, request.getCode());
+        authService.disableMfa(userId, request.getCode(), request.getCurrentPassword());
         return ResponseEntity.ok(ApiResponse.ok("MFA disabled", null));
     }
 

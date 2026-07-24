@@ -49,6 +49,28 @@ public class DisputeWebhookService {
     private final WebhookDedupService webhookDedupService;
     private final AuditLogService auditLogService;
     private final PaymentMetrics metrics;
+    private final PaymentService paymentService;
+
+    /**
+     * Monotonic dispute lifecycle rank (PAY-009). Provider events can arrive
+     * duplicated and OUT OF ORDER; a terminal state (WON/LOST/ACCEPTED) must
+     * never be reopened by a late created/under_review delivery, and one
+     * terminal outcome must never overwrite another (won-after-lost would
+     * silently flip financial truth — that needs a human).
+     */
+    private static int statusRank(String status) {
+        if (status == null) return -1;
+        return switch (status) {
+            case "OPEN" -> 0;
+            case "UNDER_REVIEW" -> 1;
+            case "WON", "LOST", "ACCEPTED" -> 2;
+            default -> -1;
+        };
+    }
+
+    private static boolean isTerminal(String status) {
+        return statusRank(status) >= 2;
+    }
 
     @Value("${app.razorpay.webhook-secret:}")
     private String razorpayWebhookSecret;
@@ -124,16 +146,47 @@ public class DisputeWebhookService {
             : payment.getAmount();
         String currency = dispute.getCurrency() != null ? dispute.getCurrency() : "INR";
 
+        // ── Monotonic ordering fence (PAY-009) ─────────────────────────────
+        // Late/out-of-order deliveries must not move the dispute backwards,
+        // and a second terminal outcome must never overwrite the first.
+        String targetStatus = switch (event) {
+            case "payment.dispute.created"      -> "OPEN";
+            case "payment.dispute.under_review" -> "UNDER_REVIEW";
+            case "payment.dispute.won"          -> "WON";
+            case "payment.dispute.lost"         -> "LOST";
+            case "payment.dispute.accepted"     -> "ACCEPTED";
+            default -> null;
+        };
+        if (targetStatus == null) {
+            log.debug("Unhandled dispute event subtype: {}", event);
+            recordDedup(dedupKey, rawBody);
+            return "unhandled:" + event;
+        }
+        String currentStatus = disputeRepository.findByGatewayDisputeId(dispute.getId())
+            .map(PaymentDispute::getStatus).orElse(null);
+        if (currentStatus != null) {
+            if (isTerminal(currentStatus) && !currentStatus.equals(targetStatus)) {
+                log.error("DISPUTE_ORDER_CONFLICT: dispute {} is terminal ({}) but received '{}' — refused; "
+                    + "if the provider genuinely corrected the outcome, ops must reconcile manually.",
+                    dispute.getId(), currentStatus, event);
+                recordDedup(dedupKey, rawBody);
+                return "ignored_out_of_order:" + currentStatus;
+            }
+            if (statusRank(targetStatus) < statusRank(currentStatus)) {
+                log.info("Dispute {} ignoring backwards transition {} → {} (late delivery)",
+                    dispute.getId(), currentStatus, targetStatus);
+                recordDedup(dedupKey, rawBody);
+                return "ignored_backwards:" + currentStatus;
+            }
+        }
+
         String result = switch (event) {
             case "payment.dispute.created"      -> handleDisputeCreated(payment, dispute, disputeAmount, currency, rawBody);
-            case "payment.dispute.under_review" -> handleDisputeUnderReview(payment, dispute, rawBody);
+            case "payment.dispute.under_review" -> handleDisputeUnderReview(payment, dispute, disputeAmount, currency, rawBody);
             case "payment.dispute.won"          -> handleDisputeWon(payment, dispute, disputeAmount, currency, rawBody);
             case "payment.dispute.lost"         -> handleDisputeLost(payment, dispute, disputeAmount, currency, rawBody);
             case "payment.dispute.accepted"     -> handleDisputeAccepted(payment, dispute, disputeAmount, currency, rawBody);
-            default -> {
-                log.debug("Unhandled dispute event subtype: {}", event);
-                yield "unhandled:" + event;
-            }
+            default -> "unhandled:" + event;
         };
 
         recordDedup(dedupKey, rawBody);
@@ -149,8 +202,15 @@ public class DisputeWebhookService {
             dispute.getReasonCode(), dispute.getRespondByEpoch());
 
         PaymentStatus prevStatus = payment.getStatus();
-        payment.setStatus(PaymentStatus.DISPUTED);
-        paymentRepository.save(payment);
+        // Freeze in DISPUTED only from an ordinary money state — a payment
+        // that is already REFUNDED (or FAILED) must keep its ledger truth.
+        if (prevStatus == PaymentStatus.SUCCESS || prevStatus == PaymentStatus.PARTIALLY_REFUNDED) {
+            payment.setStatus(PaymentStatus.DISPUTED);
+            paymentRepository.save(payment);
+        } else {
+            log.warn("Dispute {} opened for payment {} in state {} — dispute recorded, payment status untouched",
+                dispute.getId(), payment.getTransactionId(), prevStatus);
+        }
 
         upsertDispute(payment, dispute, "OPEN", amount, currency, rawBody);
 
@@ -168,9 +228,11 @@ public class DisputeWebhookService {
     }
 
     private String handleDisputeUnderReview(Payment payment, DisputeWebhookRequest.DisputeFields dispute,
-                                             String rawBody) {
+                                            BigDecimal amount, String currency, String rawBody) {
         log.info("Dispute under review: {} for booking {}", dispute.getId(), payment.getBookingRef());
-        upsertDisputeStatus(dispute.getId(), "UNDER_REVIEW", rawBody);
+        // Upsert (not update-only): under_review may be the FIRST event we see
+        // when created was lost — the record must exist for the triage queue.
+        upsertDispute(payment, dispute, "UNDER_REVIEW", amount, currency, rawBody);
         auditLogService.record("RAZORPAY_WEBHOOK", "DISPUTE_UNDER_REVIEW", "PAYMENT",
             payment.getTransactionId(), null, null, payment.getBingeId(),
             java.util.Map.of("disputeId", dispute.getId(), "bookingRef", payment.getBookingRef()));
@@ -182,11 +244,11 @@ public class DisputeWebhookService {
         log.info("Dispute WON: payment={} booking={} — funds released by gateway",
             payment.getTransactionId(), payment.getBookingRef());
 
-        // Restore payment to SUCCESS; funds have been released by the gateway.
-        payment.setStatus(PaymentStatus.SUCCESS);
-        paymentRepository.save(payment);
+        // Restore from the settled-refund ledger, not a blind SUCCESS stamp —
+        // and only when the payment is actually frozen in DISPUTED (PAY-009).
+        paymentService.restoreAfterDisputeWon(payment, dispute.getId());
 
-        upsertDisputeStatus(dispute.getId(), "WON", rawBody);
+        upsertDispute(payment, dispute, "WON", amount, currency, rawBody);
         metrics.disputeWon();
         auditLogService.record("RAZORPAY_WEBHOOK", "DISPUTE_WON", "PAYMENT",
             payment.getTransactionId(), amount, currency, payment.getBingeId(),
@@ -199,11 +261,13 @@ public class DisputeWebhookService {
         log.warn("Dispute LOST: payment={} booking={} amount={} — gateway has deducted funds",
             payment.getTransactionId(), payment.getBookingRef(), amount);
 
-        payment.setStatus(PaymentStatus.REFUNDED);
-        payment.setFailureReason("Chargeback lost: dispute " + dispute.getId());
-        paymentRepository.save(payment);
+        // Real chargeback ledger entry (PAY-009): Refund row + payment status
+        // recomputed from the ledger + payment.refunded event so the booking's
+        // collected amount and the customer timeline reflect the deduction.
+        paymentService.applyChargeback(payment, dispute.getId(), amount,
+            "Chargeback lost: dispute " + dispute.getId());
 
-        upsertDisputeStatus(dispute.getId(), "LOST", rawBody);
+        upsertDispute(payment, dispute, "LOST", amount, currency, rawBody);
         metrics.disputeLost();
         auditLogService.record("RAZORPAY_WEBHOOK", "DISPUTE_LOST", "PAYMENT",
             payment.getTransactionId(), amount, currency, payment.getBingeId(),
@@ -219,11 +283,10 @@ public class DisputeWebhookService {
         log.warn("Dispute ACCEPTED (merchant conceded): payment={} booking={}",
             payment.getTransactionId(), payment.getBookingRef());
 
-        payment.setStatus(PaymentStatus.REFUNDED);
-        payment.setFailureReason("Chargeback accepted: dispute " + dispute.getId());
-        paymentRepository.save(payment);
+        paymentService.applyChargeback(payment, dispute.getId(), amount,
+            "Chargeback accepted: dispute " + dispute.getId());
 
-        upsertDisputeStatus(dispute.getId(), "ACCEPTED", rawBody);
+        upsertDispute(payment, dispute, "ACCEPTED", amount, currency, rawBody);
         metrics.disputeLost();
         auditLogService.record("RAZORPAY_WEBHOOK", "DISPUTE_ACCEPTED", "PAYMENT",
             payment.getTransactionId(), amount, currency, payment.getBingeId(),
@@ -268,14 +331,6 @@ public class DisputeWebhookService {
             .rawPayload(rawBody)
             .build();
         disputeRepository.save(entity);
-    }
-
-    private void upsertDisputeStatus(String gatewayDisputeId, String status, String rawBody) {
-        disputeRepository.findByGatewayDisputeId(gatewayDisputeId).ifPresent(d -> {
-            d.setStatus(status);
-            d.setRawPayload(rawBody);
-            disputeRepository.save(d);
-        });
     }
 
     private void recordDedup(String key, String rawBody) {

@@ -251,6 +251,42 @@ public class SlotHoldService {
         return slotHoldRepository.findLiveHoldsByBingeAndDate(bingeId, date, LocalDateTime.now(ZoneOffset.UTC));
     }
 
+    /**
+     * System-issued hold used by waitlist promotion (BOOK-002): reserves the
+     * offered slot for the offered customer until the offer window closes.
+     * Skips the customer-facing guards (per-customer hold cap, conflict
+     * re-check) — the promoter has already validated capacity under the same
+     * per-(binge,date) advisory lock, and the offer window is authoritative.
+     *
+     * @return the hold token to store on the waitlist entry
+     */
+    @Transactional
+    public String createOfferHold(Long bingeId, Long customerId, String customerName,
+                                  String customerEmail, EventType eventType,
+                                  LocalDate bookingDate, java.time.LocalTime startTime,
+                                  int durationMinutes, int numberOfGuests,
+                                  LocalDateTime offerExpiresAt) {
+        SlotHold hold = SlotHold.builder()
+            .holdToken(generateToken())
+            .bingeId(bingeId)
+            .customerId(customerId)
+            .customerName(customerName)
+            .customerEmail(customerEmail)
+            .eventType(eventType)
+            .bookingDate(bookingDate)
+            .startTime(startTime)
+            .durationMinutes(durationMinutes)
+            .numberOfGuests(Math.max(1, numberOfGuests))
+            .status(SlotHoldStatus.ACTIVE)
+            .expiresAt(offerExpiresAt)
+            .build();
+        SlotHold saved = slotHoldRepository.save(hold);
+        funnelMetrics.holdCreated();
+        log.info("Waitlist offer hold created: token={} customer={} binge={} {} {}+{}m (expires {})",
+            saved.getHoldToken(), customerId, bingeId, bookingDate, startTime, durationMinutes, offerExpiresAt);
+        return saved.getHoldToken();
+    }
+
     /** Marks a hold RELEASED non-throwing — for use when payment downstream fails. */
     @Transactional
     public void releaseQuietly(String token, String reason) {

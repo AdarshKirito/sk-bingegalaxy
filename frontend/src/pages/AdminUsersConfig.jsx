@@ -10,6 +10,7 @@ import AddressFields, { EMPTY_ADDRESS } from '../components/form/AddressFields';
 import './AdminPages.css';
 import './AdminBookings.css';
 import './AdminUsersConfig.css';
+import { venueMoney } from '../utils/venueLocale';
 
 /* ─── Constants ────────────────────────────────────────── */
 const MAIN_TABS = [
@@ -38,7 +39,7 @@ const STATUS_BADGE = {
 const sanitize = (v) => (typeof v === 'string' ? DOMPurify.sanitize(v) : v);
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString() : '—');
 const fmtDateTime = (d) => (d ? formatServerDateTime(d) : '—');
-const fmtMoney = (n) => (n != null ? `₹${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—');
+const fmtMoney = (n) => (n != null ? venueMoney(n) : '—');
 
 // ── Tier presentation (aligns with backend LoyaltyService tiers) ──
 const TIER_META = {
@@ -649,7 +650,7 @@ export default function AdminUsersConfig() {
                 <tr><td colSpan={5} className="ab-empty"><p>No rate codes</p></td></tr>
               ) : rateCodes.map(rc => (
                 <tr key={rc.id} onClick={() => navigate(`/admin/rate-codes?expand=${rc.id}`)} style={{ cursor: 'pointer' }} title="Click to view this rate code">
-                  <td><strong style={{ color: 'var(--primary)' }}>{sanitize(rc.name)}</strong></td>
+                  <td><strong style={{ color: 'var(--primary-text)' }}>{sanitize(rc.name)}</strong></td>
                   <td>{sanitize(rc.description || '—')}</td>
                   <td>
                     <span className={rc.active !== false ? 'adm-badge adm-badge-active' : 'adm-badge adm-badge-inactive'}>

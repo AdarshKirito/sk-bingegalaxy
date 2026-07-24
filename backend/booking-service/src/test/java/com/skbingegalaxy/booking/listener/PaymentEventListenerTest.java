@@ -38,6 +38,65 @@ class PaymentEventListenerTest {
     @InjectMocks private PaymentEventListener paymentEventListener;
 
     @Test
+    void onPaymentSuccess_bingeMismatch_refusesMutationAndFlagsForOps() {
+        // SEC-011 event fence: a payment event stamped with binge 99 must never
+        // mutate a booking that belongs to binge 11 — no money recording, no
+        // saga advance; the event is flagged and swallowed (deterministic).
+        PaymentEvent event = PaymentEvent.builder()
+            .bookingRef("SKBG25123456")
+            .bingeId(99L)
+            .transactionId("TXN-FOREIGN1")
+            .amount(BigDecimal.valueOf(5000))
+            .paymentMethod("UPI")
+            .build();
+        Booking booking = Booking.builder()
+            .bookingRef("SKBG25123456")
+            .bingeId(11L)
+            .totalAmount(BigDecimal.valueOf(5000))
+            .status(BookingStatus.PENDING)
+            .build();
+
+        when(processedEventRepository.existsByEventKey(any())).thenReturn(false);
+        when(bookingService.getBookingEntityForSystem("SKBG25123456")).thenReturn(booking);
+
+        paymentEventListener.onPaymentSuccess(event);
+
+        verify(bookingService, never()).addToCollectedAmount(any(), any());
+        verify(bookingService, never()).updatePaymentStatus(any(), any(), any());
+        verify(sagaOrchestrator, never()).advanceTo(any(), any(), any());
+        // Flagged for ops + marked processed so redelivery can't retry forever.
+        verify(eventLogService).logEvent(eq(booking),
+            eq(com.skbingegalaxy.booking.entity.BookingEventType.MANUAL_REVIEW_FLAGGED),
+            any(), any(), any(), contains("TENANT_MISMATCH"));
+        verify(processedEventRepository).save(any());
+    }
+
+    @Test
+    void onPaymentRefunded_bingeMismatch_refusesMutation() {
+        PaymentEvent event = PaymentEvent.builder()
+            .bookingRef("SKBG25123456")
+            .bingeId(99L)
+            .refundId("rfnd_x")
+            .refundAmount(BigDecimal.valueOf(1000))
+            .build();
+        Booking booking = Booking.builder()
+            .bookingRef("SKBG25123456")
+            .bingeId(11L)
+            .totalAmount(BigDecimal.valueOf(5000))
+            .status(BookingStatus.CONFIRMED)
+            .build();
+
+        when(processedEventRepository.existsByEventKey(any())).thenReturn(false);
+        when(bookingService.getBookingEntityForSystem("SKBG25123456")).thenReturn(booking);
+
+        paymentEventListener.onPaymentRefunded(event);
+
+        verify(bookingService, never()).subtractFromCollectedAmount(any(), any());
+        verify(bookingService, never()).updatePaymentStatus(any(), any(), any());
+        verify(processedEventRepository).save(any());
+    }
+
+    @Test
     void onPaymentFailed_doesNotMarkProcessedWhenCompensationFails() {
         PaymentEvent event = PaymentEvent.builder()
             .bookingRef("SKBG25123456")
@@ -96,5 +155,86 @@ class PaymentEventListenerTest {
             com.skbingegalaxy.booking.entity.SagaState.SagaStatus.PAYMENT_RECEIVED, "PAYMENT_SUCCESS");
         verify(sagaOrchestrator).advanceTo("SKBG25123456",
             com.skbingegalaxy.booking.entity.SagaState.SagaStatus.CONFIRMED, "BOOKING_CONFIRMED");
+    }
+
+    @Test
+    void onPaymentRefunded_recomputesToSuccessWhenNetCollectedStillCoversTotal() {
+        // "Change payment method" fires a full refund of the old payment AND an
+        // immediate re-collection under the new method. If the re-collection's
+        // payment.success was already applied (out-of-order across topics), the net
+        // collected still equals the total — so the booking must remain SUCCESS, not
+        // be flipped to REFUNDED off the single payment's refund flag (the old bug
+        // that left a fully-paid booking showing "fully refunded, ₹0 collected").
+        PaymentEvent event = PaymentEvent.builder()
+            .bookingRef("SKBG25777001")
+            .refundId("RF-1")
+            .refundAmount(BigDecimal.valueOf(5198))
+            .status("REFUNDED")
+            .build();
+        Booking netBooking = Booking.builder()
+            .bookingRef("SKBG25777001")
+            .totalAmount(BigDecimal.valueOf(5198))
+            .collectedAmount(BigDecimal.valueOf(5198))
+            .status(BookingStatus.CHECKED_IN)
+            .build();
+
+        when(processedEventRepository.existsByEventKey(any())).thenReturn(false);
+        when(bookingService.getBookingEntityForSystem("SKBG25777001")).thenReturn(netBooking);
+
+        paymentEventListener.onPaymentRefunded(event);
+
+        verify(bookingService).subtractFromCollectedAmount("SKBG25777001", BigDecimal.valueOf(5198));
+        verify(bookingService).updatePaymentStatus("SKBG25777001",
+            com.skbingegalaxy.common.enums.PaymentStatus.SUCCESS, null);
+        verify(bookingService, never()).updatePaymentStatus("SKBG25777001",
+            com.skbingegalaxy.common.enums.PaymentStatus.REFUNDED, null);
+    }
+
+    @Test
+    void onPaymentRefunded_setsRefundedWhenNothingLeftCollected() {
+        PaymentEvent event = PaymentEvent.builder()
+            .bookingRef("SKBG25777002")
+            .refundId("RF-2")
+            .refundAmount(BigDecimal.valueOf(5198))
+            .status("REFUNDED")
+            .build();
+        Booking netBooking = Booking.builder()
+            .bookingRef("SKBG25777002")
+            .totalAmount(BigDecimal.valueOf(5198))
+            .collectedAmount(BigDecimal.ZERO)
+            .status(BookingStatus.CONFIRMED)
+            .build();
+
+        when(processedEventRepository.existsByEventKey(any())).thenReturn(false);
+        when(bookingService.getBookingEntityForSystem("SKBG25777002")).thenReturn(netBooking);
+
+        paymentEventListener.onPaymentRefunded(event);
+
+        verify(bookingService).updatePaymentStatus("SKBG25777002",
+            com.skbingegalaxy.common.enums.PaymentStatus.REFUNDED, null);
+    }
+
+    @Test
+    void onPaymentRefunded_setsPartiallyRefundedWhenSomeCollectionRetained() {
+        PaymentEvent event = PaymentEvent.builder()
+            .bookingRef("SKBG25777003")
+            .refundId("RF-3")
+            .refundAmount(BigDecimal.valueOf(2000))
+            .status("REFUNDED")
+            .build();
+        Booking netBooking = Booking.builder()
+            .bookingRef("SKBG25777003")
+            .totalAmount(BigDecimal.valueOf(5198))
+            .collectedAmount(BigDecimal.valueOf(3198))
+            .status(BookingStatus.CONFIRMED)
+            .build();
+
+        when(processedEventRepository.existsByEventKey(any())).thenReturn(false);
+        when(bookingService.getBookingEntityForSystem("SKBG25777003")).thenReturn(netBooking);
+
+        paymentEventListener.onPaymentRefunded(event);
+
+        verify(bookingService).updatePaymentStatus("SKBG25777003",
+            com.skbingegalaxy.common.enums.PaymentStatus.PARTIALLY_REFUNDED, null);
     }
 }

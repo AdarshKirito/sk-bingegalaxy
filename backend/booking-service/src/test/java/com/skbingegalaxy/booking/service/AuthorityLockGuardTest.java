@@ -40,8 +40,20 @@ class AuthorityLockGuardTest {
     void superAdmin_bypasses_evenWhenLocked() {
         BingeContext.setBingeId(7L);
         // Never even consults the lock table for a native super-admin.
-        assertThatCode(() -> guard.requireUnlocked("PRICING", "SUPER_ADMIN")).doesNotThrowAnyException();
+        assertThatCode(() -> guard.requireUnlocked("PRICING", "SUPER_ADMIN", false)).doesNotThrowAnyException();
         verifyNoInteractions(lockClient);
+    }
+
+    @Test
+    void delegatedSuperAdmin_isStillBlockedByLock() {
+        // A delegated admin has effective SUPER_ADMIN but delegated=true — locks must still
+        // apply (locks fence off capabilities even from delegated authority).
+        BingeContext.setBingeId(7L);
+        when(lockClient.lookup("PRICING", "7")).thenReturn(lock("frozen by policy", "Boss"));
+
+        assertThatThrownBy(() -> guard.requireUnlocked("PRICING", "SUPER_ADMIN", true))
+            .isInstanceOf(BusinessException.class)
+            .extracting("status").isEqualTo(HttpStatus.LOCKED);
     }
 
     @Test
@@ -49,7 +61,7 @@ class AuthorityLockGuardTest {
         BingeContext.setBingeId(7L);
         when(lockClient.lookup("PRICING", "7")).thenReturn(lock("frozen by policy", "Boss"));
 
-        assertThatThrownBy(() -> guard.requireUnlocked("PRICING", "ADMIN"))
+        assertThatThrownBy(() -> guard.requireUnlocked("PRICING", "ADMIN", false))
             .isInstanceOf(BusinessException.class)
             .extracting("status").isEqualTo(HttpStatus.LOCKED);
     }
@@ -60,7 +72,7 @@ class AuthorityLockGuardTest {
         when(lockClient.lookup("PRICING", "7")).thenReturn(null);
         when(lockClient.lookup("PRICING", "ALL")).thenReturn(lock("frozen everywhere", "Boss"));
 
-        assertThatThrownBy(() -> guard.requireUnlocked("PRICING", "ADMIN"))
+        assertThatThrownBy(() -> guard.requireUnlocked("PRICING", "ADMIN", false))
             .isInstanceOf(BusinessException.class)
             .extracting("status").isEqualTo(HttpStatus.LOCKED);
     }
@@ -71,7 +83,7 @@ class AuthorityLockGuardTest {
         when(lockClient.lookup("PRICING", "7")).thenReturn(null);
         when(lockClient.lookup("PRICING", "ALL")).thenReturn(null);
 
-        assertThatCode(() -> guard.requireUnlocked("PRICING", "ADMIN")).doesNotThrowAnyException();
+        assertThatCode(() -> guard.requireUnlocked("PRICING", "ADMIN", false)).doesNotThrowAnyException();
     }
 
     @Test
@@ -83,6 +95,66 @@ class AuthorityLockGuardTest {
         when(lockClient.lookup("PRICING", "ALL")).thenReturn(null);
 
         assertThat(BingeContext.getBingeId()).isEqualTo(7L);
-        assertThatCode(() -> guard.requireUnlocked("PRICING", "ADMIN")).doesNotThrowAnyException();
+        assertThatCode(() -> guard.requireUnlocked("PRICING", "ADMIN", false)).doesNotThrowAnyException();
+    }
+
+    // ── Timezone GRANT (default-deny, opposite polarity to the locks above) ──────
+
+    @Test
+    void timezone_nativeSuperAdmin_permitted_withoutAnyGrant() {
+        // Native super-admin never needs a grant and never consults the store.
+        assertThatCode(() -> guard.requireTimezoneChangePermitted("SUPER_ADMIN", false, 7L))
+            .doesNotThrowAnyException();
+        verifyNoInteractions(lockClient);
+    }
+
+    @Test
+    void timezone_admin_deniedByDefault_whenNoGrant() {
+        when(lockClient.lookup("TIMEZONE_CHANGE", "7")).thenReturn(null);
+        when(lockClient.lookup("TIMEZONE_CHANGE", "ALL")).thenReturn(null);
+
+        assertThatThrownBy(() -> guard.requireTimezoneChangePermitted("ADMIN", false, 7L))
+            .isInstanceOf(BusinessException.class)
+            .extracting("status").isEqualTo(HttpStatus.LOCKED);
+    }
+
+    @Test
+    void timezone_admin_permitted_withBingeSpecificGrant() {
+        when(lockClient.lookup("TIMEZONE_CHANGE", "7")).thenReturn(lock("granted for relocation", "Boss"));
+
+        assertThatCode(() -> guard.requireTimezoneChangePermitted("ADMIN", false, 7L))
+            .doesNotThrowAnyException();
+    }
+
+    @Test
+    void timezone_admin_permitted_withAllVenuesGrant_whenNoBingeSpecific() {
+        when(lockClient.lookup("TIMEZONE_CHANGE", "7")).thenReturn(null);
+        when(lockClient.lookup("TIMEZONE_CHANGE", "ALL")).thenReturn(lock("all venues may self-manage", "Boss"));
+
+        assertThatCode(() -> guard.requireTimezoneChangePermitted("ADMIN", false, 7L))
+            .doesNotThrowAnyException();
+    }
+
+    @Test
+    void timezone_delegatedSuperAdmin_deniedWithoutGrant() {
+        // Delegated authority is NOT native — timezone still needs an explicit grant.
+        when(lockClient.lookup("TIMEZONE_CHANGE", "7")).thenReturn(null);
+        when(lockClient.lookup("TIMEZONE_CHANGE", "ALL")).thenReturn(null);
+
+        assertThatThrownBy(() -> guard.requireTimezoneChangePermitted("SUPER_ADMIN", true, 7L))
+            .isInstanceOf(BusinessException.class)
+            .extracting("status").isEqualTo(HttpStatus.LOCKED);
+    }
+
+    @Test
+    void timezone_admin_failClosed_whenGrantServiceUnreachable() {
+        // Opposite posture to requireUnlocked: a null (outage / no grant) means
+        // "not proven permitted" → deny. Only native super-admins proceed offline.
+        when(lockClient.lookup("TIMEZONE_CHANGE", "7")).thenReturn(null);
+        when(lockClient.lookup("TIMEZONE_CHANGE", "ALL")).thenReturn(null);
+
+        assertThatThrownBy(() -> guard.requireTimezoneChangePermitted("ADMIN", false, 7L))
+            .isInstanceOf(BusinessException.class)
+            .extracting("status").isEqualTo(HttpStatus.LOCKED);
     }
 }

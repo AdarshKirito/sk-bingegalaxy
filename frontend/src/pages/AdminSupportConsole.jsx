@@ -1,19 +1,25 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { adminService, adminSupportService, notificationService, toArray } from '../services/endpoints';
+import { formatServerDateTime } from '../services/timeFormat';
 import { toast } from 'react-toastify';
 import {
   FiSearch, FiSend, FiAlertTriangle, FiGift, FiXCircle, FiRefreshCw,
-  FiMessageSquare, FiTrash2, FiBookmark, FiPlus,
+  FiMessageSquare, FiTrash2, FiBookmark, FiPlus, FiCheckCircle,
+  FiArrowUpCircle, FiArrowDownCircle,
 } from 'react-icons/fi';
 import './AdminPages.css';
+import './AdminSupportConsole.css';
+import { venueMoney, venueSymbol } from '../utils/venueLocale';
 
-const ESCALATION_LEVELS = ['NONE', 'L1', 'L2', 'L3'];
+const LEVELS = ['NONE', 'L1', 'L2', 'L3'];
+const levelClass = (level) => `sc-level sc-level-${(level || 'NONE').toLowerCase()}`;
 
 /**
- * Operator support console (Item 24). Search a booking by reference, then
- * inspect / act on it: threaded notes, resend confirmation, escalate,
- * issue goodwill, retry individual notifications, and cancel with reason.
+ * Operator support console. Search a booking by reference, then inspect and
+ * act on it: threaded notes, resend confirmation, a guided escalation
+ * workflow (raise → work → resolve), goodwill credit, per-row notification
+ * retries, and cancellation with reason.
  */
 export default function AdminSupportConsole() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -24,9 +30,19 @@ export default function AdminSupportConsole() {
   const [loading, setLoading] = useState(false);
 
   const [newNote, setNewNote] = useState({ body: '', visibility: 'INTERNAL', pinned: false });
-  const [escalation, setEscalation] = useState({ level: 'L1', reason: '' });
+  const [escalationReason, setEscalationReason] = useState('');
+  const [escalationBusy, setEscalationBusy] = useState(false);
   const [goodwill, setGoodwill] = useState({ amount: '', reason: '' });
   const [cancelReason, setCancelReason] = useState('');
+  // Work queue: open escalations for this binge (what needs attention NOW).
+  const [escalationQueue, setEscalationQueue] = useState([]);
+
+  const loadQueue = useCallback(() => {
+    adminSupportService.listEscalations()
+      .then((res) => setEscalationQueue(toArray(res.data?.data)))
+      .catch(() => setEscalationQueue([]));
+  }, []);
+  useEffect(() => { loadQueue(); }, [loadQueue]);
 
   const loadAll = useCallback(async (ref) => {
     if (!ref) return;
@@ -49,6 +65,15 @@ export default function AdminSupportConsole() {
     }
   }, []);
 
+  // Keep the per-booking action forms in sync with whichever booking is
+  // loaded — a stale reason from the previous booking must never be
+  // submitted against the next one.
+  useEffect(() => {
+    setEscalationReason('');
+    setGoodwill({ amount: '', reason: '' });
+    setCancelReason('');
+  }, [booking?.bookingRef]);
+
   const handleSearch = (e) => {
     e?.preventDefault();
     const ref = query.trim();
@@ -63,6 +88,7 @@ export default function AdminSupportConsole() {
   useEffect(() => {
     const ref = searchParams.get('ref');
     if (ref && ref.trim() && ref !== booking?.bookingRef) {
+      setQuery(ref.trim()); // keep the search box in sync with the deep link
       loadAll(ref.trim());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -114,15 +140,28 @@ export default function AdminSupportConsole() {
     }
   };
 
-  const submitEscalation = async (e) => {
-    e.preventDefault();
+  /**
+   * Guided escalation transition. Escalating (to a higher OR lower non-NONE
+   * level) requires a reason — it becomes the work-queue context for the next
+   * operator. Resolving (NONE) may reuse the reason box as a resolution note.
+   */
+  const setEscalationLevel = async (level) => {
     if (!booking?.bookingRef) return;
+    if (level !== 'NONE' && !escalationReason.trim()) {
+      toast.error('Add a reason first — it tells the next operator what to do');
+      return;
+    }
+    setEscalationBusy(true);
     try {
-      await adminSupportService.escalate(booking.bookingRef, escalation.level, escalation.reason);
-      toast.success('Escalation updated');
-      loadAll(booking.bookingRef);
+      await adminSupportService.escalate(booking.bookingRef, level, escalationReason.trim());
+      toast.success(level === 'NONE' ? 'Escalation resolved' : `Escalated to ${level}`);
+      setEscalationReason('');
+      await loadAll(booking.bookingRef);
+      loadQueue();
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Escalation failed');
+      toast.error(err.response?.data?.message || 'Escalation update failed');
+    } finally {
+      setEscalationBusy(false);
     }
   };
 
@@ -170,25 +209,29 @@ export default function AdminSupportConsole() {
     }
   };
 
+  const currentLevel = booking?.escalationLevel || 'NONE';
+  const currentIdx = Math.max(0, LEVELS.indexOf(currentLevel));
+  const nextLevel = currentIdx < LEVELS.length - 1 ? LEVELS[currentIdx + 1] : null;
+  const lowerLevel = currentIdx > 1 ? LEVELS[currentIdx - 1] : null;
+
   return (
     <div className="container adm-shell">
       <div className="adm-page-header">
         <div>
           <h1><FiMessageSquare /> Support Console</h1>
-          <p>Look up a booking by reference and act on it: notes, escalation, goodwill, resends, and cancellations with reason.</p>
+          <p>Look up a booking by reference and act on it: notes, escalation workflow, goodwill, resends, and cancellations with reason.</p>
         </div>
         <button type="button" className="btn btn-secondary" onClick={() => booking && loadAll(booking.bookingRef)} disabled={loading || !booking}>
           <FiRefreshCw /> {loading ? 'Loading…' : 'Refresh'}
         </button>
       </div>
 
-      <form onSubmit={handleSearch} className="adm-flow-card" style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem' }}>
+      <form onSubmit={handleSearch} className="adm-flow-card sc-search-form">
         <input
           type="text"
           placeholder="Booking reference (e.g. SK24ABC123)"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          style={{ flex: 1, padding: '0.55rem 0.7rem' }}
           autoFocus
         />
         <button type="submit" className="btn btn-primary" disabled={loading || !query.trim()}>
@@ -196,33 +239,73 @@ export default function AdminSupportConsole() {
         </button>
       </form>
 
+      {/* ── Escalation work queue ─────────────────────────────────── */}
+      {escalationQueue.length > 0 && (
+        <section className="adm-flow-card" style={{ marginBottom: '1.25rem' }}>
+          <h3 style={{ marginTop: 0 }}><FiAlertTriangle /> Open escalations ({escalationQueue.length})</h3>
+          <div className="adm-table-wrap">
+            <table className="sc-table">
+              <thead>
+                <tr>
+                  <th>Ref</th>
+                  <th>Customer</th>
+                  <th>Level</th>
+                  <th>Reason</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {escalationQueue.map((b) => (
+                  <tr key={b.bookingRef} className="sc-queue-row"
+                      onClick={() => { setQuery(b.bookingRef); setSearchParams({ ref: b.bookingRef }); loadAll(b.bookingRef); }}>
+                    <td><strong>{b.bookingRef}</strong></td>
+                    <td>{b.customerName}</td>
+                    <td><span className={levelClass(b.escalationLevel)}>{b.escalationLevel}</span></td>
+                    <td style={{ maxWidth: 320, fontSize: '0.85em', color: 'var(--text-secondary)' }}>
+                      {b.escalationReason || '—'}
+                    </td>
+                    <td><span className="badge">{b.status}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       {!booking ? (
         <section className="adm-flow-card">
-          <div className="admin-empty-state">Search for a booking to begin.</div>
+          <div className="admin-empty-state">
+            Search for a booking to begin{escalationQueue.length > 0 ? ', or pick one from the escalation queue above' : ''}.
+          </div>
         </section>
       ) : (
         <>
           {/* ── Booking summary ─────────────────────────────────────── */}
           <section className="adm-flow-card" style={{ marginBottom: '1.25rem' }}>
             <h3 style={{ marginTop: 0 }}>Booking {booking.bookingRef}</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
+            <div className="sc-summary-grid">
               <Field label="Customer">{booking.customerName} <small style={{ color: 'var(--text-secondary)' }}>(#{booking.customerId})</small></Field>
               <Field label="Email">{booking.customerEmail}</Field>
               <Field label="Phone">{booking.customerPhoneCountryCode} {booking.customerPhone}</Field>
               <Field label="Status"><span className="badge">{booking.status}</span></Field>
               <Field label="Date / Time">{booking.bookingDate} {booking.startTime}</Field>
-              <Field label="Total">₹{booking.totalAmount}</Field>
+              <Field label="Total">{venueMoney(booking.totalAmount)}</Field>
               <Field label="Escalation">
-                <span className="badge" style={{ background: booking.escalationLevel && booking.escalationLevel !== 'NONE' ? '#fee' : undefined }}>
-                  {booking.escalationLevel || 'NONE'}
-                </span>
+                <span className={levelClass(currentLevel)}>{currentLevel}</span>
+                {booking.escalationReason && (
+                  <div className="sc-subtext">{booking.escalationReason}</div>
+                )}
               </Field>
               <Field label="Goodwill">
-                {booking.goodwillCredit ? `₹${booking.goodwillCredit}` : '—'}
+                {booking.goodwillCredit ? `${venueMoney(booking.goodwillCredit)}` : '—'}
+                {booking.goodwillReason && (
+                  <div className="sc-subtext">{booking.goodwillReason}</div>
+                )}
               </Field>
             </div>
             {booking.cancellationReason && (
-              <div style={{ marginTop: '0.75rem', padding: '0.6rem', background: 'var(--surface-2, #fdf6f6)', borderRadius: 4 }}>
+              <div className="sc-callout sc-callout-danger">
                 <strong>Cancellation reason:</strong> {booking.cancellationReason}
               </div>
             )}
@@ -231,43 +314,68 @@ export default function AdminSupportConsole() {
           {/* ── Action grid ─────────────────────────────────────────── */}
           <section className="adm-flow-card" style={{ marginBottom: '1.25rem' }}>
             <h3 style={{ marginTop: 0 }}>Actions</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
+            <div className="sc-action-grid">
+              {/* Escalation workflow */}
+              <div className="sc-action-card">
+                <div className="sc-action-card-title"><FiAlertTriangle /> Escalation workflow</div>
+                <p className="sc-action-hint">
+                  Current level: <span className={levelClass(currentLevel)}>{currentLevel}</span>
+                  {currentLevel === 'NONE'
+                    ? ' — raise to L1 to put this booking on the support work queue.'
+                    : ' — work it, hand it up, or resolve it when done.'}
+                </p>
+                <input
+                  type="text"
+                  maxLength={500}
+                  placeholder={currentLevel === 'NONE'
+                    ? 'Reason (required to escalate)'
+                    : 'Reason / resolution note'}
+                  value={escalationReason}
+                  onChange={(e) => setEscalationReason(e.target.value)}
+                />
+                <div className="sc-esc-actions">
+                  {nextLevel && (
+                    <button type="button" className="btn btn-primary btn-sm" disabled={escalationBusy}
+                      onClick={() => setEscalationLevel(nextLevel)}>
+                      <FiArrowUpCircle /> Escalate to {nextLevel}
+                    </button>
+                  )}
+                  {lowerLevel && (
+                    <button type="button" className="btn btn-secondary btn-sm" disabled={escalationBusy}
+                      onClick={() => setEscalationLevel(lowerLevel)}>
+                      <FiArrowDownCircle /> De-escalate to {lowerLevel}
+                    </button>
+                  )}
+                  {currentLevel !== 'NONE' && (
+                    <button type="button" className="btn btn-secondary btn-sm" disabled={escalationBusy}
+                      onClick={() => setEscalationLevel('NONE')}>
+                      <FiCheckCircle /> Resolve
+                    </button>
+                  )}
+                </div>
+              </div>
+
               {/* Resend confirmation */}
-              <ActionCard title="Resend confirmation" icon={<FiSend />}>
-                <p style={{ fontSize: '0.9em', color: 'var(--text-secondary)' }}>
+              <div className="sc-action-card">
+                <div className="sc-action-card-title"><FiSend /> Resend confirmation</div>
+                <p className="sc-action-hint">
                   Re-emit the BOOKING_CONFIRMED event. Requires status=CONFIRMED.
                 </p>
-                <button type="button" className="btn btn-primary btn-sm" onClick={resend} disabled={booking.status !== 'CONFIRMED'}>
+                <button type="button" className="btn btn-primary btn-sm" onClick={resend} disabled={booking.status !== 'CONFIRMED'} style={{ alignSelf: 'flex-start' }}>
                   <FiSend /> Resend
                 </button>
-              </ActionCard>
-
-              {/* Escalation */}
-              <ActionCard title="Escalation" icon={<FiAlertTriangle />}>
-                <form onSubmit={submitEscalation} style={{ display: 'grid', gap: '0.5rem' }}>
-                  <select value={escalation.level} onChange={(e) => setEscalation(s => ({ ...s, level: e.target.value }))}>
-                    {ESCALATION_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
-                  </select>
-                  <input
-                    type="text"
-                    maxLength={500}
-                    placeholder="Reason"
-                    value={escalation.reason}
-                    onChange={(e) => setEscalation(s => ({ ...s, reason: e.target.value }))}
-                  />
-                  <button type="submit" className="btn btn-secondary btn-sm">Set</button>
-                </form>
-              </ActionCard>
+              </div>
 
               {/* Goodwill */}
-              <ActionCard title="Goodwill credit" icon={<FiGift />}>
+              <div className="sc-action-card">
+                <div className="sc-action-card-title"><FiGift /> Goodwill credit</div>
                 <form onSubmit={submitGoodwill} style={{ display: 'grid', gap: '0.5rem' }}>
                   <input
                     type="number"
                     min="1"
                     max="10000"
                     step="1"
-                    placeholder="Amount (₹)"
+                    placeholder={`Amount (${venueSymbol()})`}
                     value={goodwill.amount}
                     onChange={(e) => setGoodwill(s => ({ ...s, amount: e.target.value }))}
                   />
@@ -278,12 +386,13 @@ export default function AdminSupportConsole() {
                     value={goodwill.reason}
                     onChange={(e) => setGoodwill(s => ({ ...s, reason: e.target.value }))}
                   />
-                  <button type="submit" className="btn btn-secondary btn-sm">Issue</button>
+                  <button type="submit" className="btn btn-secondary btn-sm" style={{ justifySelf: 'start' }}>Issue</button>
                 </form>
-              </ActionCard>
+              </div>
 
               {/* Cancel with reason */}
-              <ActionCard title="Cancel with reason" icon={<FiXCircle />}>
+              <div className="sc-action-card">
+                <div className="sc-action-card-title"><FiXCircle /> Cancel with reason</div>
                 <textarea
                   rows={2}
                   maxLength={500}
@@ -292,10 +401,10 @@ export default function AdminSupportConsole() {
                   onChange={(e) => setCancelReason(e.target.value)}
                   style={{ width: '100%' }}
                 />
-                <button type="button" className="btn btn-danger btn-sm" onClick={submitCancel} disabled={!cancelReason.trim() || booking.status === 'CANCELLED'}>
+                <button type="button" className="btn btn-danger btn-sm" onClick={submitCancel} disabled={!cancelReason.trim() || booking.status === 'CANCELLED'} style={{ alignSelf: 'flex-start' }}>
                   <FiXCircle /> Cancel booking
                 </button>
-              </ActionCard>
+              </div>
             </div>
           </section>
 
@@ -311,7 +420,7 @@ export default function AdminSupportConsole() {
                 onChange={(e) => setNewNote(n => ({ ...n, body: e.target.value }))}
                 style={{ width: '100%' }}
               />
-              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
                 <select value={newNote.visibility} onChange={(e) => setNewNote(n => ({ ...n, visibility: e.target.value }))}>
                   <option value="INTERNAL">Internal</option>
                   <option value="CUSTOMER">Customer-visible</option>
@@ -328,17 +437,17 @@ export default function AdminSupportConsole() {
             {notes.length === 0 ? (
               <div className="admin-empty-state">No notes yet.</div>
             ) : (
-              <ul style={{ listStyle: 'none', padding: 0, display: 'grid', gap: '0.6rem' }}>
+              <ul className="sc-note-list">
                 {notes.map(n => (
-                  <li key={n.id} style={{ padding: '0.7rem', border: '1px solid var(--border)', borderRadius: 4, background: n.pinned ? 'var(--surface-2, #fffbe6)' : undefined }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                  <li key={n.id} className={`sc-note${n.pinned ? ' sc-note-pinned' : ''}`}>
+                    <div className="sc-note-head">
                       <strong>{n.authorName}</strong>
-                      <span style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                        <span className="badge" style={{ background: n.visibility === 'CUSTOMER' ? '#dff' : '#eee' }}>
+                      <span className="sc-note-meta">
+                        <span className={`sc-vis-badge${n.visibility === 'CUSTOMER' ? ' customer' : ''}`}>
                           {n.visibility}
                         </span>
                         {n.edited && <small style={{ color: 'var(--text-secondary)' }}>(edited)</small>}
-                        <small style={{ color: 'var(--text-secondary)' }}>{new Date(n.createdAt).toLocaleString()}</small>
+                        <small style={{ color: 'var(--text-secondary)' }}>{formatServerDateTime(n.createdAt)}</small>
                         <button type="button" className="btn btn-ghost btn-xs" title="Pin / Unpin" onClick={() => togglePin(n)}>
                           <FiBookmark />
                         </button>
@@ -347,7 +456,7 @@ export default function AdminSupportConsole() {
                         </button>
                       </span>
                     </div>
-                    <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
+                    <div className="sc-note-body">{n.body}</div>
                   </li>
                 ))}
               </ul>
@@ -360,42 +469,44 @@ export default function AdminSupportConsole() {
             {notifications.length === 0 ? (
               <div className="admin-empty-state">No notifications recorded for this booking.</div>
             ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: 'left', padding: '0.4rem 0.6rem' }}>Channel</th>
-                    <th style={{ textAlign: 'left', padding: '0.4rem 0.6rem' }}>Subject / Type</th>
-                    <th style={{ textAlign: 'left', padding: '0.4rem 0.6rem' }}>Status</th>
-                    <th style={{ textAlign: 'left', padding: '0.4rem 0.6rem' }}>Retries</th>
-                    <th style={{ textAlign: 'left', padding: '0.4rem 0.6rem' }}>Last error</th>
-                    <th style={{ width: 100 }} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {notifications.map(n => (
-                    <tr key={n.id} style={{ borderTop: '1px solid var(--border)' }}>
-                      <td style={{ padding: '0.4rem 0.6rem' }}>{n.channel}</td>
-                      <td style={{ padding: '0.4rem 0.6rem' }}>{n.subject || n.notificationType}</td>
-                      <td style={{ padding: '0.4rem 0.6rem' }}>
-                        <span className={`badge ${n.deliveryStatus === 'SENT' ? 'badge-success' : n.deliveryStatus === 'FAILED' ? 'badge-danger' : 'badge-warning'}`}>
-                          {n.deliveryStatus}
-                        </span>
-                      </td>
-                      <td style={{ padding: '0.4rem 0.6rem' }}>{n.retryCount}</td>
-                      <td style={{ padding: '0.4rem 0.6rem', maxWidth: 280, fontSize: '0.85em', color: 'var(--text-secondary)' }}>
-                        {n.failureReason || '—'}
-                      </td>
-                      <td style={{ padding: '0.4rem 0.6rem' }}>
-                        {n.deliveryStatus !== 'SENT' && (
-                          <button type="button" className="btn btn-secondary btn-xs" onClick={() => retryNotification(n.id)}>
-                            <FiRefreshCw /> Retry
-                          </button>
-                        )}
-                      </td>
+              <div className="adm-table-wrap">
+                <table className="sc-table">
+                  <thead>
+                    <tr>
+                      <th>Channel</th>
+                      <th>Subject / Type</th>
+                      <th>Status</th>
+                      <th>Retries</th>
+                      <th>Last error</th>
+                      <th style={{ width: 100 }} />
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {notifications.map(n => (
+                      <tr key={n.id}>
+                        <td>{n.channel}</td>
+                        <td>{n.subject || n.notificationType}</td>
+                        <td>
+                          <span className={`badge ${n.deliveryStatus === 'SENT' ? 'badge-success' : n.deliveryStatus === 'FAILED' ? 'badge-danger' : 'badge-warning'}`}>
+                            {n.deliveryStatus}
+                          </span>
+                        </td>
+                        <td>{n.retryCount}</td>
+                        <td style={{ maxWidth: 280, fontSize: '0.85em', color: 'var(--text-secondary)' }}>
+                          {n.failureReason || '—'}
+                        </td>
+                        <td>
+                          {n.deliveryStatus !== 'SENT' && (
+                            <button type="button" className="btn btn-secondary btn-xs" onClick={() => retryNotification(n.id)}>
+                              <FiRefreshCw /> Retry
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </section>
         </>
@@ -407,19 +518,8 @@ export default function AdminSupportConsole() {
 function Field({ label, children }) {
   return (
     <div>
-      <div style={{ fontSize: '0.75em', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</div>
+      <div className="sc-field-label">{label}</div>
       <div>{children}</div>
-    </div>
-  );
-}
-
-function ActionCard({ title, icon, children }) {
-  return (
-    <div style={{ padding: '0.85rem', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface, #fff)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-        {icon} {title}
-      </div>
-      {children}
     </div>
   );
 }

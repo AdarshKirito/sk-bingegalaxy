@@ -9,6 +9,7 @@ import {
 } from 'react-icons/fi';
 import { format, isToday, isYesterday, isThisWeek } from 'date-fns';
 import { notificationService, toArray } from '../services/endpoints';
+import PushToggle from '../components/PushToggle';
 import './AdminPages.css';
 import './CustomerNotifications.css';
 
@@ -550,6 +551,15 @@ function PreferencesPanel() {
               </label>
             );
           })}
+        </div>
+
+        {/* Browser push opt-in — device-scoped. The PUSH tick above controls whether push
+            is allowed; this button registers THIS browser/device to actually receive them. */}
+        <div className="cn-push-optin" style={{ marginTop: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+          <PushToggle />
+          <span className="cn-pref-help" style={{ margin: 0 }}>
+            Enable on each device where you want push alerts even when the app is closed.
+          </span>
         </div>
 
         <div style={{ marginTop: '1rem' }}>

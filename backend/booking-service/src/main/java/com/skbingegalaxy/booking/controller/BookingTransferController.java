@@ -88,8 +88,9 @@ public class BookingTransferController {
     /**
      * Public preview endpoint — what booking is this token offering? Returns
      * the from-name/booking-ref so the recipient can confirm before accepting.
-     * Token leak risk is mitigated because preview only exposes minimal data
-     * (no payment details, no PII beyond names already on the booking page).
+     * Emails are MASKED (a**@x.com): the preview is reachable by anyone holding
+     * the magic-link token, and full addresses would hand a phisher both
+     * parties' contacts. Names + masked emails are enough to confirm identity.
      */
     @GetMapping("/api/v1/booking-transfers/by-token/{token}")
     public ResponseEntity<ApiResponse<BookingTransferDto>> preview(@PathVariable String token) {
@@ -100,9 +101,9 @@ public class BookingTransferController {
                 .id(t.getId())
                 .bookingRef(t.getBookingRef())
                 .fromCustomerName(t.getFromCustomerName())
-                .fromCustomerEmail(t.getFromCustomerEmail())
+                .fromCustomerEmail(com.skbingegalaxy.common.util.LogSanitizer.maskEmail(t.getFromCustomerEmail()))
                 .toName(t.getToName())
-                .toEmail(t.getToEmail())
+                .toEmail(com.skbingegalaxy.common.util.LogSanitizer.maskEmail(t.getToEmail()))
                 .status(t.getStatus())
                 .expiresAt(t.getExpiresAt())
                 .createdAt(t.getCreatedAt())

@@ -10,6 +10,8 @@ dist
 src/test
 coverage
 .tmp
+.vite-tmp
+.npm-cache
 # Lockfile is intentionally included: the Dockerfile copies package-lock.json
 # before installing dependencies so container builds use the committed graph.
 # package-lock.json

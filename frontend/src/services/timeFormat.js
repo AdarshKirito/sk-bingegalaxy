@@ -63,6 +63,54 @@ export function formatServerDateTime(value, options) {
 }
 
 /**
+ * Format a server timestamp in a SPECIFIC IANA timezone — used for everything
+ * tied to a venue, which must render in the venue's assigned zone rather than
+ * whatever timezone the viewer's browser happens to be in.
+ * Falls back to browser-local rendering if the zone id is invalid.
+ * Example → formatInZone(ts, 'America/New_York') → "21 Apr 2026, 12:45 AM".
+ */
+export function formatInZone(value, timeZone, options) {
+  const d = parseServerDate(value);
+  if (!d) return '—';
+  try {
+    return d.toLocaleString(undefined, { ...DEFAULT_OPTS, ...(options || {}), timeZone });
+  } catch {
+    return d.toLocaleString(undefined, { ...DEFAULT_OPTS, ...(options || {}) });
+  }
+}
+
+/** Date-only variant of {@link formatInZone}. Example → "21 Apr 2026". */
+export function formatDateInZone(value, timeZone, options) {
+  return formatInZone(value, timeZone, {
+    year: 'numeric', month: 'short', day: 'numeric',
+    hour: undefined, minute: undefined,
+    ...(options || {}),
+  });
+}
+
+/** Time-only variant of {@link formatInZone}. Example → "10:15 AM". */
+export function formatTimeInZone(value, timeZone, options) {
+  return formatInZone(value, timeZone, {
+    year: undefined, month: undefined, day: undefined,
+    hour: '2-digit', minute: '2-digit',
+    ...(options || {}),
+  });
+}
+
+/** The venue's calendar date "today" (YYYY-MM-DD) in the given zone. */
+export function todayInZone(timeZone, now = new Date()) {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(now);
+  } catch {
+    return new Intl.DateTimeFormat('en-CA', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(now);
+  }
+}
+
+/**
  * Format a server timestamp as a relative string ("just now", "3 min ago", "yesterday").
  * Falls back to an absolute date if the event is more than a week old.
  */

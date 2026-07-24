@@ -46,11 +46,14 @@ class IdempotencyServiceTest {
         repository = mock(IdempotencyKeyRepository.class);
         mapper = new ObjectMapper();
         service = new IdempotencyService(repository, mapper, new SimpleMeterRegistry());
-        // reflect in the @Value-defaulted field
+        // reflect in the @Value-defaulted field + the claim-first self proxy
         try {
             var f = IdempotencyService.class.getDeclaredField("ttlHours");
             f.setAccessible(true);
             f.setInt(service, 24);
+            var s = IdempotencyService.class.getDeclaredField("self");
+            s.setAccessible(true);
+            s.set(service, service);
         } catch (ReflectiveOperationException e) {
             throw new RuntimeException(e);
         }
@@ -70,22 +73,65 @@ class IdempotencyServiceTest {
     }
 
     @Test
-    void miss_runsWork_andPersists() {
+    void miss_claimsFirst_runsWork_andPersistsResponse() {
+        // Claim-first (NEW-2): the in-progress claim is inserted BEFORE the
+        // work runs; the completion pass then fills the response into it.
+        var stored = new java.util.concurrent.atomic.AtomicReference<IdempotencyKey>();
+        when(repository.saveAndFlush(any(IdempotencyKey.class)))
+            .thenAnswer(i -> { stored.set(i.getArgument(0)); return i.getArgument(0); });
         when(repository.findByIdempotencyKeyAndHttpMethodAndRequestPathAndUserId(
-            eq("k1"), eq("POST"), eq("/api/v1/bookings"), eq(7L))).thenReturn(Optional.empty());
+            eq("k1"), eq("POST"), eq("/api/v1/bookings"), eq(7L)))
+            .thenAnswer(i -> Optional.ofNullable(stored.get()));
 
         Res out = service.execute("k1", "POST", "/api/v1/bookings", 7L,
-            new Req("a"), Res.class, () -> new Res("REF1"));
+            new Req("a"), Res.class, () -> {
+                // The claim must already be durable while the work runs.
+                assertThat(stored.get()).isNotNull();
+                assertThat(stored.get().getResponseBody()).isNull();
+                return new Res("REF1");
+            });
 
         assertThat(out.ref()).isEqualTo("REF1");
+        // Claim row shape
+        assertThat(stored.get().getIdempotencyKey()).isEqualTo("k1");
+        assertThat(stored.get().getHttpMethod()).isEqualTo("POST");
+        assertThat(stored.get().getUserId()).isEqualTo(7L);
+        assertThat(stored.get().getRequestHash()).hasSize(64); // sha256 hex
+        // Completion pass updated the SAME row with the cached response + full TTL.
         ArgumentCaptor<IdempotencyKey> captor = ArgumentCaptor.forClass(IdempotencyKey.class);
         verify(repository).save(captor.capture());
-        IdempotencyKey saved = captor.getValue();
-        assertThat(saved.getIdempotencyKey()).isEqualTo("k1");
-        assertThat(saved.getHttpMethod()).isEqualTo("POST");
-        assertThat(saved.getUserId()).isEqualTo(7L);
-        assertThat(saved.getRequestHash()).hasSize(64); // sha256 hex
-        assertThat(saved.getExpiresAt()).isAfter(LocalDateTime.now(ZoneOffset.UTC).plusHours(23));
+        IdempotencyKey completed = captor.getValue();
+        assertThat(completed.getResponseStatus()).isEqualTo(200);
+        assertThat(completed.getResponseBody()).contains("REF1");
+        assertThat(completed.getExpiresAt()).isAfter(LocalDateTime.now(ZoneOffset.UTC).plusHours(23));
+    }
+
+    @Test
+    void simultaneousDuplicate_claimCollision_returns409InProgress() {
+        // Two in-flight requests with the same key: the second one's claim
+        // insert collides on the composite PK while the winner is still
+        // working (row present, body null) → 409, work NOT run.
+        IdempotencyKey winnersClaim = IdempotencyKey.builder()
+            .idempotencyKey("k1").httpMethod("POST").requestPath("/api/v1/bookings").userId(7L)
+            .requestHash("h".repeat(64))
+            .responseBody(null)
+            .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(5))
+            .build();
+        // First lookup: nothing visible yet (winner's claim not yet committed
+        // from this transaction's view) → we try to claim ourselves.
+        when(repository.findByIdempotencyKeyAndHttpMethodAndRequestPathAndUserId(
+            eq("k1"), eq("POST"), eq("/api/v1/bookings"), eq(7L)))
+            .thenReturn(Optional.empty(), Optional.of(winnersClaim));
+        when(repository.saveAndFlush(any(IdempotencyKey.class)))
+            .thenThrow(new org.springframework.dao.DataIntegrityViolationException("duplicate key"));
+
+        AtomicInteger calls = new AtomicInteger();
+        assertThatThrownBy(() -> service.execute("k1", "POST", "/api/v1/bookings", 7L,
+                new Req("a"), Res.class, () -> { calls.incrementAndGet(); return new Res("X"); }))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("already being processed");
+        assertThat(calls.get()).isZero();
+        verify(repository, never()).save(any());
     }
 
     @Test

@@ -1,0 +1,186 @@
+/* Venue Timezones console — theme-aware (uses real --bg-card/--bg-card-hover/--bg-input/
+   --primary-bg tokens so it responds to dark mode), layered on top of AdminPages.css. */
+
+.vtz-page .card,
+.vtz-assign.card {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 14px;
+  background: var(--bg-card, #fff);
+  padding: 18px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+/* Header: lay out title + refresh action even though the page reuses admin-page-header. */
+.vtz-page .admin-page-header,
+.vtz-page .adm-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.vtz-page .admin-page-header h1 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+}
+.vtz-page .page-subtitle {
+  color: var(--text-muted, #6b7280);
+  margin: 6px 0 0;
+  max-width: 60ch;
+}
+
+/* ── Mode segmented control ─────────────────────────────── */
+.vtz-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.vtz-mode__label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, #6b7280);
+}
+.vtz-segmented {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--bg-card-hover, #f3f4f6);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  width: fit-content;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+.vtz-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-muted, #6b7280);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+.vtz-seg.is-active {
+  background: var(--bg-card, #fff);
+  color: var(--primary, #6366f1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+
+/* ── Source detail (auto / manual) ──────────────────────── */
+.vtz-source-detail { margin-bottom: 16px; }
+.vtz-auto {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.vtz-auto__zone {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--text, #1f2937);
+}
+.vtz-auto__hint {
+  font-size: 0.82rem;
+  color: var(--text-muted, #6b7280);
+}
+.vtz-manual { display: flex; flex-direction: column; gap: 6px; max-width: 640px; }
+.vtz-manual__label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-muted, #6b7280);
+}
+.vtz-manual :is(input) {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 9px;
+  font-size: 0.92rem;
+  background: var(--bg-input, #fff);
+  color: var(--text, #1f2937);
+}
+
+/* ── Apply bar ──────────────────────────────────────────── */
+.vtz-apply-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border, #e5e7eb);
+}
+.vtz-apply-summary {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.vtz-target {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.95rem;
+  color: var(--text, #1f2937);
+}
+.vtz-target__id {
+  font-size: 0.78rem;
+  color: var(--text-muted, #6b7280);
+  padding: 2px 8px;
+  background: var(--bg-input, #f3f4f6);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 999px;
+}
+.vtz-target__preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--text-muted, #6b7280);
+}
+.vtz-target--empty { color: var(--text-muted, #9ca3af); font-style: italic; }
+.vtz-apply-btn { white-space: nowrap; }
+
+/* ── Table ──────────────────────────────────────────────── */
+.vtz-table th.vtz-check,
+.vtz-table td.vtz-check { width: 40px; text-align: center; }
+.vtz-table td.vtz-check input,
+.vtz-table th.vtz-check input { cursor: pointer; width: 16px; height: 16px; }
+.vtz-table tr.is-selected { background: var(--primary-bg, rgba(99, 102, 241, 0.08)); }
+.vtz-loc { color: var(--text-muted, #6b7280); font-size: 0.88rem; }
+.vtz-zone-id { display: block; font-weight: 600; color: var(--text, #1f2937); }
+.vtz-zone-label { display: block; font-size: 0.78rem; color: var(--text-muted, #6b7280); }
+.vtz-preview { font-size: 0.85rem; color: var(--text-muted, #6b7280); white-space: nowrap; }
+.vtz-inactive { margin-left: 8px; }
+.vtz-change__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--primary, #6366f1);
+  background: var(--primary-bg, rgba(99, 102, 241, 0.12));
+  white-space: nowrap;
+}
+.vtz-empty { color: var(--text-muted, #6b7280); }
+
+@media (max-width: 640px) {
+  .vtz-apply-bar { flex-direction: column; align-items: stretch; }
+  .vtz-apply-btn { width: 100%; justify-content: center; }
+}

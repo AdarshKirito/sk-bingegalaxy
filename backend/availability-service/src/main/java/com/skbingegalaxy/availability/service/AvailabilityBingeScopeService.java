@@ -31,7 +31,9 @@ public class AvailabilityBingeScopeService {
         Long bingeId = requireSelectedBinge(action);
 
         try {
-            ApiResponse<BookingBingeDto> response = bookingBingeClient.getBinge(bingeId);
+            // userId rides along so the same round trip returns the V71
+            // denied-modules list for this admin (module enforcement).
+            ApiResponse<BookingBingeDto> response = bookingBingeClient.getBinge(bingeId, adminId);
             BookingBingeDto binge = response != null ? response.getData() : null;
             if (binge == null) {
                 throw new ResourceNotFoundException("Binge", "id", bingeId);
@@ -44,6 +46,18 @@ public class AvailabilityBingeScopeService {
             throw new ResourceNotFoundException("Binge", "id", bingeId);
         } catch (FeignException ex) {
             throw new BusinessException("Unable to validate binge ownership right now", HttpStatus.SERVICE_UNAVAILABLE);
+        }
+    }
+
+    /**
+     * V71 module enforcement: every admin endpoint of this service belongs to
+     * the BLOCKED_DATES module. 403 when the super-admin disabled/locked it
+     * for this admin in this binge; SUPER_ADMIN is never denied.
+     */
+    public void requireModuleAllowed(BookingBingeDto binge, String role, String moduleKey) {
+        if (binge == null || moduleKey == null || "SUPER_ADMIN".equalsIgnoreCase(role)) return;
+        if (binge.getDeniedModules() != null && binge.getDeniedModules().contains(moduleKey)) {
+            throw new BusinessException("This option is disabled by Super Admin.", HttpStatus.FORBIDDEN);
         }
     }
 }

@@ -198,15 +198,35 @@ public class CustomerFreezeService {
 
     @Transactional(readOnly = true)
     public List<CustomerBingeFreezeDto> listForBinge(Long bingeId, boolean activeOnly) {
+        List<CustomerBingeFreeze> rows =
+            freezeRepository.findByBingeIdAndStatusOrderByFreezeUntilDesc(bingeId, Status.ACTIVE);
         if (activeOnly) {
-            return freezeRepository.findByBingeIdAndStatusOrderByFreezeUntilDesc(bingeId, Status.ACTIVE)
-                .stream()
-                .filter(f -> f.getFreezeUntil().isAfter(LocalDateTime.now(ZoneOffset.UTC)))
-                .map(this::toDto)
-                .toList();
+            LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+            rows = rows.stream().filter(f -> f.getFreezeUntil().isAfter(now)).toList();
         }
-        return freezeRepository.findByBingeIdAndStatusOrderByFreezeUntilDesc(bingeId, Status.ACTIVE)
-            .stream().map(this::toDto).toList();
+        return rows.stream().map(f -> enrichWithCustomerIdentity(toDto(f), bingeId)).toList();
+    }
+
+    /**
+     * Admin lists show WHO is frozen, not just an id. The name/email come from
+     * the customer's most recent booking snapshot at this binge — local data,
+     * no cross-service call, and it exists for every auto-freeze (all triggers
+     * are booking-driven). Manual freezes on never-booked customers stay
+     * id-only, which the UI renders gracefully.
+     */
+    private CustomerBingeFreezeDto enrichWithCustomerIdentity(CustomerBingeFreezeDto dto, Long bingeId) {
+        try {
+            bookingRepository
+                .findFirstByCustomerIdAndBingeIdOrderByIdDesc(dto.getCustomerId(), bingeId)
+                .ifPresent(b -> {
+                    dto.setCustomerName(b.getCustomerName());
+                    dto.setCustomerEmail(b.getCustomerEmail());
+                });
+        } catch (Exception ex) {
+            log.debug("Freeze identity enrichment skipped for customer {}: {}",
+                dto.getCustomerId(), ex.getMessage());
+        }
+        return dto;
     }
 
     @Transactional
@@ -309,10 +329,15 @@ public class CustomerFreezeService {
     }
 
     private CustomerBingeFreezeDto toDto(CustomerBingeFreeze f) {
+        long secondsRemaining = f.getStatus() == Status.ACTIVE && f.getFreezeUntil() != null
+            ? Math.max(0, java.time.temporal.ChronoUnit.SECONDS.between(
+                LocalDateTime.now(ZoneOffset.UTC), f.getFreezeUntil()))
+            : 0L;
         return CustomerBingeFreezeDto.builder()
             .id(f.getId())
             .customerId(f.getCustomerId())
             .bingeId(f.getBingeId())
+            .secondsRemaining(secondsRemaining)
             .freezeUntil(f.getFreezeUntil())
             .reason(f.getReason())
             .status(f.getStatus() != null ? f.getStatus().name() : null)

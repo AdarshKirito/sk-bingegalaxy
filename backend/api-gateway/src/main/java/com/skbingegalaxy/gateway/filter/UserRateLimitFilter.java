@@ -70,6 +70,10 @@ public class UserRateLimitFilter implements GlobalFilter, Ordered {
      *   <li><b>forgot-password</b> 5 / 15 min — keyed on IP (anonymous); blocks enumeration / spam.</li>
      *   <li><b>verify-otp</b> 10 / 15 min — slows OTP brute-force across reset & login flows.</li>
      *   <li><b>change-email</b> 5 / 15 min — account takeover vector; strict limit on email changes.</li>
+     *   <li><b>contact-support</b> 8 / 15 min — keyed per customer; caps inbox-flood of the
+     *       super-admin support queue from a single account.</li>
+     *   <li><b>admin-message</b> 40 / min — generous for legitimate admin comms while still
+     *       bounding a runaway script or a compromised admin session spamming customers.</li>
      * </ul>
      */
     private static final List<Rule> RULES = List.of(
@@ -77,7 +81,13 @@ public class UserRateLimitFilter implements GlobalFilter, Ordered {
         new Rule(HttpMethod.POST, "/api/v1/payments/initiate",    "payment-initiate", 15, Duration.ofMinutes(1)),
         new Rule(HttpMethod.POST, "/api/v1/auth/forgot-password", "forgot-password",   5, Duration.ofMinutes(15)),
         new Rule(HttpMethod.POST, "/api/v1/auth/verify-otp",      "verify-otp",       10, Duration.ofMinutes(15)),
-        new Rule(HttpMethod.PUT,  "/api/v1/auth/change-email",    "change-email",      5, Duration.ofMinutes(15))
+        new Rule(HttpMethod.PUT,  "/api/v1/auth/change-email",    "change-email",      5, Duration.ofMinutes(15)),
+        // Messaging compose endpoints — inbox-flood / notification-spam guards.
+        new Rule(HttpMethod.POST, "/api/v1/bookings/notifications/contact-support", "contact-support", 8, Duration.ofMinutes(15)),
+        new Rule(HttpMethod.POST, "/api/v1/bookings/admin/notifications/send",      "admin-message",  40, Duration.ofMinutes(1)),
+        // Bulk/broadcast compose — each call can fan out to many recipients, so it is the
+        // highest-value abuse target; keep it tight (20/min per admin).
+        new Rule(HttpMethod.POST, "/api/v1/bookings/admin/notifications/send-bulk", "admin-message",  20, Duration.ofMinutes(1))
     );
 
     @SuppressWarnings("serial")
@@ -248,6 +258,8 @@ public class UserRateLimitFilter implements GlobalFilter, Ordered {
             case "forgot-password"  -> "Too many password reset requests. Please wait " + waitTime + " before retrying.";
             case "verify-otp"       -> "Too many verification attempts. Please wait " + waitTime + " before retrying.";
             case "change-email"     -> "Too many email change requests. Please wait " + waitTime + " before retrying.";
+            case "contact-support"  -> "You've sent several messages to Support. Please wait " + waitTime + " before sending another.";
+            case "admin-message"    -> "Too many messages sent. Please wait " + waitTime + " before sending more.";
             default                 -> "Too many requests. Please wait " + waitTime + " before trying again.";
         };
     }

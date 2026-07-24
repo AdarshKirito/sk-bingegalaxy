@@ -1,0 +1,172 @@
+auth_db	auth_audit_log	PRIMARY KEY	id
+auth_db	authority_grant_scopes	FOREIGN KEY	grant_id
+auth_db	authority_grant_scopes	PRIMARY KEY	grant_id,scope
+auth_db	authority_grants	PRIMARY KEY	id
+auth_db	email_verification_token	FOREIGN KEY	user_id
+auth_db	email_verification_token	PRIMARY KEY	id
+auth_db	password_history	FOREIGN KEY	user_id
+auth_db	password_history	PRIMARY KEY	id
+auth_db	password_reset_tokens	FOREIGN KEY	user_id
+auth_db	password_reset_tokens	PRIMARY KEY	id
+auth_db	resource_locks	PRIMARY KEY	id
+auth_db	resource_locks	UNIQUE	resource_type,resource_id
+auth_db	revoked_token	PRIMARY KEY	jti
+auth_db	site_content	PRIMARY KEY	slug
+auth_db	user_session	FOREIGN KEY	user_id
+auth_db	user_session	PRIMARY KEY	id
+auth_db	user_session	UNIQUE	refresh_jti
+auth_db	users	PRIMARY KEY	id
+availability_db	blocked_dates	PRIMARY KEY	id
+availability_db	blocked_slots	PRIMARY KEY	id
+booking_db	add_on_images	FOREIGN KEY	add_on_id
+booking_db	add_ons	FOREIGN KEY	binge_id
+booking_db	add_ons	FOREIGN KEY	category_id
+booking_db	add_ons	PRIMARY KEY	id
+booking_db	addon_categories	PRIMARY KEY	id
+booking_db	admin_notifications	PRIMARY KEY	id
+booking_db	billing_addresses	PRIMARY KEY	id
+booking_db	binge_change_requests	PRIMARY KEY	id
+booking_db	binge_module_permissions	PRIMARY KEY	id
+booking_db	binge_module_permissions	UNIQUE	binge_id,user_id,module_key,action_key
+booking_db	binge_permission_audit	PRIMARY KEY	id
+booking_db	binge_site_content	FOREIGN KEY	binge_id
+booking_db	binge_site_content	PRIMARY KEY	binge_id,slug
+booking_db	binges	PRIMARY KEY	id
+booking_db	booking_add_ons	FOREIGN KEY	add_on_id
+booking_db	booking_add_ons	FOREIGN KEY	booking_id
+booking_db	booking_add_ons	PRIMARY KEY	id
+booking_db	booking_event_log	PRIMARY KEY	id
+booking_db	booking_notes	PRIMARY KEY	id
+booking_db	booking_price_snapshots	PRIMARY KEY	id
+booking_db	booking_read_model	PRIMARY KEY	id
+booking_db	booking_reviews	FOREIGN KEY	booking_id
+booking_db	booking_reviews	PRIMARY KEY	id
+booking_db	booking_risk_flags	PRIMARY KEY	id
+booking_db	booking_transfers	PRIMARY KEY	id
+booking_db	booking_transfers	UNIQUE	accept_token
+booking_db	bookings	FOREIGN KEY	event_type_id
+booking_db	bookings	FOREIGN KEY	billing_address_id
+booking_db	bookings	FOREIGN KEY	price_snapshot_id
+booking_db	bookings	FOREIGN KEY	venue_room_id
+booking_db	bookings	PRIMARY KEY	id
+booking_db	cancellation_tiers	FOREIGN KEY	binge_id
+booking_db	cancellation_tiers	PRIMARY KEY	id
+booking_db	check_in_tokens	PRIMARY KEY	id
+booking_db	credit_notes	FOREIGN KEY	invoice_id
+booking_db	credit_notes	PRIMARY KEY	id
+booking_db	credit_notes	UNIQUE	credit_note_number
+booking_db	currency_rates	PRIMARY KEY	code
+booking_db	customer_addon_pricing	FOREIGN KEY	add_on_id
+booking_db	customer_addon_pricing	FOREIGN KEY	customer_pricing_profile_id
+booking_db	customer_addon_pricing	PRIMARY KEY	id
+booking_db	customer_binge_freezes	PRIMARY KEY	id
+booking_db	customer_event_pricing	FOREIGN KEY	customer_pricing_profile_id
+booking_db	customer_event_pricing	FOREIGN KEY	event_type_id
+booking_db	customer_event_pricing	PRIMARY KEY	id
+booking_db	customer_pricing_profiles	FOREIGN KEY	rate_code_id
+booking_db	customer_pricing_profiles	FOREIGN KEY	binge_id
+booking_db	customer_pricing_profiles	PRIMARY KEY	id
+booking_db	event_categories	PRIMARY KEY	id
+booking_db	event_type_images	FOREIGN KEY	event_type_id
+booking_db	event_types	FOREIGN KEY	category_id
+booking_db	event_types	FOREIGN KEY	binge_id
+booking_db	event_types	PRIMARY KEY	id
+booking_db	fx_rate_locks	PRIMARY KEY	id
+booking_db	fx_rate_locks	UNIQUE	lock_token
+booking_db	idempotency_key	PRIMARY KEY	idempotency_key,http_method,request_path,user_id
+booking_db	invoice_lines	FOREIGN KEY	invoice_id
+booking_db	invoice_lines	PRIMARY KEY	id
+booking_db	invoices	FOREIGN KEY	billing_address_id
+booking_db	invoices	PRIMARY KEY	id
+booking_db	invoices	UNIQUE	invoice_number
+booking_db	ledger_entries	FOREIGN KEY	reversal_of
+booking_db	ledger_entries	PRIMARY KEY	id
+booking_db	ledger_entries	UNIQUE	entry_uuid
+booking_db	loyalty_binge_binding	FOREIGN KEY	program_id
+booking_db	loyalty_binge_binding	PRIMARY KEY	id
+booking_db	loyalty_binge_binding	UNIQUE	program_id,binge_id
+booking_db	loyalty_binge_earning_rule	FOREIGN KEY	binding_id
+booking_db	loyalty_binge_earning_rule	PRIMARY KEY	id
+booking_db	loyalty_binge_perk_override	FOREIGN KEY	binding_id
+booking_db	loyalty_binge_perk_override	FOREIGN KEY	perk_id
+booking_db	loyalty_binge_perk_override	PRIMARY KEY	id
+booking_db	loyalty_binge_perk_override	UNIQUE	binding_id,perk_id
+booking_db	loyalty_binge_redemption_rule	FOREIGN KEY	binding_id
+booking_db	loyalty_binge_redemption_rule	PRIMARY KEY	id
+booking_db	loyalty_binge_reward_item	FOREIGN KEY	binding_id
+booking_db	loyalty_binge_reward_item	PRIMARY KEY	id
+booking_db	loyalty_binge_reward_item	UNIQUE	binding_id,sku
+booking_db	loyalty_guest_shadow	FOREIGN KEY	merged_membership_id
+booking_db	loyalty_guest_shadow	PRIMARY KEY	id
+booking_db	loyalty_ledger_entry	FOREIGN KEY	lot_id
+booking_db	loyalty_ledger_entry	FOREIGN KEY	wallet_id
+booking_db	loyalty_ledger_entry	PRIMARY KEY	id
+booking_db	loyalty_ledger_entry	UNIQUE	wallet_id,entry_type,idempotency_key
+booking_db	loyalty_membership	FOREIGN KEY	program_id
+booking_db	loyalty_membership	PRIMARY KEY	id
+booking_db	loyalty_membership	UNIQUE	program_id,customer_id
+booking_db	loyalty_membership	UNIQUE	member_number
+booking_db	loyalty_membership_event	FOREIGN KEY	membership_id
+booking_db	loyalty_membership_event	PRIMARY KEY	id
+booking_db	loyalty_perk_catalog	FOREIGN KEY	program_id
+booking_db	loyalty_perk_catalog	PRIMARY KEY	id
+booking_db	loyalty_perk_catalog	UNIQUE	program_id,code
+booking_db	loyalty_points_lot	FOREIGN KEY	wallet_id
+booking_db	loyalty_points_lot	PRIMARY KEY	id
+booking_db	loyalty_points_wallet	FOREIGN KEY	membership_id
+booking_db	loyalty_points_wallet	PRIMARY KEY	id
+booking_db	loyalty_points_wallet	UNIQUE	membership_id
+booking_db	loyalty_program	PRIMARY KEY	id
+booking_db	loyalty_program	UNIQUE	tenant_id,code
+booking_db	loyalty_qualification_event	FOREIGN KEY	membership_id
+booking_db	loyalty_qualification_event	PRIMARY KEY	id
+booking_db	loyalty_reward_claim	FOREIGN KEY	binge_reward_item_id
+booking_db	loyalty_reward_claim	FOREIGN KEY	membership_id
+booking_db	loyalty_reward_claim	FOREIGN KEY	perk_id
+booking_db	loyalty_reward_claim	PRIMARY KEY	id
+booking_db	loyalty_status_match_request	FOREIGN KEY	membership_id
+booking_db	loyalty_status_match_request	PRIMARY KEY	id
+booking_db	loyalty_tier_definition	FOREIGN KEY	program_id
+booking_db	loyalty_tier_definition	PRIMARY KEY	id
+booking_db	loyalty_tier_definition	UNIQUE	program_id,code,effective_from
+booking_db	loyalty_tier_perk	FOREIGN KEY	perk_id
+booking_db	loyalty_tier_perk	FOREIGN KEY	tier_definition_id
+booking_db	loyalty_tier_perk	PRIMARY KEY	id
+booking_db	loyalty_tier_perk	UNIQUE	tier_definition_id,perk_id
+booking_db	outbox_event	PRIMARY KEY	id
+booking_db	processed_event	PRIMARY KEY	id
+booking_db	rate_code_addon_pricing	FOREIGN KEY	add_on_id
+booking_db	rate_code_addon_pricing	FOREIGN KEY	rate_code_id
+booking_db	rate_code_addon_pricing	PRIMARY KEY	id
+booking_db	rate_code_change_log	PRIMARY KEY	id
+booking_db	rate_code_event_pricing	FOREIGN KEY	event_type_id
+booking_db	rate_code_event_pricing	FOREIGN KEY	rate_code_id
+booking_db	rate_code_event_pricing	PRIMARY KEY	id
+booking_db	rate_codes	FOREIGN KEY	binge_id
+booking_db	rate_codes	PRIMARY KEY	id
+booking_db	room_blocks	FOREIGN KEY	room_id
+booking_db	room_blocks	PRIMARY KEY	id
+booking_db	saga_state	PRIMARY KEY	id
+booking_db	slot_holds	FOREIGN KEY	event_type_id
+booking_db	slot_holds	PRIMARY KEY	id
+booking_db	surge_pricing_rules	PRIMARY KEY	id
+booking_db	system_settings	PRIMARY KEY	id
+booking_db	tax_rules	PRIMARY KEY	id
+booking_db	venue_room_images	FOREIGN KEY	room_id
+booking_db	venue_room_images	PRIMARY KEY	id
+booking_db	venue_rooms	PRIMARY KEY	id
+booking_db	waitlist_entries	FOREIGN KEY	event_type_id
+booking_db	waitlist_entries	PRIMARY KEY	id
+payment_db	admin_approval_request	PRIMARY KEY	id
+payment_db	audit_log	PRIMARY KEY	id
+payment_db	idempotency_key	PRIMARY KEY	idempotency_key,http_method,request_path,user_id
+payment_db	outbox_event	PRIMARY KEY	id
+payment_db	payment_disputes	FOREIGN KEY	payment_id
+payment_db	payment_disputes	PRIMARY KEY	id
+payment_db	payment_disputes	UNIQUE	gateway_dispute_id
+payment_db	payment_status_history	PRIMARY KEY	id
+payment_db	payments	PRIMARY KEY	id
+payment_db	processed_webhook_event	PRIMARY KEY	event_id,provider
+payment_db	refunds	FOREIGN KEY	retry_of_id
+payment_db	refunds	FOREIGN KEY	payment_id
+payment_db	refunds	PRIMARY KEY	id

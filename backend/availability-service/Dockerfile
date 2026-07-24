@@ -2,8 +2,9 @@
 FROM maven:3.9-eclipse-temurin-17-alpine AS build
 WORKDIR /build
 COPY . .
+ARG MAVEN_EXTRA_ARGS=""
 RUN --mount=type=cache,target=/root/.m2 \
-    mvn -B package -pl availability-service -am -DskipTests
+    mvn -B package -pl availability-service -am -DskipTests ${MAVEN_EXTRA_ARGS}
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
 FROM eclipse-temurin:17-jre-alpine

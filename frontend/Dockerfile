@@ -5,7 +5,9 @@ WORKDIR /app
 # shipped in node:20-alpine). If you hit "lockfile mismatch" errors locally, regenerate
 # the lockfile with the same Node/npm version used by this Dockerfile.
 COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund
+ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org/
+ARG NPM_CONFIG_STRICT_SSL=true
+RUN npm ci --no-audit --no-fund --registry="${NPM_CONFIG_REGISTRY}"
 COPY . .
 ARG VITE_GOOGLE_CLIENT_ID
 ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID

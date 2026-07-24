@@ -3,12 +3,15 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { adminService, bookingService, paymentService, toArray } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import BookingWizard from '../components/BookingWizard';
+import { useConfirm } from '../components/ui/ConfirmProvider';
 import { FiCheckCircle, FiCreditCard, FiTrendingDown, FiTrendingUp } from 'react-icons/fi';
 import './AdminPages.css';
+import { venueMoney } from '../utils/venueLocale';
 
 export default function AdminBookingCreate() {
   const navigate = useNavigate();
   const location = useLocation();
+  const confirm = useConfirm();
   const reinstateData = location.state?.reinstate || null;
   const editBookingData = location.state?.editBooking || null;
 
@@ -125,7 +128,20 @@ export default function AdminBookingCreate() {
           return;
         }
 
-        // Only notes / customer info changed — update in place
+        // Only notes / customer info changed — update in place. Remarks are
+        // mandatory for any reservation change (server-enforced too) and land
+        // in the booking event log.
+        const infoRemarks = await confirm({
+          title: 'Confirm reservation update',
+          message: 'Customer details / notes changed. Add remarks explaining the change — they are recorded in the booking event log.',
+          confirmLabel: 'Save changes',
+          variant: 'primary',
+          withReason: true,
+          reasonRequired: true,
+          reasonLabel: 'Remarks (required)',
+          reasonPlaceholder: 'e.g. Customer called to correct their phone number',
+        });
+        if (!infoRemarks) return;
         try {
           await adminService.updateBooking(editBookingData.bookingRef, {
             adminNotes: payload.adminNotes || editBookingData.adminNotes,
@@ -133,6 +149,7 @@ export default function AdminBookingCreate() {
             customerName: payload.customerName,
             customerEmail: payload.customerEmail,
             customerPhone: payload.customerPhone,
+            remarks: infoRemarks.reason || '',
           });
           toast.success('Reservation updated (no reschedule needed)');
           navigate('/admin/bookings');
@@ -142,7 +159,27 @@ export default function AdminBookingCreate() {
         return;
       }
 
-      // Something changed — use in-place update with pricing recalculation
+      // Something changed — use in-place update with pricing recalculation.
+      // Name what changed and demand remarks (server rejects without them).
+      const changedLabels = [
+        dateChanged && 'date',
+        timeChanged && 'start time',
+        durationChanged && 'duration',
+        eventChanged && 'event type',
+        guestsChanged && 'guest count',
+        addOnsChanged && 'add-ons',
+      ].filter(Boolean).join(', ');
+      const editRemarks = await confirm({
+        title: 'Confirm reservation changes',
+        message: `You are changing: ${changedLabels}. Add remarks explaining why — they are recorded in the booking event log and pricing will be recalculated.`,
+        confirmLabel: 'Apply changes',
+        variant: 'primary',
+        withReason: true,
+        reasonRequired: true,
+        reasonLabel: 'Remarks (required)',
+        reasonPlaceholder: 'e.g. Customer requested a later slot due to travel',
+      });
+      if (!editRemarks) return;
       try {
         const updatePayload = {
           customerName: payload.customerName,
@@ -150,6 +187,7 @@ export default function AdminBookingCreate() {
           customerPhone: payload.customerPhone,
           specialNotes: payload.specialNotes,
           adminNotes: payload.adminNotes || editBookingData.adminNotes,
+          remarks: editRemarks.reason || '',
         };
 
         if (eventChanged) updatePayload.eventTypeId = Number(payload.eventTypeId);
@@ -238,7 +276,7 @@ export default function AdminBookingCreate() {
           customerId: priceDiff.customerId,
           paymentMethod: chargeMethod,
           bookingTotalAmount: priceDiff.newTotal || 0,
-          notes: `Additional charge: price updated ₹${priceDiff.oldTotal.toLocaleString()} → ₹${priceDiff.newTotal.toLocaleString()}`,
+          notes: `Additional charge: price updated ${venueMoney(priceDiff.oldTotal)} → ${venueMoney(priceDiff.newTotal)}`,
         });
         // Wait for backend Kafka sync so the bookings list reflects the new
         // SUCCESS / collectedAmount immediately (avoids the stale "PARTIALLY_PAID"
@@ -248,7 +286,7 @@ export default function AdminBookingCreate() {
           expectedCollected: priceDiff.newTotal,
           prevCollected,
         });
-        toast.success(`Additional ₹${priceDiff.diff.toLocaleString()} collected (${chargeMethod})`);
+        toast.success(`Additional ${venueMoney(priceDiff.diff)} collected (${chargeMethod})`);
       } else if (wasPaid) {
         // Price decreased & customer already paid — issue refund
         const payRes = await paymentService.getByBooking(priceDiff.bookingRef);
@@ -262,14 +300,14 @@ export default function AdminBookingCreate() {
         const refundAmt = Math.abs(priceDiff.diff);
         const maxRefundable = refundable.remainingRefundable ?? refundable.amount;
         if (refundAmt > maxRefundable) {
-          toast.error(`Refund ₹${refundAmt.toLocaleString()} exceeds refundable ₹${maxRefundable.toLocaleString()}. Adjust manually from the Payment tab.`);
+          toast.error(`Refund ${venueMoney(refundAmt)} exceeds refundable ${venueMoney(maxRefundable)}. Adjust manually from the Payment tab.`);
           navigate('/admin/bookings');
           return;
         }
         await adminService.initiateRefund({
           paymentId: refundable.id,
           amount: refundAmt,
-          reason: `Price reduced: ₹${priceDiff.oldTotal.toLocaleString()} → ₹${priceDiff.newTotal.toLocaleString()}`,
+          reason: `Price reduced: ${venueMoney(priceDiff.oldTotal)} → ${venueMoney(priceDiff.newTotal)}`,
         });
         // After a partial refund, expected collected = newTotal (since the
         // backend syncs paymentStatus to balance after refund Kafka event).
@@ -278,10 +316,10 @@ export default function AdminBookingCreate() {
           expectedCollected: priceDiff.newTotal,
           prevCollected,
         });
-        toast.success(`Refund of ₹${refundAmt.toLocaleString()} initiated`);
+        toast.success(`Refund of ${venueMoney(refundAmt)} initiated`);
       } else {
         // Price decreased but not paid yet — just inform
-        toast.success(`New total is ₹${priceDiff.newTotal.toLocaleString()} (reduced by ₹${Math.abs(priceDiff.diff).toLocaleString()})`);
+        toast.success(`New total is ${venueMoney(priceDiff.newTotal)} (reduced by ${venueMoney(Math.abs(priceDiff.diff))})`);
       }
     } catch (err) {
       toast.error(err.response?.data?.message || 'Payment action failed');
@@ -331,22 +369,22 @@ export default function AdminBookingCreate() {
                 <tbody>
                   <tr>
                     <td>Previous Total</td>
-                    <td>₹{priceDiff.oldTotal.toLocaleString()}</td>
+                    <td>{venueMoney(priceDiff.oldTotal)}</td>
                   </tr>
                   <tr>
                     <td>New Total</td>
-                    <td className="highlight">₹{priceDiff.newTotal.toLocaleString()}</td>
+                    <td className="highlight">{venueMoney(priceDiff.newTotal)}</td>
                   </tr>
                   {wasPaid && (
                     <tr>
                       <td>Already Collected</td>
-                      <td>₹{priceDiff.collectedAmount.toLocaleString()}</td>
+                      <td>{venueMoney(priceDiff.collectedAmount)}</td>
                     </tr>
                   )}
                   <tr>
                     <td className="highlight">{isIncrease ? 'Customer Owes' : (wasPaid ? 'Refund to Customer' : 'Customer Saves')}</td>
-                    <td className={`highlight ${isIncrease ? '' : 'success'}`} style={isIncrease ? { color: 'var(--danger)' } : undefined}>
-                      ₹{absDiff.toLocaleString()}
+                    <td className={`highlight ${isIncrease ? '' : 'success'}`} style={isIncrease ? { color: 'var(--danger-text)' } : undefined}>
+                      {venueMoney(absDiff)}
                     </td>
                   </tr>
                 </tbody>
@@ -374,9 +412,9 @@ export default function AdminBookingCreate() {
                 {processing
                   ? 'Processing...'
                   : isIncrease
-                    ? `Charge ₹${absDiff.toLocaleString()}`
+                    ? `Charge ${venueMoney(absDiff)}`
                     : wasPaid
-                      ? `Refund ₹${absDiff.toLocaleString()}`
+                      ? `Refund ${venueMoney(absDiff)}`
                       : <><FiCheckCircle /> OK, Got It</>}
               </button>
             </div>

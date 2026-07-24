@@ -5,6 +5,11 @@ server:
 spring:
   application:
     name: notification-service
+  # Real deployments run under the `kubernetes` profile; production-only beans
+  # (real SMS/WhatsApp/push providers instead of mocks) must ride along automatically.
+  profiles:
+    group:
+      kubernetes: production
   lifecycle:
     timeout-per-shutdown-phase: 30s
   config:
@@ -14,6 +19,9 @@ spring:
     mongodb:
       uri: ${SPRING_DATA_MONGODB_URI:mongodb://localhost:27017/notification_db}
       database: ${SPRING_DATA_MONGODB_DATABASE:notification_db}
+      # Boot 3 default is false — would silently disable the PII TTL and the
+      # unique reminder index. Kept in the fallback too, not just config-server.
+      auto-index-creation: true
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     producer:

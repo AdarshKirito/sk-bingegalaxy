@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import { bookingService, paymentService, toArray } from '../services/endpoints';
 import { formatTime12h } from '../utils/format';
+import { parseServerDate } from '../services/timeFormat';
 import { toast } from 'react-toastify';
 import { trackPaymentStarted, trackPaymentCompleted, trackPaymentFailed } from '../services/analytics';
 import SEO from '../components/SEO';
@@ -22,8 +23,7 @@ import {
 } from 'react-icons/fi';
 import useBingeStore from '../stores/bingeStore';
 import './CustomerHub.css';
-
-const formatAmount = (value) => `₹${Number(value || 0).toLocaleString()}`;
+import { formatCurrency } from '../utils/currency';
 
 const formatLabel = (value, fallback = 'Pending') => {
   if (!value) return fallback;
@@ -45,15 +45,81 @@ const formatDuration = (booking) => {
   return `${remainingMinutes}m`;
 };
 
+const formatCountdown = (ms) => {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (m >= 60) {
+    const h = Math.floor(m / 60);
+    return `${h}h ${String(m % 60).padStart(2, '0')}m`;
+  }
+  return `${m}:${String(s).padStart(2, '0')}`;
+};
+
 export default function PaymentPage() {
   const { ref } = useParams();
+  const navigate = useNavigate();
   const { selectedBinge } = useBingeStore();
   const [booking, setBooking] = useState(null);
-  const [paymentMethod, setPaymentMethod] = useState('UPI');
+  // Payment rails come from the server, resolved from the VENUE's country — never
+  // a hardcoded list. Starts empty so we can't briefly preselect (and submit) UPI
+  // for a venue that doesn't offer it.
+  const [paymentMethod, setPaymentMethod] = useState('');
+  const [methodOptions, setMethodOptions] = useState([]);
+  const [methodsLoading, setMethodsLoading] = useState(true);
   const [payment, setPayment] = useState(null);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [nowTs, setNowTs] = useState(Date.now());
   const paymentCallbackRef = useRef(false);
+  // Stripe checkout state. Set once /initiate returns a client secret; drives the
+  // inline Payment Element panel below the summary.
+  const [stripeSession, setStripeSession] = useState(null);
+  const stripeRef = useRef({ stripe: null, elements: null });
+  const stripeMountRef = useRef(null);
+
+  // ── Unpaid-hold countdown (industry pattern: visible payment window) ──
+  // paymentExpiresAt is only set by the server for unpaid PENDING bookings and mirrors
+  // the exact moment the payment-timeout saga will auto-release the reservation.
+  const holdExpiryTs = parseServerDate(booking?.paymentExpiresAt)?.getTime() ?? null;
+  const holdMsLeft = holdExpiryTs != null ? holdExpiryTs - nowTs : null;
+
+  useEffect(() => {
+    if (holdExpiryTs == null) return undefined;
+    const timer = setInterval(() => setNowTs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [holdExpiryTs]);
+
+  // ── Venue-country payment rails ──────────────────────────
+  // The venue's country decides what a customer can pay with: an Indian venue
+  // offers UPI to everyone (including customers abroad), a US venue offers none.
+  // The server re-enforces this on /initiate, so this call is about showing the
+  // truth rather than about trust.
+  useEffect(() => {
+    if (!ref) return undefined;
+    let cancelled = false;
+    (async () => {
+      setMethodsLoading(true);
+      try {
+        const res = await paymentService.getPaymentMethods(ref);
+        if (cancelled) return;
+        const data = res.data?.data || {};
+        const opts = Array.isArray(data.methods) ? data.methods : [];
+        setMethodOptions(opts);
+        setPaymentMethod(data.defaultMethod || opts[0]?.method || '');
+      } catch (err) {
+        if (cancelled) return;
+        // Don't strand the customer if the lookup fails — card is the one rail
+        // that works essentially everywhere, and the server still validates it.
+        setMethodOptions([{ method: 'CARD', label: 'Credit / debit card' }]);
+        setPaymentMethod('CARD');
+      } finally {
+        if (!cancelled) setMethodsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [ref]);
 
   // ── Derived financial state ──────────────────────────────
   // balanceDue: prefer the server-computed field; fall back to totalAmount − collectedAmount.
@@ -68,6 +134,8 @@ export default function PaymentPage() {
   // Amount the customer should pay on the NEXT transaction: the remaining balance when
   // something was already collected, otherwise the full booking total.
   const amountToPay = hasOutstandingBalance ? balanceDue : Number(booking?.totalAmount || 0);
+  // Every amount displays in the booking's own (binge) currency — the exact charge currency.
+  const formatAmount = (value) => formatCurrency(value, booking?.paymentCurrencyCode || 'INR');
 
   const loadData = async () => {
     setLoading(true);
@@ -100,6 +168,23 @@ export default function PaymentPage() {
     loadData();
   }, [ref]);
 
+  // Unpaid holds are ALWAYS free to cancel (no money captured) — the backend
+  // enforces the same rule regardless of the venue's cancellation policy.
+  const handleCancelReservation = async () => {
+    if (!window.confirm('Cancel this reservation? No payment has been taken, so cancelling is free.')) return;
+    setCancelling(true);
+    try {
+      await bookingService.cancelBooking(ref);
+      toast.success('Reservation cancelled — no charges were made.');
+      navigate('/my-bookings');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not cancel the reservation. Please try again.');
+      await loadData();
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   const loadRazorpayScript = () =>
     new Promise((resolve) => {
       if (window.Razorpay) { resolve(true); return; }
@@ -110,9 +195,110 @@ export default function PaymentPage() {
       document.body.appendChild(script);
     });
 
+  // Stripe.js must be loaded from Stripe's own CDN — self-hosting or bundling it
+  // breaks PCI compliance, so it is deliberately not an npm dependency.
+  const loadStripeScript = () =>
+    new Promise((resolve) => {
+      if (window.Stripe) { resolve(true); return; }
+      const script = document.createElement('script');
+      script.src = 'https://js.stripe.com/v3/';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+
+  /**
+   * Mount Stripe's Payment Element once the server has handed us a client secret.
+   *
+   * The Element is initialised against the VENUE's connected account
+   * (`stripeAccount`), because the intent is a direct charge on that account —
+   * initialising against the platform account instead would fail to find the
+   * intent, and would offer the platform country's rails rather than the venue's.
+   */
+  useEffect(() => {
+    if (!stripeSession?.clientSecret || !stripeSession?.publishableKey) return undefined;
+    let cancelled = false;
+    (async () => {
+      const loaded = await loadStripeScript();
+      if (cancelled) return;
+      if (!loaded) {
+        toast.error('Could not load Stripe. Check your connection and try again.');
+        setStripeSession(null);
+        setProcessing(false);
+        return;
+      }
+      const stripe = window.Stripe(
+        stripeSession.publishableKey,
+        stripeSession.accountId ? { stripeAccount: stripeSession.accountId } : undefined,
+      );
+      const elements = stripe.elements({ clientSecret: stripeSession.clientSecret });
+      const paymentElement = elements.create('payment');
+      if (cancelled) return;
+      if (!stripeMountRef.current) {
+        // The panel unmounted between render and effect. Clear the spinner —
+        // returning silently here would leave the Pay button stuck on
+        // "Processing…" with no way back.
+        setProcessing(false);
+        return;
+      }
+      paymentElement.mount(stripeMountRef.current);
+      stripeRef.current = { stripe, elements };
+      setProcessing(false);
+    })();
+    return () => { cancelled = true; };
+  }, [stripeSession]);
+
+  const confirmStripePayment = async () => {
+    const { stripe, elements } = stripeRef.current;
+    if (!stripe || !elements) {
+      toast.error('Payment form is still loading. Please wait a moment.');
+      return;
+    }
+    setProcessing(true);
+    try {
+      // redirect:'if_required' keeps card payments inline; rails that genuinely
+      // need a redirect (UPI, iDEAL, bank auth) still navigate away and come back
+      // to return_url. Either way the WEBHOOK is what settles the payment — this
+      // branch only drives the UI.
+      const { error, paymentIntent } = await stripe.confirmPayment({
+        elements,
+        confirmParams: { return_url: `${window.location.origin}/payment/${ref}` },
+        redirect: 'if_required',
+      });
+
+      if (error) {
+        trackPaymentFailed(ref, error.code || 'stripe_error');
+        toast.error(error.message || 'Payment could not be completed.');
+        return;
+      }
+      if (paymentIntent?.status === 'succeeded') {
+        toast.success('Payment successful!');
+        trackPaymentCompleted(ref, amountToPay, paymentMethod);
+        setStripeSession(null);
+        stripeRef.current = { stripe: null, elements: null };
+        // The webhook is authoritative and may land a moment later, so reload
+        // rather than assuming the status has already flipped server-side.
+        await loadData();
+      } else if (paymentIntent?.status === 'processing') {
+        toast.info('Payment is processing. This page will update once it settles.');
+        await loadData();
+      } else {
+        toast.info('Payment not completed. You can try again.');
+      }
+    } catch (err) {
+      toast.error('Unexpected error confirming payment. Refresh before retrying.');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   const handleInitiate = async () => {
     if (!amountToPay || amountToPay <= 0) {
       toast.error('Booking amount is invalid. Please contact support.');
+      return;
+    }
+    if (!paymentMethod) {
+      toast.error('Please choose a payment method.');
       return;
     }
     setProcessing(true);
@@ -135,6 +321,25 @@ export default function PaymentPage() {
       });
       const payData = res.data.data;
       setPayment(payData);
+
+      // Stripe: the server hands back a client secret for a direct charge on the
+      // venue's connected account. Render the Payment Element rather than opening
+      // a modal — Stripe has no hosted modal for this flow.
+      const stripeFields = payData.checkoutFields;
+      if (payData.providerName === 'stripe' && stripeFields?.stripeClientSecret) {
+        if (!stripeFields.stripePublishableKey) {
+          toast.error('Stripe is not fully configured (missing publishable key). Contact support.');
+          setProcessing(false);
+          return;
+        }
+        setStripeSession({
+          clientSecret: stripeFields.stripeClientSecret,
+          publishableKey: stripeFields.stripePublishableKey,
+          accountId: stripeFields.stripeAccountId || null,
+        });
+        // processing stays true until the Element finishes mounting.
+        return;
+      }
 
       if (payData.razorpayKeyId && payData.gatewayOrderId?.startsWith('order_')) {
         const loaded = await loadRazorpayScript();
@@ -246,6 +451,9 @@ export default function PaymentPage() {
   // Booking-level terminal states that make payment impossible.
   const bookingState = String(booking.status || '').toUpperCase();
   const isBookingClosed = bookingState === 'CANCELLED' || bookingState === 'NO_SHOW' || bookingState === 'EXPIRED';
+  // Unpaid PENDING hold — the server sent a payment window; show the countdown and
+  // always offer a free cancel so an accidental booking never strands the customer.
+  const isUnpaidHold = holdExpiryTs != null && !isBookingClosed && !isSuccess && !isBalanceDue && !isDisputed;
   const amountLabel = formatAmount(booking.totalAmount);
   const balanceDueLabel = formatAmount(balanceDue);
   const durationLabel = formatDuration(booking);
@@ -524,6 +732,21 @@ export default function PaymentPage() {
             <p>{paymentBannerBody}</p>
           </div>
 
+          {isUnpaidHold && (
+            <div className={`customer-flow-note ${holdMsLeft > 0 ? 'customer-flow-note-warning' : 'customer-flow-note-danger'}`}>
+              <strong>
+                <FiClock /> {holdMsLeft > 0
+                  ? `Reservation held for ${formatCountdown(holdMsLeft)}`
+                  : 'Payment window elapsed'}
+              </strong>
+              <p>
+                {holdMsLeft > 0
+                  ? 'Complete payment before the timer runs out or this unpaid reservation is automatically released — no charge, no penalty. Changed your mind? Cancel below; unpaid bookings are always free to cancel.'
+                  : 'This unpaid reservation passed its payment window and will be auto-released shortly. Refresh to see the latest status, or create a new booking.'}
+              </p>
+            </div>
+          )}
+
           {isFailed && payment?.failureReason && (
             <div className="customer-flow-note customer-flow-note-danger">
               <strong><FiAlertCircle /> Failure detail</strong>
@@ -533,12 +756,17 @@ export default function PaymentPage() {
 
           {!isSuccess && !isInitiated && !isDisputed && (
             <label className="customer-flow-select">
-              <span className="customer-flow-helper">Payment method</span>
-              <select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
-                <option value="UPI">UPI</option>
-                <option value="CARD">Credit/Debit Card</option>
-                <option value="BANK_TRANSFER">Bank Transfer</option>
-                <option value="WALLET">Wallet</option>
+              <span className="customer-flow-helper">
+                {methodsLoading ? 'Loading payment methods…' : 'Payment method'}
+              </span>
+              <select
+                value={paymentMethod}
+                onChange={(event) => setPaymentMethod(event.target.value)}
+                disabled={methodsLoading || methodOptions.length === 0}
+              >
+                {methodOptions.map((opt) => (
+                  <option key={opt.method} value={opt.method}>{opt.label}</option>
+                ))}
               </select>
             </label>
           )}
@@ -594,10 +822,54 @@ export default function PaymentPage() {
             </div>
           ) : (
             <div className="customer-flow-actions customer-flow-actions-left">
-              <button className="btn btn-primary" onClick={handleInitiate} disabled={processing}>
+              <button className="btn btn-primary" onClick={handleInitiate} disabled={processing || cancelling}>
                 <FiCreditCard /> {processing ? 'Processing...' : `${isFailed ? 'Retry Payment' : 'Pay'} ${amountLabel}`}
               </button>
+              {isUnpaidHold && (
+                <button className="btn btn-danger" onClick={handleCancelReservation} disabled={cancelling || processing}>
+                  {cancelling ? 'Cancelling…' : 'Cancel Reservation — Free'}
+                </button>
+              )}
               <Link className="btn btn-secondary" to={`/booking/${ref}`}>Review Booking</Link>
+            </div>
+          )}
+
+          {/* Stripe Payment Element. Rendered inline because a direct charge on a
+              connected account has no hosted modal equivalent; the rails shown
+              inside it are the VENUE's, resolved by Stripe from that account. */}
+          {stripeSession && (
+            <div className="customer-flow-stripe-panel" style={{ marginTop: 20 }}>
+              <div className="customer-flow-card-head" style={{ marginBottom: 12 }}>
+                <div>
+                  <span className="customer-flow-section-label"><FiShield /> Secure payment</span>
+                  <h2 style={{ margin: '4px 0 0' }}>Complete your payment</h2>
+                  <p style={{ margin: '4px 0 0' }}>
+                    Card details are entered directly with Stripe and never reach our servers.
+                  </p>
+                </div>
+              </div>
+
+              <div ref={stripeMountRef} style={{ minHeight: 180 }} />
+
+              <div className="customer-flow-actions customer-flow-actions-left" style={{ marginTop: 16 }}>
+                <button
+                  className="btn btn-primary"
+                  onClick={confirmStripePayment}
+                  disabled={processing}
+                >
+                  <FiCreditCard /> {processing ? 'Processing…' : `Pay ${amountLabel}`}
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setStripeSession(null);
+                    stripeRef.current = { stripe: null, elements: null };
+                  }}
+                  disabled={processing}
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           )}
 

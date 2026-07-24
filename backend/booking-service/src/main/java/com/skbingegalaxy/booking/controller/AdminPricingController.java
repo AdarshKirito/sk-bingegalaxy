@@ -39,7 +39,8 @@ public class AdminPricingController {
         ServletRequestAttributes attrs =
             (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
         if (attrs != null && !"GET".equalsIgnoreCase(attrs.getRequest().getMethod())) {
-            authorityLockGuard.requireUnlocked(LOCK_CAPABILITY, role);
+            boolean delegated = "true".equalsIgnoreCase(attrs.getRequest().getHeader("X-Authority-Delegated"));
+            authorityLockGuard.requireUnlocked(LOCK_CAPABILITY, role, delegated);
         }
     }
 

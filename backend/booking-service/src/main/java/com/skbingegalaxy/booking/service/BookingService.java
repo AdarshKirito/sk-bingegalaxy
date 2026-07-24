@@ -76,13 +76,13 @@ public class BookingService {
     private final ApplicationEventPublisher eventPublisher;                 // Loyalty v2 — in-process events
     private final CustomerFreezeService customerFreezeService;              // Anti-abuse freeze policy
     private final com.skbingegalaxy.booking.repository.SlotHoldRepository slotHoldRepository;
+    private final SlotHoldService slotHoldService;                          // BOOK-001 — hold consumption at booking creation
     private final com.skbingegalaxy.booking.repository.BookingTransferRepository bookingTransferRepository;
     private final BookingEventPublisher bookingEventPublisher;              // Envelope-aware Kafka outbox writer (V46)
     private final BookingRiskEvaluator bookingRiskEvaluator;                // Item 23 — fraud / abuse rule engine
     private final BookingAnalyticsMetrics analyticsMetrics;                 // Item 27 — funnel/lifecycle counters
     private final BookingStateMachine stateMachine;                         // Centralized status-transition engine
     private final TaxService taxService;                                    // Tax computation at booking creation time
-    private final FxLockService fxLockService;                              // FX rate lock validation at booking creation
     private final VenueClockService venueClock;                             // Venue-aware timezone resolution
 
     @Value("${internal.api.secret}")
@@ -96,6 +96,15 @@ public class BookingService {
 
     @Value("${app.booking.cooldown-minutes-after-timeout:10}")
     private int cooldownMinutesAfterTimeout;
+
+    /**
+     * Payment window for a PENDING booking — must mirror the
+     * {@link com.skbingegalaxy.booking.scheduler.PendingBookingTimeoutScheduler} value so
+     * the {@code paymentExpiresAt} we expose to customers matches when the saga timeout
+     * will actually release the reservation.
+     */
+    @Value("${app.saga.pending-timeout-minutes:30}")
+    private int pendingTimeoutMinutes;
 
     @Value("${app.booking.max-reschedules-per-booking:3}")
     private int maxReschedulesPerBooking;
@@ -155,10 +164,15 @@ public class BookingService {
         // Anti-abuse: limit concurrent PENDING bookings per customer **per binge**.
         // Per-binge scope prevents a customer with pending payments at venue A from
         // being blocked at venue B (each binge runs its own tenancy of pending limits).
+        // The threshold is the venue admin's decision (binge.maxUnpaidBookingsPerCustomer),
+        // falling back to the platform default only if the binge row is unavailable.
         long pendingCount = bookingRepository.countPendingByCustomerIdAndBingeId(customerId, bingeId);
-        if (pendingCount >= maxPendingPerCustomer) {
+        int unpaidLimit = effectiveUnpaidLimit(bingeId);
+        if (pendingCount >= unpaidLimit) {
             throw new BusinessException(
-                "You already have " + pendingCount + " pending booking(s) at this venue. Please complete or cancel them before creating new ones.");
+                "You already have " + pendingCount + " unpaid booking(s) at this venue. "
+                + "Open My Bookings to complete payment or cancel them (unpaid bookings can "
+                + "always be cancelled free of charge), then try again.");
         }
 
         // Anti-abuse: cooldown after auto-cancelled (timed-out) bookings — also per binge.
@@ -176,8 +190,20 @@ public class BookingService {
         // Reject bookings in the past — use the venue's configured timezone so the
         // business-day boundary is correct for any country the venue operates in.
         ZoneId bizZone = venueClock.zoneOf(bingeId);
-        if (request.getBookingDate().isBefore(LocalDate.now(bizZone))) {
+        LocalDateTime bizNow = LocalDateTime.now(bizZone);
+        if (request.getBookingDate().isBefore(bizNow.toLocalDate())) {
             throw new BusinessException("Booking date cannot be in the past");
+        }
+        // Same-day defense-in-depth: a date-only check above lets a same-day slot
+        // whose start time has already elapsed (venue-local) slip through — the
+        // availability-service grid/checkSlotAvailable are the primary guard against
+        // this, but both are reachable through a resilience cache (see
+        // AvailabilityClientFallback) that can serve a stale "available" result
+        // during an outage. Re-derive the same rule here so booking-service never
+        // depends solely on a downstream call staying perfectly in sync with "now".
+        if (request.getBookingDate().isEqual(bizNow.toLocalDate())
+            && !request.getStartTime().isAfter(bizNow.toLocalTime())) {
+            throw new BusinessException("This time slot has already passed for today. Please choose a later time.");
         }
         // Reject bookings absurdly far in the future. Production rule: customers may only
         // book within the published rolling window (default 365 days). Prevents "slot
@@ -213,7 +239,7 @@ public class BookingService {
         // the slot grid (mobile app misuse, scripted abuse, leaked API token,
         // or admin walk-in typos). Falls back to global config when the binge
         // has no per-binge override.
-        validateWithinOperatingHours(bingeId, request.getStartTime(), durMin);
+        validateWithinOperatingHours(bingeId, request.getBookingDate(), request.getStartTime(), durMin);
 
         // Check availability via internal HTTP call with fallback cache
         int startMinute = request.getStartTime().getHour() * 60 + request.getStartTime().getMinute();
@@ -234,27 +260,84 @@ public class BookingService {
         // both see zero existing rows and both INSERT successfully.
         bookingRepository.acquireSlotLock(slotLockKey(bingeId, request.getBookingDate()));
 
-        // Check for double-booking with existing reservations
-        if (hasTimeConflict(request.getBookingDate(), startMinute, durMin)) {
+        // The duplicate/unpaid guards above ran BEFORE the lock, so two
+        // concurrent submits (no Idempotency-Key, multi-room venue) could both
+        // pass them and be assigned different rooms. Re-check now that this
+        // transaction owns the slot lock — a competing creation for the same
+        // (binge, date) has either committed (visible here) or not started.
+        if (bookingRepository.existsPendingDuplicate(
+                customerId, request.getEventTypeId(),
+                request.getBookingDate(), request.getStartTime())) {
+            throw new BusinessException(
+                "You already have a pending booking for this event and time slot. Please check My Bookings.");
+        }
+        long pendingCountLocked = bookingRepository.countPendingByCustomerIdAndBingeId(customerId, bingeId);
+        if (pendingCountLocked >= unpaidLimit) {
+            throw new BusinessException(
+                "You already have " + pendingCountLocked + " unpaid booking(s) at this venue. "
+                + "Open My Bookings to complete payment or cancel them (unpaid bookings can "
+                + "always be cancelled free of charge), then try again.");
+        }
+
+        // A venue WITH rooms is not a single space: two parties CAN share a time in
+        // different rooms. Per-room exclusivity is enforced by resolveRoomAssignment
+        // below, and the maxConcurrentBookings ceiling caps total concurrency at the
+        // room count — so the binge-wide "any overlap = conflict" rule applies only to
+        // a room-LESS venue (a single physical space).
+        List<VenueRoom> bookableRooms = venueRoomRepository.findByBingeIdOrderBySortOrderAsc(bingeId).stream()
+            .filter(r -> r.isActive()
+                && (r.getStatus() == null || r.getStatus() == com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED))
+            .toList();
+        boolean venueHasBookableRooms = !bookableRooms.isEmpty();
+        if (!venueHasBookableRooms && hasTimeConflict(request.getBookingDate(), startMinute, durMin)) {
             throw new BusinessException("Selected time slot conflicts with an existing booking");
         }
 
-        // Capacity management: enforce max concurrent bookings per time slot
+        // A live hold from ANOTHER customer is a real reservation: it must block a
+        // direct booking exactly the way an existing booking blocks a new hold
+        // (assertSlotAvailableForHold), otherwise the countdown promise shown to
+        // the hold-holder is empty. The booking customer's own holds never block
+        // them (their holdToken is consumed below).
+        String holdToken = request.getHoldToken() != null && !request.getHoldToken().isBlank()
+            ? request.getHoldToken().trim() : null;
+        int foreignHoldOverlap = countForeignLiveHoldOverlap(
+            bingeId, request.getBookingDate(), startMinute, durMin, customerId, null);
+        if (!venueHasBookableRooms && foreignHoldOverlap > 0) {
+            throw new BusinessException(
+                "This time slot is temporarily held by another customer completing checkout. "
+                + "Please try again in a few minutes or pick a different slot.");
+        }
+
+        // Capacity management: the static max-concurrent ceiling applies ONLY to room-less
+        // venues (a single space). A venue WITH rooms is bounded by its actual number of
+        // bookable rooms — enforced by resolveRoomAssignment below (CAPACITY_FULL when every
+        // room is taken) — so the concurrency limit tracks the room count automatically and
+        // adding/removing a room changes capacity without touching maxConcurrentBookings.
         Binge binge = bingeRepository.findById(bingeId).orElse(null);
-        if (binge != null && binge.getMaxConcurrentBookings() != null) {
+        if (!venueHasBookableRooms && binge != null && binge.getMaxConcurrentBookings() != null) {
             int overlapping = countOverlappingBookings(request.getBookingDate(), startMinute, durMin);
-            if (overlapping >= binge.getMaxConcurrentBookings()) {
+            if (overlapping + foreignHoldOverlap >= binge.getMaxConcurrentBookings()) {
                 throw new BusinessException("CAPACITY_FULL:This time slot has reached maximum capacity ("
                     + binge.getMaxConcurrentBookings() + " bookings). You can join the waitlist to be notified when a spot opens up.");
+            }
+        }
+        if (venueHasBookableRooms) {
+            // Foreign live holds (pinned to a room or not) reserve capacity out of
+            // the venue's total room-slots; per-room pinning is enforced again in
+            // resolveRoomAssignment.
+            int totalRoomCapacity = bookableRooms.stream()
+                .mapToInt(r -> Math.max(r.getCapacity(), 1)).sum();
+            int occupied = countOverlappingBookings(request.getBookingDate(), startMinute, durMin)
+                + foreignHoldOverlap;
+            if (occupied >= totalRoomCapacity) {
+                throw new BusinessException("CAPACITY_FULL:All rooms are booked or held for this time slot. "
+                    + "You can join the waitlist to be notified when a spot opens up.");
             }
         }
 
         // Calculate pricing using resolved customer pricing
         PricingService.ResolvedEventPrice eventPrice = pricingService.resolveEventPrice(customerId, request.getEventTypeId());
-        BigDecimal durationDecimalHours = BigDecimal.valueOf(durMin)
-            .divide(BigDecimal.valueOf(60), 4, RoundingMode.HALF_UP);
-        BigDecimal baseAmount = eventPrice.basePrice()
-            .add(eventPrice.hourlyRate().multiply(durationDecimalHours).setScale(2, RoundingMode.HALF_UP));
+        BigDecimal baseAmount = PricingService.computeBaseAmount(eventPrice, durMin);
 
         // Process add-ons with resolved pricing
         List<BookingAddOn> bookingAddOns = new ArrayList<>();
@@ -285,8 +368,7 @@ public class BookingService {
         // Guest charge with resolved pricing
         int guests = Math.max(request.getNumberOfGuests(), 1);
         enforceEventTypeGuestRange(eventType, guests);
-        BigDecimal guestAmount = eventPrice.pricePerGuest()
-            .multiply(BigDecimal.valueOf(Math.max(guests - 1, 0)));
+        BigDecimal guestAmount = PricingService.computeGuestAmount(eventPrice, guests);
 
         // Determine pricing source for snapshot
         String pricingSource = eventPrice.source();
@@ -301,38 +383,18 @@ public class BookingService {
         if (surge != null) {
             surgeMultiplier = surge.multiplier();
             surgeLabel = surge.label();
-            // Apply surge to total; keep component amounts (base, addOn, guest) as pre-surge
-            // values so admins can see the breakdown clearly. The surgeMultiplier field
-            // on the booking records the factor for transparency.
-            totalAmount = totalAmount.multiply(surgeMultiplier).setScale(2, RoundingMode.HALF_UP);
+            // Component amounts (base, addOn, guest) stay pre-surge so admins see
+            // the breakdown; the surgeMultiplier field records the factor.
+            totalAmount = PricingService.applySurge(totalAmount, surgeMultiplier);
         }
 
         // ── Venue room assignment ─────────────────────────────────
-        Long venueRoomId = null;
-        String venueRoomName = null;
-        BigDecimal venueRoomPrice = BigDecimal.ZERO;
-        if (request.getVenueRoomId() != null) {
-            VenueRoom room = venueRoomRepository.findByIdAndBingeId(request.getVenueRoomId(), bingeId)
-                .orElseThrow(() -> new BusinessException("Selected room not found"));
-            if (!room.isActive()) throw new BusinessException("Selected room is currently unavailable");
-            // V56: block bookings against rooms that haven't been approved.
-            if (room.getStatus() != null && room.getStatus() != com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED) {
-                throw new BusinessException("Selected room is not yet approved for bookings");
-            }
-            int roomOccupancy = countRoomBookings(room.getId(), request.getBookingDate(), startMinute, durMin);
-            if (roomOccupancy >= room.getCapacity()) {
-                throw new BusinessException("Selected room '" + room.getName() + "' is fully booked for this time slot");
-            }
-            venueRoomId = room.getId();
-            venueRoomName = room.getName();
-            venueRoomPrice = room.getPriceAddition() != null ? room.getPriceAddition() : BigDecimal.ZERO;
-        } else {
-            // V56: enforce the per-binge "must pick a room" toggle.
-            Binge bingeCfg = bingeRepository.findById(bingeId).orElse(null);
-            if (bingeCfg != null && bingeCfg.isRoomSelectionRequired()) {
-                throw new BusinessException("This binge requires a room to be selected before booking");
-            }
-        }
+        VenueRoom assignedRoom = resolveRoomAssignment(
+            bingeId, request.getVenueRoomId(), request.getBookingDate(), startMinute, durMin, customerId);
+        Long venueRoomId = assignedRoom != null ? assignedRoom.getId() : null;
+        String venueRoomName = assignedRoom != null ? assignedRoom.getName() : null;
+        BigDecimal venueRoomPrice = (assignedRoom != null && assignedRoom.getPriceAddition() != null)
+            ? assignedRoom.getPriceAddition() : BigDecimal.ZERO;
         // Add the room surcharge to the booking total. We intentionally apply
         // it after surge multiplication so the room fee is flat and predictable
         // for the customer (a luxury room shouldn't get 1.5x'd on a busy night).
@@ -364,7 +426,7 @@ public class BookingService {
         }
 
         // ── Tax computation (applied at creation, like Stripe/Shopify) ───────────
-        TaxContext taxCtx = buildBookingTaxContext(bingeId);
+        TaxContext taxCtx = buildBookingTaxContext(bingeId, durMin);
         TaxComputationResult taxResult = taxService.compute(taxCtx, totalAmount, baseAmount, addOnTotal, guestAmount);
         BigDecimal subtotalForTax = totalAmount;
         BigDecimal taxComputed = taxResult.getTotalTax() != null ? taxResult.getTotalTax() : BigDecimal.ZERO;
@@ -373,26 +435,17 @@ public class BookingService {
         }
         String taxBreakdown = taxResult.getBreakdownJson();
 
-        // ── FX rate lock validation ────────────────────────────────────────────
-        // If the customer obtained a rate lock at checkout, consume it now (atomic
-        // validate + mark CONSUMED). consumeLock() throws BusinessException if the
-        // lock has expired or was already consumed, preventing the booking from being
-        // committed at a stale rate. Domestic INR customers don't supply a token.
+        // ── Payment currency ────────────────────────────────────────────────────
+        // Native per-binge pricing: the booking is priced and charged in the BINGE's own
+        // currency (derived from its country) — the customer never chooses a currency, so
+        // there is no server-side FX conversion and no customer-supplied rate lock. A
+        // foreign customer's own bank/card converts from their home currency at charge time.
+        String bingeCurrency = (binge != null && binge.getCurrency() != null && !binge.getCurrency().isBlank())
+            ? binge.getCurrency()
+            : com.skbingegalaxy.booking.util.CountryCurrency.BASE;
         LocalDateTime fxLockedUntil = null;
-        String paymentCurrencyCode = null;
-        BigDecimal lockedFxRate = null;
-        if (request.getFxLockToken() != null && !request.getFxLockToken().isBlank()) {
-            com.skbingegalaxy.booking.entity.FxRateLock fxLock =
-                fxLockService.consumeLock(request.getFxLockToken());
-            fxLockedUntil = fxLock.getLockedUntil();
-            // Record WHICH currency and rate were locked so the payment path can
-            // validate a foreign-currency charge against the same rate (the booking
-            // total stays in base/INR; fxRate = foreign units per 1 INR).
-            paymentCurrencyCode = fxLock.getToCurrency();
-            lockedFxRate = fxLock.getFxRate();
-            log.info("FX lock consumed for booking {} — rate={} currency={} lockedUntil={}",
-                bookingRef, lockedFxRate, paymentCurrencyCode, fxLockedUntil);
-        }
+        String paymentCurrencyCode = bingeCurrency;
+        BigDecimal lockedFxRate = BigDecimal.ONE;
 
         Booking booking = Booking.builder()
             .bookingRef(bookingRef)
@@ -438,6 +491,16 @@ public class BookingService {
         Booking saved = bookingRepository.save(booking);
         log.info("Booking created: {} for customer {}", bookingRef, customerId);
 
+        // Consume the customer's slot hold atomically inside this transaction
+        // (BOOK-001): validates ownership + slot match and marks it CONVERTED
+        // with this booking's ref. A validation failure rolls the booking back;
+        // a rollback after this point restores the hold to ACTIVE.
+        if (holdToken != null) {
+            slotHoldService.consumeHold(holdToken, customerId, request.getEventTypeId(),
+                request.getBookingDate(), request.getStartTime(), durMin, bookingRef);
+            log.info("Slot hold {} consumed by booking {}", holdToken, bookingRef);
+        }
+
         // Event log
         eventLogService.logEvent(saved, BookingEventType.CREATED, null, customerId, "CUSTOMER",
             "Booking created via customer portal");
@@ -452,6 +515,11 @@ public class BookingService {
         // here can never roll back the booking creation; flags are purely
         // informational for the operator queue.
         bookingRiskEvaluator.evaluate(saved);
+
+        // In-process AFTER_COMMIT fan-out (waitlist OFFERED→BOOKED conversion).
+        eventPublisher.publishEvent(new com.skbingegalaxy.booking.event.BookingCreatedEvent(
+            saved.getId(), saved.getBookingRef(), customerId, bingeId,
+            saved.getBookingDate(), saved.getStartTime()));
 
         return toDto(saved);
     }
@@ -501,16 +569,15 @@ public class BookingService {
         List<Booking> list = bid != null
             ? bookingRepository.findByBingeIdAndCustomerIdOrderByCreatedAtDesc(bid, customerId)
             : bookingRepository.findByCustomerIdOrderByCreatedAtDesc(customerId);
-        return list.stream().map(this::toDto).toList();
+        return toDtos(list);
     }
 
     @Transactional(readOnly = true)
     public List<BookingDto> getCustomerBookingsByStatus(Long customerId, BookingStatus status) {
         Long bid = BingeContext.getBingeId();
-        return (bid != null
+        return toDtos(bid != null
             ? bookingRepository.findByBingeIdAndCustomerIdAndStatus(bid, customerId, status)
-            : bookingRepository.findByCustomerIdAndStatus(customerId, status))
-            .stream().map(this::toDto).toList();
+            : bookingRepository.findByCustomerIdAndStatus(customerId, status));
     }
 
     @Transactional(readOnly = true)
@@ -520,7 +587,7 @@ public class BookingService {
         List<Booking> list = bid != null
             ? bookingRepository.findCustomerCurrentBookingsByBinge(bid, customerId, today)
             : bookingRepository.findCustomerCurrentBookings(customerId, today);
-        return list.stream().map(this::toDto).toList();
+        return toDtos(list);
     }
 
     @Transactional(readOnly = true)
@@ -530,14 +597,14 @@ public class BookingService {
         List<Booking> list = bid != null
             ? bookingRepository.findCustomerPastBookingsByBinge(bid, customerId, today)
             : bookingRepository.findCustomerPastBookings(customerId, today);
-        return list.stream().map(this::toDto).toList();
+        return toDtos(list);
     }
 
     // â”€â”€ Admin: all bookings (paginated) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     @Transactional(readOnly = true)
     public Page<BookingDto> getAllBookings(Pageable pageable) {
         Long bid = BingeContext.getBingeId();
-        return (bid != null ? bookingRepository.findByBingeId(bid, pageable) : bookingRepository.findAll(pageable)).map(this::toDto);
+        return toDtoPage(bid != null ? bookingRepository.findByBingeId(bid, pageable) : bookingRepository.findAll(pageable));
     }
 
     // â”€â”€ Admin: today's bookings (paginated) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -545,7 +612,7 @@ public class BookingService {
     public Page<BookingDto> getTodayBookings(LocalDate clientToday, Pageable pageable) {
         Long bid = BingeContext.getBingeId();
         LocalDate today = systemSettingsService.getOperationalDate(bid, clientToday);
-        return (bid != null ? bookingRepository.findByBingeIdAndBookingDate(bid, today, pageable) : bookingRepository.findByBookingDate(today, pageable)).map(this::toDto);
+        return toDtoPage(bid != null ? bookingRepository.findByBingeIdAndBookingDate(bid, today, pageable) : bookingRepository.findByBookingDate(today, pageable));
     }
 
     // â”€â”€ Admin: upcoming bookings (today+future, PENDING or CONFIRMED only) â”€
@@ -553,21 +620,21 @@ public class BookingService {
     public Page<BookingDto> getUpcomingBookings(LocalDate clientToday, Pageable pageable) {
         Long bid = BingeContext.getBingeId();
         LocalDate today = systemSettingsService.getOperationalDate(bid, clientToday);
-        return (bid != null ? bookingRepository.findUpcomingBookingsByBinge(bid, today, pageable) : bookingRepository.findUpcomingBookings(today, pageable)).map(this::toDto);
+        return toDtoPage(bid != null ? bookingRepository.findUpcomingBookingsByBinge(bid, today, pageable) : bookingRepository.findUpcomingBookings(today, pageable));
     }
 
     // â”€â”€ Admin: by date â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     @Transactional(readOnly = true)
     public Page<BookingDto> getBookingsByDate(LocalDate date, Pageable pageable) {
         Long bid = BingeContext.getBingeId();
-        return (bid != null ? bookingRepository.findByBingeIdAndBookingDate(bid, date, pageable) : bookingRepository.findByBookingDate(date, pageable)).map(this::toDto);
+        return toDtoPage(bid != null ? bookingRepository.findByBingeIdAndBookingDate(bid, date, pageable) : bookingRepository.findByBookingDate(date, pageable));
     }
 
     // â”€â”€ Admin: by status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     @Transactional(readOnly = true)
     public Page<BookingDto> getBookingsByStatus(BookingStatus status, Pageable pageable) {
         Long bid = BingeContext.getBingeId();
-        return (bid != null ? bookingRepository.findByBingeIdAndStatus(bid, status, pageable) : bookingRepository.findByStatus(status, pageable)).map(this::toDto);
+        return toDtoPage(bid != null ? bookingRepository.findByBingeIdAndStatus(bid, status, pageable) : bookingRepository.findByStatus(status, pageable));
     }
 
     // â”€â”€ Admin: by status scoped to operational day â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -575,25 +642,25 @@ public class BookingService {
     public Page<BookingDto> getBookingsByStatusForToday(BookingStatus status, LocalDate clientToday, Pageable pageable) {
         Long bid = BingeContext.getBingeId();
         LocalDate today = systemSettingsService.getOperationalDate(bid, clientToday);
-        return (bid != null
+        return toDtoPage(bid != null
             ? bookingRepository.findByBingeIdAndBookingDateAndStatus(bid, today, status, pageable)
-            : bookingRepository.findByBookingDateAndStatus(today, status, pageable)).map(this::toDto);
+            : bookingRepository.findByBookingDateAndStatus(today, status, pageable));
     }
 
     // â”€â”€ Admin: by date range â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     @Transactional(readOnly = true)
     public Page<BookingDto> getBookingsByDateRange(LocalDate from, LocalDate to, Pageable pageable) {
         Long bid = BingeContext.getBingeId();
-        return (bid != null
+        return toDtoPage(bid != null
             ? bookingRepository.findByBingeIdAndBookingDateBetween(bid, from, to, pageable)
-            : bookingRepository.findByBookingDateBetween(from, to, pageable)).map(this::toDto);
+            : bookingRepository.findByBookingDateBetween(from, to, pageable));
     }
 
     // â”€â”€ Admin: search â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     @Transactional(readOnly = true)
     public Page<BookingDto> searchBookings(String query, Pageable pageable) {
         Long bid = BingeContext.getBingeId();
-        return (bid != null ? bookingRepository.searchBookingsByBinge(bid, query, pageable) : bookingRepository.searchBookings(query, pageable)).map(this::toDto);
+        return toDtoPage(bid != null ? bookingRepository.searchBookingsByBinge(bid, query, pageable) : bookingRepository.searchBookings(query, pageable));
     }
 
     // â”€â”€ Admin: search scoped to operational day â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -601,9 +668,9 @@ public class BookingService {
     public Page<BookingDto> searchBookingsForToday(String query, LocalDate clientToday, Pageable pageable) {
         Long bid = BingeContext.getBingeId();
         LocalDate today = systemSettingsService.getOperationalDate(bid, clientToday);
-        return (bid != null
+        return toDtoPage(bid != null
             ? bookingRepository.searchBookingsByBingeAndDate(bid, today, query, pageable)
-            : bookingRepository.searchBookingsByDate(today, query, pageable)).map(this::toDto);
+            : bookingRepository.searchBookingsByDate(today, query, pageable));
     }
 
     // â”€â”€ Admin: update booking â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -611,6 +678,11 @@ public class BookingService {
     public BookingDto updateBooking(String bookingRef, UpdateBookingRequest request) {
         Booking booking = findScopedBookingByRef(bookingRef);
         String previousStatus = booking.getStatus().name();
+        // Item 7 (July-2026): every ACTUAL reservation change is collected here so
+        // (a) remarks can be demanded only when something really changed, and
+        // (b) the event-log row names exactly what changed. Status / check-in
+        // transitions are excluded — they carry their own audited reasons.
+        java.util.List<String> changeSummary = new java.util.ArrayList<>();
 
         // ── Status field — routed through the central state machine. ──────
         // Only CONFIRMED / CANCELLED / CHECKED_IN are reachable via the
@@ -643,22 +715,36 @@ public class BookingService {
             boolean wasCheckedInBefore = booking.isCheckedIn();
             if (request.getCheckedIn()) {
                 if (booking.getStatus() != BookingStatus.CHECKED_IN) {
+                    // Physical-occupancy guard: a room (or a room-less venue) can
+                    // only hold its capacity of simultaneously checked-in parties.
+                    // Blocks a back-to-back booking from checking in while the prior
+                    // guests are still physically present (CHECKED_IN, not yet out).
+                    enforceCheckInOccupancy(booking);
                     booking = stateMachine.transition(
                         booking, BookingTransitionEvent.CHECK_IN,
                         adminActorFromContext(), /*reason*/ null);
                 }
                 booking.setCheckedIn(true);
                 ZoneId venueZone = venueClock.zoneOf(booking.getBingeId());
+                // Audit instant stored in UTC (platform contract: point-in-time events
+                // are UTC; only business-meaningful wall-clock fields such as
+                // bookingDate/startTime are venue-local). Clients render it in their own
+                // locale. Storing it venue-local previously made the value ambiguous and
+                // skewed every downstream timestamp display by the viewer's UTC offset.
+                java.time.Instant nowInstant = java.time.Instant.now();
                 if (booking.getActualCheckInTime() == null) {
-                    booking.setActualCheckInTime(LocalDateTime.now(venueZone));
+                    booking.setActualCheckInTime(LocalDateTime.ofInstant(nowInstant, ZoneOffset.UTC));
                 }
-                // Late-arrival flag — set when the operational check-in time is
-                // after the scheduled start. Both QR/OTP and manual admin
-                // check-in funnel through this method, so the flag is set
-                // consistently regardless of channel.
-                LocalDateTime scheduledStart = LocalDateTime.of(
-                    booking.getBookingDate(), booking.getStartTime());
-                if (LocalDateTime.now(venueZone).isAfter(scheduledStart) && !booking.isLateArrival()) {
+                // Late-arrival flag — compare absolute instants so the result is
+                // timezone-robust for a multi-region deployment: real "now" vs the
+                // scheduled start resolved through the VENUE's zone (not the operator's
+                // browser zone, not the JVM default). Both QR/OTP and manual admin
+                // check-in funnel through this method, so the flag is set consistently
+                // regardless of channel.
+                java.time.Instant scheduledStartInstant = LocalDateTime.of(
+                        booking.getBookingDate(), booking.getStartTime())
+                    .atZone(venueZone).toInstant();
+                if (nowInstant.isAfter(scheduledStartInstant) && !booking.isLateArrival()) {
                     booking.setLateArrival(true);
                 }
                 // Emit booking.checked-in only on the transition (avoid double
@@ -681,18 +767,23 @@ public class BookingService {
             booking.setAdminNotes(request.getAdminNotes());
         }
         if (request.getCustomerName() != null) {
+            if (!request.getCustomerName().equals(booking.getCustomerName())) changeSummary.add("customer name");
             booking.setCustomerName(request.getCustomerName());
         }
         if (request.getCustomerEmail() != null) {
+            if (!request.getCustomerEmail().equals(booking.getCustomerEmail())) changeSummary.add("customer email");
             booking.setCustomerEmail(request.getCustomerEmail());
         }
         if (request.getCustomerPhone() != null) {
+            if (!request.getCustomerPhone().equals(booking.getCustomerPhone())) changeSummary.add("customer phone");
             booking.setCustomerPhone(request.getCustomerPhone());
         }
         if (request.getCustomerPhoneCountryCode() != null) {
             booking.setCustomerPhoneCountryCode(request.getCustomerPhoneCountryCode());
         }
         if (request.getSpecialNotes() != null) {
+            String oldNotes = booking.getSpecialNotes() == null ? "" : booking.getSpecialNotes();
+            if (!request.getSpecialNotes().equals(oldNotes)) changeSummary.add("special notes");
             booking.setSpecialNotes(request.getSpecialNotes());
         }
 
@@ -705,6 +796,7 @@ public class BookingService {
             EventType newEventType = findBookableEventType(request.getEventTypeId());
             booking.setEventType(newEventType);
             pricingChanged = true;
+            changeSummary.add("event type");
         }
 
         // Duration change
@@ -721,38 +813,53 @@ public class BookingService {
                 booking.setDurationMinutes(newDur);
                 booking.setDurationHours(newDur / 60);
                 pricingChanged = true;
+                changeSummary.add("duration");
             }
         }
 
-        // Date/time change — check availability
+        // Date/time change — check availability. Only a REAL change flips the
+        // flag; echoing the unchanged date/time back must not trigger conflict
+        // re-checks, surge re-resolution, or the remarks requirement.
         boolean dateTimeChanged = false;
-        if (request.getBookingDate() != null) {
+        if (request.getBookingDate() != null && !request.getBookingDate().equals(booking.getBookingDate())) {
             booking.setBookingDate(request.getBookingDate());
             dateTimeChanged = true;
+            changeSummary.add("date");
         }
-        if (request.getStartTime() != null) {
+        if (request.getStartTime() != null && !request.getStartTime().equals(booking.getStartTime())) {
             booking.setStartTime(request.getStartTime());
             dateTimeChanged = true;
+            changeSummary.add("start time");
         }
-        if (dateTimeChanged) {
+        // A duration change moves the occupied window's END even when the date
+        // and start stay put — it must pass the same conflict / capacity gate.
+        if (dateTimeChanged || changeSummary.contains("duration")) {
             bookingRepository.acquireSlotLock(slotLockKey(booking.getBingeId(), booking.getBookingDate()));
             int startMinute = booking.getStartTime().getHour() * 60 + booking.getStartTime().getMinute();
             int durMin = resolveDurationMinutes(booking.getDurationMinutes(), booking.getDurationHours());
             if (hasTimeConflict(booking.getBookingDate(), startMinute, durMin, booking.getId())) {
                 throw new BusinessException("Selected time slot is no longer available");
             }
-            // Validate venue room capacity at the new time slot
+            // Validate venue room capacity at the new time slot. Live holds from
+            // other customers count as occupancy (same rule as createBooking) —
+            // release the hold from Admin → Slot Holds first if the move is intended.
             if (booking.getVenueRoomId() != null) {
                 VenueRoom room = venueRoomRepository.findById(booking.getVenueRoomId()).orElse(null);
                 if (room == null || !room.isActive()) {
                     booking.setVenueRoomId(null);
                     booking.setVenueRoomName(null);
                 } else {
-                    int roomOcc = countRoomBookings(room.getId(), booking.getBookingDate(), startMinute, durMin, booking.getId());
+                    int roomOcc = countRoomBookings(room.getId(), booking.getBookingDate(), startMinute, durMin, booking.getId())
+                        + countForeignLiveHoldOverlap(booking.getBingeId(), booking.getBookingDate(),
+                            startMinute, durMin, booking.getCustomerId(), room.getId());
                     if (roomOcc >= room.getCapacity()) {
-                        throw new BusinessException("Room '" + room.getName() + "' is fully booked for the new time slot");
+                        throw new BusinessException("Room '" + room.getName() + "' is fully booked or held for the new time slot");
                     }
                 }
+            } else if (countForeignLiveHoldOverlap(booking.getBingeId(), booking.getBookingDate(),
+                    startMinute, durMin, booking.getCustomerId(), null) > 0) {
+                throw new BusinessException(
+                    "The new time slot is temporarily held by another customer completing checkout.");
             }
         }
 
@@ -762,6 +869,7 @@ public class BookingService {
             enforceEventTypeGuestRange(booking.getEventType(), request.getNumberOfGuests());
             booking.setNumberOfGuests(request.getNumberOfGuests());
             pricingChanged = true;
+            changeSummary.add("guest count");
         }
 
         // Add-on changes
@@ -776,6 +884,13 @@ public class BookingService {
                 // collide with itself.
                 enforceAddOnAvailability(addOn, qty, booking.getBookingDate(), bookingStartDt, booking.getId());
             }
+            String oldAddOnSig = booking.getAddOns().stream()
+                .map(ba -> ba.getAddOn().getId() + ":" + ba.getQuantity())
+                .sorted().collect(Collectors.joining(","));
+            String newAddOnSig = request.getAddOns().stream()
+                .map(sel -> sel.getAddOnId() + ":" + Math.max(sel.getQuantity(), 1))
+                .sorted().collect(Collectors.joining(","));
+            if (!oldAddOnSig.equals(newAddOnSig)) changeSummary.add("add-ons");
             pricingChanged = true;
         }
 
@@ -801,10 +916,15 @@ public class BookingService {
                 ? request.getPriceAdjustmentReason()
                 : "Admin price adjustment";
             BigDecimal diff = newTotal.subtract(oldTotal);
-            String diffNote = String.format("PRICE OVERRIDE: ₹%s → ₹%s (%s₹%s). Reason: %s",
-                oldTotal.toPlainString(), newTotal.toPlainString(),
+            // Amounts are denominated in the BINGE's currency — never a hardcoded ₹.
+            String cur = booking.getPaymentCurrencyCode() != null ? booking.getPaymentCurrencyCode() + " " : "";
+            String diffNote = String.format("PRICE OVERRIDE: %s%s → %s%s (%s%s%s). Reason: %s",
+                cur, oldTotal.toPlainString(), cur, newTotal.toPlainString(),
                 diff.compareTo(BigDecimal.ZERO) >= 0 ? "+" : "-",
-                diff.abs().toPlainString(), reason);
+                cur, diff.abs().toPlainString(), reason);
+            // Deliberately NOT added to changeSummary: price overrides carry their
+            // own audited priceAdjustmentReason, so the generic remarks gate would
+            // just double-charge the operator for the same justification.
             String existing = booking.getAdminNotes() != null ? booking.getAdminNotes() + " | " : "";
             booking.setAdminNotes(existing + diffNote);
 
@@ -828,10 +948,7 @@ public class BookingService {
             }
 
             int durMin = resolveDurationMinutes(booking.getDurationMinutes(), booking.getDurationHours());
-            BigDecimal durationDecimalHours = BigDecimal.valueOf(durMin)
-                .divide(BigDecimal.valueOf(60), 4, RoundingMode.HALF_UP);
-            BigDecimal baseAmount = eventPrice.basePrice()
-                .add(eventPrice.hourlyRate().multiply(durationDecimalHours).setScale(2, RoundingMode.HALF_UP));
+            BigDecimal baseAmount = PricingService.computeBaseAmount(eventPrice, durMin);
 
             // Recalculate add-ons
             BigDecimal addOnTotal = BigDecimal.ZERO;
@@ -867,8 +984,7 @@ public class BookingService {
 
             // Guest charge
             int guests = booking.getNumberOfGuests();
-            BigDecimal guestAmount = eventPrice.pricePerGuest()
-                .multiply(BigDecimal.valueOf(Math.max(guests - 1, 0)));
+            BigDecimal guestAmount = PricingService.computeGuestAmount(eventPrice, guests);
 
             BigDecimal newTotal = baseAmount.add(addOnTotal).add(guestAmount);
 
@@ -876,10 +992,11 @@ public class BookingService {
             BigDecimal oldTotal = booking.getTotalAmount();
             BigDecimal diff = newTotal.subtract(oldTotal);
             if (diff.compareTo(BigDecimal.ZERO) != 0) {
-                String diffNote = String.format("Price updated: ₹%s → ₹%s (%s₹%s)",
-                    oldTotal.toPlainString(), newTotal.toPlainString(),
+                String cur = booking.getPaymentCurrencyCode() != null ? booking.getPaymentCurrencyCode() + " " : "";
+                String diffNote = String.format("Price updated: %s%s → %s%s (%s%s%s)",
+                    cur, oldTotal.toPlainString(), cur, newTotal.toPlainString(),
                     diff.compareTo(BigDecimal.ZERO) > 0 ? "+" : "-",
-                    diff.abs().toPlainString());
+                    cur, diff.abs().toPlainString());
                 String existing = booking.getAdminNotes() != null ? booking.getAdminNotes() + " | " : "";
                 booking.setAdminNotes(existing + diffNote);
             }
@@ -905,7 +1022,7 @@ public class BookingService {
                 if (surge != null) {
                     booking.setSurgeMultiplier(surge.multiplier());
                     booking.setSurgeLabel(surge.label());
-                    booking.setTotalAmount(preSurgeTotal.multiply(surge.multiplier()).setScale(2, RoundingMode.HALF_UP));
+                    booking.setTotalAmount(PricingService.applySurge(preSurgeTotal, surge.multiplier()));
                 } else {
                     booking.setSurgeMultiplier(null);
                     booking.setSurgeLabel(null);
@@ -915,7 +1032,7 @@ public class BookingService {
                 // Pricing fields changed but date/time didn't — reapply existing surge multiplier
                 BigDecimal preSurgeTotal = booking.getBaseAmount()
                     .add(booking.getAddOnAmount()).add(booking.getGuestAmount());
-                booking.setTotalAmount(preSurgeTotal.multiply(booking.getSurgeMultiplier()).setScale(2, RoundingMode.HALF_UP));
+                booking.setTotalAmount(PricingService.applySurge(preSurgeTotal, booking.getSurgeMultiplier()));
             }
         }
 
@@ -926,7 +1043,8 @@ public class BookingService {
         // Therefore tax must always be reapplied on top of the new line items —
         // we do NOT treat a component override as "admin set the final number".
         if (pricingChanged || dateTimeChanged || directPriceOverride) {
-            TaxContext taxCtxUpdate = buildBookingTaxContext(booking.getBingeId());
+            TaxContext taxCtxUpdate = buildBookingTaxContext(booking.getBingeId(),
+                resolveDurationMinutes(booking.getDurationMinutes(), booking.getDurationHours()));
             BigDecimal preTaxTotal = booking.getTotalAmount();
             TaxComputationResult taxResultUpdate = taxService.compute(taxCtxUpdate, preTaxTotal,
                 booking.getBaseAmount() != null ? booking.getBaseAmount() : BigDecimal.ZERO,
@@ -947,6 +1065,15 @@ public class BookingService {
         // correct state (PARTIALLY_PAID) and is shown a "pay balance" call-to-action.
         syncPaymentStatusToBalance(booking);
 
+        // Item 7: a real reservation change demands operator remarks — the
+        // whole transaction rolls back here, so nothing above has committed.
+        // Notes-only or status-only updates (empty changeSummary) stay exempt.
+        boolean hasRemarks = request.getRemarks() != null && !request.getRemarks().isBlank();
+        if (!changeSummary.isEmpty() && !hasRemarks) {
+            throw new BusinessException("Remarks are required when changing a reservation ("
+                + String.join(", ", changeSummary) + " changed)");
+        }
+
         Booking updated = bookingRepository.save(booking);
 
         // Award loyalty when admin transitions status to COMPLETED.
@@ -962,10 +1089,18 @@ public class BookingService {
         // when a transition fires; here we only log a "MODIFIED" row for
         // non-status edits (price overrides, notes, contact details, etc.).
         if (booking.getStatus().name().equals(previousStatus)) {
-            String eventDesc = directPriceOverride
-                ? "Price adjusted by admin: " + (request.getPriceAdjustmentReason() != null && !request.getPriceAdjustmentReason().isBlank()
-                    ? request.getPriceAdjustmentReason() : "Admin price adjustment")
-                : "Booking updated by admin";
+            String eventDesc;
+            if (directPriceOverride) {
+                eventDesc = "Price adjusted by admin: " + (request.getPriceAdjustmentReason() != null && !request.getPriceAdjustmentReason().isBlank()
+                    ? request.getPriceAdjustmentReason() : "Admin price adjustment");
+            } else if (!changeSummary.isEmpty()) {
+                eventDesc = "Reservation modified (" + String.join(", ", changeSummary) + ")";
+            } else {
+                eventDesc = "Booking updated by admin";
+            }
+            if (hasRemarks) {
+                eventDesc += " — Remarks: " + request.getRemarks().trim();
+            }
             eventLogService.logEvent(updated, BookingEventType.MODIFIED, previousStatus, null, "ADMIN", eventDesc);
         }
         return toDto(updated);
@@ -1014,9 +1149,17 @@ public class BookingService {
             // leaking that the booking exists or who owns it.
             throw new BusinessException("Not authorised to cancel this booking", org.springframework.http.HttpStatus.FORBIDDEN);
         }
-        if (booking.getStatus() != BookingStatus.PENDING) {
+        // BOOK-004: paid (CONFIRMED) bookings are cancellable too — the
+        // venue's cancellation policy (evaluated below) decides whether it is
+        // allowed and what refund percentage of the collected money is owed.
+        // The UI has always advertised this; the old PENDING-only gate made
+        // the policy evaluation unreachable for exactly the bookings it was
+        // written for.
+        if (booking.getStatus() != BookingStatus.PENDING
+                && booking.getStatus() != BookingStatus.CONFIRMED) {
             throw new BusinessException(
-                "Only PENDING bookings can be cancelled by the customer. Current status: " + booking.getStatus());
+                "Only PENDING or CONFIRMED bookings can be cancelled by the customer. Current status: "
+                    + booking.getStatus());
         }
         // Production-grade: a PENDING outbound transfer offer locks the booking
         // against owner-side cancellation. The customer must revoke the transfer
@@ -1123,7 +1266,7 @@ public class BookingService {
         Long bingeId = booking.getBingeId();
 
         // Operating-hours guard for the *new* slot (same rule as createBooking).
-        validateWithinOperatingHours(bingeId, request.getNewStartTime(), newDurMin);
+        validateWithinOperatingHours(bingeId, request.getNewBookingDate(), request.getNewStartTime(), newDurMin);
 
         // Check availability via internal HTTP call
         int startMinute = request.getNewStartTime().getHour() * 60 + request.getNewStartTime().getMinute();
@@ -1142,14 +1285,38 @@ public class BookingService {
         // Acquire advisory lock for the new slot
         bookingRepository.acquireSlotLock(slotLockKey(bingeId, request.getNewBookingDate()));
 
-        // Check for conflicts (exclude this booking from overlap check)
-        if (hasTimeConflict(request.getNewBookingDate(), startMinute, newDurMin, booking.getId())) {
-            throw new BusinessException("The new time slot conflicts with an existing booking");
+        // Conflict check — room-aware. A reschedule keeps the booking's room, so it only
+        // conflicts if THAT room is occupied at the new slot (excluding itself). A room-less
+        // venue is a single space where any overlap conflicts. Live holds from OTHER
+        // customers count as occupancy exactly as in createBooking — a reschedule must not
+        // be a side door into a slot someone is holding at checkout.
+        Long rescheduleRoomId = booking.getVenueRoomId();
+        if (rescheduleRoomId != null) {
+            VenueRoom rRoom = venueRoomRepository.findById(rescheduleRoomId).orElse(null);
+            int rCap = rRoom != null ? Math.max(rRoom.getCapacity(), 1) : 1;
+            int rOccupied = countRoomBookings(rescheduleRoomId, request.getNewBookingDate(), startMinute, newDurMin, booking.getId())
+                + countForeignLiveHoldOverlap(bingeId, request.getNewBookingDate(), startMinute, newDurMin,
+                    booking.getCustomerId(), rescheduleRoomId);
+            if (rOccupied >= rCap) {
+                throw new BusinessException("The new time slot conflicts with an existing booking or an active hold in this room");
+            }
+        } else {
+            if (hasTimeConflict(request.getNewBookingDate(), startMinute, newDurMin, booking.getId())) {
+                throw new BusinessException("The new time slot conflicts with an existing booking");
+            }
+            if (countForeignLiveHoldOverlap(bingeId, request.getNewBookingDate(), startMinute, newDurMin,
+                    booking.getCustomerId(), null) > 0) {
+                throw new BusinessException(
+                    "The new time slot is temporarily held by another customer completing checkout. "
+                    + "Please try again in a few minutes or pick a different slot.");
+            }
         }
 
-        // Capacity check for new slot
+        // Capacity check for new slot — static ceiling only for a room-less booking. When the
+        // booking occupies a room, the per-room conflict check above already bounds capacity
+        // to the number of rooms, so the static maxConcurrentBookings must not double-cap it.
         Binge binge = bingeRepository.findById(bingeId).orElse(null);
-        if (binge != null && binge.getMaxConcurrentBookings() != null) {
+        if (rescheduleRoomId == null && binge != null && binge.getMaxConcurrentBookings() != null) {
             // Exclude current booking from count if same date
             List<Booking> activeBookings = bookingRepository.findActiveBookingsByBingeAndDate(bingeId, request.getNewBookingDate());
             int newEnd = startMinute + newDurMin;
@@ -1171,10 +1338,7 @@ public class BookingService {
         if (newDurMin != existingDuration) {
             PricingService.ResolvedEventPrice eventPrice = pricingService.resolveEventPrice(
                 booking.getCustomerId(), booking.getEventType().getId());
-            BigDecimal durationDecimalHours = BigDecimal.valueOf(newDurMin)
-                .divide(BigDecimal.valueOf(60), 4, RoundingMode.HALF_UP);
-            BigDecimal newBaseAmount = eventPrice.basePrice()
-                .add(eventPrice.hourlyRate().multiply(durationDecimalHours).setScale(2, RoundingMode.HALF_UP));
+            BigDecimal newBaseAmount = PricingService.computeBaseAmount(eventPrice, newDurMin);
             BigDecimal totalAmount = newBaseAmount.add(booking.getAddOnAmount()).add(booking.getGuestAmount());
             booking.setBaseAmount(newBaseAmount);
             booking.setTotalAmount(totalAmount);
@@ -1188,7 +1352,7 @@ public class BookingService {
             booking.setSurgeLabel(newSurge.label());
             BigDecimal preSurgeTotal = booking.getBaseAmount()
                 .add(booking.getAddOnAmount()).add(booking.getGuestAmount());
-            booking.setTotalAmount(preSurgeTotal.multiply(newSurge.multiplier()).setScale(2, RoundingMode.HALF_UP));
+            booking.setTotalAmount(PricingService.applySurge(preSurgeTotal, newSurge.multiplier()));
         } else {
             // New slot has no surge — clear it and recalculate without surge
             if (booking.getSurgeMultiplier() != null) {
@@ -1204,7 +1368,8 @@ public class BookingService {
         // be reapplied so the rescheduled booking honours the binge's tax rules
         // exactly like a fresh booking would.
         {
-            TaxContext taxCtxResched = buildBookingTaxContext(booking.getBingeId());
+            TaxContext taxCtxResched = buildBookingTaxContext(booking.getBingeId(),
+                resolveDurationMinutes(booking.getDurationMinutes(), booking.getDurationHours()));
             BigDecimal preTaxTotalResched = booking.getTotalAmount();
             TaxComputationResult taxResultResched = taxService.compute(taxCtxResched, preTaxTotalResched,
                 booking.getBaseAmount() != null ? booking.getBaseAmount() : BigDecimal.ZERO,
@@ -1343,11 +1508,14 @@ public class BookingService {
         Long bingeId = BingeContext.requireBingeId();
         assertBingeBookable(bingeId);
 
-        // Anti-abuse: same limits as single booking creation
-        long pendingCount = bookingRepository.countPendingByCustomerId(customerId);
-        if (pendingCount >= maxPendingPerCustomer) {
+        // Anti-abuse: same limits as single booking creation — per-binge scope and
+        // per-binge admin-configured threshold, matching createBooking exactly.
+        long pendingCount = bookingRepository.countPendingByCustomerIdAndBingeId(customerId, bingeId);
+        int unpaidLimit = effectiveUnpaidLimit(bingeId);
+        if (pendingCount >= unpaidLimit) {
             throw new BusinessException(
-                "You already have " + pendingCount + " pending booking(s). Please complete or cancel them before creating new ones.");
+                "You already have " + pendingCount + " unpaid booking(s) at this venue. "
+                + "Open My Bookings to complete payment or cancel them, then try again.");
         }
         LocalDateTime cooldownSince = LocalDateTime.now(ZoneOffset.UTC).minusMinutes(cooldownMinutesAfterTimeout);
         long recentTimeouts = bookingRepository.countRecentTimeoutCancellations(customerId, cooldownSince);
@@ -1421,10 +1589,7 @@ public class BookingService {
 
                 // Calculate pricing
                 PricingService.ResolvedEventPrice eventPrice = pricingService.resolveEventPrice(customerId, request.getEventTypeId());
-                BigDecimal durationDecimalHours = BigDecimal.valueOf(durMin)
-                    .divide(BigDecimal.valueOf(60), 4, RoundingMode.HALF_UP);
-                BigDecimal baseAmount = eventPrice.basePrice()
-                    .add(eventPrice.hourlyRate().multiply(durationDecimalHours).setScale(2, RoundingMode.HALF_UP));
+                BigDecimal baseAmount = PricingService.computeBaseAmount(eventPrice, durMin);
 
                 // Process add-ons
                 List<BookingAddOn> bookingAddOns = new ArrayList<>();
@@ -1442,8 +1607,7 @@ public class BookingService {
                 }
 
                 int guests = Math.max(request.getNumberOfGuests(), 1);
-                BigDecimal guestAmount = eventPrice.pricePerGuest()
-                    .multiply(BigDecimal.valueOf(Math.max(guests - 1, 0)));
+                BigDecimal guestAmount = PricingService.computeGuestAmount(eventPrice, guests);
                 BigDecimal totalAmount = baseAmount.add(addOnTotal).add(guestAmount);
 
                 // Apply surge pricing per occurrence date/time
@@ -1453,7 +1617,7 @@ public class BookingService {
                 if (surge != null) {
                     surgeMultiplier = surge.multiplier();
                     surgeLabel = surge.label();
-                    totalAmount = totalAmount.multiply(surgeMultiplier).setScale(2, RoundingMode.HALF_UP);
+                    totalAmount = PricingService.applySurge(totalAmount, surgeMultiplier);
                 }
 
                 // Validate venue room if requested (V56: must be APPROVED). Done
@@ -1479,7 +1643,7 @@ public class BookingService {
                 }
 
                 // Tax computation (per-occurrence, since surge varies per date)
-                TaxContext taxCtxRec = buildBookingTaxContext(bingeId);
+                TaxContext taxCtxRec = buildBookingTaxContext(bingeId, durMin);
                 TaxComputationResult taxResultRec = taxService.compute(taxCtxRec, totalAmount, baseAmount, addOnTotal, guestAmount);
                 BigDecimal subtotalRec = totalAmount;
                 BigDecimal taxComputedRec = taxResultRec.getTotalTax() != null ? taxResultRec.getTotalTax() : BigDecimal.ZERO;
@@ -1586,7 +1750,7 @@ public class BookingService {
         if (!owns) {
             throw new BusinessException("Not authorised to view this recurring group", org.springframework.http.HttpStatus.FORBIDDEN);
         }
-        return bookings.stream().map(this::toDto).toList();
+        return toDtos(bookings);
     }
 
     @Transactional(readOnly = true)
@@ -1600,12 +1764,11 @@ public class BookingService {
             .filter(b -> b.getStatus() == BookingStatus.COMPLETED)
             .toList();
 
-        return completed.stream()
+        return toDtos(completed.stream()
             .filter(b -> bookingReviewRepository
                 .findByBookingRefAndCustomerIdAndReviewerRole(b.getBookingRef(), customerId, "CUSTOMER")
                 .isEmpty())
-            .map(this::toDto)
-            .toList();
+            .toList());
     }
 
     @Transactional(readOnly = true)
@@ -1803,6 +1966,30 @@ public class BookingService {
             .map(this::toReviewDto);
     }
 
+    // ── Public: room review summary + list (derived from bookings in that room) ──
+    @Transactional(readOnly = true)
+    public java.util.Map<String, Object> getRoomReviewSummary(Long roomId) {
+        long count = bookingReviewRepository.countRoomCustomerReviews(roomId);
+        double avg = count > 0 ? bookingReviewRepository.averageRoomRating(roomId) : 0;
+        java.util.Map<Integer, Long> distribution = new java.util.LinkedHashMap<>();
+        for (int star = 5; star >= 1; star--) distribution.put(star, 0L);
+        for (Object[] row : bookingReviewRepository.roomRatingDistribution(roomId)) {
+            distribution.put((Integer) row[0], (Long) row[1]);
+        }
+        java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("roomId", roomId);
+        out.put("averageRating", Math.round(avg * 10.0) / 10.0);
+        out.put("totalReviews", count);
+        out.put("ratingDistribution", distribution);
+        return out;
+    }
+
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<BookingReviewDto> getRoomPublicReviews(
+            Long roomId, org.springframework.data.domain.Pageable pageable) {
+        return bookingReviewRepository.findRoomCustomerReviews(roomId, pageable).map(this::toReviewDto);
+    }
+
     // â”€â”€ Admin: customer review summary (avg admin rating + count) â”€â”€
     @Transactional(readOnly = true, timeout = 10)
     public java.util.Map<String, Object> getCustomerReviewSummary(Long customerId) {
@@ -1900,12 +2087,32 @@ public class BookingService {
                 LocalDateTime.now(ZoneOffset.UTC)
         ));
 
-        // Reverse collectedAmount for cancellations where money was already collected
-        if (saved.getCollectedAmount() != null
-                && saved.getCollectedAmount().compareTo(java.math.BigDecimal.ZERO) > 0) {
-            subtractFromCollectedAmount(bookingRef, saved.getCollectedAmount());
-            log.info("Reversed collectedAmount {} for cancelled booking {}",
-                    saved.getCollectedAmount(), bookingRef);
+        // ── BOOK-004: captured money is returned through REAL refunds ───────
+        // The refund owed is refundPercentage of the COLLECTED amount (money
+        // actually held), not of the list price. We no longer zero the
+        // collected amount locally — payment-service receives refundAmount on
+        // the booking.cancelled event, moves the money at the gateway, and the
+        // resulting payment.refunded events are what reduce collectedAmount
+        // here. Until they settle, the booking truthfully shows the money as
+        // still collected, with the refund timeline visible to the customer.
+        java.math.BigDecimal collected = saved.getCollectedAmount() != null
+            ? saved.getCollectedAmount() : java.math.BigDecimal.ZERO;
+        java.math.BigDecimal moneyRefund = collected.compareTo(java.math.BigDecimal.ZERO) > 0
+            ? collected.multiply(BigDecimal.valueOf(refundPercentage))
+                .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP)
+            : java.math.BigDecimal.ZERO;
+        if (collected.compareTo(java.math.BigDecimal.ZERO) > 0) {
+            log.info("Cancellation of {}: {}% of collected {} → refund {} requested via payment-service",
+                bookingRef, refundPercentage, collected, moneyRefund);
+            try {
+                eventLogService.logEvent(saved, BookingEventType.REFUND_INITIATED,
+                    saved.getStatus().name(), null, actorRole,
+                    String.format("Cancellation refund of %s (%d%% of collected %s) requested",
+                        moneyRefund, refundPercentage, collected));
+            } catch (Exception ex) {
+                log.warn("Timeline log for cancellation refund request failed for {}: {}",
+                    bookingRef, ex.getMessage());
+            }
         }
 
         // Loyalty reversal (both REVERSE_REDEEM and REVERSE_EARN) is handled
@@ -1914,8 +2121,9 @@ public class BookingService {
 
         // Cancellation audit row was emitted by BookingStateMachine.transition
         // above (with reason / IP / User-Agent). Here we only publish the
-        // outbound Kafka event so notification-service can react.
-        publishBookingEvent(saved, KafkaTopics.BOOKING_CANCELLED);
+        // outbound Kafka event so notification-service can react and
+        // payment-service can issue the policy-decided refund.
+        publishBookingEvent(saved, KafkaTopics.BOOKING_CANCELLED, moneyRefund);
         log.info("Booking cancelled: {}", bookingRef);
 
         return toDto(saved);
@@ -2160,7 +2368,7 @@ public class BookingService {
     // â”€â”€ House accounts: pending payments â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     public Page<BookingDto> getPendingPaymentBookings(Pageable pageable) {
         Long bid = BingeContext.getBingeId();
-        return (bid != null ? bookingRepository.findByBingeIdAndPaymentStatus(bid, PaymentStatus.PENDING, pageable) : bookingRepository.findByPaymentStatus(PaymentStatus.PENDING, pageable)).map(this::toDto);
+        return toDtoPage(bid != null ? bookingRepository.findByBingeIdAndPaymentStatus(bid, PaymentStatus.PENDING, pageable) : bookingRepository.findByPaymentStatus(PaymentStatus.PENDING, pageable));
     }
 
     // â”€â”€ Customer booking count â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -2186,6 +2394,7 @@ public class BookingService {
                     .startMinute(startMin)
                     .durationMinutes(effMin)
                     .bookingRef(b.getBookingRef())
+                    .venueRoomId(b.getVenueRoomId())
                     .build();
             })
             .filter(slot -> slot.getDurationMinutes() > 0)
@@ -2239,7 +2448,7 @@ public class BookingService {
         }
 
         LocalTime startTime = LocalTime.of(startMinute / 60, startMinute % 60);
-        validateWithinOperatingHours(bingeId, startTime, durationMinutes);
+        validateWithinOperatingHours(bingeId, date, startTime, durationMinutes);
 
         Boolean available = availabilityClient.checkSlotAvailable(
             internalApiSecret, date, bingeId, startMinute, durationMinutes);
@@ -2306,7 +2515,7 @@ public class BookingService {
      * @param durationMinutes resolved duration in minutes
      * @throws BusinessException with a friendly message if outside the window
      */
-    private void validateWithinOperatingHours(Long bingeId, LocalTime startTime, int durationMinutes) {
+    private void validateWithinOperatingHours(Long bingeId, LocalDate bookingDate, LocalTime startTime, int durationMinutes) {
         if (startTime == null) {
             return; // upstream validators have already rejected null start times
         }
@@ -2317,6 +2526,24 @@ public class BookingService {
             if (binge != null) {
                 openTime = binge.getOpenTime();
                 closeTime = binge.getCloseTime();
+                // Per-day override (V66): when the binge publishes a per-day schedule and
+                // this booking's weekday is configured, it wins over the single open/close
+                // pair. A day marked closed rejects the booking outright.
+                if (bookingDate != null && binge.getOpeningHoursJson() != null) {
+                    var dayHours = com.skbingegalaxy.booking.util.OpeningHoursCodec
+                        .forDay(binge.getOpeningHoursJson(), bookingDate.getDayOfWeek());
+                    if (dayHours.isPresent()) {
+                        var dh = dayHours.get();
+                        String dayName = bookingDate.getDayOfWeek()
+                            .getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.ENGLISH);
+                        if (dh.isClosed()) {
+                            throw new BusinessException(
+                                "This venue is closed on " + dayName + "s. Please pick another day.");
+                        }
+                        if (dh.getOpenTime() != null) openTime = dh.getOpenTime();
+                        if (dh.getCloseTime() != null) closeTime = dh.getCloseTime();
+                    }
+                }
             }
         }
         if (openTime == null) {
@@ -2350,6 +2577,22 @@ public class BookingService {
                 "Booking would end after this binge's closing time (" + closeTime
                     + "). Either pick an earlier start time or reduce the duration.");
         }
+        // BOOK-003: defence-in-depth against a directly-submitted phantom slot. On a
+        // DST spring-forward day the venue's wall clock skips an hour, so a start time
+        // in that gap names a LOCAL instant that never occurs; booking it would silently
+        // shift the real time by the DST offset. The availability grid already omits such
+        // slots, but a direct API call could still carry one. No-op for non-DST venues
+        // (getTransition returns null), so IST bookings are byte-for-byte unchanged.
+        if (bingeId != null && bookingDate != null) {
+            ZoneId venueZone = venueClock.zoneOf(bingeId);
+            java.time.zone.ZoneOffsetTransition dstTransition =
+                venueZone.getRules().getTransition(java.time.LocalDateTime.of(bookingDate, startTime));
+            if (dstTransition != null && dstTransition.isGap()) {
+                throw new BusinessException(
+                    "Selected start time " + startTime + " does not exist on " + bookingDate
+                        + " at this venue due to a daylight-saving change. Please pick another time.");
+            }
+        }
     }
 
     @Transactional(readOnly = true)
@@ -2370,6 +2613,143 @@ public class BookingService {
             }
         }
         return false;
+    }
+
+    /**
+     * Physical-occupancy guard applied at the moment of check-in. A room can hold
+     * its {@code capacity} of simultaneously present parties; a room-less venue is
+     * a single physical space (capacity 1). If the resource is already at capacity
+     * with currently CHECKED_IN reservations, the new check-in is rejected — you
+     * cannot put two parties in the same room.
+     *
+     * <p>Serialized with the same per-binge/date advisory slot lock used at
+     * booking creation so two concurrent check-ins can't both slip past the count.
+     */
+    private void enforceCheckInOccupancy(Booking booking) {
+        Long bid = booking.getBingeId();
+        LocalDate date = booking.getBookingDate();
+        Long excludeId = booking.getId() != null ? booking.getId() : -1L;
+        if (bid != null) {
+            bookingRepository.acquireSlotLock(slotLockKey(bid, date));
+        }
+        Long roomId = booking.getVenueRoomId();
+        if (roomId != null) {
+            VenueRoom room = venueRoomRepository.findById(roomId).orElse(null);
+            int capacity = room != null ? Math.max(room.getCapacity(), 1) : 1;
+            long occupied = bookingRepository.countActiveCheckInsInRoom(bid, date, roomId, excludeId);
+            if (occupied >= capacity) {
+                String name = room != null ? room.getName() : ("room " + roomId);
+                throw new BusinessException(capacity == 1
+                    ? "Room '" + name + "' is already occupied by a checked-in reservation. "
+                        + "Check the current guests out before checking another party in."
+                    : "Room '" + name + "' is at capacity (" + capacity
+                        + " checked-in reservations). Check a party out before checking another in.");
+            }
+        } else {
+            long occupied = bookingRepository.countActiveCheckInsInVenue(bid, date, excludeId);
+            if (occupied >= 1) {
+                throw new BusinessException(
+                    "This venue is already occupied by a checked-in reservation. "
+                    + "Check the current guests out before checking another party in.");
+            }
+        }
+    }
+
+    /**
+     * Resolve which venue room a booking should occupy, enforcing exclusivity + capacity.
+     *
+     * <p>Three cases:
+     * <ul>
+     *   <li><b>Explicit room</b> — the customer/admin picked one: validate it exists, is
+     *       active + approved, and is free for the overlapping window (else reject).</li>
+     *   <li><b>"Any room" at a venue that HAS rooms</b> — auto-assign the first available
+     *       room (lowest sort order). If every room is occupied for the window, reject with
+     *       a capacity message. This is what makes "N rooms → at most N concurrent bookings"
+     *       hold: every booking is pinned to a specific exclusive room, so the per-room
+     *       check-in guard (not the venue-wide fallback) applies and cross-room check-ins
+     *       never block each other.</li>
+     *   <li><b>Room-less venue</b> — no rooms configured: return null (booking has no room),
+     *       honouring the per-binge {@code roomSelectionRequired} toggle only if a room was
+     *       required but none exists to pick.</li>
+     * </ul>
+     */
+    private VenueRoom resolveRoomAssignment(Long bingeId, Long requestedRoomId,
+                                            LocalDate date, int startMinute, int durMin) {
+        return resolveRoomAssignment(bingeId, requestedRoomId, date, startMinute, durMin, null);
+    }
+
+    private VenueRoom resolveRoomAssignment(Long bingeId, Long requestedRoomId,
+                                            LocalDate date, int startMinute, int durMin,
+                                            Long bookingCustomerId) {
+        if (requestedRoomId != null) {
+            VenueRoom room = venueRoomRepository.findByIdAndBingeId(requestedRoomId, bingeId)
+                .orElseThrow(() -> new BusinessException("Selected room not found"));
+            if (!room.isActive()) throw new BusinessException("Selected room is currently unavailable");
+            if (room.getStatus() != null && room.getStatus() != com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED) {
+                throw new BusinessException("Selected room is not yet approved for bookings");
+            }
+            int roomOccupancy = countRoomBookings(room.getId(), date, startMinute, durMin)
+                + countForeignLiveHoldOverlap(bingeId, date, startMinute, durMin, bookingCustomerId, room.getId());
+            if (roomOccupancy >= Math.max(room.getCapacity(), 1)) {
+                throw new BusinessException("Selected room '" + room.getName() + "' is fully booked or held for this time slot");
+            }
+            return room;
+        }
+
+        // "Any room" — find the bookable rooms for this venue and auto-assign a free one.
+        List<VenueRoom> rooms = venueRoomRepository.findByBingeIdOrderBySortOrderAsc(bingeId).stream()
+            .filter(VenueRoom::isActive)
+            .filter(r -> r.getStatus() == null || r.getStatus() == com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED)
+            .toList();
+
+        if (rooms.isEmpty()) {
+            // Genuinely room-less venue. Only block if the venue insists a room be picked.
+            Binge bingeCfg = bingeRepository.findById(bingeId).orElse(null);
+            if (bingeCfg != null && bingeCfg.isRoomSelectionRequired()) {
+                throw new BusinessException("This binge requires a room to be selected before booking");
+            }
+            return null;
+        }
+
+        for (VenueRoom room : rooms) {
+            int occ = countRoomBookings(room.getId(), date, startMinute, durMin)
+                + countForeignLiveHoldOverlap(bingeId, date, startMinute, durMin, bookingCustomerId, room.getId());
+            if (occ < Math.max(room.getCapacity(), 1)) {
+                return room; // first free room wins (deterministic by sort order)
+            }
+        }
+        // Every room is occupied for the overlapping window → at capacity.
+        throw new BusinessException("CAPACITY_FULL:All " + rooms.size()
+            + " room(s) are booked for this time slot. You can join the waitlist to be notified when a spot opens up.");
+    }
+
+    /**
+     * Overlapping live holds owned by customers OTHER than {@code bookingCustomerId}
+     * — reservations a direct booking must not steal (BOOK-001). When {@code roomId}
+     * is non-null only holds pinned to that room count; when null, every overlapping
+     * foreign live hold counts (pinned or not).
+     */
+    private int countForeignLiveHoldOverlap(Long bingeId, LocalDate date, int startMinute,
+                                            int durationMinutes, Long bookingCustomerId, Long roomId) {
+        int newEnd = startMinute + durationMinutes;
+        int n = 0;
+        try {
+            java.time.LocalDateTime now = java.time.LocalDateTime.now(ZoneOffset.UTC);
+            for (com.skbingegalaxy.booking.entity.SlotHold h :
+                    slotHoldRepository.findLiveHoldsByBingeAndDate(bingeId, date, now)) {
+                if (bookingCustomerId != null && bookingCustomerId.equals(h.getCustomerId())) continue;
+                if (roomId != null && !roomId.equals(h.getVenueRoomId())) continue;
+                int hStart = h.getStartTime().getHour() * 60 + h.getStartTime().getMinute();
+                int hEnd = hStart + Math.max(h.getDurationMinutes(), 0);
+                if (startMinute < hEnd && newEnd > hStart) n++;
+            }
+        } catch (Exception e) {
+            // Fail-open matches assertSlotAvailableForHold: a hold-lookup outage
+            // must not block bookings; the advisory lock still prevents physical
+            // double-booking.
+            log.warn("Foreign-hold overlap check failed for binge={} date={}: {}", bingeId, date, e.getMessage());
+        }
+        return n;
     }
 
     /** Count active bookings that overlap with a given time range (for capacity enforcement). */
@@ -2461,23 +2841,15 @@ public class BookingService {
      *
      * <p>We therefore enrich the context with the binge's venue address (used by
      * {@code TaxContext#resolved*()} when billing address is unknown). This keeps
-     * the persist path consistent with {@code CheckoutQuoteService.preview()}.
+     * the persist path consistent with the public tax-preview endpoint.
      */
-    private TaxContext buildBookingTaxContext(Long bingeId) {
-        TaxContext.TaxContextBuilder b = TaxContext.builder()
-            .bingeId(bingeId)
-            .customerType("B2C")
-            .productType("BOOKING")
-            .venueZone(venueClock.zoneOf(bingeId));
-        if (bingeId != null) {
-            bingeRepository.findById(bingeId).ifPresent(binge -> {
-                b.venueCountryCode(binge.getCountry())
-                 .venueStateCode(binge.getState())
-                 .venueCity(binge.getCity())
-                 .venuePostalCode(binge.getPostalCode());
-            });
-        }
-        return b.build();
+    private TaxContext buildBookingTaxContext(Long bingeId, Integer durationMinutes) {
+        // Single source of truth lives in TaxService so the customer preview,
+        // checkout quote and the persisted booking all resolve the SAME context.
+        // durationMinutes drives FLAT_PER_HOUR tax rules (per-hour occupancy fees).
+        return taxService.venueContext(bingeId)
+            .durationMinutes(durationMinutes)
+            .build();
     }
 
     private void syncPaymentStatusToBalance(Booking booking) {
@@ -2554,11 +2926,16 @@ public class BookingService {
                 overlapping++;
             }
         }
+        // Live holds ARE occupancy: a slot reserved for a customer mid-checkout
+        // (or a promoted waitlist entry) must read as taken, or the waitlist
+        // promoter would offer the same physical slot twice.
+        int liveHolds = countForeignLiveHoldOverlap(bingeId, date, startMinute, durationMinutes, null, null);
         Integer max = binge != null ? binge.getMaxConcurrentBookings() : null;
         return java.util.Map.of(
             "currentBookings", overlapping,
+            "liveHolds", liveHolds,
             "maxConcurrentBookings", max != null ? max : -1,
-            "isFull", max != null && overlapping >= max
+            "isFull", max != null && (overlapping + liveHolds) >= max
         );
     }
 
@@ -2602,6 +2979,20 @@ public class BookingService {
         }
     }
 
+    /**
+     * The venue admin's configured cap on concurrent unpaid PENDING bookings per
+     * customer (see {@link Binge#getMaxUnpaidBookingsPerCustomer()}). Falls back to
+     * the platform default when the binge row is unavailable; a stored value below 1
+     * (legacy rows) also falls back rather than locking everyone out.
+     */
+    private int effectiveUnpaidLimit(Long bingeId) {
+        Binge binge = bingeId != null ? bingeRepository.findById(bingeId).orElse(null) : null;
+        if (binge != null && binge.getMaxUnpaidBookingsPerCustomer() >= 1) {
+            return binge.getMaxUnpaidBookingsPerCustomer();
+        }
+        return Math.max(1, maxPendingPerCustomer);
+    }
+
     private static final java.util.Map<BookingStatus, java.util.Set<BookingStatus>> VALID_TRANSITIONS = java.util.Map.of(
         BookingStatus.PENDING, java.util.Set.of(BookingStatus.CONFIRMED, BookingStatus.CANCELLED),
         BookingStatus.CONFIRMED, java.util.Set.of(BookingStatus.CHECKED_IN, BookingStatus.CANCELLED, BookingStatus.NO_SHOW),
@@ -2642,6 +3033,11 @@ public class BookingService {
     }
 
     // â”€â”€ Admin: early checkout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    /**
+     * @param clientNow retained for API compatibility but IGNORED for time math —
+     *                  the operator's browser clock is untrusted and zone-ambiguous;
+     *                  the venue clock is the single time authority.
+     */
     @Transactional
     public BookingDto earlyCheckout(String bookingRef, LocalDateTime clientNow) {
         Booking booking = findScopedBookingByRef(bookingRef);
@@ -2662,27 +3058,43 @@ public class BookingService {
         BigDecimal collected = booking.getCollectedAmount() != null ? booking.getCollectedAmount() : BigDecimal.ZERO;
         BigDecimal balance = total.subtract(collected);
         if (balance.abs().compareTo(new BigDecimal("0.01")) > 0) {
+            String ccy = booking.getCurrencyCode() != null ? booking.getCurrencyCode() : "INR";
             String direction = balance.signum() > 0
-                ? "Outstanding balance of ₹" + balance.toPlainString() + " must be collected"
-                : "Customer overpaid by ₹" + balance.abs().toPlainString() + "; issue refund";
+                ? "Outstanding balance of " + ccy + " " + balance.toPlainString() + " must be collected"
+                : "Customer overpaid by " + ccy + " " + balance.abs().toPlainString() + "; issue refund";
             throw new BusinessException(
                 "Cannot checkout — balance not settled. " + direction
                 + " before checkout. Use \"Adjust Prices\" or the Payment tab to reconcile.");
         }
 
-        LocalDateTime now = clientNow != null ? clientNow : LocalDateTime.now(ZoneOffset.UTC);
-        // Use actual check-in time when available — otherwise fall back to scheduled start.
-        LocalDateTime sessionStart = booking.getActualCheckInTime() != null
-            ? booking.getActualCheckInTime()
-            : LocalDateTime.of(booking.getBookingDate(), booking.getStartTime());
-        LocalDateTime scheduledStart = LocalDateTime.of(booking.getBookingDate(), booking.getStartTime());
-        int bookedMinutes = resolveDurationMinutes(booking.getDurationMinutes(), booking.getDurationHours());
-        LocalDateTime scheduledEnd = scheduledStart.plusMinutes(bookedMinutes);
+        // ── Venue-zone time authority ─────────────────────────────────────
+        // All duration math runs on absolute instants; wall-clock strings shown
+        // to humans are rendered in the VENUE's zone. The client-supplied clock
+        // (clientNow) is deliberately NOT used for time math — an operator's
+        // browser zone/skew must never decide whether a checkout is "early"
+        // (mixing it with venue-local schedule times produced artifacts like
+        // "Early checkout at 06:33 AM (checked in 11:29 AM). Used 0m").
+        java.time.ZoneId venueZone = venueClock.zoneOf(booking.getBingeId());
+        java.time.Instant nowInstant = java.time.Instant.now();
 
-        // Only treat as early if current time is before the scheduled end
-        if (!now.isBefore(scheduledEnd)) {
+        // bookingDate/startTime are venue-local wall times (platform contract);
+        // actualCheckInTime is a UTC instant (see the check-in path).
+        java.time.Instant scheduledStartInstant = LocalDateTime
+            .of(booking.getBookingDate(), booking.getStartTime())
+            .atZone(venueZone).toInstant();
+        int bookedMinutes = resolveDurationMinutes(booking.getDurationMinutes(), booking.getDurationHours());
+        java.time.Instant scheduledEndInstant = scheduledStartInstant.plusSeconds(bookedMinutes * 60L);
+        java.time.Instant sessionStartInstant = booking.getActualCheckInTime() != null
+            ? booking.getActualCheckInTime().toInstant(ZoneOffset.UTC)
+            : scheduledStartInstant;
+
+        // Stored form of "now" — UTC, matching actualCheckInTime's contract.
+        LocalDateTime now = LocalDateTime.ofInstant(nowInstant, ZoneOffset.UTC);
+
+        // Only treat as early if the real current instant is before scheduled end
+        if (!nowInstant.isBefore(scheduledEndInstant)) {
             // Not early — do a normal checkout, but still record actual session duration
-            long fullSessionMinutes = java.time.Duration.between(sessionStart, now).toMinutes();
+            long fullSessionMinutes = java.time.Duration.between(sessionStartInstant, nowInstant).toMinutes();
             if (fullSessionMinutes < 0) fullSessionMinutes = 0;
             booking.setCheckedIn(false);
             booking.setActualCheckoutTime(now);
@@ -2695,7 +3107,7 @@ public class BookingService {
             return toDto(completed);
         }
 
-        long usedMinutes = java.time.Duration.between(sessionStart, now).toMinutes();
+        long usedMinutes = java.time.Duration.between(sessionStartInstant, nowInstant).toMinutes();
         if (usedMinutes < 0) usedMinutes = 0;
 
         // For slot/availability release: round up to nearest 30-min boundary
@@ -2721,13 +3133,16 @@ public class BookingService {
                 ? String.format("%dh", bookedH)
                 : String.format("%dm", bookedM);
 
-        java.time.format.DateTimeFormatter timeFmt = java.time.format.DateTimeFormatter.ofPattern("hh:mm a");
+        // Human-readable times are rendered in the venue's zone — the note is a
+        // wall-clock statement about what happened AT the venue.
+        java.time.format.DateTimeFormatter venueTimeFmt =
+            java.time.format.DateTimeFormatter.ofPattern("hh:mm a").withZone(venueZone);
         String checkInDisplay = booking.getActualCheckInTime() != null
-            ? booking.getActualCheckInTime().toLocalTime().format(timeFmt)
-            : booking.getStartTime().format(timeFmt);
+            ? venueTimeFmt.format(booking.getActualCheckInTime().toInstant(ZoneOffset.UTC))
+            : booking.getStartTime().format(java.time.format.DateTimeFormatter.ofPattern("hh:mm a"));
         String note = String.format(
             "Early checkout at %s (checked in %s). Used %s of %s booked.",
-            now.toLocalTime().format(timeFmt), checkInDisplay,
+            venueTimeFmt.format(nowInstant), checkInDisplay,
             usedStr, bookedStr);
 
         booking.setCheckedIn(false);
@@ -2878,7 +3293,7 @@ public class BookingService {
         // explicitly via the BingeService update endpoint).
         Long adminBingeIdForHours = BingeContext.getBingeId();
         if (adminBingeIdForHours != null) {
-            validateWithinOperatingHours(adminBingeIdForHours, request.getStartTime(), durMin);
+            validateWithinOperatingHours(adminBingeIdForHours, request.getBookingDate(), request.getStartTime(), durMin);
         }
 
         // Check for double-booking with existing reservations
@@ -2887,7 +3302,14 @@ public class BookingService {
         if (adminBingeId != null) {
             bookingRepository.acquireSlotLock(slotLockKey(adminBingeId, request.getBookingDate()));
         }
-        if (hasTimeConflict(request.getBookingDate(), startMinute, durMin)) {
+        // Room-aware: only a room-LESS venue is a single space where any overlap conflicts.
+        // A multi-room venue allows concurrent bookings in different rooms (per-room
+        // exclusivity is enforced by resolveRoomAssignment below).
+        boolean adminVenueHasBookableRooms = adminBingeId != null
+            && venueRoomRepository.findByBingeIdOrderBySortOrderAsc(adminBingeId).stream()
+                .anyMatch(r -> r.isActive()
+                    && (r.getStatus() == null || r.getStatus() == com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED));
+        if (!adminVenueHasBookableRooms && hasTimeConflict(request.getBookingDate(), startMinute, durMin)) {
             throw new BusinessException("Selected time slot conflicts with an existing booking");
         }
 
@@ -2900,24 +3322,16 @@ public class BookingService {
         Long adminVenueRoomId = null;
         String adminVenueRoomName = null;
         BigDecimal adminVenueRoomPrice = BigDecimal.ZERO;
-        if (request.getVenueRoomId() != null && adminBingeId != null) {
-            VenueRoom room = venueRoomRepository.findByIdAndBingeId(request.getVenueRoomId(), adminBingeId)
-                .orElseThrow(() -> new BusinessException("Selected room not found"));
-            if (!room.isActive()) throw new BusinessException("Selected room is currently unavailable");
-            if (room.getStatus() != null && room.getStatus() != com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED) {
-                throw new BusinessException("Selected room is not yet approved for bookings");
-            }
-            int roomOccupancy = countRoomBookings(room.getId(), request.getBookingDate(), startMinute, durMin);
-            if (roomOccupancy >= room.getCapacity()) {
-                throw new BusinessException("Selected room '" + room.getName() + "' is fully booked for this time slot");
-            }
-            adminVenueRoomId = room.getId();
-            adminVenueRoomName = room.getName();
-            adminVenueRoomPrice = room.getPriceAddition() != null ? room.getPriceAddition() : BigDecimal.ZERO;
-        } else if (adminBingeId != null) {
-            Binge bingeCfg = bingeRepository.findById(adminBingeId).orElse(null);
-            if (bingeCfg != null && bingeCfg.isRoomSelectionRequired()) {
-                throw new BusinessException("This binge requires a room to be selected before booking");
+        if (adminBingeId != null) {
+            // Same unified assignment as the customer path: explicit room is validated for
+            // availability; "any room" auto-assigns a free exclusive room (so every booking
+            // at a multi-room venue has a room and the per-room check-in guard applies).
+            VenueRoom adminRoom = resolveRoomAssignment(
+                adminBingeId, request.getVenueRoomId(), request.getBookingDate(), startMinute, durMin);
+            if (adminRoom != null) {
+                adminVenueRoomId = adminRoom.getId();
+                adminVenueRoomName = adminRoom.getName();
+                adminVenueRoomPrice = adminRoom.getPriceAddition() != null ? adminRoom.getPriceAddition() : BigDecimal.ZERO;
             }
         }
 
@@ -2946,10 +3360,7 @@ public class BookingService {
         pricingSource = eventPrice.source();
         rateCodeName = eventPrice.rateCodeName();
 
-        BigDecimal durationDecimalHours = BigDecimal.valueOf(durMin)
-            .divide(BigDecimal.valueOf(60), 4, RoundingMode.HALF_UP);
-        BigDecimal baseAmount = eventPrice.basePrice()
-            .add(eventPrice.hourlyRate().multiply(durationDecimalHours).setScale(2, RoundingMode.HALF_UP));
+        BigDecimal baseAmount = PricingService.computeBaseAmount(eventPrice, durMin);
 
         List<BookingAddOn> bookingAddOns = new ArrayList<>();
         BigDecimal addOnTotal = BigDecimal.ZERO;
@@ -2976,8 +3387,7 @@ public class BookingService {
 
         // Guest charge
         int adminGuests = Math.max(request.getNumberOfGuests(), 1);
-        BigDecimal guestAmount = eventPrice.pricePerGuest()
-            .multiply(BigDecimal.valueOf(Math.max(adminGuests - 1, 0)));
+        BigDecimal guestAmount = PricingService.computeGuestAmount(eventPrice, adminGuests);
 
         // Check for admin price overrides
         if (request.getOverrideBaseAmount() != null) {
@@ -3056,7 +3466,7 @@ public class BookingService {
         PaymentStatus payStatus = autoConfirm ? PaymentStatus.SUCCESS : PaymentStatus.PENDING;
 
         // ── Tax computation ────────────────────────────────────
-        TaxContext taxCtxAdmin = buildBookingTaxContext(BingeContext.getBingeId());
+        TaxContext taxCtxAdmin = buildBookingTaxContext(BingeContext.getBingeId(), durMin);
         TaxComputationResult taxResultAdmin = taxService.compute(taxCtxAdmin, totalAmount, baseAmount, addOnTotal, guestAmount);
         BigDecimal subtotalAdmin = totalAmount;
         BigDecimal taxComputedAdmin = taxResultAdmin.getTotalTax() != null ? taxResultAdmin.getTotalTax() : BigDecimal.ZERO;
@@ -3678,6 +4088,107 @@ public class BookingService {
             }).toList();
     }
 
+    /**
+     * Rooms an admin may pick for a specific booking at check-in / room-change. Same as
+     * {@link #getAvailableRooms} but excludes THIS booking's own occupancy, so the room it
+     * already holds reads as available (and can be re-confirmed), and every room free for the
+     * booking's window is offered.
+     */
+    @Transactional(readOnly = true)
+    public List<VenueRoomDto> getAvailableRoomsForBooking(String bookingRef) {
+        Booking booking = getBookingEntity(bookingRef);
+        Long bid = booking.getBingeId();
+        int startMinute = booking.getStartTime().getHour() * 60 + booking.getStartTime().getMinute();
+        int durMin = getEffectiveDurationMinutes(booking);
+        Long currentRoomId = booking.getVenueRoomId();
+        return venueRoomRepository.findByBingeIdAndActiveTrueOrderBySortOrderAsc(bid).stream()
+            .filter(r -> r.getStatus() == null || r.getStatus() == com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED)
+            .map(room -> {
+                int occ = countRoomBookings(room.getId(), booking.getBookingDate(), startMinute, durMin, booking.getId());
+                VenueRoomDto dto = toRoomDto(room);
+                dto.setCurrentOccupancy(occ);
+                // Bookable if free for this window, OR it is the room this booking already holds.
+                dto.setAvailable(occ < Math.max(room.getCapacity(), 1) || room.getId().equals(currentRoomId));
+                return dto;
+            }).toList();
+    }
+
+    /**
+     * Assign / change the physical room for a booking (admin action at or before check-in).
+     * Validates the room is active, approved, and free for the booking's window (excluding the
+     * booking itself). Operational room swap only — it does NOT re-price the booking. The new
+     * room is snapshotted onto the booking so the customer's view reflects it immediately.
+     */
+    @Transactional
+    public BookingDto assignRoomForBooking(String bookingRef, Long venueRoomId) {
+        return assignRoomForBooking(bookingRef, venueRoomId, null);
+    }
+
+    @Transactional
+    public BookingDto assignRoomForBooking(String bookingRef, Long venueRoomId, String remarks) {
+        Booking booking = getBookingEntity(bookingRef);
+        if (venueRoomId == null) {
+            throw new BusinessException("Select a room to assign");
+        }
+        // A room may only be (re)assigned BEFORE check-in, or AFTER an undo-check-in.
+        // Once a party is physically checked into a room, the room is locked to preserve
+        // an accurate occupancy/audit record — the admin must undo the check-in first.
+        // (The check-in flow assigns the room while the booking is still CONFIRMED, i.e.
+        // before checkedIn is set, so it is unaffected by this guard.)
+        if (booking.isCheckedIn()) {
+            throw new BusinessException(
+                "This booking is already checked in — undo the check-in before changing its room.");
+        }
+        VenueRoom room = venueRoomRepository.findByIdAndBingeId(venueRoomId, booking.getBingeId())
+            .orElseThrow(() -> new BusinessException("Selected room not found"));
+        if (!room.isActive()) throw new BusinessException("Selected room is currently unavailable");
+        if (room.getStatus() != null && room.getStatus() != com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED) {
+            throw new BusinessException("Selected room is not yet approved for bookings");
+        }
+        // Serialise room reassignments for this slot with the same advisory lock booking
+        // creation uses, so two admins can't put two parties in one room concurrently.
+        bookingRepository.acquireSlotLock(slotLockKey(booking.getBingeId(), booking.getBookingDate()));
+        Long previousRoomId = booking.getVenueRoomId();
+        String previousRoomName = booking.getVenueRoomName();
+        boolean roomChanged = !room.getId().equals(previousRoomId);
+        // Item 7: CHANGING an already-assigned room requires operator remarks
+        // (recorded in the event log). A first-time assignment stays friction-free.
+        boolean hasRemarks = remarks != null && !remarks.isBlank();
+        if (roomChanged && previousRoomId != null && !hasRemarks) {
+            throw new BusinessException("Remarks are required when changing this booking's room");
+        }
+        if (roomChanged) {
+            int startMinute = booking.getStartTime().getHour() * 60 + booking.getStartTime().getMinute();
+            int durMin = getEffectiveDurationMinutes(booking);
+            int occ = countRoomBookings(room.getId(), booking.getBookingDate(), startMinute, durMin, booking.getId());
+            if (occ >= Math.max(room.getCapacity(), 1)) {
+                throw new BusinessException("Room '" + room.getName() + "' is already occupied for this time slot");
+            }
+        }
+        booking.setVenueRoomId(room.getId());
+        booking.setVenueRoomName(room.getName());
+        bookingRepository.save(booking);
+        log.info("Room reassigned for booking {} -> {} ({})", bookingRef, room.getName(), room.getId());
+
+        // Audit the change in the booking event log so it shows up in the admin timeline
+        // with who did it (actor name/role resolved from the request headers). Only log an
+        // actual change (skip a no-op re-assign of the same room).
+        if (roomChanged) {
+            String actorRole = com.skbingegalaxy.booking.web.RequestContext.currentRole();
+            Long actorId = com.skbingegalaxy.booking.web.RequestContext.currentUserId();
+            String desc = (previousRoomName != null && !previousRoomName.isBlank())
+                ? "Room changed from '" + previousRoomName + "' to '" + room.getName() + "'"
+                : "Room assigned: '" + room.getName() + "'";
+            if (hasRemarks) {
+                desc += " — Remarks: " + remarks.trim();
+            }
+            eventLogService.logEvent(booking, BookingEventType.ROOM_CHANGED,
+                booking.getStatus().name(), actorId,
+                actorRole != null ? actorRole : "ADMIN", desc);
+        }
+        return toDto(booking);
+    }
+
     @Transactional(readOnly = true)
     public List<VenueRoomDto> getAllVenueRooms() {
         Long bid = requireSelectedBinge("managing venue rooms");
@@ -3806,12 +4317,27 @@ public class BookingService {
             .stream().map(this::toRoomBlockDto).toList();
     }
 
+    /**
+     * Every room block across the selected binge — powers the Blocked Dates
+     * calendar, which shows venue-wide closures (availability-service) and
+     * per-room maintenance/hold windows (this store) side by side.
+     */
+    @Transactional(readOnly = true)
+    public java.util.List<com.skbingegalaxy.booking.dto.RoomBlockDto> listAllRoomBlocksForBinge() {
+        Long bid = BingeContext.requireBingeId();
+        List<Long> roomIds = venueRoomRepository.findByBingeIdOrderBySortOrderAsc(bid)
+            .stream().map(VenueRoom::getId).toList();
+        if (roomIds.isEmpty()) return java.util.List.of();
+        return roomBlockRepository.findByRoomIdInOrderByStartAtAsc(roomIds)
+            .stream().map(this::toRoomBlockDto).toList();
+    }
+
     @Transactional
     public com.skbingegalaxy.booking.dto.RoomBlockDto createRoomBlock(
             Long roomId,
             com.skbingegalaxy.booking.dto.RoomBlockSaveRequest req,
             Long actorAdminId) {
-        requireRoomInCurrentBinge(roomId, "creating room block");
+        VenueRoom room = requireRoomInCurrentBinge(roomId, "creating room block");
         if (req.getStartAt() == null || req.getEndAt() == null) {
             throw new com.skbingegalaxy.common.exception.BusinessException(
                 "startAt and endAt are required", org.springframework.http.HttpStatus.BAD_REQUEST);
@@ -3820,6 +4346,10 @@ public class BookingService {
             throw new com.skbingegalaxy.common.exception.BusinessException(
                 "endAt must be after startAt", org.springframework.http.HttpStatus.BAD_REQUEST);
         }
+        // Counted BEFORE the block exists — countRoomBookings would short-circuit
+        // to "full" once the new block covers the slot and miscount.
+        int affected = countBookingsOverlappingWindow(
+            room.getBingeId(), roomId, req.getStartAt(), req.getEndAt());
         com.skbingegalaxy.booking.entity.RoomBlock block = com.skbingegalaxy.booking.entity.RoomBlock.builder()
             .roomId(roomId)
             .startAt(req.getStartAt())
@@ -3828,10 +4358,43 @@ public class BookingService {
             .createdBy(actorAdminId)
             .build();
         block = roomBlockRepository.save(block);
-        log.info("Room block created: room={} window=[{} .. {}] reason='{}' by admin {}",
-            roomId, block.getStartAt(), block.getEndAt(), block.getReason(), actorAdminId);
+        log.info("Room block created: room={} window=[{} .. {}] reason='{}' by admin {} ({} existing booking(s) overlap)",
+            roomId, block.getStartAt(), block.getEndAt(), block.getReason(), actorAdminId, affected);
         publishBlockLifecycle(block, "BLOCKED", com.skbingegalaxy.common.constants.KafkaTopics.ROOM_BLOCKED, actorAdminId);
-        return toRoomBlockDto(block);
+        com.skbingegalaxy.booking.dto.RoomBlockDto dto = toRoomBlockDto(block);
+        dto.setAffectedBookings(affected);
+        return dto;
+    }
+
+    /**
+     * Active bookings on {@code roomId} overlapping [startAt, endAt) — advisory
+     * count surfaced when a block is created, because blocks never cancel
+     * existing bookings (ops must reschedule those by hand). Deliberately does
+     * NOT reuse countRoomBookings: that helper reports "full capacity" whenever
+     * any block covers the slot, which would miscount here.
+     */
+    private int countBookingsOverlappingWindow(Long bingeId, Long roomId,
+            LocalDateTime startAt, LocalDateTime endAt) {
+        int total = 0;
+        LocalDate day = startAt.toLocalDate();
+        // endAt is exclusive: a block ending exactly at midnight doesn't touch that day.
+        LocalDate last = endAt.toLocalTime().equals(java.time.LocalTime.MIDNIGHT)
+            ? endAt.toLocalDate().minusDays(1) : endAt.toLocalDate();
+        for (int guard = 0; !day.isAfter(last) && guard < 62; day = day.plusDays(1), guard++) {
+            int winStart = day.equals(startAt.toLocalDate())
+                ? startAt.getHour() * 60 + startAt.getMinute() : 0;
+            int winEnd = day.equals(endAt.toLocalDate())
+                ? endAt.getHour() * 60 + endAt.getMinute() : 1440;
+            if (winEnd <= winStart) continue;
+            for (Booking b : bookingRepository.findActiveBookingsForReadByBingeAndDate(bingeId, day)) {
+                if (!roomId.equals(b.getVenueRoomId()) || b.getStartTime() == null) continue;
+                int dur = getEffectiveDurationMinutes(b);
+                if (dur == 0) continue;
+                int bs = b.getStartTime().getHour() * 60 + b.getStartTime().getMinute();
+                if (bs < winEnd && bs + dur > winStart) total++;
+            }
+        }
+        return total;
     }
 
     @Transactional
@@ -4007,6 +4570,16 @@ public class BookingService {
     }
 
     /**
+     * Active escalations for the selected binge — the support console's work
+     * queue, so operators see what needs attention without hunting for refs.
+     */
+    @Transactional(readOnly = true)
+    public List<BookingDto> listActiveEscalations() {
+        Long bid = BingeContext.requireBingeId();
+        return toDtos(bookingRepository.findActiveEscalations(bid));
+    }
+
+    /**
      * Set or clear an escalation level on a booking. Pure metadata — no Kafka
      * side-effects beyond the event-log entry — so the support team can
      * filter "L2+ active escalations" in the console.
@@ -4018,6 +4591,11 @@ public class BookingService {
         String normalized = level == null ? "NONE" : level.trim().toUpperCase();
         if (!java.util.Set.of("NONE", "L1", "L2", "L3").contains(normalized)) {
             throw new BusinessException("Invalid escalation level. Use NONE, L1, L2, or L3.");
+        }
+        // Raising / holding an escalation needs a reason the next operator can act
+        // on; clearing to NONE (resolution) may omit it.
+        if (!"NONE".equals(normalized) && (reason == null || reason.isBlank())) {
+            throw new BusinessException("A reason is required when escalating (it becomes the work-queue context)");
         }
         b.setEscalationLevel(normalized);
         b.setEscalationReason(reason != null && reason.length() > 500
@@ -4064,11 +4642,21 @@ public class BookingService {
     }
 
     private void publishBookingEvent(Booking b, String topic) {
+        publishBookingEvent(b, topic, null);
+    }
+
+    /**
+     * @param refundAmount BOOK-004 — only for {@code booking.cancelled}: the
+     *                     collected-money refund the policy owes; payment-service
+     *                     executes it as real gateway refunds.
+     */
+    private void publishBookingEvent(Booking b, String topic, java.math.BigDecimal refundAmount) {
         // Envelope (eventId/version/correlationId/occurredAt) is filled by
         // BookingEventPublisher — see V46 outbox migration. Keeping the
         // builder here means concrete domain fields stay close to the call
         // site for grep-ability.
         BookingEvent event = BookingEvent.builder()
+            .refundAmount(refundAmount)
             .bookingRef(b.getBookingRef())
             .bingeId(b.getBingeId())
             .customerId(b.getCustomerId())
@@ -4082,6 +4670,7 @@ public class BookingService {
             .durationHours(b.getDurationHours())
             .durationMinutes(resolveDurationMinutes(b.getDurationMinutes(), b.getDurationHours()))
             .totalAmount(b.getTotalAmount())
+            .currency(b.getPaymentCurrencyCode() != null ? b.getPaymentCurrencyCode() : "INR")
             .status(b.getStatus().name())
             .specialNotes(b.getSpecialNotes())
             .customerCancellationCutoffMinutes(
@@ -4105,31 +4694,105 @@ public class BookingService {
         }
     }
 
+    /**
+     * Single-row mapper — resolves its own lookup context. List/page paths
+     * MUST go through {@link #toDtos(java.util.List)} instead, which resolves
+     * binges, add-on categories and event categories in ONE query each
+     * (PERF-001: the per-row version made query count grow linearly with page
+     * size).
+     */
     private BookingDto toDto(Booking b) {
-        CancellationPolicyDecision cancelDecision = evaluateCustomerCancellation(b);
-        // Batch-resolve add-on category names in a single IN query to avoid an
-        // N+1 against addon_categories for bookings with many add-ons.
+        Binge binge = b.getBingeId() != null
+            ? bingeRepository.findById(b.getBingeId()).orElse(null)
+            : null;
+        // Per-row add-on category resolution (single IN query for this booking).
         java.util.List<Long> catIds = b.getAddOns().stream()
             .map(ba -> ba.getAddOn() != null ? ba.getAddOn().getCategoryId() : null)
             .filter(java.util.Objects::nonNull)
             .distinct()
             .toList();
-        final java.util.Map<Long, String> catNamesById = catIds.isEmpty()
+        java.util.Map<Long, String> catNamesById = catIds.isEmpty()
             ? java.util.Map.of()
             : addOnCategoryRepository.findAllById(catIds).stream()
                 .collect(java.util.stream.Collectors.toMap(
                     com.skbingegalaxy.booking.entity.AddOnCategory::getId,
                     com.skbingegalaxy.booking.entity.AddOnCategory::getName));
+        java.util.Map<Long, String> eventCatNames = null; // resolved per-row inside the builder
+        return toDto(b, binge, catNamesById, eventCatNames);
+    }
+
+    /** Batch list mapper: bounded query count regardless of list size (PERF-001). */
+    private java.util.List<BookingDto> toDtos(java.util.List<Booking> bookings) {
+        if (bookings == null || bookings.isEmpty()) return java.util.List.of();
+
+        java.util.List<Long> bingeIds = bookings.stream()
+            .map(Booking::getBingeId).filter(java.util.Objects::nonNull).distinct().toList();
+        java.util.Map<Long, Binge> bingesById = bingeIds.isEmpty()
+            ? java.util.Map.of()
+            : bingeRepository.findAllById(bingeIds).stream()
+                .collect(java.util.stream.Collectors.toMap(Binge::getId, binge -> binge));
+
+        java.util.List<Long> addonCatIds = bookings.stream()
+            .flatMap(b -> b.getAddOns().stream())
+            .map(ba -> ba.getAddOn() != null ? ba.getAddOn().getCategoryId() : null)
+            .filter(java.util.Objects::nonNull)
+            .distinct()
+            .toList();
+        java.util.Map<Long, String> addonCatNames = addonCatIds.isEmpty()
+            ? java.util.Map.of()
+            : addOnCategoryRepository.findAllById(addonCatIds).stream()
+                .collect(java.util.stream.Collectors.toMap(
+                    com.skbingegalaxy.booking.entity.AddOnCategory::getId,
+                    com.skbingegalaxy.booking.entity.AddOnCategory::getName));
+
+        java.util.List<Long> eventCatIds = bookings.stream()
+            .map(b -> b.getEventType() != null ? b.getEventType().getCategoryId() : null)
+            .filter(java.util.Objects::nonNull)
+            .distinct()
+            .toList();
+        java.util.Map<Long, String> eventCatNames = eventCatIds.isEmpty()
+            ? java.util.Map.of()
+            : eventCategoryRepository.findAllById(eventCatIds).stream()
+                .collect(java.util.stream.Collectors.toMap(
+                    com.skbingegalaxy.booking.entity.EventCategory::getId,
+                    com.skbingegalaxy.booking.entity.EventCategory::getName));
+
+        return bookings.stream()
+            .map(b -> toDto(b, b.getBingeId() != null ? bingesById.get(b.getBingeId()) : null,
+                addonCatNames, eventCatNames))
+            .toList();
+    }
+
+    /** Page adapter over {@link #toDtos}. */
+    private org.springframework.data.domain.Page<BookingDto> toDtoPage(
+            org.springframework.data.domain.Page<Booking> page) {
+        return new org.springframework.data.domain.PageImpl<>(
+            toDtos(page.getContent()), page.getPageable(), page.getTotalElements());
+    }
+
+    private BookingDto toDto(Booking b, Binge binge,
+                             java.util.Map<Long, String> addonCatNamesById,
+                             java.util.Map<Long, String> eventCatNamesById) {
+        CancellationPolicyDecision cancelDecision = evaluateCustomerCancellation(b, binge);
+        final java.util.Map<Long, String> catNamesById =
+            addonCatNamesById != null ? addonCatNamesById : java.util.Map.of();
         return BookingDto.builder()
             .id(b.getId())
             .bookingRef(b.getBookingRef())
             .bingeId(b.getBingeId())
+            // Venue-local IANA zone so the UI can label bookingDate/startTime unambiguously.
+            // venueClock caches per-binge, so this adds no per-booking DB hit.
+            .venueTimezone(venueClock.zoneOf(b.getBingeId()).getId())
             .customerId(b.getCustomerId())
             .customerName(b.getCustomerName())
             .customerEmail(b.getCustomerEmail())
             .customerPhone(b.getCustomerPhone())
             .customerPhoneCountryCode(b.getCustomerPhoneCountryCode())
-            .eventType(toEventTypeDto(b.getEventType()))
+            .eventType(eventCatNamesById != null
+                ? toEventTypeDto(b.getEventType(),
+                    b.getEventType() != null && b.getEventType().getCategoryId() != null
+                        ? eventCatNamesById.get(b.getEventType().getCategoryId()) : null)
+                : toEventTypeDto(b.getEventType()))
             .bookingDate(b.getBookingDate())
             .startTime(b.getStartTime())
             .durationHours(b.getDurationHours())
@@ -4165,6 +4828,7 @@ public class BookingService {
             .canCustomerCancel(cancelDecision.allowed())
             .customerCancelMessage(cancelDecision.message())
             .cancellationRefundPercentage(cancelDecision.refundPercentage())
+            .paymentExpiresAt(computePaymentExpiresAt(b))
             .pricingSource(b.getPricingSource())
             .rateCodeName(b.getRateCodeName())
             .rescheduleCount(b.getRescheduleCount())
@@ -4181,8 +4845,13 @@ public class BookingService {
             .loyaltyDiscountAmount(b.getLoyaltyDiscountAmount())
             .surgeMultiplier(b.getSurgeMultiplier())
             .surgeLabel(b.getSurgeLabel())
+            .escalationLevel(b.getEscalationLevel())
+            .escalationReason(b.getEscalationReason())
+            .goodwillCredit(b.getGoodwillCredit())
+            .goodwillReason(b.getGoodwillReason())
             .subtotalAmount(b.getSubtotalAmount())
             .taxAmount(b.getTaxAmount())
+            .taxBreakdownJson(b.getTaxBreakdownJson())
             .paymentCurrencyCode(b.getPaymentCurrencyCode())
             .fxRate(b.getFxRate())
             .createdAt(b.getCreatedAt())
@@ -4208,10 +4877,47 @@ public class BookingService {
         return hoursUntilStart >= transferCutoffHours;
     }
 
+    /**
+     * When the payment-timeout saga will auto-release this booking (UTC), or null when
+     * it isn't an unpaid PENDING hold. MUST mirror {@code findStalePendingBookings}
+     * exactly (status PENDING + paymentStatus PENDING, createdAt + timeout) — a countdown
+     * we show the customer has to be the countdown that actually fires. FAILED-payment
+     * bookings are deliberately excluded: the payment-failure saga cancels those directly,
+     * so the timeout scheduler never touches them and a timer would be a lie.
+     */
+    private LocalDateTime computePaymentExpiresAt(Booking b) {
+        if (b.getStatus() == BookingStatus.PENDING
+            && b.getPaymentStatus() == PaymentStatus.PENDING
+            && b.getCreatedAt() != null) {
+            return b.getCreatedAt().plusMinutes(pendingTimeoutMinutes);
+        }
+        return null;
+    }
+
     private CancellationPolicyDecision evaluateCustomerCancellation(Booking booking) {
-        Binge binge = null;
-        if (booking.getBingeId() != null) {
-            binge = bingeRepository.findById(booking.getBingeId()).orElse(null);
+        Binge binge = booking.getBingeId() != null
+            ? bingeRepository.findById(booking.getBingeId()).orElse(null)
+            : null;
+        return evaluateCustomerCancellation(booking, binge);
+    }
+
+    /**
+     * Batch-aware overload (PERF-001): list/page mappers prefetch each distinct
+     * binge ONCE and pass it in, instead of one binge query per booking row.
+     */
+    private CancellationPolicyDecision evaluateCustomerCancellation(Booking booking, Binge binge) {
+        // Industry rule (Ticketmaster / BookMyShow / Airbnb): an UNPAID hold is not a
+        // committed booking. No money has been captured, so the customer may ALWAYS
+        // release it — free of charge — regardless of the venue's cancellation policy,
+        // tiers or cutoffs. Those apply only once payment is involved (SUCCESS /
+        // PARTIALLY_PAID / PARTIALLY_REFUNDED). Without this, a venue that disables
+        // self-cancellation strands customers with accidental unpaid bookings they can
+        // neither pay for nor remove — forcing manual admin contact.
+        if (booking.getStatus() == BookingStatus.PENDING
+            && (booking.getPaymentStatus() == PaymentStatus.PENDING
+                || booking.getPaymentStatus() == PaymentStatus.FAILED)) {
+            return new CancellationPolicyDecision(true,
+                "Free cancellation — no payment has been taken for this booking.", 0);
         }
 
         boolean enabled = binge == null || binge.isCustomerCancellationEnabled();

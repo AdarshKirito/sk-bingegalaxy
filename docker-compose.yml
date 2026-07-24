@@ -1,9 +1,12 @@
 # ── Shared YAML anchors ───────────────────────────────────
 # JVM tuning preset applied to every Java service. Settings chosen for
 # production-grade containerised workloads:
-#   * InitialRAMPercentage=50 + MaxRAMPercentage=75 — committed heap
-#     grows promptly under load, ceiling leaves headroom for native/Netty
-#     direct buffers and metaspace inside the cgroup memory limit.
+#   * Xms/Xmx as fixed values, NOT InitialRAMPercentage/MaxRAMPercentage —
+#     on this Docker Desktop/WSL2 setup the JVM's cgroup memory detection
+#     falls back to /proc/meminfo (the full VM's ~16G), so RAM-percentage
+#     flags size the heap off host memory instead of the container's
+#     `deploy.resources.limits.memory` and OOM-kill almost immediately.
+#     320m/192m fits safely inside the smallest per-service limit (512M).
 #   * UseG1GC + MaxGCPauseMillis=100 — bounded p99 GC pause for tail
 #     latency-sensitive request paths.
 #   * AlwaysPreTouch — pages the heap on startup so the first burst of
@@ -15,8 +18,8 @@
 #   * java.security.egd=/dev/./urandom — avoids the well-known SecureRandom
 #     blocking-entropy stall on container startup.
 x-jvm-opts: &jvm_opts >-
-  -XX:InitialRAMPercentage=50.0
-  -XX:MaxRAMPercentage=75.0
+  -Xms192m
+  -Xmx320m
   -XX:+UseG1GC
   -XX:MaxGCPauseMillis=100
   -XX:+AlwaysPreTouch
@@ -25,6 +28,16 @@ x-jvm-opts: &jvm_opts >-
   -XX:+HeapDumpOnOutOfMemoryError
   -XX:HeapDumpPath=/tmp
   -Djava.security.egd=file:/dev/./urandom
+
+# Container log-size cap applied to every service. The json-file driver rotates at
+# 10 MB and keeps 3 files, so each container's logs can never exceed ~30 MB on disk —
+# bounding a top silent disk-filler. (Build-cache growth is capped separately in
+# ~/.docker/daemon.json builder.gc; volumes hold real data and are not capped here.)
+x-logging: &default_logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 # Hikari connection-pool preset for every Postgres-backed service.
 # Sized for ~100 concurrent VUs across the stack: 20 connections per
@@ -75,6 +88,7 @@ services:
     image: postgres:16-alpine
     container_name: skbg-postgres
     restart: unless-stopped
+    logging: *default_logging
     environment:
       POSTGRES_USER: skbg_admin
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -124,6 +138,7 @@ services:
     image: mongo:7
     container_name: skbg-mongodb
     restart: unless-stopped
+    logging: *default_logging
     environment:
       MONGO_INITDB_ROOT_USERNAME: skbg_admin
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
@@ -144,6 +159,7 @@ services:
     image: redis:7-alpine
     container_name: skbg-redis
     restart: unless-stopped
+    logging: *default_logging
     # tcp-backlog + maxclients sized for gateway Lettuce pool × replicas.
     # maxmemory-policy allkeys-lru protects the rate-limit + session cache
     # from runaway growth under sustained load.
@@ -185,6 +201,7 @@ services:
     image: confluentinc/cp-zookeeper:7.6.0
     container_name: skbg-zookeeper
     restart: unless-stopped
+    logging: *default_logging
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
@@ -211,6 +228,7 @@ services:
     image: confluentinc/cp-kafka:7.6.0
     container_name: skbg-kafka
     restart: unless-stopped
+    logging: *default_logging
     depends_on:
       zookeeper:
         condition: service_healthy
@@ -260,7 +278,8 @@ services:
         for topic in booking.created booking.confirmed booking.cancelled \
                      booking.cash-payment \
                      payment.success payment.failed payment.refunded \
-                     notification.send user.registered password.reset; do
+                     notification.send user.registered password.reset \
+                     user.anonymized; do
           kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
             --topic $$topic --partitions 3 --replication-factor 1
         done
@@ -271,6 +290,7 @@ services:
   zipkin:
     image: openzipkin/zipkin:3.5.1
     restart: unless-stopped
+    logging: *default_logging
     deploy:
       resources:
         limits:
@@ -284,6 +304,7 @@ services:
       dockerfile: discovery-server/Dockerfile
     container_name: skbg-discovery
     restart: unless-stopped
+    logging: *default_logging
     environment:
       EUREKA_PASSWORD: ${EUREKA_PASSWORD}
       JAVA_TOOL_OPTIONS: *jvm_opts
@@ -295,7 +316,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 768M
           cpus: "0.50"
 
   config-server:
@@ -304,6 +325,7 @@ services:
       dockerfile: config-server/Dockerfile
     container_name: skbg-config
     restart: unless-stopped
+    logging: *default_logging
     depends_on:
       discovery-server:
         condition: service_healthy
@@ -329,13 +351,14 @@ services:
       dockerfile: api-gateway/Dockerfile
     container_name: skbg-gateway
     restart: unless-stopped
+    logging: *default_logging
     depends_on:
       config-server:
         condition: service_healthy
       redis:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "8090:8080"
     environment:
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:${EUREKA_PASSWORD}@discovery-server:8761/eureka/
       SPRING_CLOUD_CONFIG_URI: http://config-server:8888
@@ -386,6 +409,7 @@ services:
       dockerfile: auth-service/Dockerfile
     container_name: skbg-auth
     restart: unless-stopped
+    logging: *default_logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -395,11 +419,17 @@ services:
         condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     environment:
       <<: [*hikari_env, *tomcat_env, *kafka_env]
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/auth_db
       SPRING_DATASOURCE_USERNAME: auth_svc
       SPRING_DATASOURCE_PASSWORD: ${AUTH_SVC_PASSWORD:-auth_svc_dev}
+      # Session-revocation denylist shared with the API gateway.
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       SPRING_JPA_HIBERNATE_DDL_AUTO: validate
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:${EUREKA_PASSWORD}@discovery-server:8761/eureka/
       SPRING_CLOUD_CONFIG_URI: http://config-server:8888
@@ -407,10 +437,29 @@ services:
       SPRING_CLOUD_CONFIG_PASSWORD: ${CONFIG_SERVER_PASSWORD}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       JWT_SECRET: ${JWT_SECRET}
+      # Shared service-to-service secret consumed by InternalApiAuthFilter so
+      # other services (booking/payment/availability) can call auth's
+      # /internal/** endpoints (e.g. authority-lock lookups). Without this the
+      # config placeholder `${INTERNAL_API_SECRET:?...}` silently resolves to a
+      # bogus DEFAULT under Spring (':' is Spring's default separator, not the
+      # bash fail-if-unset operator), causing every internal call to 403.
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       # Local compose runs over HTTP, so secure cookies must be opt-in.
       COOKIE_SECURE: "${COOKIE_SECURE:-false}"
+      # Super-admin MFA enforcement. Defaults to FALSE for local compose so the
+      # seeded super-admin can log in after a `down -v` DB wipe (which erases any
+      # prior TOTP enrolment — otherwise there is no way to enrol the first admin).
+      # Set SUPER_ADMIN_REQUIRE_MFA=true in .env for production-like security;
+      # the auth-service code default is `true` when the var is absent entirely.
+      SUPER_ADMIN_REQUIRE_MFA: "${SUPER_ADMIN_REQUIRE_MFA:-false}"
+      # AES-256 key (base64, 32 bytes) encrypting TOTP secrets at rest. When empty
+      # the key is derived from JWT_SECRET — still encrypted, but then rotating
+      # JWT_SECRET makes enrolled TOTP secrets undecryptable. Set explicitly in prod.
+      CRYPTO_SECRET_KEY: "${CRYPTO_SECRET_KEY:-}"
+      TOTP_MAX_FAILED_ATTEMPTS: "${TOTP_MAX_FAILED_ATTEMPTS:-5}"
+      TOTP_LOCK_MINUTES: "${TOTP_LOCK_MINUTES:-15}"
       JAVA_TOOL_OPTIONS: *jvm_opts
     deploy:
       resources:
@@ -424,6 +473,7 @@ services:
       dockerfile: availability-service/Dockerfile
     container_name: skbg-availability
     restart: unless-stopped
+    logging: *default_logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -453,6 +503,7 @@ services:
       dockerfile: booking-service/Dockerfile
     container_name: skbg-booking
     restart: unless-stopped
+    logging: *default_logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -487,6 +538,7 @@ services:
       dockerfile: payment-service/Dockerfile
     container_name: skbg-payment
     restart: unless-stopped
+    logging: *default_logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -515,6 +567,14 @@ services:
       RAZORPAY_KEY_ID: "${RAZORPAY_KEY_ID}"
       RAZORPAY_KEY_SECRET: "${RAZORPAY_KEY_SECRET}"
       RAZORPAY_WEBHOOK_SECRET: "${RAZORPAY_WEBHOOK_SECRET:-}"
+      # Stripe Connect — optional. Empty secret key keeps Stripe dormant (the
+      # provider advertises no currencies, so the registry never routes to it).
+      STRIPE_SECRET_KEY: "${STRIPE_SECRET_KEY:-}"
+      STRIPE_PUBLISHABLE_KEY: "${STRIPE_PUBLISHABLE_KEY:-}"
+      STRIPE_WEBHOOK_SECRET: "${STRIPE_WEBHOOK_SECRET:-}"
+      STRIPE_APPLICATION_FEE_BPS: "${STRIPE_APPLICATION_FEE_BPS:-0}"
+      STRIPE_ONBOARDING_RETURN_URL: "${STRIPE_ONBOARDING_RETURN_URL:-http://localhost:5173/admin/binges}"
+      STRIPE_ONBOARDING_REFRESH_URL: "${STRIPE_ONBOARDING_REFRESH_URL:-http://localhost:5173/admin/binges}"
       JAVA_TOOL_OPTIONS: *jvm_opts
     deploy:
       resources:
@@ -528,6 +588,7 @@ services:
       dockerfile: notification-service/Dockerfile
     container_name: skbg-notification
     restart: unless-stopped
+    logging: *default_logging
     depends_on:
       mongodb:
         condition: service_healthy
@@ -559,6 +620,9 @@ services:
       TWILIO_SMS_FROM: "${TWILIO_SMS_FROM:-}"
       TWILIO_WHATSAPP_FROM: "${TWILIO_WHATSAPP_FROM:-}"
       FCM_CREDENTIALS_PATH: "${FCM_CREDENTIALS_PATH:-}"
+      # VAPID keys are required (config has no default) — boot fails without them.
+      WEBPUSH_PUBLIC_KEY: "${WEBPUSH_PUBLIC_KEY}"
+      WEBPUSH_PRIVATE_KEY: "${WEBPUSH_PRIVATE_KEY}"
       NOTIFICATION_UNSUBSCRIBE_URL: "${NOTIFICATION_UNSUBSCRIBE_URL:-http://localhost:3000/account/notifications}"
       REMINDER_CHECK_INTERVAL_MS: "${REMINDER_CHECK_INTERVAL_MS:-60000}"
       JAVA_TOOL_OPTIONS: *jvm_opts
@@ -576,6 +640,7 @@ services:
         VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
     container_name: skbg-frontend
     restart: unless-stopped
+    logging: *default_logging
     ports:
       - "3000:8080"
     depends_on:

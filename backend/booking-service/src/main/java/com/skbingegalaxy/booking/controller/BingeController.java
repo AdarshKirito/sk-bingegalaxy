@@ -134,13 +134,47 @@ public class BingeController {
     }
 
     // ── Super-Admin: approve a pending binge ──────────────────────────
+    // Optional body {"taxesEnabled": bool, "disabledModules": [..], "accessRemarks": ".."}
+    // — the approval dialog confirms the venue's timezone + currency, records the
+    // super-admin's tax decision, AND sets which binge-operation modules the owning
+    // admin may use from day one (V71 permission matrix; unlisted modules stay enabled).
     @PostMapping("/admin/binges/{id}/approve")
     public ResponseEntity<ApiResponse<BingeDto>> approveBinge(
             @PathVariable Long id,
+            @RequestBody(required = false) java.util.Map<String, Object> body,
             @RequestHeader("X-User-Id") Long superAdminId,
             @RequestHeader("X-User-Role") String role) {
+        Boolean taxesEnabled = null;
+        java.util.List<String> disabledModules = null;
+        String accessRemarks = null;
+        String timezoneOverride = null;
+        String countryOverride = null;
+        if (body != null) {
+            if (body.get("taxesEnabled") instanceof Boolean b) taxesEnabled = b;
+            if (body.get("timezone") instanceof String tz && !tz.isBlank()) timezoneOverride = tz;
+            if (body.get("country") instanceof String c && !c.isBlank()) countryOverride = c;
+            if (body.get("disabledModules") instanceof java.util.List<?> list) {
+                disabledModules = list.stream().map(String::valueOf).toList();
+            }
+            if (body.get("accessRemarks") instanceof String s && !s.isBlank()) accessRemarks = s;
+        }
         return ResponseEntity.ok(ApiResponse.ok(
-            "Binge approved", bingeService.approveBinge(id, superAdminId, role)));
+            "Binge approved",
+            bingeService.approveBinge(id, superAdminId, role, taxesEnabled, disabledModules,
+                accessRemarks, timezoneOverride, countryOverride)));
+    }
+
+    // ── Super-Admin: master tax switch for a venue ─────────────────────
+    @PatchMapping("/admin/binges/{id}/taxes-enabled")
+    public ResponseEntity<ApiResponse<BingeDto>> setTaxesEnabled(
+            @PathVariable Long id,
+            @RequestBody java.util.Map<String, Object> body,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String role) {
+        boolean enabled = body != null && Boolean.TRUE.equals(body.get("enabled"));
+        return ResponseEntity.ok(ApiResponse.ok(
+            "Venue taxes " + (enabled ? "enabled" : "disabled"),
+            bingeService.setTaxesEnabled(id, enabled, userId, role)));
     }
 
     // ── Super-Admin: reject a pending binge ────────────────────────────
@@ -161,6 +195,16 @@ public class BingeController {
         private String reason;
     }
 
+    // ── Admin: re-request approval for a rejected binge ────────────────
+    @PostMapping("/admin/binges/{id}/resubmit")
+    public ResponseEntity<ApiResponse<BingeDto>> resubmitBinge(
+            @PathVariable Long id,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        return ResponseEntity.ok(ApiResponse.ok(
+            "Binge re-submitted for approval", bingeService.resubmitBinge(id, adminId, role)));
+    }
+
     // ── Admin: update binge ──────────────────────────────────
     @PutMapping("/admin/binges/{id}")
     public ResponseEntity<ApiResponse<BingeDto>> updateBinge(
@@ -173,6 +217,119 @@ public class BingeController {
         // NOT a native super-admin — timezone changes still require an explicit grant.
         boolean delegated = "true".equalsIgnoreCase(delegatedHeader);
         return ResponseEntity.ok(ApiResponse.ok("Binge updated", bingeService.updateBinge(id, request, adminId, role, delegated)));
+    }
+
+    /**
+     * A regular admin requests that a super-admin move this binge to a different country
+     * (which re-derives its currency). Persists a PENDING change request (audit trail)
+     * and notifies super-admins, who approve/reject from the review panel.
+     * Body: {@code {"country":"US","reason":"..."}}.
+     */
+    @PostMapping("/admin/binges/{id}/country-request")
+    public ResponseEntity<ApiResponse<com.skbingegalaxy.booking.dto.BingeChangeRequestDto>> requestCountryChange(
+            @PathVariable Long id,
+            @RequestBody java.util.Map<String, String> body,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        var dto = bingeService.requestCountryChange(id,
+            body == null ? null : body.get("country"),
+            body == null ? null : body.get("reason"),
+            adminId, role);
+        return ResponseEntity.ok(ApiResponse.ok(
+            "Country-change request sent to super-admins for review", dto));
+    }
+
+    /**
+     * A regular admin reports that this venue's auto-derived timezone is wrong.
+     * The admin cannot set the zone directly (the picker is read-only for them);
+     * this raises a PENDING review for a super-admin to resolve.
+     * Body: {@code {"timezone":"America/New_York" (optional suggestion), "reason":"..."}}.
+     */
+    @PostMapping("/admin/binges/{id}/timezone-request")
+    public ResponseEntity<ApiResponse<com.skbingegalaxy.booking.dto.BingeChangeRequestDto>> requestTimezoneChange(
+            @PathVariable Long id,
+            @RequestBody java.util.Map<String, String> body,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        var dto = bingeService.requestTimezoneChange(id,
+            body == null ? null : body.get("timezone"),
+            body == null ? null : body.get("reason"),
+            adminId, role);
+        return ResponseEntity.ok(ApiResponse.ok(
+            "Timezone review sent to super-admins for resolution", dto));
+    }
+
+    // ── Binge change requests (country-change state machine) ─────────────
+    // Gateway already requires ADMIN/SUPER_ADMIN for /admin/**; the service layer
+    // additionally scopes admins to their own requests and gates decisions to
+    // SUPER_ADMIN (requireSuperAdminRole) — defence in depth like the rest of
+    // this controller.
+
+    /** Super-admin: all requests (optional ?status=PENDING). Admin: own requests. */
+    @GetMapping("/admin/binges/change-requests")
+    public ResponseEntity<ApiResponse<java.util.List<com.skbingegalaxy.booking.dto.BingeChangeRequestDto>>> listChangeRequests(
+            @RequestParam(required = false) String status,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String role) {
+        return ResponseEntity.ok(ApiResponse.ok(bingeService.listChangeRequests(userId, role, status)));
+    }
+
+    /** SUPER-ADMIN: approve — applies country+currency atomically and notifies the requester. */
+    @PostMapping("/admin/binges/change-requests/{requestId}/approve")
+    public ResponseEntity<ApiResponse<com.skbingegalaxy.booking.dto.BingeChangeRequestDto>> approveChangeRequest(
+            @PathVariable Long requestId,
+            @RequestBody(required = false) java.util.Map<String, String> body,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String role) {
+        return ResponseEntity.ok(ApiResponse.ok("Change request approved",
+            bingeService.approveChangeRequest(requestId, userId, role,
+                body == null ? null : body.get("note"),
+                // For a timezone review the super-admin sends the zone to apply here.
+                body == null ? null : body.get("timezone"))));
+    }
+
+    /** SUPER-ADMIN: reject with an optional note; the requester is notified. */
+    @PostMapping("/admin/binges/change-requests/{requestId}/reject")
+    public ResponseEntity<ApiResponse<com.skbingegalaxy.booking.dto.BingeChangeRequestDto>> rejectChangeRequest(
+            @PathVariable Long requestId,
+            @RequestBody(required = false) java.util.Map<String, String> body,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String role) {
+        return ResponseEntity.ok(ApiResponse.ok("Change request rejected",
+            bingeService.rejectChangeRequest(requestId, userId, role,
+                body == null ? null : body.get("note"))));
+    }
+
+    /** Requester (or super-admin) withdraws a pending request. */
+    @PostMapping("/admin/binges/change-requests/{requestId}/cancel")
+    public ResponseEntity<ApiResponse<com.skbingegalaxy.booking.dto.BingeChangeRequestDto>> cancelChangeRequest(
+            @PathVariable Long requestId,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String role) {
+        return ResponseEntity.ok(ApiResponse.ok("Change request cancelled",
+            bingeService.cancelChangeRequest(requestId, userId, role)));
+    }
+
+    // ── Native Super-Admin only: bulk-assign a timezone to many venues ──
+    // Unlike updateBinge above, this console is intentionally NOT delegable —
+    // Authority-Handover grants (even X-Authority-Delegated=true SUPER_ADMIN) are
+    // rejected outright rather than falling through to the per-binge grant check,
+    // matching the page-level access rule ("only super admin").
+    @PostMapping("/admin/binges/bulk-timezone")
+    public ResponseEntity<ApiResponse<BulkBingeTimezoneAssignResult>> bulkAssignTimezone(
+            @Valid @RequestBody BulkBingeTimezoneAssignRequest request,
+            @RequestHeader("X-User-Role") String role,
+            @RequestHeader(value = "X-Authority-Delegated", required = false) String delegatedHeader) {
+        boolean delegated = "true".equalsIgnoreCase(delegatedHeader);
+        if (!"SUPER_ADMIN".equalsIgnoreCase(role) || delegated) {
+            throw new com.skbingegalaxy.common.exception.BusinessException(
+                "Only a native super-admin can bulk-assign venue timezones", HttpStatus.FORBIDDEN);
+        }
+        BulkBingeTimezoneAssignResult result = bingeService.bulkAssignTimezone(request, role, delegated);
+        String message = result.getNotFoundBingeIds().isEmpty()
+            ? result.getUpdatedCount() + " venue(s) updated"
+            : result.getUpdatedCount() + " venue(s) updated, " + result.getNotFoundBingeIds().size() + " not found";
+        return ResponseEntity.ok(ApiResponse.ok(message, result));
     }
 
     @GetMapping("/admin/binges/{id}/customer-dashboard")

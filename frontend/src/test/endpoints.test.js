@@ -192,10 +192,16 @@ describe('paymentService', () => {
     expect(api.get).toHaveBeenCalledWith('/payments/booking/BK-001');
   });
 
-  it('getMyPayments calls GET /payments/my', async () => {
+  it('getMyPayments calls GET /payments/my with paging params (FE-001)', async () => {
     api.get.mockResolvedValue({ data: {} });
-    await paymentService.getMyPayments();
-    expect(api.get).toHaveBeenCalledWith('/payments/my');
+    await paymentService.getMyPayments({ page: 2, size: 20 });
+    expect(api.get).toHaveBeenCalledWith('/payments/my', { params: { page: 2, size: 20 } });
+  });
+
+  it('getMyPaymentsSummary calls GET /payments/my/summary (FE-001 lifetime totals)', async () => {
+    api.get.mockResolvedValue({ data: {} });
+    await paymentService.getMyPaymentsSummary();
+    expect(api.get).toHaveBeenCalledWith('/payments/my/summary');
   });
 
   it('cancelPayment calls POST /payments/cancel/:txnId', async () => {

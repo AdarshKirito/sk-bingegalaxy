@@ -30,6 +30,27 @@ public interface BookingReviewRepository extends JpaRepository<BookingReview, Lo
     @Query("SELECT r.rating, COUNT(r) FROM BookingReview r WHERE r.bingeId = :bingeId AND r.reviewerRole = 'CUSTOMER' AND r.skipped = false AND r.rating IS NOT NULL GROUP BY r.rating ORDER BY r.rating DESC")
     List<Object[]> ratingDistribution(@Param("bingeId") Long bingeId);
 
+    // ── Room-level: reviews derived from bookings that occupied a specific room ──
+    // A booking carries venueRoomId, so a room's rating is the aggregate of customer
+    // reviews left on bookings held in that room. No separate room-review table needed.
+    @Query("SELECT r FROM BookingReview r WHERE r.booking.venueRoomId = :roomId "
+         + "AND r.reviewerRole = 'CUSTOMER' AND r.skipped = false "
+         + "AND r.visibleToCustomer = true AND r.rating IS NOT NULL")
+    Page<BookingReview> findRoomCustomerReviews(@Param("roomId") Long roomId, Pageable pageable);
+
+    @Query("SELECT COUNT(r) FROM BookingReview r WHERE r.booking.venueRoomId = :roomId "
+         + "AND r.reviewerRole = 'CUSTOMER' AND r.skipped = false AND r.rating IS NOT NULL")
+    long countRoomCustomerReviews(@Param("roomId") Long roomId);
+
+    @Query("SELECT COALESCE(AVG(r.rating), 0) FROM BookingReview r WHERE r.booking.venueRoomId = :roomId "
+         + "AND r.reviewerRole = 'CUSTOMER' AND r.skipped = false AND r.rating IS NOT NULL")
+    double averageRoomRating(@Param("roomId") Long roomId);
+
+    @Query("SELECT r.rating, COUNT(r) FROM BookingReview r WHERE r.booking.venueRoomId = :roomId "
+         + "AND r.reviewerRole = 'CUSTOMER' AND r.skipped = false AND r.rating IS NOT NULL "
+         + "GROUP BY r.rating ORDER BY r.rating DESC")
+    List<Object[]> roomRatingDistribution(@Param("roomId") Long roomId);
+
     // Admin-level: all customer reviews for a specific customer across binges
     Page<BookingReview> findByCustomerIdAndReviewerRoleAndSkippedFalseAndRatingIsNotNull(
         Long customerId, String reviewerRole, Pageable pageable);

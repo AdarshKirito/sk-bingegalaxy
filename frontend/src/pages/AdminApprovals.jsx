@@ -182,7 +182,7 @@ export default function AdminApprovals() {
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.4rem', flexWrap: 'wrap' }}>
                       <strong>#{req.id}</strong>
                       <span style={{ color: 'var(--text-secondary)' }}>·</span>
-                      <strong style={{ color: 'var(--primary)' }}>{req.actionType}</strong>
+                      <strong style={{ color: 'var(--primary-text)' }}>{req.actionType}</strong>
                       <StatusPill s={req.status} />
                       {own && <span style={{
                         background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b',

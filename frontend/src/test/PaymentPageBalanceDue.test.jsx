@@ -99,7 +99,8 @@ describe('PaymentPage balance-due behavior', () => {
     renderPaymentRoute();
 
     await waitFor(() => {
-      expect(screen.getByText('Outstanding balance of ₹200')).toBeInTheDocument();
+      // Intl currency formatting always shows minor units ("₹200.00").
+      expect(screen.getByText('Outstanding balance of ₹200.00')).toBeInTheDocument();
     });
 
     expect(screen.getByRole('button', { name: /Pay Outstanding Balance ₹200/i })).toBeInTheDocument();

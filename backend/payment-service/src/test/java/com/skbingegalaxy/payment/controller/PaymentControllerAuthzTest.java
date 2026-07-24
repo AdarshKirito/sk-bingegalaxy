@@ -49,7 +49,14 @@ class PaymentControllerAuthzTest {
     @MockBean private PaymentBingeScopeService scopeService;
     @MockBean private com.skbingegalaxy.payment.service.IdempotencyService idempotencyService;
     @MockBean private DisputeWebhookService disputeWebhookService;
+    @MockBean private com.skbingegalaxy.payment.service.RefundWebhookService refundWebhookService;
     @MockBean private DisputeAdminService disputeAdminService;
+    // Stripe Connect collaborators on PaymentController. This is a @WebMvcTest
+    // slice, so every controller dependency must be mocked explicitly or the
+    // ApplicationContext fails to construct the controller at all.
+    @MockBean private com.skbingegalaxy.payment.service.ConnectedAccountService connectedAccountService;
+    @MockBean private com.skbingegalaxy.payment.client.StripeGatewayClient stripeGatewayClient;
+    @MockBean private com.skbingegalaxy.payment.service.WebhookDedupService webhookDedupService;
 
     private PaymentDto paymentOwnedBy42;
 

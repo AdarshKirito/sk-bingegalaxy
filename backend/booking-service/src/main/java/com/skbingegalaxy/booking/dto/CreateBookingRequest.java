@@ -52,13 +52,13 @@ public class CreateBookingRequest {
     private Long redeemLoyaltyPoints;
 
     /**
-     * Optional FX rate lock token obtained from POST /checkout/lock-fx.
-     * When supplied, the locked rate is validated and consumed atomically at
-     * booking creation — if the lock has expired the request is rejected with
-     * 400 "FX rate has expired, please refresh your quote".
-     * International customers should always supply this to guarantee price
-     * stability between the checkout preview and payment.
+     * Optional pre-payment slot-hold token from POST /bookings/slot-holds.
+     * When supplied, the hold is validated (ownership, matching slot) and
+     * consumed atomically inside the booking transaction, and the hold's
+     * reservation transfers to the booking. Without it, the booking is a
+     * direct booking and must win the slot against any live foreign holds.
      */
-    @Size(max = 64, message = "FX lock token too long")
-    private String fxLockToken;
+    @Size(max = 64, message = "Hold token too long")
+    private String holdToken;
+
 }

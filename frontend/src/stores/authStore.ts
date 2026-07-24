@@ -24,7 +24,7 @@ interface AuthState {
   effectiveAuthority: EffectiveAuthority | null;
   _setAuth: (userData: User, token?: string) => void;
   refreshAuthority: () => Promise<void>;
-  login: (credentials: { email: string; password: string; mfaCode?: string }) => Promise<{ user: User; mfaRequired?: boolean }>;
+  login: (credentials: { email: string; password: string; mfaCode?: string }) => Promise<{ user: User; mfaRequired?: boolean; mustChangePassword?: boolean }>;
   adminLogin: (credentials: { email: string; password: string; mfaCode?: string }) => Promise<{ user: User; mfaRequired?: boolean }>;
   register: (data: Record<string, unknown>) => Promise<User>;
   googleLogin: (credential: string) => Promise<User>;
@@ -48,7 +48,15 @@ const useAuthStore = create<AuthState>((set, get) => {
   if (storedUser) {
     api.get('/auth/profile').then(res => {
       const userData = res.data?.data;
-      if (userData) {
+      if (userData && userData.mustChangePassword) {
+        // Lingering temporary-password session — don't finalize; force re-auth so
+        // the user completes the password change (gateway blocks everything else).
+        localStorage.removeItem('user');
+        set({ user: null, isAuthenticated: false, isAdmin: false, isSuperAdmin: false, effectiveAuthority: null, loading: false });
+        if (typeof window !== 'undefined' && !window.location.pathname.endsWith('/login')) {
+          window.location.href = '/login';
+        }
+      } else if (userData) {
         get()._setAuth(userData);
         set({ loading: false });
         get().refreshAuthority();
@@ -138,6 +146,12 @@ const useAuthStore = create<AuthState>((set, get) => {
     if (data?.mfaRequired) {
       return { user: data.user, mfaRequired: true };
     }
+    if (data?.mustChangePassword) {
+      // Signed in with an admin-issued temporary password. The backend has a
+      // session cookie set, but we intentionally do NOT finalize local auth —
+      // the caller must force a password change first, then re-login.
+      return { user: data.user, mustChangePassword: true };
+    }
     const { user: userData, token } = data;
     get()._setAuth(userData, token);
     return { user: userData };
@@ -192,6 +206,12 @@ const useAuthStore = create<AuthState>((set, get) => {
     localStorage.removeItem('selectedBinge');
     localStorage.removeItem('token_exp');
     set({ user: null, isAuthenticated: false, isAdmin: false, isSuperAdmin: false, effectiveAuthority: null });
+    // SEC-009: drop any service-worker runtime API cache from older SW builds
+    // so the next identity on this device can never be served this user's
+    // cached responses. Best-effort — the current SW caches no API responses.
+    try {
+      if (typeof caches !== 'undefined') await caches.delete('api-cache');
+    } catch (_) { /* best-effort */ }
     // Clear httpOnly cookies via backend
     try { await api.post('/auth/logout'); } catch (_) { /* best-effort */ }
   },

@@ -26,7 +26,10 @@ const parseTime = (timeStr) => {
   return h * 60 + (m || 0);
 };
 
-const emptyForm = { name: '', dayOfWeek: '', startMinute: 1080, endMinute: 1380, multiplier: 1.5, label: '' };
+const emptyForm = {
+  name: '', dayOfWeek: '', startMinute: 1080, endMinute: 1380, multiplier: 1.5, label: '',
+  dateFrom: '', dateTo: '', leadTimeMaxHours: '', leadTimeMinHours: '', occupancyThresholdPct: '', priority: 100,
+};
 
 export default function AdminSurgeRules() {
   const [rules, setRules] = useState([]);
@@ -64,6 +67,12 @@ export default function AdminSurgeRules() {
       endMinute: rule.endMinute ?? 1440,
       multiplier: Number(rule.multiplier ?? 1.5),
       label: rule.label || '',
+      dateFrom: rule.dateFrom || '',
+      dateTo: rule.dateTo || '',
+      leadTimeMaxHours: rule.leadTimeMaxHours ?? '',
+      leadTimeMinHours: rule.leadTimeMinHours ?? '',
+      occupancyThresholdPct: rule.occupancyThresholdPct ?? '',
+      priority: rule.priority ?? 100,
     });
     setShowForm(true);
   };
@@ -72,8 +81,9 @@ export default function AdminSurgeRules() {
     e.preventDefault();
     if (saving) return;
     if (!form.name.trim()) { toast.error('Rule name is required'); return; }
-    if (!Number.isFinite(form.multiplier) || form.multiplier < 1 || form.multiplier > 5) { toast.error('Multiplier must be a number between 1.0 and 5.0'); return; }
+    if (!Number.isFinite(form.multiplier) || form.multiplier < 0.1 || form.multiplier > 5) { toast.error('Multiplier must be a number between 0.1 and 5.0'); return; }
     if (Number(form.startMinute) >= Number(form.endMinute)) { toast.error('End time must be after start time'); return; }
+    if (form.dateFrom && form.dateTo && form.dateFrom > form.dateTo) { toast.error('Date from must be on or before date to'); return; }
     setSaving(true);
     const payload = {
       ...form,
@@ -81,6 +91,12 @@ export default function AdminSurgeRules() {
       startMinute: Number(form.startMinute),
       endMinute: Number(form.endMinute),
       multiplier: Number(form.multiplier),
+      dateFrom: form.dateFrom || null,
+      dateTo: form.dateTo || null,
+      leadTimeMaxHours: form.leadTimeMaxHours === '' ? null : Number(form.leadTimeMaxHours),
+      leadTimeMinHours: form.leadTimeMinHours === '' ? null : Number(form.leadTimeMinHours),
+      occupancyThresholdPct: form.occupancyThresholdPct === '' ? null : Number(form.occupancyThresholdPct),
+      priority: Number(form.priority) || 100,
     };
     try {
       if (editId) {
@@ -130,7 +146,11 @@ export default function AdminSurgeRules() {
       <div className="adm-page-header">
         <div>
           <h1><FiZap style={{ verticalAlign: '-2px' }} /> Surge Pricing Rules</h1>
-          <p>Define time-based pricing multipliers. When a booking falls within a surge window, the highest matching multiplier applies to the total.</p>
+          <p>
+            Dynamic pricing rules: time windows, seasonal dates, last-minute premiums, early-bird
+            discounts (multiplier below 1), and demand triggers that fire once a date is X% booked.
+            When several rules match, the lowest priority number wins (ties go to the strongest multiplier).
+          </p>
         </div>
         <button className="btn btn-primary" onClick={() => showForm ? resetForm() : setShowForm(true)}>
           {showForm ? <><FiX /> Cancel</> : <><FiPlus /> Add Rule</>}
@@ -162,14 +182,47 @@ export default function AdminSurgeRules() {
                 <input type="time" value={fmtTime(form.endMinute)} onChange={(e) => setForm({ ...form, endMinute: parseTime(e.target.value) })} />
               </div>
               <div className="input-group">
-                <label>Multiplier (1.0 – 5.0)</label>
-                <input type="number" step="0.1" min="1" max="5" value={form.multiplier} onChange={(e) => setForm({ ...form, multiplier: Number(e.target.value) || '' })} />
-                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>e.g., 1.5 = 50% price increase</span>
+                <label>Multiplier (0.1 – 5.0)</label>
+                <input type="number" step="0.05" min="0.1" max="5" value={form.multiplier} onChange={(e) => setForm({ ...form, multiplier: Number(e.target.value) || '' })} />
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>1.5 = 50% premium · 0.9 = 10% early-bird discount</span>
               </div>
               <div className="input-group">
                 <label>Display Label</label>
                 <input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="e.g., Peak Hours" />
                 <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Shown to customers during booking</span>
+              </div>
+              <div className="input-group">
+                <label>Date From (optional)</label>
+                <input type="date" value={form.dateFrom} onChange={(e) => setForm({ ...form, dateFrom: e.target.value })} />
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Seasonal/event window start (e.g. festival week)</span>
+              </div>
+              <div className="input-group">
+                <label>Date To (optional)</label>
+                <input type="date" value={form.dateTo} onChange={(e) => setForm({ ...form, dateTo: e.target.value })} />
+              </div>
+              <div className="input-group">
+                <label>Last-minute window (hours)</label>
+                <input type="number" min="0" max="8760" value={form.leadTimeMaxHours}
+                  onChange={(e) => setForm({ ...form, leadTimeMaxHours: e.target.value })} placeholder="e.g. 6" />
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Applies only when the slot starts within X hours (last-minute premium)</span>
+              </div>
+              <div className="input-group">
+                <label>Early-bird floor (hours)</label>
+                <input type="number" min="0" max="8760" value={form.leadTimeMinHours}
+                  onChange={(e) => setForm({ ...form, leadTimeMinHours: e.target.value })} placeholder="e.g. 168" />
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Applies only when booked at least X hours ahead — pair with a &lt;1 multiplier for a discount</span>
+              </div>
+              <div className="input-group">
+                <label>Demand trigger (% booked)</label>
+                <input type="number" min="1" max="100" value={form.occupancyThresholdPct}
+                  onChange={(e) => setForm({ ...form, occupancyThresholdPct: e.target.value })} placeholder="e.g. 70" />
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Applies only once the date is at least X% occupied (leave blank = always)</span>
+              </div>
+              <div className="input-group">
+                <label>Priority</label>
+                <input type="number" min="1" max="1000" value={form.priority}
+                  onChange={(e) => setForm({ ...form, priority: e.target.value })} />
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>When rules overlap, the lowest number wins (ties → strongest multiplier)</span>
               </div>
             </div>
             <div className="adm-form-actions">
@@ -193,6 +246,7 @@ export default function AdminSurgeRules() {
                 <th>Rule</th>
                 <th>Day</th>
                 <th>Window</th>
+                <th>Triggers</th>
                 <th>Multiplier</th>
                 <th>Label</th>
                 <th>Status</th>
@@ -202,12 +256,24 @@ export default function AdminSurgeRules() {
             <tbody>
               {rules.map(rule => (
                 <tr key={rule.id} className={rule.active ? '' : 'adm-row-inactive'}>
-                  <td><strong>{rule.name}</strong></td>
+                  <td>
+                    <strong>{rule.name}</strong>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>priority {rule.priority ?? 100}</div>
+                  </td>
                   <td>{dayLabel(rule.dayOfWeek)}</td>
                   <td>{fmtTime(rule.startMinute)} – {fmtTime(rule.endMinute)}</td>
+                  <td style={{ fontSize: '0.78rem' }}>
+                    {(rule.dateFrom || rule.dateTo) && (
+                      <div title="Seasonal/event window">📅 {rule.dateFrom || '…'} → {rule.dateTo || '…'}</div>
+                    )}
+                    {rule.leadTimeMaxHours != null && <div title="Last-minute premium">⏱ within {rule.leadTimeMaxHours}h of start</div>}
+                    {rule.leadTimeMinHours != null && <div title="Early-bird window">🐦 booked ≥ {rule.leadTimeMinHours}h ahead</div>}
+                    {rule.occupancyThresholdPct != null && <div title="Demand trigger">📈 ≥ {rule.occupancyThresholdPct}% booked</div>}
+                    {!rule.dateFrom && !rule.dateTo && rule.leadTimeMaxHours == null && rule.leadTimeMinHours == null && rule.occupancyThresholdPct == null && '—'}
+                  </td>
                   <td>
-                    <span style={{ fontWeight: 700, color: rule.multiplier > 1 ? '#d97706' : 'inherit' }}>
-                      {Number(rule.multiplier).toFixed(1)}×
+                    <span style={{ fontWeight: 700, color: rule.multiplier > 1 ? '#d97706' : rule.multiplier < 1 ? '#059669' : 'inherit' }}>
+                      {Number(rule.multiplier).toFixed(2)}×
                     </span>
                   </td>
                   <td>{rule.label || '—'}</td>

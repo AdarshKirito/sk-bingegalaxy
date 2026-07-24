@@ -5,6 +5,7 @@ import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
@@ -26,6 +27,18 @@ public class TaxRule {
 
     public enum AppliesTo { TOTAL, BASE, ADDONS, GUEST }
 
+    /**
+     * How the tax amount is computed:
+     * <ul>
+     *   <li>{@code PERCENT} — {@code rateBps} applied to the {@code appliesTo} base.</li>
+     *   <li>{@code FLAT_PER_BOOKING} — {@code flatAmount} charged once per reservation
+     *       (e.g. a county amusement fee).</li>
+     *   <li>{@code FLAT_PER_HOUR} — {@code flatAmount} × booked hours, rounded up
+     *       (hourly-venue equivalent of a per-night occupancy tax).</li>
+     * </ul>
+     */
+    public enum CalcMethod { PERCENT, FLAT_PER_BOOKING, FLAT_PER_HOUR }
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -40,9 +53,18 @@ public class TaxRule {
     @Column(length = 500)
     private String description;
 
-    /** Tax rate in basis points: 1800 = 18.00%. */
+    /** Tax rate in basis points: 1800 = 18.00%. Meaningful for PERCENT rules; 0 for flat rules. */
     @Column(name = "rate_bps", nullable = false)
     private Integer rateBps;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "calc_method", nullable = false, length = 20)
+    @Builder.Default
+    private CalcMethod calcMethod = CalcMethod.PERCENT;
+
+    /** Flat charge in the binge's currency — required for FLAT_* rules, ignored for PERCENT. */
+    @Column(name = "flat_amount", precision = 12, scale = 2)
+    private BigDecimal flatAmount;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "applies_to", nullable = false, length = 20)

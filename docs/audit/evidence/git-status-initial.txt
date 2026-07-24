@@ -1,0 +1,337 @@
+﻿ M .claude/settings.local.json
+ M .gitignore
+ M backend/api-gateway/Dockerfile
+ M backend/api-gateway/src/main/java/com/skbingegalaxy/gateway/filter/CsrfProtectionFilter.java
+ M backend/api-gateway/src/main/java/com/skbingegalaxy/gateway/filter/JwtAuthenticationFilter.java
+ M backend/api-gateway/src/main/java/com/skbingegalaxy/gateway/filter/UserRateLimitFilter.java
+ M backend/api-gateway/src/test/java/com/skbingegalaxy/gateway/filter/JwtAuthenticationFilterTest.java
+ M backend/auth-service/Dockerfile
+ M backend/auth-service/pom.xml
+ M backend/auth-service/src/main/java/com/skbingegalaxy/auth/config/GoogleAuthConfig.java
+ M backend/auth-service/src/main/java/com/skbingegalaxy/auth/controller/AuthController.java
+ M backend/auth-service/src/main/java/com/skbingegalaxy/auth/dto/AdminCreateCustomerRequest.java
+ M backend/auth-service/src/main/java/com/skbingegalaxy/auth/dto/AuthResponse.java
+ M backend/auth-service/src/main/java/com/skbingegalaxy/auth/dto/UserDto.java
+ M backend/auth-service/src/main/java/com/skbingegalaxy/auth/entity/EmailVerificationToken.java
+ M backend/auth-service/src/main/java/com/skbingegalaxy/auth/entity/SiteContent.java
+ M backend/auth-service/src/main/java/com/skbingegalaxy/auth/entity/User.java
+ M backend/auth-service/src/main/java/com/skbingegalaxy/auth/repository/UserRepository.java
+ M backend/auth-service/src/main/java/com/skbingegalaxy/auth/security/JwtProvider.java
+ M backend/auth-service/src/main/java/com/skbingegalaxy/auth/security/SecurityConfig.java
+ M backend/auth-service/src/main/java/com/skbingegalaxy/auth/service/AuthAuditService.java
+ M backend/auth-service/src/main/java/com/skbingegalaxy/auth/service/AuthService.java
+ M backend/auth-service/src/main/java/com/skbingegalaxy/auth/service/EmailVerificationService.java
+ M backend/auth-service/src/main/java/com/skbingegalaxy/auth/service/UserSessionService.java
+ M backend/auth-service/src/main/resources/application.yml
+ M backend/auth-service/src/test/java/com/skbingegalaxy/auth/controller/AuthControllerTest.java
+ M backend/auth-service/src/test/java/com/skbingegalaxy/auth/service/AuthServiceTest.java
+ M backend/availability-service/Dockerfile
+ M backend/availability-service/src/main/java/com/skbingegalaxy/availability/client/BookingBingeClient.java
+ M backend/availability-service/src/main/java/com/skbingegalaxy/availability/client/BookingBingeClientFallback.java
+ M backend/availability-service/src/main/java/com/skbingegalaxy/availability/controller/AvailabilityController.java
+ M backend/availability-service/src/main/java/com/skbingegalaxy/availability/dto/BookingBingeDto.java
+ M backend/availability-service/src/main/java/com/skbingegalaxy/availability/dto/DayAvailabilityDto.java
+ M backend/availability-service/src/main/java/com/skbingegalaxy/availability/entity/BlockedDate.java
+ M backend/availability-service/src/main/java/com/skbingegalaxy/availability/entity/BlockedSlot.java
+ M backend/availability-service/src/main/java/com/skbingegalaxy/availability/repository/BlockedDateRepository.java
+ M backend/availability-service/src/main/java/com/skbingegalaxy/availability/repository/BlockedSlotRepository.java
+ M backend/availability-service/src/main/java/com/skbingegalaxy/availability/service/AvailabilityBingeScopeService.java
+ M backend/availability-service/src/main/java/com/skbingegalaxy/availability/service/AvailabilityService.java
+ M backend/availability-service/src/main/resources/application.yml
+ M backend/availability-service/src/test/java/com/skbingegalaxy/availability/service/AvailabilityBingeScopeServiceTest.java
+ M backend/availability-service/src/test/java/com/skbingegalaxy/availability/service/AvailabilityServiceTest.java
+ M backend/booking-service/Dockerfile
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/config/AuthorityLockInterceptor.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/config/DataSeeder.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/config/KafkaConfig.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/config/SecurityConfig.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/controller/AdminBookingController.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/controller/AdminCurrencyController.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/controller/AdminNotificationController.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/controller/AdminPricingController.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/controller/AdminSseController.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/controller/AdminSupportController.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/controller/AdminTaxController.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/controller/BingeController.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/controller/BookingController.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/controller/CheckoutController.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/controller/InternalBookingController.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/controller/PublicTaxController.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/dto/AdminNotificationDto.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/dto/BingeDto.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/dto/BingeSaveRequest.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/dto/BookedSlotDto.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/dto/BookingDto.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/dto/CancellationPolicyDto.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/dto/PublicBingeDto.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/dto/RoomBlockDto.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/dto/SurgePricingRuleDto.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/dto/SurgePricingRuleSaveRequest.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/dto/TaxComputationResult.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/dto/TaxRuleDto.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/entity/AdminNotification.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/entity/Binge.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/entity/BingeSiteContent.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/entity/BookingEventType.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/entity/SurgePricingRule.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/entity/TaxRule.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/listener/PaymentEventListener.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/loyalty/v2/LoyaltyV2Constants.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/loyalty/v2/config/LoyaltyBindingAutoSeeder.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/loyalty/v2/controller/LoyaltyV2AdminController.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/loyalty/v2/controller/LoyaltyV2CustomerController.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/loyalty/v2/controller/LoyaltyV2SuperAdminController.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/loyalty/v2/engine/EarnEngine.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/loyalty/v2/entity/LoyaltyBingeBinding.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/loyalty/v2/event/LoyaltyV2BookingListener.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/loyalty/v2/repository/LoyaltyLedgerEntryRepository.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/loyalty/v2/service/LoyaltyMemberService.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/repository/AdminNotificationRepository.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/repository/BookingRepository.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/repository/BookingReviewRepository.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/scheduler/NoShowAutomationScheduler.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/scheduler/OutboxPublisher.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/service/AdminNotificationService.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/service/AuthorityLockGuard.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/service/BingeService.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/service/BookingEventLogService.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/service/BookingService.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/service/CheckInService.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/service/CheckoutQuoteService.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/service/CurrencyService.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/service/FxLockService.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/service/InvoicePdfService.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/service/PricingService.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/service/TaxService.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/tax/provider/InternalTaxProvider.java
+ M backend/booking-service/src/main/java/com/skbingegalaxy/booking/tax/provider/TaxContext.java
+ M backend/booking-service/src/main/resources/application.yml
+ M backend/booking-service/src/test/java/com/skbingegalaxy/booking/controller/AdminTaxControllerAuthzTest.java
+ M backend/booking-service/src/test/java/com/skbingegalaxy/booking/listener/PaymentEventListenerTest.java
+ M backend/booking-service/src/test/java/com/skbingegalaxy/booking/loyalty/v2/event/LoyaltyV2BookingListenerTest.java
+ M backend/booking-service/src/test/java/com/skbingegalaxy/booking/scheduler/NoShowAutomationSchedulerTest.java
+ M backend/booking-service/src/test/java/com/skbingegalaxy/booking/scheduler/OutboxPublisherTest.java
+ M backend/booking-service/src/test/java/com/skbingegalaxy/booking/service/AuthorityLockGuardTest.java
+ M backend/booking-service/src/test/java/com/skbingegalaxy/booking/service/BingeServiceTest.java
+ M backend/booking-service/src/test/java/com/skbingegalaxy/booking/service/BookingCheckoutAndRevenueTest.java
+ M backend/booking-service/src/test/java/com/skbingegalaxy/booking/service/BookingServiceLifecycleTest.java
+ M backend/booking-service/src/test/java/com/skbingegalaxy/booking/service/BookingServiceTest.java
+ M backend/booking-service/src/test/java/com/skbingegalaxy/booking/service/CheckoutQuoteServiceTest.java
+ M backend/common-lib/pom.xml
+ M backend/common-lib/src/main/java/com/skbingegalaxy/common/config/KafkaDlqErrorHandlerConfig.java
+ M backend/common-lib/src/main/java/com/skbingegalaxy/common/context/BingeContext.java
+ M backend/common-lib/src/main/java/com/skbingegalaxy/common/event/BookingEvent.java
+ M backend/common-lib/src/test/java/com/skbingegalaxy/common/config/KafkaDlqErrorHandlerConfigTest.java
+ M backend/common-lib/src/test/java/com/skbingegalaxy/common/context/BingeContextTest.java
+ M backend/common-lib/src/test/java/com/skbingegalaxy/common/money/MoneyUtilTest.java
+ M backend/config-server/Dockerfile
+ M backend/config-server/src/main/resources/configurations/api-gateway.yml
+ M backend/config-server/src/main/resources/configurations/auth-service.yml
+ M backend/config-server/src/main/resources/configurations/availability-service.yml
+ M backend/config-server/src/main/resources/configurations/booking-service.yml
+ M backend/config-server/src/main/resources/configurations/notification-service.yml
+ M backend/config-server/src/main/resources/configurations/payment-service.yml
+ M backend/discovery-server/Dockerfile
+ M backend/notification-service/Dockerfile
+ M backend/notification-service/pom.xml
+ M backend/notification-service/src/main/java/com/skbingegalaxy/notification/config/KafkaConfig.java
+ M backend/notification-service/src/main/java/com/skbingegalaxy/notification/controller/DeliveryWebhookController.java
+ M backend/notification-service/src/main/java/com/skbingegalaxy/notification/listener/EventListener.java
+ M backend/notification-service/src/main/java/com/skbingegalaxy/notification/service/NotificationService.java
+ M backend/notification-service/src/test/java/com/skbingegalaxy/notification/controller/DeliveryWebhookControllerTest.java
+ M backend/notification-service/src/test/java/com/skbingegalaxy/notification/service/NotificationServiceTest.java
+ M backend/payment-service/Dockerfile
+ M backend/payment-service/src/main/java/com/skbingegalaxy/payment/client/BookingBingeClient.java
+ M backend/payment-service/src/main/java/com/skbingegalaxy/payment/client/BookingBingeClientFallback.java
+ M backend/payment-service/src/main/java/com/skbingegalaxy/payment/client/RazorpayGatewayClient.java
+ M backend/payment-service/src/main/java/com/skbingegalaxy/payment/config/KafkaConfig.java
+ M backend/payment-service/src/main/java/com/skbingegalaxy/payment/controller/PaymentController.java
+ M backend/payment-service/src/main/java/com/skbingegalaxy/payment/dto/BookingBingeDto.java
+ M backend/payment-service/src/main/java/com/skbingegalaxy/payment/service/AdminApprovalService.java
+ M backend/payment-service/src/main/java/com/skbingegalaxy/payment/service/PaymentBingeScopeService.java
+ M backend/payment-service/src/main/java/com/skbingegalaxy/payment/service/PaymentService.java
+ M backend/payment-service/src/main/resources/application.yml
+ M backend/payment-service/src/test/java/com/skbingegalaxy/payment/service/PaymentBingeScopeServiceTest.java
+ M docker-compose.yml
+ M frontend/.dockerignore
+ M frontend/Dockerfile
+ M frontend/nginx.conf
+ M frontend/package-lock.json
+ M frontend/src/App.jsx
+ D frontend/src/components/CurrencySwitcher.jsx
+ M frontend/src/components/CustomerReviewsDrawer.jsx
+ M frontend/src/components/Navbar.jsx
+ M frontend/src/components/NotificationsBell.css
+ M frontend/src/components/NotificationsBell.jsx
+ M frontend/src/components/PWAUpdatePrompt.jsx
+ M frontend/src/components/admin/BingeLoyaltySection.jsx
+ M frontend/src/components/booking/BookingWizard.jsx
+ M frontend/src/components/booking/SlotSuggestionsPanel.jsx
+ M frontend/src/components/booking/StepAddOns.jsx
+ M frontend/src/components/booking/StepCustomer.jsx
+ M frontend/src/components/booking/StepDateTime.jsx
+ M frontend/src/components/booking/StepEvent.jsx
+ M frontend/src/components/booking/StepReview.jsx
+ M frontend/src/components/form/FormFields.css
+ M frontend/src/components/form/PhoneField.jsx
+ M frontend/src/components/form/VenueCoordinatesField.jsx
+ D frontend/src/context/CurrencyContext.jsx
+ M frontend/src/index.css
+ M frontend/src/main.jsx
+ M frontend/src/pages/AboutBinge.jsx
+ M frontend/src/pages/AccountCenter.jsx
+ M frontend/src/pages/AdminAccount.jsx
+ M frontend/src/pages/AdminAllUsers.jsx
+ M frontend/src/pages/AdminBlockedDates.jsx
+ M frontend/src/pages/AdminBookingCreate.jsx
+ M frontend/src/pages/AdminBookings.jsx
+ M frontend/src/pages/AdminCurrencies.jsx
+ M frontend/src/pages/AdminCustomerEdit.jsx
+ M frontend/src/pages/AdminCustomerPricing.jsx
+ M frontend/src/pages/AdminDashboard.jsx
+ M frontend/src/pages/AdminEntranceDashboard.jsx
+ M frontend/src/pages/AdminEventTypes.jsx
+ M frontend/src/pages/AdminFailedRefunds.jsx
+ M frontend/src/pages/AdminLoyaltyCenter.jsx
+ M frontend/src/pages/AdminOps.jsx
+ M frontend/src/pages/AdminRateCodes.jsx
+ M frontend/src/pages/AdminRegister.jsx
+ M frontend/src/pages/AdminReports.jsx
+ M frontend/src/pages/AdminRiskFlags.jsx
+ M frontend/src/pages/AdminSupportConsole.jsx
+ M frontend/src/pages/AdminSurgeRules.jsx
+ M frontend/src/pages/AdminTaxes.jsx
+ M frontend/src/pages/AdminUsersConfig.jsx
+ M frontend/src/pages/AdminVenueRooms.jsx
+ M frontend/src/pages/AdminWaitlist.jsx
+ M frontend/src/pages/AuthorityHandover.jsx
+ M frontend/src/pages/BingeManagement.jsx
+ M frontend/src/pages/BingeSelector.jsx
+ M frontend/src/pages/BookingConfirmation.jsx
+ M frontend/src/pages/CustomerNotifications.jsx
+ M frontend/src/pages/CustomerPayments.jsx
+ M frontend/src/pages/CustomerSettings.jsx
+ M frontend/src/pages/Dashboard.jsx
+ M frontend/src/pages/Home.jsx
+ M frontend/src/pages/Login.jsx
+ M frontend/src/pages/Membership.jsx
+ M frontend/src/pages/MyBookings.jsx
+ M frontend/src/pages/MySessions.jsx
+ M frontend/src/pages/PaymentPage.jsx
+ M frontend/src/pages/PlatformDashboard.jsx
+ M frontend/src/pages/Register.jsx
+ M frontend/src/pages/SuperAdminDashboard.jsx
+ M frontend/src/services/api.js
+ M frontend/src/services/endpoints.js
+ M frontend/src/services/exportUtils.js
+ M frontend/src/services/loyaltyV2.js
+ M frontend/src/services/timeFormat.js
+ M frontend/src/stores/authStore.ts
+ M frontend/src/stores/bingeStore.ts
+ M frontend/src/test/AdminBlockedDates.test.jsx
+ M frontend/src/test/AdminBookings.test.jsx
+ M frontend/src/test/BingeSelectorNearby.test.jsx
+ M frontend/src/test/PaymentPageBalanceDue.test.jsx
+ M frontend/src/test/bingeStore.test.js
+ M frontend/src/types/index.ts
+ M frontend/src/utils/format.js
+ M frontend/vite.config.js
+?? .ca-patch/
+?? .claude/settings.json
+?? avg-root-ca.crt
+?? backend/api-gateway/src/test/java/com/skbingegalaxy/gateway/filter/CsrfProtectionFilterTest.java
+?? backend/auth-service/src/main/java/com/skbingegalaxy/auth/client/
+?? backend/auth-service/src/main/java/com/skbingegalaxy/auth/controller/InternalUserController.java
+?? backend/auth-service/src/main/java/com/skbingegalaxy/auth/service/SessionRevocationCache.java
+?? backend/auth-service/src/main/resources/db/migration/V16__temp_password_onboarding.sql
+?? backend/auth-service/src/main/resources/db/migration/V17__seed_legal_terms_content.sql
+?? backend/auth-service/src/main/resources/db/migration/V18__guest_customer_profiles.sql
+?? backend/auth-service/src/main/resources/db/migration/V19__email_change_verification.sql
+?? backend/availability-service/src/main/java/com/skbingegalaxy/availability/client/InternalApiFeignConfig.java
+?? backend/availability-service/src/main/java/com/skbingegalaxy/availability/config/ClockConfig.java
+?? backend/availability-service/src/main/java/com/skbingegalaxy/availability/dto/BingeDayHoursDto.java
+?? backend/booking-service/src/main/java/com/skbingegalaxy/booking/config/AuthorityLockWebConfig.java
+?? backend/booking-service/src/main/java/com/skbingegalaxy/booking/config/TaxRuleAutoSeeder.java
+?? backend/booking-service/src/main/java/com/skbingegalaxy/booking/controller/MessageAttachmentController.java
+?? backend/booking-service/src/main/java/com/skbingegalaxy/booking/controller/MyNotificationController.java
+?? backend/booking-service/src/main/java/com/skbingegalaxy/booking/dto/BingeChangeRequestDto.java
+?? backend/booking-service/src/main/java/com/skbingegalaxy/booking/dto/BingeDayHours.java
+?? backend/booking-service/src/main/java/com/skbingegalaxy/booking/dto/BulkBingeTimezoneAssignRequest.java
+?? backend/booking-service/src/main/java/com/skbingegalaxy/booking/dto/BulkBingeTimezoneAssignResult.java
+?? backend/booking-service/src/main/java/com/skbingegalaxy/booking/dto/InternalBingeDto.java
+?? backend/booking-service/src/main/java/com/skbingegalaxy/booking/entity/BingeChangeRequest.java
+?? backend/booking-service/src/main/java/com/skbingegalaxy/booking/fx/
+?? backend/booking-service/src/main/java/com/skbingegalaxy/booking/loyalty/v2/entity/LoyaltyCountryEarnConfig.java
+?? backend/booking-service/src/main/java/com/skbingegalaxy/booking/loyalty/v2/repository/LoyaltyCountryEarnConfigRepository.java
+?? backend/booking-service/src/main/java/com/skbingegalaxy/booking/permission/
+?? backend/booking-service/src/main/java/com/skbingegalaxy/booking/repository/BingeChangeRequestRepository.java
+?? backend/booking-service/src/main/java/com/skbingegalaxy/booking/scheduler/FxRateRefreshScheduler.java
+?? backend/booking-service/src/main/java/com/skbingegalaxy/booking/service/FxRateRefreshService.java
+?? backend/booking-service/src/main/java/com/skbingegalaxy/booking/util/CountryCurrency.java
+?? backend/booking-service/src/main/java/com/skbingegalaxy/booking/util/CountryTaxDefaults.java
+?? backend/booking-service/src/main/java/com/skbingegalaxy/booking/util/CountryTimezoneDefaults.java
+?? backend/booking-service/src/main/java/com/skbingegalaxy/booking/util/OpeningHoursCodec.java
+?? backend/booking-service/src/main/resources/db/migration/V65__admin_notifications_messaging.sql
+?? backend/booking-service/src/main/resources/db/migration/V66__binge_per_day_opening_hours.sql
+?? backend/booking-service/src/main/resources/db/migration/V67__admin_notifications_attachment.sql
+?? backend/booking-service/src/main/resources/db/migration/V68__binge_currency.sql
+?? backend/booking-service/src/main/resources/db/migration/V69__unpaid_limit_and_change_requests.sql
+?? backend/booking-service/src/main/resources/db/migration/V70__binge_taxes_enabled.sql
+?? backend/booking-service/src/main/resources/db/migration/V71__binge_module_permissions.sql
+?? backend/booking-service/src/main/resources/db/migration/V72__tax_rule_calc_method.sql
+?? backend/booking-service/src/main/resources/db/migration/V73__loyalty_country_config_and_goodwill.sql
+?? backend/booking-service/src/main/resources/db/migration/V74__surge_rules_production_grade.sql
+?? backend/booking-service/src/test/java/com/skbingegalaxy/booking/config/
+?? backend/booking-service/src/test/java/com/skbingegalaxy/booking/service/FxLockServiceTest.java
+?? backend/common-lib/src/main/java/com/skbingegalaxy/common/config/KafkaDlqProperties.java
+?? backend/common-lib/src/main/java/com/skbingegalaxy/common/exception/MissingBingeContextException.java
+?? backend/common-lib/src/test/java/com/skbingegalaxy/common/enums/
+?? backend/notification-service/src/main/java/com/skbingegalaxy/notification/config/WebPushConfig.java
+?? backend/notification-service/src/main/java/com/skbingegalaxy/notification/controller/PushSubscriptionController.java
+?? backend/notification-service/src/main/java/com/skbingegalaxy/notification/dto/PushSubscriptionRequest.java
+?? backend/notification-service/src/main/java/com/skbingegalaxy/notification/model/PushSubscription.java
+?? backend/notification-service/src/main/java/com/skbingegalaxy/notification/repository/PushSubscriptionRepository.java
+?? backend/notification-service/src/main/java/com/skbingegalaxy/notification/service/WebPushService.java
+?? backend/payment-service/src/main/java/com/skbingegalaxy/payment/client/InternalApiFeignConfig.java
+?? backend/payment-service/src/test/java/com/skbingegalaxy/payment/service/AdminApprovalServiceTest.java
+?? build_log.txt
+?? docs/audit/
+?? frontend/_home.png
+?? frontend/_shot.mjs
+?? frontend/public/push-sw.js
+?? frontend/src/components/CustomerMessagesBell.jsx
+?? frontend/src/components/MessageAttachment.css
+?? frontend/src/components/MessageAttachment.jsx
+?? frontend/src/components/PushToggle.css
+?? frontend/src/components/PushToggle.jsx
+?? frontend/src/components/RecipientPicker.css
+?? frontend/src/components/RecipientPicker.jsx
+?? frontend/src/components/TaxBreakdown.jsx
+?? frontend/src/components/TimezonePicker.jsx
+?? frontend/src/components/VenueTimeNote.css
+?? frontend/src/components/VenueTimeNote.jsx
+?? frontend/src/components/account/
+?? frontend/src/components/booking/RoomDetailModal.css
+?? frontend/src/components/booking/RoomDetailModal.jsx
+?? frontend/src/components/form/OperatingHoursField.jsx
+?? frontend/src/content/legalContent.js
+?? frontend/src/hooks/useModuleAccess.js
+?? frontend/src/hooks/useVenueLocale.js
+?? frontend/src/pages/AdminBingeAbout.jsx
+?? frontend/src/pages/AdminCurrencies.css
+?? frontend/src/pages/AdminMessages.css
+?? frontend/src/pages/AdminMessages.jsx
+?? frontend/src/pages/AdminTermsEditor.jsx
+?? frontend/src/pages/AdminVenueTimezones.css
+?? frontend/src/pages/AdminVenueTimezones.jsx
+?? frontend/src/pages/CustomerMessages.jsx
+?? frontend/src/pages/Terms.jsx
+?? frontend/src/pages/TransferAccept.jsx
+?? frontend/src/services/push.js
+?? frontend/src/styles/
+?? frontend/src/utils/currency.js
+?? frontend/src/utils/timezoneGuess.js
+?? frontend/src/utils/venueLocale.js
+?? rebuild.ps1
+?? rebuild.sh
+e3edbc1b5b11c11b7826ae18e2f8246aec076a9f Sat Jun 20 16:44:50 2026 -0500 test(binge): execution-level coverage for the proximity bounding-box queries

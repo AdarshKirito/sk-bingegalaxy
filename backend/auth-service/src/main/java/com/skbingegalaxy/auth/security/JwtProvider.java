@@ -99,6 +99,18 @@ public class JwtProvider {
         return buildToken(user, jwtExpirationMs, "access", Collections.emptySet());
     }
 
+    /**
+     * Access token bound to a server-side session row via the {@code sid} claim.
+     * The gateway checks {@code sid} against the Redis revocation denylist on every
+     * request, so force-revoking a session kills its access tokens immediately
+     * instead of waiting out the 15-minute expiry. {@code sid} is stable across
+     * refresh rotations (the session row is reused), so every access token ever
+     * minted for the session dies with one revocation.
+     */
+    public String generateToken(User user, Long sessionId) {
+        return buildToken(user, jwtExpirationMs, "access", Collections.emptySet(), 0L, sessionId);
+    }
+
     public String generateRefreshToken(User user) {
         return buildToken(user, refreshExpirationMs, "refresh", Collections.emptySet());
     }
@@ -120,6 +132,11 @@ public class JwtProvider {
         return buildToken(user, jwtExpirationMs, "access", delegatedScopes, delegationExpiresAtMillis);
     }
 
+    /** Delegation-scoped access token additionally bound to a session row (see {@link #generateToken(User, Long)}). */
+    public String generateToken(User user, Set<AuthorityScope> delegatedScopes, long delegationExpiresAtMillis, Long sessionId) {
+        return buildToken(user, jwtExpirationMs, "access", delegatedScopes, delegationExpiresAtMillis, sessionId);
+    }
+
     public String generateRefreshToken(User user, Set<AuthorityScope> delegatedScopes, long delegationExpiresAtMillis) {
         return buildToken(user, refreshExpirationMs, "refresh", delegatedScopes, delegationExpiresAtMillis);
     }
@@ -130,13 +147,37 @@ public class JwtProvider {
 
     private String buildToken(User user, long expirationMs, String tokenType,
                               Set<AuthorityScope> delegatedScopes, long delegationExpiresAtMillis) {
+        return buildToken(user, expirationMs, tokenType, delegatedScopes, delegationExpiresAtMillis, null);
+    }
+
+    private String buildToken(User user, long expirationMs, String tokenType,
+                              Set<AuthorityScope> delegatedScopes, long delegationExpiresAtMillis,
+                              Long sessionId) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("email", user.getEmail());
         claims.put("role", user.getRole().name());
         claims.put("firstName", user.getFirstName());
+        // Full-name propagation: the gateway builds X-User-Name from BOTH name
+        // parts, so downstream customer-name snapshots (bookings, holds, payments,
+        // waitlist) stop collapsing users to an ambiguous first name.
+        claims.put("lastName", user.getLastName());
         claims.put("phone", user.getPhone());
         claims.put("phoneCountryCode", user.getPhoneCountryCode());
         claims.put("token_type", tokenType);
+        // Session binding: lets the gateway kill this token the moment its session
+        // row is revoked (Redis denylist keyed by sid). Absent on legacy tokens,
+        // which simply age out on their 15-minute expiry.
+        if (sessionId != null) {
+            claims.put("sid", sessionId);
+        }
+        // Restricted-session marker: a token minted while the account still holds an
+        // admin-issued temporary password. The gateway hard-limits such tokens to the
+        // change-password / logout / profile surface (server-side forced rotation),
+        // so the flag can't be bypassed by a hand-crafted API client. Cleared
+        // automatically once the user sets a real password (mustChangePassword=false).
+        if (user.isMustChangePassword()) {
+            claims.put("mustChangePassword", true);
+        }
 
         if (delegatedScopes != null && !delegatedScopes.isEmpty()) {
             // Comma-joined string keeps JWT compact and avoids Jackson List<Enum> quirks

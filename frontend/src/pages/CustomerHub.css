@@ -55,7 +55,7 @@
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--primary);
+  color: var(--primary-text);
   padding: 0.42rem 0.78rem;
   border-radius: 999px;
   border: 1px solid rgba(var(--gold-rgb), 0.18);
@@ -160,7 +160,7 @@
   height: 42px;
   border-radius: 14px;
   background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.14), rgba(var(--accent-rgb), 0.06));
-  color: var(--primary);
+  color: var(--primary-text);
   box-shadow: inset 0 0 0 1px rgba(var(--primary-rgb), 0.12);
 }
 
@@ -343,7 +343,7 @@
 }
 
 .customer-hub-search:focus-within svg {
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 /* Keyboard shortcut hint badge ("/" — like GitHub / Linear / Slack) */
@@ -395,7 +395,7 @@
 .customer-hub-search-clear:hover,
 .customer-hub-search-clear:focus-visible {
   background: rgba(var(--primary-rgb), 0.12);
-  color: var(--primary);
+  color: var(--primary-text);
   outline: none;
 }
 
@@ -440,7 +440,7 @@
 }
 
 .customer-hub-select[data-active="true"] svg {
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 [data-theme="dark"] .customer-hub-select[data-active="true"] {
@@ -531,7 +531,7 @@
   padding: 0.75rem 0.9rem;
   border-radius: 16px;
   background: rgba(220, 38, 38, 0.08);
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .customer-mini-grid {
@@ -683,7 +683,7 @@
   border: none;
   padding: 0.3rem 0.6rem;
   border-radius: 8px;
-  color: var(--primary);
+  color: var(--primary-text);
   font-weight: 600;
   font-size: 0.85rem;
   cursor: pointer;
@@ -766,7 +766,7 @@
   height: 48px;
   border-radius: 16px;
   background: rgba(var(--primary-rgb), 0.1);
-  color: var(--primary);
+  color: var(--primary-text);
   font-size: 1.15rem;
 }
 
@@ -840,7 +840,7 @@
 
 .customer-account-support-link svg {
   margin-top: 0.1rem;
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .customer-account-support-link span,
@@ -1016,7 +1016,7 @@
   border-radius: 999px;
   border: 1px solid rgba(var(--gold-rgb), 0.18);
   background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.08), rgba(var(--gold-rgb), 0.05));
-  color: var(--primary);
+  color: var(--primary-text);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.14em;
@@ -1198,7 +1198,7 @@
   height: 60px;
   border-radius: 20px;
   background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.16), rgba(var(--accent-rgb), 0.06));
-  color: var(--primary);
+  color: var(--primary-text);
   font-size: 1.55rem;
   box-shadow: inset 0 0 0 1px rgba(var(--primary-rgb), 0.12);
 }
@@ -1289,13 +1289,13 @@
   height: 34px;
   border-radius: 12px;
   background: rgba(var(--primary-rgb), 0.1);
-  color: var(--primary);
+  color: var(--primary-text);
   flex-shrink: 0;
 }
 
 .customer-flow-stage--complete .customer-flow-stage-icon {
   background: rgba(var(--success-rgb), 0.12);
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .customer-flow-stage small {
@@ -1469,7 +1469,7 @@
   height: 34px;
   border-radius: 12px;
   background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.16), rgba(var(--accent-rgb), 0.08));
-  color: var(--primary);
+  color: var(--primary-text);
   font-weight: 700;
   flex-shrink: 0;
 }
@@ -1560,7 +1560,7 @@
   flex-shrink: 0;
   border-radius: 12px;
   background: rgba(var(--primary-rgb), 0.12);
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .venue-locate-copy strong {
@@ -1614,7 +1614,7 @@
   padding: 0.18rem 0.55rem;
   border-radius: 999px;
   background: rgba(var(--primary-rgb), 0.12);
-  color: var(--primary);
+  color: var(--primary-text);
   font-size: 0.78rem;
   font-weight: 600;
   white-space: nowrap;

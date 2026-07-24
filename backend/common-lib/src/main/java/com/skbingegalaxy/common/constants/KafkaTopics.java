@@ -21,6 +21,8 @@ public final class KafkaTopics {
     public static final String NOTIFICATION_SEND = "notification.send";
     public static final String USER_REGISTERED   = "user.registered";
     public static final String PASSWORD_RESET    = "password.reset";
+    /** Right-to-erasure fan-out: every service holding a PII copy redacts on receipt. */
+    public static final String USER_ANONYMIZED   = "user.anonymized";
 
     // V56/V57: admin-surface lifecycle events. Payload: AdminLifecycleEvent.
     public static final String ROOM_APPROVED  = "room.approved";

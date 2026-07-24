@@ -3,6 +3,9 @@
  * Pure client-side — no server round-trip required.
  */
 
+import { parseServerDate } from './timeFormat';
+import { venueCurrency } from '../utils/venueLocale';
+
 /* ── CSV ─────────────────────────────────────────────── */
 
 /**
@@ -100,7 +103,9 @@ function triggerDownload(blob, filename) {
 /* ── Convenience: export bookings ────────────────────── */
 
 const BOOKING_COLUMNS = ['bookingRef', 'customerName', 'eventType', 'date', 'slot', 'status', 'paymentStatus', 'totalAmount', 'createdAt'];
-const BOOKING_HEADINGS = {
+// Evaluated at export time (not module load) so the amount column is labelled
+// with the SELECTED venue's currency code, not a hardcoded ₹.
+const bookingHeadings = () => ({
   bookingRef: 'Reference',
   customerName: 'Customer',
   eventType: 'Event Type',
@@ -108,13 +113,13 @@ const BOOKING_HEADINGS = {
   slot: 'Slot',
   status: 'Status',
   paymentStatus: 'Payment',
-  totalAmount: 'Amount (₹)',
+  totalAmount: `Amount (${venueCurrency()})`,
   createdAt: 'Created',
-};
+});
 
 export function exportBookingsCSV(bookings) {
   const rows = normalizeBookings(bookings);
-  const csv = toCSV(rows, BOOKING_COLUMNS, BOOKING_HEADINGS);
+  const csv = toCSV(rows, BOOKING_COLUMNS, bookingHeadings());
   downloadCSV(csv, `bookings-${new Date().toISOString().slice(0, 10)}.csv`);
 }
 
@@ -124,7 +129,7 @@ export function exportBookingsPDF(bookings, subtitle) {
     title: 'SK Binge Galaxy — Bookings Report',
     rows,
     columns: BOOKING_COLUMNS,
-    headings: BOOKING_HEADINGS,
+    headings: bookingHeadings(),
     subtitle,
   });
 }
@@ -139,25 +144,26 @@ function normalizeBookings(bookings) {
     status: b.status || '',
     paymentStatus: b.paymentStatus || '',
     totalAmount: b.totalAmount != null ? String(b.totalAmount) : '',
-    createdAt: b.createdAt ? new Date(b.createdAt).toLocaleDateString() : '',
+    createdAt: b.createdAt ? (parseServerDate(b.createdAt)?.toLocaleDateString() || '') : '',
   }));
 }
 
 /* ── Convenience: export reports ─────────────────────── */
 
 const REPORT_COLUMNS = ['label', 'total', 'confirmed', 'completed', 'cancelled', 'revenue'];
-const REPORT_HEADINGS = {
+// Evaluated at export time so the revenue column carries the venue's currency code.
+const reportHeadings = () => ({
   label: 'Period',
   total: 'Total',
   confirmed: 'Confirmed',
   completed: 'Completed',
   cancelled: 'Cancelled',
-  revenue: 'Revenue (₹)',
-};
+  revenue: `Revenue (${venueCurrency()})`,
+});
 
 export function exportReportCSV(report, label) {
   const rows = [{ label, ...report }];
-  const csv = toCSV(rows, REPORT_COLUMNS, REPORT_HEADINGS);
+  const csv = toCSV(rows, REPORT_COLUMNS, reportHeadings());
   downloadCSV(csv, `report-${new Date().toISOString().slice(0, 10)}.csv`);
 }
 
@@ -167,7 +173,7 @@ export function exportReportPDF(report, label) {
     title: 'SK Binge Galaxy — Report',
     rows,
     columns: REPORT_COLUMNS,
-    headings: REPORT_HEADINGS,
+    headings: reportHeadings(),
     subtitle: label,
   });
 }

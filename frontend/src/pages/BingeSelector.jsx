@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { bookingService } from '../services/endpoints';
 import { useBinge } from '../context/BingeContext';
+import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
 import SEO from '../components/SEO';
 import { FiArrowRight, FiCompass, FiCrosshair, FiMapPin, FiNavigation, FiSearch, FiStar } from 'react-icons/fi';
@@ -56,7 +57,28 @@ export default function BingeSelector() {
   // hook's high-accuracy default instead).
   const { status: geoStatus, request: requestLocation } = useGeolocation({ enableHighAccuracy: false });
   const { selectBinge } = useBinge();
+  const { user } = useAuth();
   const navigate = useNavigate();
+
+  // ── Saved-address fallback (location OFF) ──
+  // Precise location is ALWAYS the first choice, but when the customer denies it
+  // (or it's unavailable) we fall back to their profile city/pincode: venues in
+  // the same city, or sharing a postal-code prefix, are shown first instead of
+  // an unranked list. mode === 'address' renders this fallback.
+  const addressMatches = useMemo(() => {
+    const city = (user?.city || '').trim().toLowerCase();
+    const pin = (user?.postalCode || '').trim().toLowerCase();
+    if (!city && !pin) return [];
+    return binges.filter((b) => {
+      const bCity = (b.city || '').trim().toLowerCase();
+      const bPin = (b.postalCode || '').trim().toLowerCase();
+      if (city && bCity && bCity === city) return true;
+      // Postal prefix match (first 3 chars) approximates "same area" across
+      // most postcode systems without needing a geocoder.
+      if (pin && bPin && pin.slice(0, 3) === bPin.slice(0, 3)) return true;
+      return false;
+    });
+  }, [binges, user?.city, user?.postalCode]);
 
   // Monotonic token so out-of-order proximity responses (rapid radius changes /
   // double-clicks) can't overwrite a newer result. Only the latest request applies.
@@ -132,12 +154,18 @@ export default function BingeSelector() {
       setCoords(c);
       await loadNearby(c.latitude, c.longitude, radiusKm);
     } catch (err) {
-      // useGeolocation rejects with a friendly message for denied/unavailable/timeout.
-      if (err && err.message && !String(err.message).includes('in-flight')) {
-        toast.info(err.message);
+      if (err && String(err.message || '').includes('in-flight')) return;
+      // Location denied/unavailable — fall back to the customer's saved address
+      // (city/pincode) so they still get a "near me" experience. Precise location
+      // remains the recommended path and stays one click away.
+      if (addressMatches.length > 0) {
+        setMode('address');
+        toast.info('Location is off — showing venues matching your saved address instead. Allowing location access gives the most accurate results.');
+        return;
       }
+      if (err && err.message) toast.info(err.message);
     }
-  }, [requestLocation, loadNearby, radiusKm]);
+  }, [requestLocation, loadNearby, radiusKm, addressMatches]);
 
   const handleRadiusChange = useCallback((nextRadius) => {
     setRadiusKm(nextRadius);
@@ -156,8 +184,8 @@ export default function BingeSelector() {
     navigate('/dashboard');
   };
 
-  // The active source list depends on mode; both are then text-filtered.
-  const sourceList = mode === 'nearby' ? nearby : binges;
+  // The active source list depends on mode; all are then text-filtered.
+  const sourceList = mode === 'nearby' ? nearby : mode === 'address' ? addressMatches : binges;
   const filteredBinges = useMemo(() => {
     if (!search.trim()) return sourceList;
     const q = search.trim().toLowerCase();
@@ -208,18 +236,33 @@ export default function BingeSelector() {
             <div className="venue-locate-copy">
               <span className="venue-locate-icon"><FiNavigation /></span>
               <div>
-                <strong>{mode === 'nearby' ? 'Showing venues near you' : 'Find venues near you'}</strong>
+                <strong>
+                  {mode === 'nearby' ? 'Showing venues near you'
+                    : mode === 'address' ? 'Showing venues near your saved address'
+                    : 'Find venues near you'}
+                </strong>
                 <p>
                   {mode === 'nearby'
                     ? `Sorted by distance${coords ? ` within ${radiusKm} km` : ''}.`
-                    : geocodedCount > 0
-                      ? 'Use your current location to see the closest venues first.'
-                      : 'Browse all available venues below.'}
+                    : mode === 'address'
+                      ? `Matched by your profile ${user?.city ? `city (${user.city})` : `pincode (${user?.postalCode})`}. Allow location access for precise distances — it's always the most accurate option.`
+                      : geocodedCount > 0
+                        ? 'Use your current location to see the closest venues first.'
+                        : 'Browse all available venues below.'}
                 </p>
               </div>
             </div>
             <div className="venue-locate-actions">
-              {mode === 'nearby' ? (
+              {mode === 'address' ? (
+                <>
+                  <button type="button" className="btn btn-primary btn-sm" onClick={handleUseLocation} disabled={locating}>
+                    <FiCrosshair /> {locating ? 'Locating…' : 'Use precise location'}
+                  </button>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={showAllVenues} disabled={locating}>
+                    Show all venues
+                  </button>
+                </>
+              ) : mode === 'nearby' ? (
                 <>
                   <label className="venue-radius-select">
                     <span>Radius</span>

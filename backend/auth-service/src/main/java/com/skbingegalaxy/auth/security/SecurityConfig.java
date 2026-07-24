@@ -48,6 +48,10 @@ public class SecurityConfig {
                 // requirement is honoured (defence in depth on top of the
                 // shared-secret filter above).
                 .requestMatchers("/api/v1/auth/authority/internal/**").hasRole("SYSTEM")
+                // Trusted service-to-service user lookups (contact projection for messaging
+                // out-of-band notifications). SYSTEM only — requires X-Internal-Secret; must
+                // precede the catch-all /api/v1/auth/** permitAll so it is never public.
+                .requestMatchers("/api/v1/auth/internal/**").hasRole("SYSTEM")
                 // DPDP / GDPR privacy endpoints — must be declared before the
                 // catch-all /api/v1/auth/** permitAll so access control is enforced.
                 .requestMatchers("/api/v1/auth/privacy/admin/**").hasRole("SUPER_ADMIN")

@@ -39,6 +39,12 @@ public class TaxComputationResult {
         private String taxType;
         /** "IN/MH/Mumbai/400001" or "GLOBAL". */
         private String jurisdiction;
+        /** PERCENT / FLAT_PER_BOOKING / FLAT_PER_HOUR (null on legacy rows = PERCENT). */
+        private String calcMethod;
+        /** Flat charge per unit — set for FLAT_* lines. */
+        private BigDecimal flatAmount;
+        /** Units charged (hours for FLAT_PER_HOUR, 1 for FLAT_PER_BOOKING). */
+        private Integer units;
         /** Human-readable computation formula for audit. */
         private String formula;
     }

@@ -121,22 +121,35 @@ export default function SlotSuggestionsPanel({
     return out;
   }, [perDate, editBookingRef, dur]);
 
-  // Surge multiplier for a (date, startMin); 1.0 = no surge.
+  // ESTIMATED surge multiplier for a (date, startMin); 1.0 = no surge.
+  // This is a ranking heuristic only — the authoritative price comes from the
+  // server (/bookings/surge/quote) once a slot is selected. We mirror the
+  // server's matcher for the client-evaluable subset: day-of-week, time
+  // window, seasonal date window, priority winner (lowest number, tie →
+  // strongest multiplier). Rules gated on occupancy % or venue-clock lead
+  // times are SKIPPED here — the client cannot know those, and guessing
+  // would rank slots by prices the server may never charge.
   const surgeFor = useCallback((date, startMin) => {
     if (!Array.isArray(surgeRules) || !surgeRules.length) return 1;
     const isoDow = (() => {
       const dow = new Date(date + 'T00:00:00').getDay();
       return dow === 0 ? 7 : dow;
     })();
-    let best = 1;
+    let best = null;
     for (const r of surgeRules) {
       if (r.dayOfWeek && r.dayOfWeek !== isoDow) continue;
-      if (startMin >= r.startMinute && startMin < r.endMinute) {
-        const m = Number(r.multiplier) || 1;
-        if (m > best) best = m;
+      if (!(startMin >= r.startMinute && startMin < r.endMinute)) continue;
+      if (r.dateFrom && date < r.dateFrom) continue;
+      if (r.dateTo && date > r.dateTo) continue;
+      if (r.occupancyThresholdPct != null || r.leadTimeMaxHours != null || r.leadTimeMinHours != null) continue;
+      const prio = r.priority ?? 100;
+      const bestPrio = best ? (best.priority ?? 100) : Infinity;
+      if (!best || prio < bestPrio
+          || (prio === bestPrio && Number(r.multiplier) > Number(best.multiplier))) {
+        best = r;
       }
     }
-    return best;
+    return best ? (Number(best.multiplier) || 1) : 1;
   }, [surgeRules]);
 
   // Build the ranked candidate list across all candidate dates.

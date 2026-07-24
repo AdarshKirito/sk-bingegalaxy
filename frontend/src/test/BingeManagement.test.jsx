@@ -34,6 +34,8 @@ const {
   mockGetBingeDashboardExperience,
   mockUpdateBingeDashboardExperience,
   mockGetAllEventTypes,
+  mockGetStripeConnectStatus,
+  mockStartStripeOnboarding,
 } = vi.hoisted(() => ({
   mockGetAdminBinges: vi.fn(),
   mockCreateBinge: vi.fn(),
@@ -45,6 +47,8 @@ const {
   mockGetBingeDashboardExperience: vi.fn(),
   mockUpdateBingeDashboardExperience: vi.fn(),
   mockGetAllEventTypes: vi.fn(),
+  mockGetStripeConnectStatus: vi.fn(),
+  mockStartStripeOnboarding: vi.fn(),
 }));
 vi.mock('../services/endpoints', () => ({
   adminService: {
@@ -57,6 +61,11 @@ vi.mock('../services/endpoints', () => ({
     getBingeDashboardExperience: mockGetBingeDashboardExperience,
     updateBingeDashboardExperience: mockUpdateBingeDashboardExperience,
     getAllEventTypes: mockGetAllEventTypes,
+    // Stripe Connect panel. The component only calls these once a binge is being
+    // edited, and guards them in try/catch — but mocking them explicitly keeps the
+    // failure mode honest instead of relying on that guard swallowing a TypeError.
+    getStripeConnectStatus: mockGetStripeConnectStatus,
+    startStripeOnboarding: mockStartStripeOnboarding,
   },
   authService: {
     getAllAdmins: mockGetAllAdmins,

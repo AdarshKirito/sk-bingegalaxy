@@ -3,6 +3,7 @@ import { adminService, toArray } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import { FiPackage, FiPlus, FiEdit2, FiToggleLeft, FiToggleRight, FiTrash2, FiX, FiImage } from 'react-icons/fi';
 import './AdminPages.css';
+import { venueMoney, venueSymbol } from '../utils/venueLocale';
 
 const emptyEventType = { name: '', description: '', basePrice: '', hourlyRate: '', pricePerGuest: '', minHours: 1, maxHours: 8, minGuests: '', maxGuests: '', categoryId: '', imageUrls: [''] };
 const emptyAddOn = { name: '', description: '', price: '', categoryId: '', stockPerDay: '', advanceNoticeMinutes: '', imageUrls: [''] };
@@ -350,9 +351,9 @@ export default function AdminEventTypes() {
                   </div>
                   {et.description && <span className="adm-item-desc">{et.description}</span>}
                   <div className="adm-item-meta">
-                    <span>Base: <strong>₹{Number(et.basePrice).toLocaleString()}</strong></span>
-                    <span>Hourly: <strong>₹{Number(et.hourlyRate).toLocaleString()}/hr</strong></span>
-                    {Number(et.pricePerGuest) > 0 && <span>Per Guest: <strong>₹{Number(et.pricePerGuest).toLocaleString()}</strong></span>}
+                    <span>Base: <strong>{venueMoney(Number(et.basePrice))}</strong></span>
+                    <span>Hourly: <strong>{venueMoney(Number(et.hourlyRate))}/hr</strong></span>
+                    {Number(et.pricePerGuest) > 0 && <span>Per Guest: <strong>{venueMoney(Number(et.pricePerGuest))}</strong></span>}
                     <span>Duration: <strong>{et.minHours}–{et.maxHours} hrs</strong></span>
                   </div>
                 </div>
@@ -396,7 +397,7 @@ export default function AdminEventTypes() {
                     {!ao.active && <span className="adm-badge adm-badge-inactive">Inactive</span>}
                   </div>
                   {ao.description && <span className="adm-item-desc">{ao.description}</span>}
-                  <span style={{ marginTop: '0.4rem', fontWeight: 700, fontSize: '1.1rem', color: 'var(--text)' }}>₹{Number(ao.price).toLocaleString()}</span>
+                  <span style={{ marginTop: '0.4rem', fontWeight: 700, fontSize: '1.1rem', color: 'var(--text)' }}>{venueMoney(Number(ao.price))}</span>
                 </div>
                 <div className="adm-item-footer">
                   <button className="btn btn-sm btn-secondary" onClick={() => openEditAO(ao)}><FiEdit2 style={{ marginRight: 3 }} /> Edit</button>
@@ -525,18 +526,18 @@ export default function AdminEventTypes() {
                 </div>
                 <div className="grid-2">
                   <div className="input-group">
-                    <label>Base Price (₹) *</label>
+                    <label>Base Price ({venueSymbol()}) *</label>
                     <input type="number" required min="0" step="0.01" value={form.basePrice}
                       onChange={e => setForm({ ...form, basePrice: e.target.value })} placeholder="1000" />
                   </div>
                   <div className="input-group">
-                    <label>Hourly Rate (₹) *</label>
+                    <label>Hourly Rate ({venueSymbol()}) *</label>
                     <input type="number" required min="0" step="0.01" value={form.hourlyRate}
                       onChange={e => setForm({ ...form, hourlyRate: e.target.value })} placeholder="500" />
                   </div>
                 </div>
                 <div className="input-group">
-                  <label>Price Per Guest (₹)</label>
+                  <label>Price Per Guest ({venueSymbol()})</label>
                   <input type="number" min="0" step="0.01" value={form.pricePerGuest}
                     onChange={e => setForm({ ...form, pricePerGuest: e.target.value })} placeholder="0 (extra guest surcharge)" />
                   <span className="adm-hint">Charged for each additional guest (2nd guest onward)</span>
@@ -618,7 +619,7 @@ export default function AdminEventTypes() {
                 </div>
                 <div className="grid-2">
                   <div className="input-group">
-                    <label>Price (₹) *</label>
+                    <label>Price ({venueSymbol()}) *</label>
                     <input type="number" required min="0" step="0.01" value={addonForm.price}
                       onChange={e => setAddonForm({ ...addonForm, price: e.target.value })} placeholder="500" />
                   </div>

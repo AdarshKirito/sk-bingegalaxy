@@ -18,7 +18,7 @@ spring:
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/availability_db}
     username: ${SPRING_DATASOURCE_USERNAME:availability_svc}
-    password: ${SPRING_DATASOURCE_PASSWORD:?SPRING_DATASOURCE_PASSWORD must be set}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:8}
@@ -54,9 +54,13 @@ spring:
     consumer:
       group-id: availability-group
       auto-offset-reset: earliest
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      # ErrorHandlingDeserializer wrap — a poison record must never block a
+      # partition forever (see booking-service.yml for the full rationale).
+      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       properties:
+        spring.deserializer.key.delegate.class: org.apache.kafka.common.serialization.StringDeserializer
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
         spring.json.trusted.packages: com.skbingegalaxy.*
     listener:
       observation-enabled: true
@@ -68,6 +72,11 @@ app:
     closing-hour: ${THEATER_CLOSING_HOUR:23}
     slot-duration-minutes: 60
     max-concurrent-bookings: 1
+  business:
+    # Must match booking-service's app.business.default-timezone: both services
+    # fall back to this when a venue's timezone is momentarily uncached, and a
+    # mismatch here would let them disagree about "today" near midnight.
+    default-timezone: ${BUSINESS_TIMEZONE:Asia/Kolkata}
 
 springdoc:
   api-docs:

@@ -44,10 +44,15 @@ export default function AdminAccount() {
   const [profileForm, setProfileForm] = useState(EMPTY_PROFILE_FORM);
   const [savingProfile, setSavingProfile] = useState(false);
 
-  // Email change
-  const [emailForm, setEmailForm] = useState({ newEmail: '', currentPassword: '' });
+  // Email change — verified two-step: password re-auth → OTP to the NEW inbox → confirm.
+  const [emailForm, setEmailForm] = useState({ newEmail: '', currentPassword: '', otp: '', codeSent: false });
   const [showEmailPassword, setShowEmailPassword] = useState(false);
   const [changingEmail, setChangingEmail] = useState(false);
+
+  // Phone change — password re-auth (phone is a recovery channel; the plain
+  // profile update deliberately rejects phone edits server-side).
+  const [phoneForm, setPhoneForm] = useState({ phone: '', phoneCountryCode: '+91', currentPassword: '' });
+  const [changingPhone, setChangingPhone] = useState(false);
 
   // Password change
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
@@ -95,25 +100,61 @@ export default function AdminAccount() {
     }
   };
 
+  // Step 1: password re-auth + send the 6-digit code to the NEW inbox.
   const handleEmailChange = async (e) => {
     e.preventDefault();
     if (!emailForm.currentPassword || !emailForm.newEmail) { toast.error('Both fields are required'); return; }
     setChangingEmail(true);
     try {
-      await authService.changeEmail(emailForm);
-      // Backend revokes every active session after an email rotation, so the
-      // current JWT will start failing on the next refresh. Force a clean
-      // re-login with the new credential — standard production behaviour.
-      toast.success('Email changed. Please sign in with your new email.');
-      setEmailForm({ newEmail: '', currentPassword: '' });
+      await authService.requestEmailChange(emailForm.newEmail.trim(), emailForm.currentPassword);
+      setEmailForm((f) => ({ ...f, codeSent: true, otp: '' }));
+      toast.success('Verification code sent to the new address — check that inbox.');
+    } catch (error) {
+      const msg = error.response?.data?.message || error.userMessage || 'Failed to start the email change';
+      toast.error(msg);
+    } finally {
+      setChangingEmail(false);
+    }
+  };
+
+  // Step 2: the code proves inbox ownership → the switch applies and every other
+  // session is revoked, so force a clean re-login — standard production behaviour.
+  const handleEmailConfirm = async (e) => {
+    e.preventDefault();
+    if (!/^\d{6}$/.test(emailForm.otp.trim())) { toast.error('Enter the 6-digit code from the email'); return; }
+    setChangingEmail(true);
+    try {
+      await authService.confirmEmailChange(emailForm.otp.trim());
+      toast.success('Email changed and verified. Please sign in with your new email.');
+      setEmailForm({ newEmail: '', currentPassword: '', otp: '', codeSent: false });
       try { await logout(); } catch { /* ignore */ }
       navigate('/login', { replace: true });
       return;
     } catch (error) {
-      const msg = error.response?.data?.message || error.userMessage || 'Failed to change email';
+      const msg = error.response?.data?.message || error.userMessage || 'Failed to confirm the code';
       toast.error(msg);
     } finally {
       setChangingEmail(false);
+    }
+  };
+
+  const handlePhoneChange = async (e) => {
+    e.preventDefault();
+    if (phoneForm.phone && !/^\d{4,15}$/.test(phoneForm.phone)) { toast.error('Phone must be 4-15 digits'); return; }
+    if (!phoneForm.currentPassword) { toast.error('Enter your current password to authorise the change'); return; }
+    setChangingPhone(true);
+    try {
+      const res = await authService.changePhone(phoneForm.phone, phoneForm.phoneCountryCode, phoneForm.currentPassword);
+      const updated = res.data.data;
+      setProfile(updated);
+      setProfileForm(profileFormFromUser(updated));
+      setUser({ ...(user || {}), ...updated });
+      setPhoneForm({ phone: '', phoneCountryCode: '+91', currentPassword: '' });
+      toast.success('Phone number updated');
+    } catch (error) {
+      toast.error(error.response?.data?.message || error.userMessage || 'Failed to update the phone number');
+    } finally {
+      setChangingPhone(false);
     }
   };
 
@@ -206,9 +247,12 @@ export default function AdminAccount() {
                 <div className="input-group"><label>First name *</label><input value={profileForm.firstName} onChange={(e) => setFormField('firstName', e.target.value)} maxLength={50} required /></div>
                 <div className="input-group"><label>Last name</label><input value={profileForm.lastName} onChange={(e) => setFormField('lastName', e.target.value)} maxLength={50} /></div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '0.85rem' }}>
-                <div className="input-group"><label>Country code *</label><input value={profileForm.phoneCountryCode} onChange={(e) => setFormField('phoneCountryCode', e.target.value)} placeholder="+91" required /></div>
-                <div className="input-group"><label>Phone *</label><input value={profileForm.phone} onChange={(e) => setFormField('phone', e.target.value)} placeholder="9876543210" required /></div>
+              <div className="input-group">
+                <label>Phone</label>
+                <input value={`${profileForm.phoneCountryCode || ''} ${profileForm.phone || ''}`.trim() || 'Not set'} disabled />
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  Phone is a security contact — change it in the “Change Phone” section below (password required).
+                </span>
               </div>
               <div className="input-group"><label>Address line 1</label><input value={profileForm.addressLine1} onChange={(e) => setFormField('addressLine1', e.target.value)} maxLength={200} /></div>
               <div className="input-group"><label>Address line 2</label><input value={profileForm.addressLine2} onChange={(e) => setFormField('addressLine2', e.target.value)} maxLength={200} /></div>
@@ -231,22 +275,57 @@ export default function AdminAccount() {
         <div className="adm-form">
           <h3><FiMail style={{ marginRight: '0.5rem', verticalAlign: 'middle' }} /> Change Email</h3>
           <p className="adm-form-intro" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-            Changing your email signs you out of other devices and requires re-verification.
+            A 6-digit code is sent to the <strong>new</strong> address — nothing changes until you enter it.
+            Completing the change signs you out of every device.
           </p>
-          <form onSubmit={handleEmailChange} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-            <div className="input-group"><label>New email</label><input type="email" value={emailForm.newEmail} onChange={(e) => setEmailForm((f) => ({ ...f, newEmail: e.target.value }))} placeholder="you@example.com" autoComplete="email" required /></div>
-            <div className="input-group">
-              <label>Current password</label>
-              <div style={{ position: 'relative' }}>
-                <input type={showEmailPassword ? 'text' : 'password'} value={emailForm.currentPassword} onChange={(e) => setEmailForm((f) => ({ ...f, currentPassword: e.target.value }))} autoComplete="current-password" required />
-                <button type="button" onClick={() => setShowEmailPassword((v) => !v)} tabIndex={-1}
-                  style={{ position: 'absolute', right: '0.65rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: '0.25rem' }}>
-                  {showEmailPassword ? <FiEyeOff /> : <FiEye />}
-                </button>
+          {!emailForm.codeSent ? (
+            <form onSubmit={handleEmailChange} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+              <div className="input-group"><label>New email</label><input type="email" value={emailForm.newEmail} onChange={(e) => setEmailForm((f) => ({ ...f, newEmail: e.target.value }))} placeholder="you@example.com" autoComplete="email" required /></div>
+              <div className="input-group">
+                <label>Current password</label>
+                <div style={{ position: 'relative' }}>
+                  <input type={showEmailPassword ? 'text' : 'password'} value={emailForm.currentPassword} onChange={(e) => setEmailForm((f) => ({ ...f, currentPassword: e.target.value }))} autoComplete="current-password" required />
+                  <button type="button" onClick={() => setShowEmailPassword((v) => !v)}
+                    style={{ position: 'absolute', right: '0.65rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: '0.25rem' }}>
+                    {showEmailPassword ? <FiEyeOff /> : <FiEye />}
+                  </button>
+                </div>
               </div>
+              <div className="adm-form-actions" style={{ marginTop: '0.5rem' }}>
+                <button type="submit" className="btn btn-primary" disabled={changingEmail}>{changingEmail ? 'Sending…' : 'Send Verification Code'}</button>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={handleEmailConfirm} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+              <div className="input-group">
+                <label>6-digit code (sent to {emailForm.newEmail})</label>
+                <input inputMode="numeric" maxLength={6} value={emailForm.otp}
+                       onChange={(e) => setEmailForm((f) => ({ ...f, otp: e.target.value.replace(/\D/g, '') }))} required />
+              </div>
+              <div className="adm-form-actions" style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem' }}>
+                <button type="submit" className="btn btn-primary" disabled={changingEmail}>{changingEmail ? 'Confirming…' : 'Confirm & Switch Email'}</button>
+                <button type="button" className="btn btn-secondary" disabled={changingEmail} onClick={handleEmailChange}>Resend code</button>
+                <button type="button" className="btn btn-secondary" disabled={changingEmail}
+                        onClick={() => setEmailForm({ newEmail: '', currentPassword: '', otp: '', codeSent: false })}>Cancel</button>
+              </div>
+            </form>
+          )}
+        </div>
+
+        {/* Change Phone — password re-auth (SMS OTP is deployment-optional) */}
+        <div className="adm-form">
+          <h3><FiPhone style={{ marginRight: '0.5rem', verticalAlign: 'middle' }} /> Change Phone</h3>
+          <p className="adm-form-intro" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+            Your phone is used for account recovery and booking contact, so changing it requires your password.
+          </p>
+          <form onSubmit={handlePhoneChange} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '0.85rem' }}>
+              <div className="input-group"><label>Country code</label><input value={phoneForm.phoneCountryCode} onChange={(e) => setPhoneForm((f) => ({ ...f, phoneCountryCode: e.target.value }))} placeholder="+91" /></div>
+              <div className="input-group"><label>New phone</label><input inputMode="numeric" value={phoneForm.phone} onChange={(e) => setPhoneForm((f) => ({ ...f, phone: e.target.value.replace(/\D/g, '') }))} placeholder="9876543210" /></div>
             </div>
+            <div className="input-group"><label>Current password</label><input type="password" autoComplete="current-password" value={phoneForm.currentPassword} onChange={(e) => setPhoneForm((f) => ({ ...f, currentPassword: e.target.value }))} /></div>
             <div className="adm-form-actions" style={{ marginTop: '0.5rem' }}>
-              <button type="submit" className="btn btn-primary" disabled={changingEmail}>{changingEmail ? 'Changing…' : 'Change Email'}</button>
+              <button type="submit" className="btn btn-primary" disabled={changingPhone}>{changingPhone ? 'Updating…' : 'Update Phone'}</button>
             </div>
           </form>
         </div>
@@ -259,7 +338,7 @@ export default function AdminAccount() {
               <label>Current Password</label>
               <div style={{ position: 'relative' }}>
                 <input type={showPasswords.current ? 'text' : 'password'} value={passwordForm.currentPassword} onChange={(e) => setPasswordForm((p) => ({ ...p, currentPassword: e.target.value }))} placeholder="Enter current password" autoComplete="current-password" />
-                <button type="button" onClick={() => toggleShow('current')} tabIndex={-1}
+                <button type="button" onClick={() => toggleShow('current')}
                   style={{ position: 'absolute', right: '0.65rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: '0.25rem' }}>
                   {showPasswords.current ? <FiEyeOff /> : <FiEye />}
                 </button>
@@ -269,7 +348,7 @@ export default function AdminAccount() {
               <label>New Password</label>
               <div style={{ position: 'relative' }}>
                 <input type={showPasswords.new ? 'text' : 'password'} value={passwordForm.newPassword} onChange={(e) => setPasswordForm((p) => ({ ...p, newPassword: e.target.value }))} placeholder="Min 10 chars, upper+lower+digit+special" autoComplete="new-password" />
-                <button type="button" onClick={() => toggleShow('new')} tabIndex={-1}
+                <button type="button" onClick={() => toggleShow('new')}
                   style={{ position: 'absolute', right: '0.65rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: '0.25rem' }}>
                   {showPasswords.new ? <FiEyeOff /> : <FiEye />}
                 </button>
@@ -279,7 +358,7 @@ export default function AdminAccount() {
               <label>Confirm New Password</label>
               <div style={{ position: 'relative' }}>
                 <input type={showPasswords.confirm ? 'text' : 'password'} value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm((p) => ({ ...p, confirmPassword: e.target.value }))} placeholder="Re-enter new password" autoComplete="new-password" />
-                <button type="button" onClick={() => toggleShow('confirm')} tabIndex={-1}
+                <button type="button" onClick={() => toggleShow('confirm')}
                   style={{ position: 'absolute', right: '0.65rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: '0.25rem' }}>
                   {showPasswords.confirm ? <FiEyeOff /> : <FiEye />}
                 </button>

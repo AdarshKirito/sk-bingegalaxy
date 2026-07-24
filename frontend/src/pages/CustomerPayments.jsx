@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { bookingService, paymentService } from '../services/endpoints';
-import { useFormatMoney } from '../context/CurrencyContext';
+import { formatCurrency } from '../utils/currency';
 import { formatTime12h } from '../utils/format';
+import { parseServerDate } from '../services/timeFormat';
 import { SkeletonGrid } from '../components/ui/Skeleton';
+import Pagination from '../components/ui/Pagination';
 import SEO from '../components/SEO';
 import { FiAlertCircle, FiCalendar, FiCheckCircle, FiCreditCard, FiFilter, FiRefreshCw, FiSearch, FiTrendingUp, FiX } from 'react-icons/fi';
 import DOMPurify from 'dompurify';
@@ -16,11 +18,18 @@ import './CustomerHub.css';
 // change can never silently blank the payment history again.
 const toRows = (val) => (Array.isArray(val) ? val : (Array.isArray(val?.content) ? val.content : []));
 
+const PAGE_SIZE = 20;
+
 export default function CustomerPayments() {
   const navigate = useNavigate();
   const [payments, setPayments] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
+  // FE-001: server-side pagination (1-based for the Pagination component)
+  // plus lifetime aggregates so totals never stop at the first 20 rows.
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [summary, setSummary] = useState(null);
   const [query, setQuery] = useState('');
   const [appliedQuery, setAppliedQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -75,11 +84,11 @@ export default function CustomerPayments() {
       // Refresh both lists so the row drops out of "unpaid".
       const toArray = (val) => Array.isArray(val) ? val : [];
       const [pay, cur, past] = await Promise.allSettled([
-        paymentService.getMyPayments(),
+        paymentService.getMyPayments({ page: page - 1, size: PAGE_SIZE }),
         bookingService.getCurrentBookings(),
         bookingService.getPastBookings(),
       ]);
-      if (pay.status === 'fulfilled') setPayments(toRows(pay.value?.data?.data));
+      if (pay.status === 'fulfilled') applyPaymentsPage(pay.value?.data?.data);
       const c = cur.status === 'fulfilled' ? toArray(cur.value?.data?.data) : [];
       const p = past.status === 'fulfilled' ? toArray(past.value?.data?.data) : [];
       setBookings([...c, ...p]);
@@ -105,20 +114,31 @@ export default function CustomerPayments() {
   })();
 
 
+  // Consume the Spring Page envelope: rows for the grid, metadata for the pager.
+  const applyPaymentsPage = (data) => {
+    setPayments(toRows(data));
+    if (data && typeof data.totalPages === 'number') {
+      setTotalPages(Math.max(1, data.totalPages));
+    }
+  };
+
   useEffect(() => {
     setLoading(true);
     Promise.allSettled([
-      paymentService.getMyPayments(),
+      paymentService.getMyPayments({ page: page - 1, size: PAGE_SIZE }),
       bookingService.getCurrentBookings(),
       bookingService.getPastBookings(),
-    ]).then(([paymentRes, currentRes, pastRes]) => {
+      paymentService.getMyPaymentsSummary(),
+    ]).then(([paymentRes, currentRes, pastRes, summaryRes]) => {
       const toArray = (val) => Array.isArray(val) ? val : [];
-      setPayments(paymentRes.status === 'fulfilled' ? toRows(paymentRes.value?.data?.data) : []);
+      if (paymentRes.status === 'fulfilled') applyPaymentsPage(paymentRes.value?.data?.data);
+      else setPayments([]);
       const currentBookings = currentRes.status === 'fulfilled' ? toArray(currentRes.value?.data?.data) : [];
       const pastBookings = pastRes.status === 'fulfilled' ? toArray(pastRes.value?.data?.data) : [];
       setBookings([...currentBookings, ...pastBookings]);
+      if (summaryRes.status === 'fulfilled') setSummary(summaryRes.value?.data?.data || null);
     }).finally(() => setLoading(false));
-  }, []);
+  }, [page]);
 
   // ── Live sync: refetch payments + reservations whenever the user
   //    returns to the tab, so an admin-recorded charge / refund shows
@@ -128,16 +148,18 @@ export default function CustomerPayments() {
     const toArray = (val) => Array.isArray(val) ? val : [];
     const refresh = () => {
       Promise.allSettled([
-        paymentService.getMyPayments(),
+        paymentService.getMyPayments({ page: page - 1, size: PAGE_SIZE }),
         bookingService.getCurrentBookings(),
         bookingService.getPastBookings(),
-      ]).then(([paymentRes, currentRes, pastRes]) => {
-        if (paymentRes.status === 'fulfilled') setPayments(toRows(paymentRes.value?.data?.data));
+        paymentService.getMyPaymentsSummary(),
+      ]).then(([paymentRes, currentRes, pastRes, summaryRes]) => {
+        if (paymentRes.status === 'fulfilled') applyPaymentsPage(paymentRes.value?.data?.data);
         const cur = currentRes.status === 'fulfilled' ? toArray(currentRes.value?.data?.data) : [];
         const past = pastRes.status === 'fulfilled' ? toArray(pastRes.value?.data?.data) : [];
         if (currentRes.status === 'fulfilled' || pastRes.status === 'fulfilled') {
           setBookings([...cur, ...past]);
         }
+        if (summaryRes.status === 'fulfilled') setSummary(summaryRes.value?.data?.data || null);
       });
     };
     const onFocus = () => refresh();
@@ -192,10 +214,9 @@ export default function CustomerPayments() {
   }[status] ?? (status?.replace(/_/g, ' ') || 'Pending'));
 
   // Informational amounts (totals, payment history) render in the customer's selected
-  // display currency; amounts beside a "Pay Now" CTA use formatINR so they match the exact
-  // base-INR charge the customer will be billed.
-  const formatAmount = useFormatMoney();
-  const formatINR = (amount) => `₹${Number(amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  // Native per-binge currency: each amount shows in its own payment/booking currency —
+  // the exact currency the customer is charged in. No customer-side conversion.
+  const money = (v, ccy) => formatCurrency(v, ccy || 'INR');
 
   const formatDate = (ts) => ts
     ? new Date(ts).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -219,7 +240,7 @@ export default function CustomerPayments() {
       .toLowerCase();
     const matchesQuery = !appliedQuery || searchTarget.includes(appliedQuery.toLowerCase());
     const matchesStatus = statusFilter === 'ALL' || payment.status === statusFilter;
-    const paymentTs = new Date(payment.createdAt || payment.paidAt || 0);
+    const paymentTs = parseServerDate(payment.createdAt || payment.paidAt) || new Date(0);
     const matchesFrom = !fromDate || paymentTs >= new Date(fromDate);
     const matchesTo = !toDate || paymentTs <= new Date(toDate + 'T23:59:59');
     return matchesQuery && matchesStatus && matchesFrom && matchesTo;
@@ -229,9 +250,14 @@ export default function CustomerPayments() {
   const successfulPayments = sortedPayments.filter(payment => payment.status === 'SUCCESS');
   const refundedPayments = sortedPayments.filter(payment => payment.status === 'REFUNDED' || payment.status === 'PARTIALLY_REFUNDED');
   const failedPayments = sortedPayments.filter(payment => payment.status === 'FAILED');
-  const totalPaid = sortedPayments
+  // FE-001: lifetime total comes from the server-side aggregate — the page
+  // sum is only the fallback while the summary request is in flight.
+  const pageTotalPaid = sortedPayments
     .filter(payment => payment.status === 'SUCCESS' || payment.status === 'PARTIALLY_PAID')
     .reduce((sum, payment) => sum + (payment.amount || 0), 0);
+  const totalPaid = summary?.lifetimeSpend ?? pageTotalPaid;
+  // Stat tiles aggregate across payments; format in the predominant payment currency.
+  const primaryCurrency = sortedPayments[0]?.currency || 'INR';
   const unpaidBookings = bookings.filter(booking =>
     !['CANCELLED', 'COMPLETED', 'NO_SHOW'].includes(booking.status) &&
     !['SUCCESS', 'REFUNDED'].includes(booking.paymentStatus)
@@ -285,13 +311,13 @@ export default function CustomerPayments() {
 
         <aside className="customer-hub-highlight card">
           <span className="customer-hub-panel-label">Live snapshot</span>
-          <h2>{loading ? 'Loading payments...' : initiatedPayments.length > 0 ? `${initiatedPayments.length} payment${initiatedPayments.length === 1 ? '' : 's'} in progress` : `${formatAmount(totalPaid)} collected total`}</h2>
+          <h2>{loading ? 'Loading payments...' : initiatedPayments.length > 0 ? `${initiatedPayments.length} payment${initiatedPayments.length === 1 ? '' : 's'} in progress` : `${money(totalPaid, primaryCurrency)} collected total`}</h2>
           <p>{loading ? 'Pulling your transaction history.' : initiatedPayments.length > 0 ? 'Continue the in-progress transaction or check the full booking timeline.' : 'No active transactions right now — all payments are settled or recorded.'}</p>
           <div className="customer-hub-highlight-meta">
             <span className="badge badge-success">{successfulPayments.length} successful</span>
             <span className="badge badge-warning">{unpaidBookings.length} unpaid bookings</span>
           </div>
-          <strong>{loading ? '–' : formatAmount(totalPaid)}</strong>
+          <strong>{loading ? '–' : money(totalPaid, primaryCurrency)}</strong>
           <div className="customer-hub-inline-actions">
             <Link to="/my-bookings" className="btn btn-secondary btn-sm">View Reservations</Link>
             {initiatedPayments[0]?.bookingRef && <Link to={`/payment/${initiatedPayments[0].bookingRef}`} className="btn btn-primary btn-sm">Continue Latest</Link>}
@@ -309,8 +335,8 @@ export default function CustomerPayments() {
         <article className="customer-hub-stat card">
           <span className="customer-hub-stat-icon"><FiTrendingUp /></span>
           <span className="customer-hub-stat-label">Total Paid</span>
-          <strong>{loading ? '–' : formatAmount(totalPaid)}</strong>
-          <p>Cumulative amount across settled payments.</p>
+          <strong>{loading ? '–' : money(totalPaid, primaryCurrency)}</strong>
+          <p>Lifetime amount across all your payments.</p>
         </article>
         <article className="customer-hub-stat card">
           <span className="customer-hub-stat-icon"><FiRefreshCw /></span>
@@ -349,7 +375,7 @@ export default function CustomerPayments() {
                   <p>{booking.bookingDate} at {formatTime12h(booking.startTime)}</p>
                 </div>
                 <div className="customer-mini-card-actions">
-                  <strong>{formatINR(booking.totalAmount)}</strong>
+                  <strong>{money(booking.totalAmount, booking.paymentCurrencyCode)}</strong>
                   <Link to={`/payment/${booking.bookingRef}`} className="btn btn-primary btn-sm">Pay Now</Link>
                   {booking.status === 'PENDING' && (
                     <button
@@ -494,7 +520,7 @@ export default function CustomerPayments() {
                       <p>{booking.bookingDate} at {formatTime12h(booking.startTime)}</p>
                     </div>
                     <div className="customer-mini-card-actions">
-                      <strong>{formatINR(booking.totalAmount)}</strong>
+                      <strong>{money(booking.totalAmount, booking.paymentCurrencyCode)}</strong>
                       {['SUCCESS', 'REFUNDED', 'PARTIALLY_REFUNDED'].includes(booking.paymentStatus) ? (
                         <Link to={`/booking/${booking.bookingRef}`} className="btn btn-secondary btn-sm">View Booking</Link>
                       ) : (
@@ -532,7 +558,7 @@ export default function CustomerPayments() {
                       {payment.transactionId || 'ID assigned after payment'}
                     </p>
                   </div>
-                  <strong>{formatAmount(payment.amount)}</strong>
+                  <strong>{money(payment.amount, payment.currency)}</strong>
                 </div>
 
                 <div className="customer-payment-meta">
@@ -559,6 +585,10 @@ export default function CustomerPayments() {
             );
           })}
         </div>
+      )}
+
+      {!loading && (
+        <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
       )}
     </div>
   );

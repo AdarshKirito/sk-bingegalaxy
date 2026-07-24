@@ -34,5 +34,7 @@ public enum BookingEventType {
     CONFIRMATION_RESENT,
     ESCALATED,
     DE_ESCALATED,
-    GOODWILL_ISSUED
+    GOODWILL_ISSUED,
+    /** Physical room (re)assigned or changed for the booking (admin action at/before check-in). */
+    ROOM_CHANGED
 }

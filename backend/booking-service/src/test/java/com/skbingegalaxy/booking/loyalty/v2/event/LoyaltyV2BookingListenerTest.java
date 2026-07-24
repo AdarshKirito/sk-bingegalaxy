@@ -109,4 +109,36 @@ class LoyaltyV2BookingListenerTest {
 
         verify(walletService, never()).debit(any());
     }
+
+    @Test
+    void redeemRefund_clampsProportionToOne_onOverRefund() {
+        // Misconfigured tier / bad event: refundAmount (2000) > totalAmount (1000) => raw proportion 2.0.
+        // Must clamp to 1.0 so we never credit back MORE points than were originally redeemed.
+        LoyaltyMembership membership = org.mockito.Mockito.mock(LoyaltyMembership.class);
+        when(membership.getId()).thenReturn(1L);
+        LoyaltyPointsWallet wallet = org.mockito.Mockito.mock(LoyaltyPointsWallet.class);
+        when(wallet.getId()).thenReturn(10L);
+        LoyaltyLedgerEntry redeem = org.mockito.Mockito.mock(LoyaltyLedgerEntry.class);
+        when(redeem.getPointsDelta()).thenReturn(-200L);   // 200 points originally redeemed
+
+        when(enrollmentService.findForCustomer(anyLong())).thenReturn(Optional.of(membership));
+        when(walletRepository.findByMembershipId(1L)).thenReturn(Optional.of(wallet));
+        when(ledgerRepository.findByWalletIdAndBookingRefAndEntryType(
+                eq(10L), eq("BK1"), eq(LoyaltyV2Constants.LEDGER_REDEEM))).thenReturn(List.of(redeem));
+        when(ledgerRepository.findByWalletIdAndBookingRefAndEntryType(
+                eq(10L), eq("BK1"), eq(LoyaltyV2Constants.LEDGER_EARN))).thenReturn(List.of());
+
+        BookingCancelledEvent overRefund = new BookingCancelledEvent(
+                1L, "BK1", 7L, 3L, null,
+                new BigDecimal("1000"), new BigDecimal("2000"),   // refund > total
+                "over refund", LocalDateTime.now());
+
+        listener.onBookingCancelled(overRefund);
+
+        ArgumentCaptor<PointsWalletService.CreditRequest> captor =
+                ArgumentCaptor.forClass(PointsWalletService.CreditRequest.class);
+        verify(walletService).credit(captor.capture());
+        // 200 * clamped(1.0) == 200 — NOT 400 (which is what the un-clamped 2.0 ratio would give).
+        assertThat(captor.getValue().points()).isEqualTo(200L);
+    }
 }

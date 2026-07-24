@@ -16,9 +16,19 @@ public class AdminCreateCustomerRequest {
     @Size(max = 100, message = "Last name must be at most 100 characters")
     private String lastName;
 
-    @NotBlank(message = "Email is required")
+    /**
+     * Required for regular accounts; enforced in the service layer instead of
+     * {@code @NotBlank} because guest profiles ({@link #guest}) have no email.
+     */
     @Email(message = "Invalid email format")
     private String email;
+
+    /**
+     * TRUE = "no email / not opting for email" walk-in guest: only a name is
+     * required, no credentials are issued, nothing is emailed or texted. The
+     * server assigns a synthetic placeholder email and an unusable password.
+     */
+    private Boolean guest;
 
     @Pattern(regexp = "^$|^\\d{4,15}$", message = "Phone must be 4-15 digits without spaces or symbols")
     private String phone;

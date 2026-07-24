@@ -41,6 +41,14 @@ vi.mock('../services/endpoints', () => ({
     unblockDate: mockUnblockDate,
     blockSlot: mockBlockSlot,
     unblockSlot: mockUnblockSlot,
+    // Room-block surface the page also calls — must exist on the mock (the
+    // page's .catch() fallbacks only cover rejected promises, not missing fns).
+    listAllRoomBlocks: vi.fn().mockResolvedValue({ data: { data: [] } }),
+    getVenueRooms: vi.fn().mockResolvedValue({ data: { data: [] } }),
+    createRoomBlock: vi.fn(),
+    deleteRoomBlock: vi.fn(),
+    unblockDateById: vi.fn(),
+    unblockSlotById: vi.fn(),
   },
 }));
 
@@ -85,6 +93,9 @@ describe('AdminBlockedDates Page', () => {
       data: { data: [{ id: 1, date: '2025-02-14', reason: 'Valentine special' }] },
     });
     renderAdminBlockedDates();
+    // The page opens on the Calendar tab; the reason list lives on "Blocked Dates".
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /blocked dates/i }));
     await waitFor(() => {
       expect(screen.getByText(/valentine special/i)).toBeInTheDocument();
     });

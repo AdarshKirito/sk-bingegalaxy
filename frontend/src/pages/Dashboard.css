@@ -54,7 +54,7 @@
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--primary);
+  color: var(--primary-text);
   padding: 0.42rem 0.78rem;
   border-radius: 999px;
   border: 1px solid rgba(var(--gold-rgb), 0.18);
@@ -130,7 +130,7 @@
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .dash-highlight-body {
@@ -228,7 +228,7 @@
   height: 44px;
   border-radius: 14px;
   background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.14), rgba(var(--accent-rgb), 0.08));
-  color: var(--primary);
+  color: var(--primary-text);
   font-size: 1.15rem;
   box-shadow: inset 0 0 0 1px rgba(var(--primary-rgb), 0.1);
 }
@@ -300,13 +300,13 @@
   height: 48px;
   border-radius: 16px;
   background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.14), rgba(var(--accent-rgb), 0.08));
-  color: var(--primary);
+  color: var(--primary-text);
   font-size: 1.25rem;
 }
 
 .dash-icon-success {
   background: linear-gradient(135deg, rgba(var(--success-rgb), 0.14), rgba(var(--primary-rgb), 0.06));
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .dash-card-kicker {
@@ -314,7 +314,7 @@
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .dash-action-card h3 {
@@ -332,7 +332,7 @@
   position: absolute;
   bottom: 1.25rem;
   right: 1.25rem;
-  color: var(--primary);
+  color: var(--primary-text);
   font-size: 1.15rem;
   opacity: 0.4;
   transition: var(--transition);
@@ -354,7 +354,7 @@
 }
 
 .dash-payments-pending {
-  color: var(--warning);
+  color: var(--warning-text);
   font-weight: 600;
   font-size: 0.92rem;
 }
@@ -405,7 +405,7 @@
   height: 42px;
   border-radius: 14px;
   background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.14), rgba(var(--accent-rgb), 0.08));
-  color: var(--primary);
+  color: var(--primary-text);
   font-size: 1.1rem;
   flex-shrink: 0;
 }
@@ -504,7 +504,7 @@
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .dash-section-header h2 {
@@ -525,7 +525,7 @@
 
 .dash-inline-link {
   font-weight: 600;
-  color: var(--primary);
+  color: var(--primary-text);
   text-decoration: none;
   white-space: nowrap;
 }
@@ -557,7 +557,7 @@
 .dash-loyalty-stat-value {
   font-size: 1.5rem;
   font-weight: 800;
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .dash-loyalty-stat-label {
@@ -604,7 +604,7 @@
 .dash-help-points svg {
   flex-shrink: 0;
   margin-top: 0.15rem;
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 /* -- Experience Section ----------------------------------- */
@@ -642,7 +642,7 @@
 
 .dash-exp-nav button:hover {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .dash-exp-nav span {
@@ -743,7 +743,7 @@
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--primary);
+  color: var(--primary-text);
   background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.1), rgba(var(--accent-rgb), 0.04));
   border: 1px solid rgba(var(--primary-rgb), 0.14);
 }
@@ -779,7 +779,7 @@
   height: 64px;
   border-radius: 20px;
   background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.14), rgba(var(--accent-rgb), 0.1));
-  color: var(--primary);
+  color: var(--primary-text);
   font-size: 1.6rem;
 }
 
@@ -851,7 +851,7 @@
   height: 36px;
   border-radius: 10px;
   background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.12), rgba(var(--accent-rgb), 0.06));
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .dash-exp-card h3 {
@@ -954,7 +954,7 @@
 .bpc-ref {
   font-family: monospace;
   font-size: 0.78rem;
-  color: var(--primary);
+  color: var(--primary-text);
   opacity: 0.7;
 }
 
@@ -988,22 +988,22 @@
   font-weight: 700;
   white-space: nowrap;
   background: var(--primary-bg);
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .dash-pill.is-success {
   background: var(--success-bg);
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .dash-pill.is-warning {
   background: var(--warning-bg);
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .dash-pill.is-danger {
   background: var(--danger-bg);
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 /* -- FAQ / Steps ----------------------------------------- */
@@ -1041,7 +1041,7 @@
 }
 
 .dash-steps-list li::marker {
-  color: var(--primary);
+  color: var(--primary-text);
   font-weight: 700;
 }
 

@@ -8,6 +8,14 @@
   box-sizing: border-box;
 }
 
+/* The universal reset above zeroes `margin` on every element, which also clobbers
+   the user-agent `dialog:modal { margin: auto }` rule that centers native <dialog>
+   modals — leaving them pinned to the top-left. Restore centering for dialogs only.
+   (Author `dialog` beats author `*`; the UA still supplies position:fixed + inset:0.) */
+dialog {
+  margin: auto;
+}
+
 /* Skip-to-content link for keyboard/screen-reader users */
 .skip-link {
   position: absolute;
@@ -62,6 +70,15 @@
   --warning-bg: rgba(245, 158, 11, 0.08);
   --danger: #ef4444;
   --danger-bg: rgba(239, 68, 68, 0.08);
+  /* A11Y-004 — text-role variants of the status/brand colors. The base
+     tokens above are DECORATIVE fills (badges, borders, icons); as normal-
+     size TEXT on light backgrounds they fail WCAG AA (success 2.54:1,
+     warning 2.15:1, danger 3.76:1, primary 4.47:1). Anything that renders
+     readable text must use these ≥4.5:1 variants instead. */
+  --primary-text: #4f46e5;
+  --success-text: #047857;
+  --warning-text: #b45309;
+  --danger-text: #b91c1c;
   --border: #e8e5e1;
   --border-hover: #d4d0cc;
   --border-gradient: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(194, 158, 70, 0.08) 50%, rgba(99, 102, 241, 0.06));
@@ -98,6 +115,37 @@
   --danger-bg: rgba(239, 68, 68, 0.14);
   --accent-light: #d4b565;
   --panel-glow: 0 0 0 1px rgba(99, 102, 241, 0.1), 0 8px 24px rgba(0, 0, 0, 0.2);
+  /* A11Y-004 — dark-theme text-role variants (≥4.5:1 on the card surfaces). */
+  --primary-text: #a5b4fc;
+  --success-text: #34d399;
+  --warning-text: #fbbf24;
+  --danger-text: #f87171;
+}
+
+/* ── A11Y-005: global reduced-motion layer ─────────────────────────────
+   Users who ask the OS for reduced motion get it EVERYWHERE — shimmer,
+   pulse, drawers, page transitions — not only where an author remembered
+   the query. Durations collapse to a frame (not 0: 'animation: none'
+   breaks animation-fill-mode states) and smooth scrolling turns off.
+   Essential motion (the loading Spinner conveys "in progress") may opt
+   out with .motion-essential, which slows it instead of removing it. */
+@media (prefers-reduced-motion: reduce) {
+  *:not(.motion-essential),
+  *:not(.motion-essential)::before,
+  *:not(.motion-essential)::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  html {
+    scroll-behavior: auto;
+  }
+  .motion-essential,
+  .motion-essential::before,
+  .motion-essential::after {
+    animation-duration: 1.5s !important;
+  }
 }
 
 html.theme-switching *,
@@ -194,7 +242,7 @@ body::after {
 }
 
 a {
-  color: var(--primary);
+  color: var(--primary-text);
   text-decoration: none;
 }
 
@@ -273,7 +321,7 @@ select optgroup {
 
 .btn-secondary {
   background: rgba(var(--primary-rgb), 0.08);
-  color: var(--primary);
+  color: var(--primary-text);
   border: 1px solid rgba(var(--primary-rgb), 0.18);
 }
 .btn-secondary:hover {
@@ -431,10 +479,10 @@ td,
   gap: 0.3rem;
 }
 
-.badge-success { background: var(--success-bg); color: var(--success); }
-.badge-warning { background: linear-gradient(135deg, var(--warning-bg), rgba(var(--accent-rgb), 0.06)); color: var(--warning); }
-.badge-danger { background: var(--danger-bg); color: var(--danger); }
-.badge-info { background: var(--primary-bg); color: var(--primary); }
+.badge-success { background: var(--success-bg); color: var(--success-text); }
+.badge-warning { background: linear-gradient(135deg, var(--warning-bg), rgba(var(--accent-rgb), 0.06)); color: var(--warning-text); }
+.badge-danger { background: var(--danger-bg); color: var(--danger-text); }
+.badge-info { background: var(--primary-bg); color: var(--primary-text); }
 
 [data-theme="dark"] .badge-warning { color: var(--accent-light); }
 
@@ -488,7 +536,7 @@ td,
 .error-message {
   background: var(--danger-bg);
   border: 1px solid rgba(239, 68, 68, 0.2);
-  color: var(--danger);
+  color: var(--danger-text);
   padding: 0.75rem 1rem;
   border-radius: var(--radius-sm);
   margin-bottom: 1rem;
@@ -755,7 +803,7 @@ td,
 }
 .pagination-btn:hover:not(:disabled) {
   border-color: var(--primary);
-  color: var(--primary);
+  color: var(--primary-text);
   background: var(--primary-bg);
 }
 .pagination-btn.active {

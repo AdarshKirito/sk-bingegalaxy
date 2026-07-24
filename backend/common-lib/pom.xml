@@ -58,6 +58,14 @@
             <artifactId>spring-kafka</artifactId>
             <scope>provided</scope>
         </dependency>
+        <!-- spring-boot: @ConfigurationProperties / @EnableConfigurationProperties used by
+             KafkaDlqProperties so the shared DLQ handler is tunable from the config-server.
+             provided — every consumer is a Spring Boot app, so it is never bundled here. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot</artifactId>
+            <scope>provided</scope>
+        </dependency>
 
         <!-- Logback — provided by every Spring Boot service via spring-boot-starter-logging -->
         <dependency>

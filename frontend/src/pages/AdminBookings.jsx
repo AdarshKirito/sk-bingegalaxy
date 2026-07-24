@@ -11,6 +11,8 @@ import { exportBookingsCSV, exportBookingsPDF } from '../services/exportUtils';
 import { formatServerDateTime, formatRelativeTime, parseServerDate } from '../services/timeFormat';
 import { FiDownload } from 'react-icons/fi';
 import './AdminBookings.css';
+import { venueMoney, venueSymbol, venueDateTime, venueToday } from '../utils/venueLocale';
+import TaxBreakdown from '../components/TaxBreakdown';
 
 const TABS = [
   { key: 'today', label: "Operational Day" },
@@ -47,11 +49,13 @@ const paymentBadge = (s) => ({
   REFUNDED: 'badge-info', FAILED: 'badge-danger', DISPUTED: 'badge-warning',
 }[s] || 'badge-danger');
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+// The operational "today" is the VENUE's calendar date, not the browser's.
+const todayISO = () => venueToday();
 
 export default function AdminBookings() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const confirm = useConfirm();
 
   // Read deep-link params from dashboard stat card clicks
   const initTab = searchParams.get('tab') || 'today';
@@ -222,8 +226,14 @@ export default function AdminBookings() {
   const reload = () => { fetchBookings(); fetchStats(); };
 
   // Reinstate: navigate to admin booking create with pre-filled data from the original booking
-  const handleReinstate = (booking) => {
-    if (!confirm(`Reinstate booking ${booking.bookingRef} as a new reservation?`)) return;
+  const handleReinstate = async (booking) => {
+    const ok = await confirm({
+      title: 'Reinstate booking?',
+      message: `Reinstate booking ${booking.bookingRef} as a new reservation?`,
+      confirmLabel: 'Reinstate',
+      variant: 'primary',
+    });
+    if (!ok) return;
     const prefill = {
       customerId: booking.customerId,
       customerName: booking.customerName,
@@ -371,14 +381,14 @@ export default function AdminBookings() {
           </div>
           <div className="ab-stat-cards">
           {[
-            { label: "Total",             val: stats.todayTotal ?? '-',     color: 'var(--primary)' },
-            { label: 'Confirmed',          val: stats.todayConfirmed ?? '-', color: 'var(--success)' },
+            { label: "Total",             val: stats.todayTotal ?? '-',     color: 'var(--primary-text)' },
+            { label: 'Confirmed',          val: stats.todayConfirmed ?? '-', color: 'var(--success-text)' },
             { label: 'Checked In',         val: stats.todayCheckedIn ?? '-', color: '#3b82f6' },
-            { label: 'Pending',            val: stats.todayPending ?? '-',   color: 'var(--warning)' },
+            { label: 'Pending',            val: stats.todayPending ?? '-',   color: 'var(--warning-text)' },
             { label: 'Completed',          val: stats.todayCompleted ?? '-', color: '#06b6d4' },
             { label: 'Cancelled',          val: stats.todayCancelled ?? '-', color: 'var(--danger, #e74c3c)' },
-            { label: 'Revenue',            val: `₹${(stats.todayRevenue ?? 0).toLocaleString()}`, color: '#10b981' },
-            { label: 'Est. Revenue',       val: `₹${(stats.todayEstimatedRevenue ?? 0).toLocaleString()}`, color: '#8b5cf6' },
+            { label: 'Revenue',            val: `${venueMoney((stats.todayRevenue ?? 0))}`, color: '#10b981' },
+            { label: 'Est. Revenue',       val: `${venueMoney((stats.todayEstimatedRevenue ?? 0))}`, color: '#8b5cf6' },
           ].map(c => (
             <div key={c.label} className="ab-stat-card" style={{ borderLeftColor: c.color }}>
               <div className="ab-stat-card-value" style={{ color: c.color }}>{c.val}</div>
@@ -466,7 +476,7 @@ export default function AdminBookings() {
                     <td>{b.eventType?.name ?? b.eventType}</td>
                     <td>{b.bookingDate}</td>
                     <td>{formatTime12h(b.startTime)} ({(() => { const m = b.durationMinutes || (b.durationHours * 60); const h = Math.floor(m/60); const min = m%60; return h > 0 && min > 0 ? `${h}h ${min}m` : h > 0 ? `${h}h` : `${min}m`; })()})</td>
-                    <td className="ab-amount">₹{b.totalAmount?.toLocaleString()}</td>
+                    <td className="ab-amount">{venueMoney(b.totalAmount)}</td>
                     <td><span className={`badge ${statusBadge(b.status)}`}>{b.status?.replace('_', ' ')}</span>{b.lateArrival && <span className="badge badge-warning" style={{ marginLeft: 4, fontSize: '0.65rem' }} title="Customer checked in after the scheduled start time">LATE</span>}</td>
                     <td>
                       <span className={`badge ${paymentBadge(b.paymentStatus)}`}>
@@ -567,8 +577,29 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
   const [qrInput, setQrInput] = useState('');
   const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [verifyingQr, setVerifyingQr] = useState(false);
+  // ── Room assignment (pick at check-in / change any time) ──
+  const [bookingRooms, setBookingRooms] = useState([]);            // rooms pickable for this booking's slot
+  const [selectedRoomId, setSelectedRoomId] = useState(b.venueRoomId || '');
+  const [assigningRoom, setAssigningRoom] = useState(false);
   // Check-in is only shown for bookings on the current operational date
   const isTodayBooking = b.bookingDate === (operationalDate || new Date().toISOString().slice(0, 10));
+
+  // Load the rooms an admin may assign to this booking (empty for room-less venues, which
+  // simply hides the room UI). Refetched whenever the booking or its room changes.
+  useEffect(() => {
+    if (!b?.bookingRef) return;
+    let live = true;
+    adminService.getBookingAvailableRooms(b.bookingRef)
+      .then((res) => {
+        if (!live) return;
+        const rooms = res.data?.data || [];
+        setBookingRooms(rooms);
+        setSelectedRoomId((prev) => prev || b.venueRoomId || (rooms.find((r) => r.available)?.id ?? ''));
+      })
+      .catch(() => { if (live) setBookingRooms([]); });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [b?.bookingRef, b?.venueRoomId]);
 
   // Event log state
   const [eventLog, setEventLog] = useState([]);
@@ -771,7 +802,13 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
   };
 
   const handleReplayBooking = async () => {
-    if (!confirm(`Rebuild CQRS projection for ${b.bookingRef}? This re-derives the booking state from its event log.`)) return;
+    const ok = await confirm({
+      title: 'Rebuild projection?',
+      message: `Rebuild CQRS projection for ${b.bookingRef}? This re-derives the booking state from its event log.`,
+      confirmLabel: 'Rebuild',
+      variant: 'warning',
+    });
+    if (!ok) return;
     setReplaying(true);
     try {
       await adminService.replayBooking(b.bookingRef);
@@ -786,8 +823,14 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
     const amt = parseFloat(refundAmount);
     if (isNaN(amt) || amt <= 0) { toast.error('Enter a valid amount'); return; }
     const maxRefundable = refundModal.payment.remainingRefundable ?? refundModal.payment.amount;
-    if (amt > maxRefundable) { toast.error(`Refund amount cannot exceed remaining refundable ₹${maxRefundable.toLocaleString()}`); return; }
-    if (!confirm(`Refund ₹${amt.toLocaleString()} to customer? This action cannot be undone.`)) return;
+    if (amt > maxRefundable) { toast.error(`Refund amount cannot exceed remaining refundable ${venueMoney(maxRefundable)}`); return; }
+    const ok = await confirm({
+      title: 'Initiate refund?',
+      message: `Refund ${venueMoney(amt)} to customer? This action cannot be undone.`,
+      confirmLabel: 'Refund',
+      variant: 'danger',
+    });
+    if (!ok) return;
     setRefunding(true);
     try {
       await adminService.initiateRefund({
@@ -820,7 +863,13 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
 
   // ── Record cash payment ────────────────────────────────────
   const handleRecordCashPayment = async () => {
-    if (!confirm(`Record cash payment of ₹${b.totalAmount?.toLocaleString()} for booking ${b.bookingRef}?\nThis will create a payment record so you can issue refunds.`)) return;
+    const ok = await confirm({
+      title: 'Record cash payment?',
+      message: `Record cash payment of ${venueMoney(b.totalAmount)} for booking ${b.bookingRef}? This will create a payment record so you can issue refunds.`,
+      confirmLabel: 'Record Payment',
+      variant: 'primary',
+    });
+    if (!ok) return;
     setRecordingCash(true);
     try {
       await adminService.recordCashPayment({
@@ -854,7 +903,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
     // Guard: do not allow collecting more than the booking's balance due
     const balance = (b.balanceDue != null) ? b.balanceDue : ((b.totalAmount || 0) - (b.collectedAmount || 0));
     if (amt > balance + 0.01 && balance >= 0) {
-      toast.error(`Amount ₹${amt.toLocaleString()} exceeds remaining balance ₹${Math.max(0, balance).toLocaleString()}`);
+      toast.error(`Amount ${venueMoney(amt)} exceeds remaining balance ${venueMoney(Math.max(0, balance))}`);
       return;
     }
     setAddingPayment(true);
@@ -893,10 +942,16 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
     const remaining = payment.remainingRefundable ?? payment.amount;
     const confirmMsg = `Change payment method from ${payment.paymentMethod} to ${changeMethodNewMethod}?\n\n` +
       `⚠️ This will:\n` +
-      `  1. Refund ₹${remaining.toLocaleString()} from the original ${payment.paymentMethod.replace('_', ' ')} payment\n` +
-      `  2. Record a new ₹${remaining.toLocaleString()} ${changeMethodNewMethod} payment\n\n` +
-      `Net effect: ₹0 change to balance (method swap only).\nContinue?`;
-    if (!confirm(confirmMsg)) return;
+      `  1. Refund ${venueMoney(remaining)} from the original ${payment.paymentMethod.replace('_', ' ')} payment\n` +
+      `  2. Record a new ${venueMoney(remaining)} ${changeMethodNewMethod} payment\n\n` +
+      `Net effect: ${venueMoney(0)} change to balance (method swap only).\nContinue?`;
+    const ok = await confirm({
+      title: 'Change payment method?',
+      message: confirmMsg,
+      confirmLabel: 'Change Method',
+      variant: 'danger',
+    });
+    if (!ok) return;
     setChangingMethod(true);
     try {
       await adminService.initiateRefund({
@@ -914,7 +969,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
           notes: `Method changed from ${payment.paymentMethod} to ${changeMethodNewMethod}`,
         });
       } catch (addErr) {
-        toast.error(`Refund succeeded but re-recording failed. Please manually add a ₹${remaining.toLocaleString()} ${changeMethodNewMethod} payment from the Payment tab.`);
+        toast.error(`Refund succeeded but re-recording failed. Please manually add a ${venueMoney(remaining)} ${changeMethodNewMethod} payment from the Payment tab.`);
         await refreshPayments();
         setTimeout(() => refreshBooking(), 3000);
         setTimeout(() => refreshBooking(), 7000);
@@ -964,15 +1019,52 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
       }
       setActionLoading(false);
     }
+    // Room-based venue: a room must be chosen before check-in.
+    if (bookingRooms.length > 0 && !selectedRoomId) {
+      toast.error('Select a room before checking in.');
+      return;
+    }
     setActionLoading(true);
     try {
-      const res = await adminService.checkIn(b.bookingRef);
+      const res = await adminService.checkIn(b.bookingRef, bookingRooms.length > 0 ? selectedRoomId : undefined);
       toast.success('Checked in!');
       const updated = res.data.data || { ...b, status: 'CHECKED_IN', checkedIn: true };
       setB(updated);
       onAction(updated);
     } catch (err) { toast.error(err.response?.data?.message || 'Check-in failed'); }
     setActionLoading(false);
+  };
+
+  // Assign / change the physical room for this booking (works before or after check-in).
+  // The change is snapshotted on the booking, so the customer's view reflects it on next load.
+  // CHANGING an already-assigned room requires remarks (server-enforced, event-logged).
+  const handleAssignRoom = async (roomId) => {
+    if (!roomId) return;
+    let remarks = '';
+    if (b.venueRoomId && Number(roomId) !== Number(b.venueRoomId)) {
+      const result = await confirm({
+        title: 'Change room?',
+        message: `This booking is currently in "${b.venueRoomName || 'its assigned room'}". Add remarks explaining the room change — they are recorded in the event log.`,
+        confirmLabel: 'Change room',
+        variant: 'primary',
+        withReason: true,
+        reasonRequired: true,
+        reasonLabel: 'Remarks (required)',
+        reasonPlaceholder: 'e.g. AC fault in the original room',
+      });
+      if (!result) return;
+      remarks = result.reason || '';
+    }
+    setAssigningRoom(true);
+    try {
+      const res = await adminService.assignBookingRoom(b.bookingRef, Number(roomId), remarks);
+      const updated = res.data.data || { ...b, venueRoomId: Number(roomId) };
+      setB(updated);
+      setSelectedRoomId(Number(roomId));
+      onAction(updated);
+      toast.success('Room updated');
+    } catch (err) { toast.error(err.response?.data?.message || 'Failed to update room'); }
+    setAssigningRoom(false);
   };
 
   const handleModalCheckout = async () => {
@@ -983,11 +1075,11 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
       return;
     }
     if (balance > 0.01) {
-      toast.error(`Cannot checkout — outstanding balance of ₹${balance.toLocaleString()}. Collect payment or use "Adjust Prices" to reconcile.`);
+      toast.error(`Cannot checkout — outstanding balance of ${venueMoney(balance)}. Collect payment or use "Adjust Prices" to reconcile.`);
       return;
     }
     if (balance < -0.01) {
-      toast.error(`Cannot checkout — customer overpaid by ₹${Math.abs(balance).toLocaleString()}. Issue a refund or use "Adjust Prices" to reconcile.`);
+      toast.error(`Cannot checkout — customer overpaid by ${venueMoney(Math.abs(balance))}. Issue a refund or use "Adjust Prices" to reconcile.`);
       return;
     }
     setActionLoading(true);
@@ -1097,14 +1189,14 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
           setActionLoading(false); return;
         }
         const maxRefundable = successPayment.remainingRefundable ?? successPayment.amount;
-        if (amt > maxRefundable) { toast.error(`Refund amount cannot exceed remaining refundable ₹${maxRefundable.toLocaleString()}`); setActionLoading(false); return; }
+        if (amt > maxRefundable) { toast.error(`Refund amount cannot exceed remaining refundable ${venueMoney(maxRefundable)}`); setActionLoading(false); return; }
         try {
           await adminService.initiateRefund({
             paymentId: successPayment.id,
             amount: amt,
             reason: 'Cancellation refund',
           });
-          toast.success('Refund of ₹' + amt.toLocaleString() + ' initiated');
+          toast.success('Refund of ' + venueMoney(amt) + ' initiated');
         } catch (refundErr) {
           toast.error('Refund failed: ' + (refundErr.response?.data?.message || 'Unknown error') + '. Booking will still be cancelled — issue refund manually from the Payment tab.');
         }
@@ -1165,7 +1257,13 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
       toast.error('Please provide a reason for the price adjustment');
       return;
     }
-    if (!confirm(`Adjust total from ₹${oldTotal.toLocaleString()} to ₹${newTotal.toLocaleString()}?\n\nReason: ${priceForm.reason}\n\nThis will be recorded in the audit log.`)) return;
+    const ok = await confirm({
+      title: 'Adjust booking total?',
+      message: `Adjust total from ${venueMoney(oldTotal)} to ${venueMoney(newTotal)}? Reason: ${priceForm.reason}. This will be recorded in the audit log.`,
+      confirmLabel: 'Adjust Total',
+      variant: 'warning',
+    });
+    if (!ok) return;
     setSavingPrices(true);
     try {
       const res = await adminService.updateBooking(b.bookingRef, {
@@ -1178,7 +1276,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
       setB(updated);
       onAction(updated);
       setAdjustingPrices(false);
-      toast.success(`Price adjusted: ₹${oldTotal.toLocaleString()} → ₹${newTotal.toLocaleString()}`);
+      toast.success(`Price adjusted: ${venueMoney(oldTotal)} → ${venueMoney(newTotal)}`);
     } catch (err) { toast.error(err.response?.data?.message || 'Failed to adjust prices'); }
     setSavingPrices(false);
   };
@@ -1301,12 +1399,37 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                   not on the current operational day we disable the button and
                   surface a hint — backend still enforces the date guard.
                 */}
+                {/* Room-based venues: confirm / change the physical room before check-in. */}
+                {bookingRooms.length > 0 && (
+                  <div style={{ width: '100%', marginBottom: '0.5rem' }}>
+                    <label htmlFor="checkin-room" style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.25rem', color: 'var(--text-secondary)' }}>
+                      Room / Space <span style={{ color: 'var(--danger, #e74c3c)' }}>*</span>
+                    </label>
+                    <select
+                      id="checkin-room"
+                      value={selectedRoomId || ''}
+                      onChange={(e) => setSelectedRoomId(e.target.value ? Number(e.target.value) : '')}
+                      disabled={actionLoading}
+                      style={{ width: '100%', padding: '0.5rem 0.6rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--text)' }}
+                    >
+                      <option value="">Select a room…</option>
+                      {bookingRooms.map((r) => (
+                        <option key={r.id} value={r.id} disabled={!r.available}>
+                          {r.name}{!r.available ? ' — occupied' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '0.25rem 0 0' }}>
+                      Confirm which room the party occupies before checking in. The room locks on check-in.
+                    </p>
+                  </div>
+                )}
                 <button
                   className="btn btn-primary"
                   onClick={handleModalCheckIn}
-                  disabled={actionLoading || !isTodayBooking}
+                  disabled={actionLoading || !isTodayBooking || (bookingRooms.length > 0 && !selectedRoomId)}
                   title={isTodayBooking
-                    ? 'Mark this booking as checked in'
+                    ? (bookingRooms.length > 0 && !selectedRoomId ? 'Select a room first' : 'Mark this booking as checked in')
                     : `Check-in is restricted to the current operational day (${operationalDate || 'today'}). This booking is for ${b.bookingDate}.`}
                 >
                   {actionLoading ? 'Processing...' : 'Check In'}
@@ -1386,25 +1509,41 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
             )}
             {b.status === 'CHECKED_IN' && (
               <>
-                {b.paymentStatus === 'REFUNDED' && (
+                {b.paymentStatus === 'REFUNDED' && (b.collectedAmount || 0) < 0.01 && (
                   <div className="ab-warning-banner ab-warning-banner--danger" style={{ width: '100%', marginBottom: '0.3rem' }}>
-                    ⚠️ Payment was <strong>fully refunded</strong> — ₹0 collected on a ₹{(b.totalAmount || 0).toLocaleString()} booking. You can still checkout, but no revenue will be recorded.
+                    ⚠️ Payment was <strong>fully refunded</strong> — {venueMoney((b.collectedAmount || 0))} collected on a {venueMoney((b.totalAmount || 0))} booking. You can still checkout, but no revenue will be recorded.
                   </div>
                 )}
                 {(() => {
                   const bal = (b.balanceDue != null) ? b.balanceDue : ((b.totalAmount || 0) - (b.collectedAmount || 0));
                   if (bal > 0.01) return (
                     <div style={{ width: '100%', padding: '0.5rem 0.75rem', background: 'rgba(255, 100, 0, 0.1)', border: '1px solid orange', borderRadius: 'var(--radius-sm)', fontSize: '0.82rem', color: 'orange', marginBottom: '0.3rem' }}>
-                      💰 Outstanding balance: <strong>₹{bal.toLocaleString()}</strong>. Collect from the <strong>Payment tab</strong> before checkout.
+                      💰 Outstanding balance: <strong>{venueMoney(bal)}</strong>. Collect from the <strong>Payment tab</strong> before checkout.
                     </div>
                   );
                   if (bal < -0.01) return (
                     <div style={{ width: '100%', padding: '0.5rem 0.75rem', background: 'rgba(0, 206, 201, 0.1)', border: '1px solid #00cec9', borderRadius: 'var(--radius-sm)', fontSize: '0.82rem', color: '#00cec9', marginBottom: '0.3rem' }}>
-                      💳 Customer overpaid by <strong>₹{Math.abs(bal).toLocaleString()}</strong>. Consider issuing a refund from the <strong>Payment tab</strong>.
+                      💳 Customer overpaid by <strong>{venueMoney(Math.abs(bal))}</strong>. Consider issuing a refund from the <strong>Payment tab</strong>.
                     </div>
                   );
                   return null;
                 })()}
+                {/* Once checked in, the room is LOCKED — it can only be changed before
+                    check-in or after an undo-check-in (the backend enforces this too).
+                    Show it read-only with clear guidance instead of an editable picker. */}
+                {(bookingRooms.length > 0 || b.venueRoomName) && (
+                  <div style={{ width: '100%', marginBottom: '0.3rem' }}>
+                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.25rem', color: 'var(--text-secondary)' }}>
+                      Assigned room
+                    </label>
+                    <div style={{ width: '100%', padding: '0.5rem 0.6rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-card-hover, var(--bg-input))', color: 'var(--text)' }}>
+                      {b.venueRoomName || 'No room assigned'}
+                    </div>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '0.25rem 0 0' }}>
+                      🔒 Room is locked after check-in. Undo the check-in to change it.
+                    </p>
+                  </div>
+                )}
                 <button className="btn btn-primary" style={{ background: 'var(--success, #00b894)' }} onClick={handleModalCheckout} disabled={actionLoading}>
                   {actionLoading ? 'Processing...' : 'Checkout'}
                 </button>
@@ -1434,7 +1573,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
           {/* Cancel Modal — with/without refund */}
           {cancelModal.open && (
             <div style={{ marginTop: '1rem', padding: '1rem', background: 'var(--bg-card)', border: '1px solid var(--danger, #e74c3c)', borderRadius: 'var(--radius-sm)' }}>
-              <h4 style={{ marginBottom: '0.75rem', color: 'var(--danger)' }}>Cancel Booking</h4>
+              <h4 style={{ marginBottom: '0.75rem', color: 'var(--danger-text)' }}>Cancel Booking</h4>
               <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
                 <button className={`btn btn-sm ${!cancelWithRefund ? 'btn-danger' : 'btn-secondary'}`}
                   onClick={() => setCancelWithRefund(false)}>Cancel Without Refund</button>
@@ -1443,7 +1582,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
               </div>
               {cancelWithRefund && (
                 <div style={{ marginBottom: '0.75rem' }}>
-                  <label style={{ ...labelStyle, display: 'block', marginBottom: '0.3rem' }}>Refund Amount (max ₹{b.totalAmount?.toLocaleString()})</label>
+                  <label style={{ ...labelStyle, display: 'block', marginBottom: '0.3rem' }}>Refund Amount (max {venueMoney(b.totalAmount)})</label>
                   <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                     <input type="number" value={cancelRefundAmount} onChange={e => setCancelRefundAmount(e.target.value)}
                       max={b.totalAmount} step="0.01" min="1"
@@ -1482,24 +1621,26 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
               {b.addOns.map((ao, i) => (
                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: '0.5rem', fontSize: '0.82rem' }}>
                   <span>{ao.name} × {ao.quantity}</span>
-                  <span>₹{ao.price?.toLocaleString()}</span>
+                  <span>{venueMoney(ao.price)}</span>
                 </div>
               ))}
             </div>
           )}
 
-          <div style={rowStyle}><span style={labelStyle}>Base Amount</span><span>₹{b.baseAmount?.toLocaleString()}</span></div>
-          <div style={rowStyle}><span style={labelStyle}>Add-On Amount</span><span>₹{b.addOnAmount?.toLocaleString()}</span></div>
+          <div style={rowStyle}><span style={labelStyle}>Base Amount</span><span>{venueMoney(b.baseAmount)}</span></div>
+          <div style={rowStyle}><span style={labelStyle}>Add-On Amount</span><span>{venueMoney(b.addOnAmount)}</span></div>
           {b.guestAmount > 0 && (
-            <div style={rowStyle}><span style={labelStyle}>Guest Charge</span><span>₹{b.guestAmount?.toLocaleString()}</span></div>
+            <div style={rowStyle}><span style={labelStyle}>Guest Charge</span><span>{venueMoney(b.guestAmount)}</span></div>
           )}
           {b.taxAmount > 0 && (
             <>
-              <div style={rowStyle}><span style={labelStyle}>Subtotal</span><span>₹{(b.subtotalAmount ?? b.totalAmount)?.toLocaleString()}</span></div>
-              <div style={rowStyle}><span style={labelStyle}>Tax</span><span>₹{b.taxAmount?.toLocaleString()}</span></div>
+              <div style={rowStyle}><span style={labelStyle}>Subtotal</span><span>{venueMoney((b.subtotalAmount ?? b.totalAmount))}</span></div>
+              {/* Itemised taxes as persisted at pricing time — name, type, jurisdiction, rate/flat×units */}
+              <TaxBreakdown taxBreakdownJson={b.taxBreakdownJson} money={(v) => venueMoney(v, b)} compact />
+              <div style={rowStyle}><span style={labelStyle}>Total Tax</span><span>{venueMoney(b.taxAmount)}</span></div>
             </>
           )}
-          <div style={{ ...rowStyle, fontWeight: 700, fontSize: '1rem' }}><span style={labelStyle}>Total Amount</span><span style={{ color: 'var(--primary)' }}>₹{b.totalAmount?.toLocaleString()}</span></div>
+          <div style={{ ...rowStyle, fontWeight: 700, fontSize: '1rem' }}><span style={labelStyle}>Total Amount</span><span style={{ color: 'var(--primary-text)' }}>{venueMoney(b.totalAmount)}</span></div>
           {b.pricingSource && b.pricingSource !== 'DEFAULT' && (
             <div style={{ ...rowStyle, fontSize: '0.78rem' }}>
               <span style={labelStyle}>Pricing</span>
@@ -1512,12 +1653,12 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
             const bal = (b.balanceDue != null) ? b.balanceDue : ((b.totalAmount || 0) - (b.collectedAmount || 0));
             if (b.collectedAmount != null && b.collectedAmount > 0) return (
               <>
-                <div style={rowStyle}><span style={labelStyle}>Collected</span><span>₹{b.collectedAmount?.toLocaleString()}</span></div>
+                <div style={rowStyle}><span style={labelStyle}>Collected</span><span>{venueMoney(b.collectedAmount)}</span></div>
                 {Math.abs(bal) > 0.01 && (
                   <div style={{ ...rowStyle, fontWeight: 600 }}>
                     <span style={labelStyle}>{bal > 0 ? 'Balance Due' : 'Overpaid'}</span>
                     <span style={{ color: bal > 0 ? 'var(--danger, #e74c3c)' : '#00cec9' }}>
-                      ₹{Math.abs(bal).toLocaleString()}
+                      {venueMoney(Math.abs(bal))}
                     </span>
                   </div>
                 )}
@@ -1545,7 +1686,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                   {b.loyaltyDiscountAmount > 0 && (
                     <div style={rowStyle}>
                       <span style={labelStyle}>Loyalty Discount</span>
-                      <span style={{ color: '#00b894', fontWeight: 600 }}>−₹{Number(b.loyaltyDiscountAmount).toLocaleString()}</span>
+                      <span style={{ color: '#00b894', fontWeight: 600 }}>−{venueMoney(Number(b.loyaltyDiscountAmount))}</span>
                     </div>
                   )}
                 </>
@@ -1577,14 +1718,14 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
           <div style={rowStyle}>
             <span style={labelStyle}>Created</span>
             <span title={parseServerDate(b.createdAt)?.toISOString() || ''}>
-              {b.createdAt ? `${formatServerDateTime(b.createdAt)} · ${formatRelativeTime(b.createdAt)}` : 'N/A'}
+              {b.createdAt ? `${venueDateTime(b.createdAt)} · ${formatRelativeTime(b.createdAt)}` : 'N/A'}
             </span>
           </div>
           {b.updatedAt && b.updatedAt !== b.createdAt && (
             <div style={rowStyle}>
               <span style={labelStyle}>Last updated</span>
               <span title={parseServerDate(b.updatedAt)?.toISOString() || ''}>
-                {`${formatServerDateTime(b.updatedAt)} · ${formatRelativeTime(b.updatedAt)}`}
+                {`${venueDateTime(b.updatedAt)} · ${formatRelativeTime(b.updatedAt)}`}
               </span>
             </div>
           )}
@@ -1596,7 +1737,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
             </div>
           )}
           {b.actualCheckoutTime && !b.earlyCheckoutNote && (
-            <div style={rowStyle}><span style={labelStyle}>Checkout Time</span><span>{new Date(b.actualCheckoutTime).toLocaleString()}</span></div>
+            <div style={rowStyle}><span style={labelStyle}>Checkout Time</span><span>{venueDateTime(b.actualCheckoutTime)}</span></div>
           )}
 
           {/* Edit Reservation button — navigates to booking wizard for time/addon changes */}
@@ -1623,40 +1764,40 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
           {/* Price Adjustment Form */}
           {adjustingPrices && (
             <div className="ab-cancel-box" style={{ borderColor: 'var(--primary)', marginTop: '1rem' }}>
-              <h4 style={{ marginBottom: '0.5rem', color: 'var(--primary)' }}>Adjust Prices</h4>
+              <h4 style={{ marginBottom: '0.5rem', color: 'var(--primary-text)' }}>Adjust Prices</h4>
               <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
-                Override pricing for this reservation. Original total: <strong>₹{b.totalAmount?.toLocaleString()}</strong>
+                Override pricing for this reservation. Original total: <strong>{venueMoney(b.totalAmount)}</strong>
               </p>
               <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.6rem' }}>
                 <div>
-                  <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.2rem' }}>Base Amount (₹)</label>
+                  <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.2rem' }}>Base Amount ({venueSymbol()})</label>
                   <input type="number" value={priceForm.baseAmount} onChange={e => setPriceForm(f => ({ ...f, baseAmount: e.target.value }))}
                     min="0" step="1"
                     style={{ padding: '0.35rem 0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--text)', fontSize: '0.85rem', width: '120px' }} />
                 </div>
                 <div>
-                  <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.2rem' }}>Add-On Amount (₹)</label>
+                  <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.2rem' }}>Add-On Amount ({venueSymbol()})</label>
                   <input type="number" value={priceForm.addOnAmount} onChange={e => setPriceForm(f => ({ ...f, addOnAmount: e.target.value }))}
                     min="0" step="1"
                     style={{ padding: '0.35rem 0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--text)', fontSize: '0.85rem', width: '120px' }} />
                 </div>
                 <div>
-                  <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.2rem' }}>Guest Charge (₹)</label>
+                  <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.2rem' }}>Guest Charge ({venueSymbol()})</label>
                   <input type="number" value={priceForm.guestAmount} onChange={e => setPriceForm(f => ({ ...f, guestAmount: e.target.value }))}
                     min="0" step="1"
                     style={{ padding: '0.35rem 0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--text)', fontSize: '0.85rem', width: '120px' }} />
                 </div>
               </div>
               <div style={{ marginBottom: '0.5rem', padding: '0.4rem 0.6rem', background: 'var(--bg)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', fontSize: '0.82rem' }}>
-                New Total: <strong style={{ color: 'var(--primary)' }}>
-                  ₹{((parseFloat(priceForm.baseAmount) || 0) + (parseFloat(priceForm.addOnAmount) || 0) + (parseFloat(priceForm.guestAmount) || 0)).toLocaleString()}
+                New Total: <strong style={{ color: 'var(--primary-text)' }}>
+                  {venueMoney(((parseFloat(priceForm.baseAmount) || 0) + (parseFloat(priceForm.addOnAmount) || 0) + (parseFloat(priceForm.guestAmount) || 0)))}
                 </strong>
                 {(() => {
                   const newT = (parseFloat(priceForm.baseAmount) || 0) + (parseFloat(priceForm.addOnAmount) || 0) + (parseFloat(priceForm.guestAmount) || 0);
                   const diff = newT - (b.totalAmount || 0);
                   if (Math.abs(diff) > 0.01) return (
                     <span style={{ marginLeft: '0.5rem', color: diff > 0 ? 'var(--danger, #e74c3c)' : 'var(--success, #00b894)', fontWeight: 600 }}>
-                      ({diff > 0 ? '+' : ''}₹{diff.toLocaleString()})
+                      ({diff > 0 ? '+' : ''}{venueMoney(diff)})
                     </span>
                   );
                   return null;
@@ -1684,10 +1825,10 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.75rem' }}>
             <button className="btn btn-secondary btn-sm" onClick={() => {
               const addOnsHtml = (b.addOns && b.addOns.length > 0) ? b.addOns.map(a =>
-                `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee">${DOMPurify.sanitize(a.name || a.addOnName || 'Add-on', { ALLOWED_TAGS: [] })}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right">x${a.quantity || 1}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right">₹${(a.price || 0).toLocaleString()}</td></tr>`
+                `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee">${DOMPurify.sanitize(a.name || a.addOnName || 'Add-on', { ALLOWED_TAGS: [] })}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right">x${a.quantity || 1}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right">${venueMoney((a.price || 0))}</td></tr>`
               ).join('') : '';
               const paymentsHtml = payments.length > 0 ? payments.map(p =>
-                `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee">${DOMPurify.sanitize(p.transactionId || '—', { ALLOWED_TAGS: [] })}</td><td style="padding:4px 8px;border-bottom:1px solid #eee">${(p.paymentMethod || '').replace('_',' ')}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right">₹${(p.amount || 0).toLocaleString()}</td><td style="padding:4px 8px;border-bottom:1px solid #eee"><span style="color:${p.status==='SUCCESS'?'green':'#e74c3c'}">${p.status}</span></td></tr>`
+                `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee">${DOMPurify.sanitize(p.transactionId || '—', { ALLOWED_TAGS: [] })}</td><td style="padding:4px 8px;border-bottom:1px solid #eee">${(p.paymentMethod || '').replace('_',' ')}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right">${venueMoney((p.amount || 0))}</td><td style="padding:4px 8px;border-bottom:1px solid #eee"><span style="color:${p.status==='SUCCESS'?'green':'#e74c3c'}">${p.status}</span></td></tr>`
               ).join('') : '<tr><td colspan="4" style="padding:8px;text-align:center;color:#888">No digital payment records</td></tr>';
               const w = window.open('', '_blank', 'width=420,height=650');
               if (!w) return;
@@ -1703,10 +1844,10 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
               + `<tr><td><strong>Status:</strong></td><td>${b.status || '—'}</td></tr>`
               + `</table><hr>`
               + `<table><tr><th>Item</th><th style="text-align:right">Qty</th><th style="text-align:right">Amount</th></tr>`
-              + `<tr><td style="padding:4px 8px">Base Amount</td><td style="padding:4px 8px;text-align:right">—</td><td style="padding:4px 8px;text-align:right">₹${(b.baseAmount || 0).toLocaleString()}</td></tr>`
-              + (b.guestAmount > 0 ? `<tr><td style="padding:4px 8px">Guest Charges</td><td style="padding:4px 8px;text-align:right">—</td><td style="padding:4px 8px;text-align:right">₹${(b.guestAmount || 0).toLocaleString()}</td></tr>` : '')
+              + `<tr><td style="padding:4px 8px">Base Amount</td><td style="padding:4px 8px;text-align:right">—</td><td style="padding:4px 8px;text-align:right">${venueMoney((b.baseAmount || 0))}</td></tr>`
+              + (b.guestAmount > 0 ? `<tr><td style="padding:4px 8px">Guest Charges</td><td style="padding:4px 8px;text-align:right">—</td><td style="padding:4px 8px;text-align:right">${venueMoney((b.guestAmount || 0))}</td></tr>` : '')
               + addOnsHtml
-              + `<tr class="total"><td colspan="2" style="padding:6px 8px">TOTAL</td><td style="padding:6px 8px;text-align:right">₹${(b.totalAmount || 0).toLocaleString()}</td></tr>`
+              + `<tr class="total"><td colspan="2" style="padding:6px 8px">TOTAL</td><td style="padding:6px 8px;text-align:right">${venueMoney((b.totalAmount || 0))}</td></tr>`
               + `</table><hr>`
               + `<p style="font-size:12px;font-weight:600;margin-bottom:4px">Payment Details</p>`
               + `<table><tr><th>Transaction</th><th>Method</th><th style="text-align:right">Amount</th><th>Status</th></tr>`
@@ -1744,11 +1885,11 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                 <div style={{ padding: '1rem', background: 'rgba(108,92,231,0.08)', border: '1px solid var(--primary)', borderRadius: 'var(--radius-sm)', marginBottom: '1rem' }}>
                   <p style={{ fontWeight: 600, marginBottom: '0.4rem' }}>💵 Cash Payment Booking</p>
                   <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-                    This booking was paid in cash (₹{b.totalAmount?.toLocaleString()}). No digital payment record exists yet.
+                    This booking was paid in cash ({venueMoney(b.totalAmount)}). No digital payment record exists yet.
                     Record it in the system to enable refunds.
                   </p>
                   <button className="btn btn-primary btn-sm" onClick={handleRecordCashPayment} disabled={recordingCash}>
-                    {recordingCash ? 'Recording...' : `Record Cash Payment ₹${b.totalAmount?.toLocaleString()}`}
+                    {recordingCash ? 'Recording...' : `Record Cash Payment ${venueMoney(b.totalAmount)}`}
                   </button>
                 </div>
               ) : (
@@ -1759,7 +1900,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
             payments.map((p, idx) => (
               <div key={p.id || idx} style={{ marginBottom: '1rem', padding: '0.75rem', borderRadius: 'var(--radius-sm)', background: 'var(--bg-input)', border: '1px solid var(--border)' }}>
                 <div style={rowStyle}><span style={labelStyle}>Transaction ID</span><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{p.transactionId}</span></div>
-                <div style={rowStyle}><span style={labelStyle}>Amount</span><span style={{ fontWeight: 600 }}>₹{p.amount?.toLocaleString()}</span></div>
+                <div style={rowStyle}><span style={labelStyle}>Amount</span><span style={{ fontWeight: 600 }}>{venueMoney(p.amount)}</span></div>
                 <div style={rowStyle}><span style={labelStyle}>Method</span><span>{p.paymentMethod?.replace('_', ' ')}</span></div>
                 <div style={rowStyle}>
                   <span style={labelStyle}>Status</span>
@@ -1768,14 +1909,14 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                   </span>
                 </div>
                 {p.gatewayOrderId && <div style={rowStyle}><span style={labelStyle}>Gateway Order</span><span style={{ fontSize: '0.82rem' }}>{p.gatewayOrderId}</span></div>}
-                {p.paidAt && <div style={rowStyle}><span style={labelStyle}>Paid At</span><span>{new Date(p.paidAt).toLocaleString()}</span></div>}
+                {p.paidAt && <div style={rowStyle}><span style={labelStyle}>Paid At</span><span>{venueDateTime(p.paidAt)}</span></div>}
                 {p.refundCount > 0 && (
                   <>
-                    <div style={rowStyle}><span style={labelStyle}>Total Refunded</span><span style={{ color: '#e74c3c' }}>₹{p.totalRefunded?.toLocaleString()}</span></div>
-                    <div style={rowStyle}><span style={labelStyle}>Remaining Refundable</span><span style={{ color: 'var(--success, #00b894)' }}>₹{(p.remainingRefundable ?? 0).toLocaleString()}</span></div>
+                    <div style={rowStyle}><span style={labelStyle}>Total Refunded</span><span style={{ color: '#e74c3c' }}>{venueMoney(p.totalRefunded)}</span></div>
+                    <div style={rowStyle}><span style={labelStyle}>Remaining Refundable</span><span style={{ color: 'var(--success, #00b894)' }}>{venueMoney((p.remainingRefundable ?? 0))}</span></div>
                   </>
                 )}
-                {p.failureReason && <div style={rowStyle}><span style={labelStyle}>Failure Reason</span><span style={{ color: 'var(--danger)' }}>{DOMPurify.sanitize(p.failureReason, { ALLOWED_TAGS: [] })}</span></div>}
+                {p.failureReason && <div style={rowStyle}><span style={labelStyle}>Failure Reason</span><span style={{ color: 'var(--danger-text)' }}>{DOMPurify.sanitize(p.failureReason, { ALLOWED_TAGS: [] })}</span></div>}
                 {(p.status === 'SUCCESS' || p.status === 'PARTIALLY_REFUNDED') && (
                   <>
                     <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1789,11 +1930,17 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                         }}>
                         💳 {(p.remainingRefundable ?? p.amount) <= 0 ? 'Fully Refunded' : 'Refund Payment'}
                       </button>
-                      {(p.remainingRefundable ?? p.amount) > 0 && b.status !== 'COMPLETED' && b.status !== 'CANCELLED' && b.status !== 'NO_SHOW' && (
+                      {(p.remainingRefundable ?? p.amount) > 0 && b.status !== 'COMPLETED' && b.status !== 'CANCELLED' && b.status !== 'NO_SHOW' && !p.gatewayOrderId && (
                         <button className="btn btn-sm btn-secondary"
                           onClick={() => { setChangeMethodFor(changeMethodFor === p.id ? null : p.id); setChangeMethodNewMethod('CASH'); }}>
                           ⇄ Change Method
                         </button>
+                      )}
+                      {(p.remainingRefundable ?? p.amount) > 0 && b.status !== 'COMPLETED' && b.status !== 'CANCELLED' && b.status !== 'NO_SHOW' && p.gatewayOrderId && (
+                        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic' }}
+                          title="Changing method refunds and re-collects. For an online gateway payment that would issue a real refund to the customer's card — not allowed here. Refund explicitly if intended.">
+                          Method change unavailable — online gateway payment
+                        </span>
                       )}
                       {(p.remainingRefundable ?? p.amount) > 0 && (b.status === 'COMPLETED' || b.status === 'CANCELLED' || b.status === 'NO_SHOW') && (
                         <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
@@ -1802,14 +1949,14 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                       )}
                       {p.totalRefunded > 0 && (
                         <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                          ₹{p.totalRefunded?.toLocaleString()} refunded
+                          {venueMoney(p.totalRefunded)} refunded
                         </span>
                       )}
                     </div>
                     {changeMethodFor === p.id && (
                       <div style={{ marginTop: '0.5rem', padding: '0.6rem 0.75rem', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }}>
                         <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>
-                          Refund ₹{(p.remainingRefundable ?? p.amount)?.toLocaleString()} from <strong>{p.paymentMethod?.replace('_', ' ')}</strong> and record as:
+                          Refund {venueMoney((p.remainingRefundable ?? p.amount))} from <strong>{p.paymentMethod?.replace('_', ' ')}</strong> and record as:
                         </p>
                         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                           <select value={changeMethodNewMethod} onChange={e => setChangeMethodNewMethod(e.target.value)}
@@ -1846,7 +1993,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                       const onRetry = async () => {
                         const ok = await confirm({
                           title: `Retry failed refund #${r.id}?`,
-                          message: `Amount: ₹${r.amount}. If this exceeds the maker-checker threshold, an approval request will be created at /admin/approvals for another admin to review. Otherwise the gateway is charged again immediately.`,
+                          message: `Amount: ${venueMoney(r.amount)}. If this exceeds the maker-checker threshold, an approval request will be created at /admin/approvals for another admin to review. Otherwise the gateway is charged again immediately.`,
                           confirmLabel: 'Retry refund',
                           variant: 'danger',
                         });
@@ -1872,11 +2019,11 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                       return (
                         <div key={ri} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem', color: 'var(--text-secondary)', padding: '0.2rem 0', borderBottom: '1px dotted var(--border)' }}>
                           <span>
-                            ₹{r.amount?.toLocaleString()} — {r.reason || 'No reason'}
+                            {venueMoney(r.amount)} — {r.reason || 'No reason'}
                             {' '}<span style={{ color: statusColor, fontWeight: 600 }}>· {r.refundStatus || 'UNKNOWN'}</span>
                           </span>
                           <span style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center' }}>
-                            <span style={{ color: 'var(--text-muted)' }}>{r.refundedAt ? new Date(r.refundedAt).toLocaleDateString() : ''} by {r.initiatedBy}</span>
+                            <span style={{ color: 'var(--text-muted)' }}>{r.refundedAt ? (parseServerDate(r.refundedAt)?.toLocaleDateString() || '') : ''} by {r.initiatedBy}</span>
                             {isFailed && (
                               <button className="btn btn-sm btn-secondary" onClick={onRetry}
                                 title="Retry this failed refund. Above the maker-checker threshold a second admin must approve.">
@@ -1898,14 +2045,14 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
             <div style={{ marginTop: '1rem', padding: '1rem', background: 'var(--bg-card)', border: '1px solid var(--danger, #e74c3c)', borderRadius: 'var(--radius-sm)' }}>
               <h4 style={{ marginBottom: '0.5rem' }}>Refund Payment</h4>
               <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-                Paid: ₹{refundModal.payment?.amount?.toLocaleString()}
+                Paid: {venueMoney(refundModal.payment?.amount)}
                 {(refundModal.payment?.totalRefunded || 0) > 0 && (
-                  <> &bull; Already refunded: ₹{refundModal.payment?.totalRefunded?.toLocaleString()} &bull; Remaining: ₹{(refundModal.payment?.remainingRefundable ?? refundModal.payment?.amount)?.toLocaleString()}</>
+                  <> &bull; Already refunded: {venueMoney(refundModal.payment?.totalRefunded)} &bull; Remaining: {venueMoney((refundModal.payment?.remainingRefundable ?? refundModal.payment?.amount))}</>
                 )}
                 <br/><span style={{ fontSize: '0.75rem', fontFamily: 'monospace' }}>{refundModal.payment?.transactionId}</span>
               </p>
               <div style={{ marginBottom: '0.5rem' }}>
-                <label style={{ ...labelStyle, display: 'block', marginBottom: '0.3rem' }}>Refund Amount (max ₹{(refundModal.payment?.remainingRefundable ?? refundModal.payment?.amount)?.toLocaleString()})</label>
+                <label style={{ ...labelStyle, display: 'block', marginBottom: '0.3rem' }}>Refund Amount (max {venueMoney((refundModal.payment?.remainingRefundable ?? refundModal.payment?.amount))})</label>
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                   <input type="number" value={refundAmount} onChange={e => setRefundAmount(e.target.value)}
                     max={refundModal.payment?.remainingRefundable ?? refundModal.payment?.amount} step="0.01" min="1"
@@ -1945,9 +2092,9 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                     return (
                       <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '0.6rem', padding: '0.4rem 0.6rem', background: 'var(--bg)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
                         <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                          Total: <strong>₹{(b.totalAmount || 0).toLocaleString()}</strong>
-                          {' ∙ '}Collected: <strong>₹{(b.collectedAmount || 0).toLocaleString()}</strong>
-                          {' ∙ '}Remaining: <strong style={{ color: remainBalance > 0 ? 'var(--success, #00b894)' : 'var(--text-muted)' }}>₹{remainBalance.toLocaleString()}</strong>
+                          Total: <strong>{venueMoney((b.totalAmount || 0))}</strong>
+                          {' ∙ '}Collected: <strong>{venueMoney((b.collectedAmount || 0))}</strong>
+                          {' ∙ '}Remaining: <strong style={{ color: remainBalance > 0 ? 'var(--success, #00b894)' : 'var(--text-muted)' }}>{venueMoney(remainBalance)}</strong>
                         </span>
                         <button className="btn btn-sm btn-secondary"
                           style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
@@ -1960,7 +2107,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                   })()}
                   <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
                     <div>
-                      <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.2rem' }}>Amount (₹)</label>
+                      <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: '0.2rem' }}>Amount ({venueSymbol()})</label>
                       <input type="number" value={addPaymentForm.amount} onChange={e => setAddPaymentForm(f => ({ ...f, amount: e.target.value }))}
                         placeholder="0" min="1" step="1"
                         style={{ padding: '0.35rem 0.5rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--text)', fontSize: '0.85rem', width: '120px' }} />
@@ -2111,6 +2258,7 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                     ESCALATED: 'Escalated to Support',
                     DE_ESCALATED: 'De-escalated',
                     GOODWILL_ISSUED: 'Goodwill Credit Issued',
+                    ROOM_CHANGED: 'Room Changed',
                   };
                   return map[type] || type.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
                 })();
@@ -2140,10 +2288,9 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                   ? actorName
                   : `${actorName} (${roleLabel})`;
 
-                // Format timestamp using the UTC-aware helper so the
-                // naive LocalDateTime coming from the server renders in
-                // the admin dashboard's local wall-clock time.
-                const localTime = formatServerDateTime(evt.createdAt, {
+                // Event log timestamps are UTC instants — render them in the
+                // VENUE's zone so the audit trail matches what happened on-site.
+                const localTime = venueDateTime(evt.createdAt, {
                   year: 'numeric', month: 'short', day: 'numeric',
                   hour: '2-digit', minute: '2-digit', second: '2-digit',
                 });
@@ -2152,9 +2299,12 @@ function DetailModalTabs({ booking: initialBooking, bookingCount, operationalDat
                 // Build change summary
                 const changeSummary = (() => {
                   const parts = [];
-                  if (evt.previousStatus && evt.newStatus) {
+                  // Only surface a status line when the status actually changed. Events like
+                  // ROOM_CHANGED / PAYMENT_UPDATED keep the same status, so their (identical)
+                  // prev→new pair would just be noise — show only their description instead.
+                  if (evt.previousStatus && evt.newStatus && evt.previousStatus !== evt.newStatus) {
                     parts.push(`Status: ${evt.previousStatus.replace(/_/g, ' ')} → ${evt.newStatus.replace(/_/g, ' ')}`);
-                  } else if (evt.newStatus) {
+                  } else if (evt.newStatus && !evt.previousStatus) {
                     parts.push(`Status set to: ${evt.newStatus.replace(/_/g, ' ')}`);
                   }
                   if (evt.description) {

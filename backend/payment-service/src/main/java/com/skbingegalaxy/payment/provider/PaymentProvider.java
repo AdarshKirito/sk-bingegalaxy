@@ -38,6 +38,22 @@ public interface PaymentProvider {
         return iso != null && supportedCurrencies().contains(iso.toUpperCase());
     }
 
+    /**
+     * Rails this gateway can actually charge for a venue in {@code countryIso2}.
+     *
+     * <p>This is the SUPPLY side of payment-method resolution: it is intersected
+     * with what the market expects (the country catalogue) so we never render a
+     * method the gateway would reject at checkout. Gateway capability is
+     * genuinely country-dependent — Razorpay can take UPI for an Indian venue but
+     * only cards for an international one — hence the parameter.
+     *
+     * <p>Defaults to card-only, the near-universal baseline, so a newly added
+     * provider is conservative until it declares more.
+     */
+    default Set<com.skbingegalaxy.common.enums.PaymentMethod> supportedMethods(String countryIso2) {
+        return Set.of(com.skbingegalaxy.common.enums.PaymentMethod.CARD);
+    }
+
     CreateOrderResponse createOrder(CreateOrderRequest req);
 
     CallbackVerificationResult verifyCallback(Map<String, String> params);
@@ -46,6 +62,15 @@ public interface PaymentProvider {
 
     // ── Value objects ──────────────────────────────────────────────────
 
+    /**
+     * @param venueCountry       ISO-3166 alpha-2 of the VENUE. Decides which rails the
+     *                           gateway may enable for this charge.
+     * @param connectedAccountId the venue's gateway account for marketplace providers
+     *                           (Stripe Connect {@code acct_…}); null for providers that
+     *                           settle to a single platform account, such as Razorpay.
+     * @param paymentMethods     rails to enable, already resolved from the venue country;
+     *                           empty lets the gateway decide.
+     */
     record CreateOrderRequest(
         String bookingRef,
         BigDecimal amount,
@@ -53,7 +78,19 @@ public interface PaymentProvider {
         String customerEmail,
         String customerName,
         String fxLockId,
-        Map<String, String> metadata) {}
+        Map<String, String> metadata,
+        String venueCountry,
+        String connectedAccountId,
+        java.util.List<com.skbingegalaxy.common.enums.PaymentMethod> paymentMethods) {
+
+        /** Convenience for providers that ignore venue routing (single-account gateways). */
+        public CreateOrderRequest(String bookingRef, BigDecimal amount, String currency,
+                                  String customerEmail, String customerName, String fxLockId,
+                                  Map<String, String> metadata) {
+            this(bookingRef, amount, currency, customerEmail, customerName, fxLockId, metadata,
+                null, null, java.util.List.of());
+        }
+    }
 
     record CreateOrderResponse(
         String providerName,

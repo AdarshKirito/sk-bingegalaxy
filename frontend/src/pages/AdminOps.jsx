@@ -5,6 +5,7 @@ import {
   FiTool, FiClock, FiCheckCircle, FiXCircle, FiDatabase,
 } from 'react-icons/fi';
 import { adminService, toArray } from '../services/endpoints';
+import { parseServerDate } from '../services/timeFormat';
 import './AdminPages.css';
 
 /**
@@ -221,7 +222,7 @@ function HealthPanel() {
                         title={r.lastError || ''}>
                       {r.lastError || '\u2014'}
                     </td>
-                    <td>{r.createdAt ? new Date(r.createdAt).toLocaleString() : '\u2014'}</td>
+                    <td>{r.createdAt ? (parseServerDate(r.createdAt)?.toLocaleString() || '\u2014') : '\u2014'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -493,7 +494,7 @@ function OutboxPanel() {
                       title={r.lastError || ''}>
                     {r.lastError ? <span style={{ color: 'var(--danger, #ef4444)' }}><FiXCircle /> {r.lastError}</span> : '\u2014'}
                   </td>
-                  <td>{r.createdAt ? new Date(r.createdAt).toLocaleString() : '\u2014'}</td>
+                  <td>{r.createdAt ? (parseServerDate(r.createdAt)?.toLocaleString() || '\u2014') : '\u2014'}</td>
                   <td>
                     <button className="btn btn-sm btn-secondary" onClick={() => onRetryOne(r)} disabled={busyId === r.id}>
                       <FiPlay /> {busyId === r.id ? '\u2026' : 'Retry'}

@@ -12,25 +12,27 @@ import {
   buildSupportEmailHref,
   buildSupportWhatsAppHref,
   CUSTOMER_SUPPORT,
-  EXPERIENCE_STEPS,
   getAccountPreferences,
   getCallSupportHref,
-  HELP_FAQS,
   mergeSupportContact,
-  MEMBER_OFFERS,
 } from '../services/customerExperience';
+import { useAccountPageContent } from '../hooks/useAccountPageContent';
+import { countPastVisits } from '../utils/bookings';
 import { FiArrowRight, FiBell, FiCalendar, FiCheckCircle, FiClock, FiCreditCard, FiGift, FiHeart, FiLifeBuoy, FiMail, FiMessageCircle, FiPhoneCall, FiSettings, FiShield, FiStar, FiUser } from 'react-icons/fi';
 import './CustomerHub.css';
 
 export default function AccountCenter() {
   const { user, setUser } = useAuth();
   const { selectedBinge } = useBinge();
+  // CMS-driven help/benefits/support copy — binge override → global → defaults.
+  const { content: pageContent } = useAccountPageContent(selectedBinge?.id);
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState(user);
   const [supportContact, setSupportContact] = useState(CUSTOMER_SUPPORT);
   const [currentBookings, setCurrentBookings] = useState([]);
   const [pastBookings, setPastBookings] = useState([]);
   const [payments, setPayments] = useState([]);
+  const [paymentSummary, setPaymentSummary] = useState(null);
   const [myPricing, setMyPricing] = useState(null);
   const [loyaltyAccount, setLoyaltyAccount] = useState(null);
   const [preferences, setPreferences] = useState({ ...ACCOUNT_PREFERENCES_DEFAULTS });
@@ -50,7 +52,10 @@ export default function AccountCenter() {
       selectedBinge ? paymentService.getMyPayments() : Promise.resolve({ data: { data: [] } }),
       selectedBinge ? bookingService.getMyPricing() : Promise.resolve({ data: { data: null } }),
       bookingService.getMyLoyalty().catch(() => ({ data: { data: null } })),
-    ]).then(([profileRes, supportRes, currentRes, pastRes, paymentRes, pricingRes, loyaltyRes]) => {
+      // FE-001: lifetime spend must be a server-side aggregate — the paged
+      // /payments/my response caps at 20 rows and silently understated it.
+      selectedBinge ? paymentService.getMyPaymentsSummary().catch(() => ({ data: { data: null } })) : Promise.resolve({ data: { data: null } }),
+    ]).then(([profileRes, supportRes, currentRes, pastRes, paymentRes, pricingRes, loyaltyRes, paymentSummaryRes]) => {
       const profileData = profileRes.status === 'fulfilled' ? (profileRes.value.data.data || null) : null;
       if (profileData) {
         setProfile(profileData);
@@ -63,6 +68,7 @@ export default function AccountCenter() {
       setPayments(paymentRes.status === 'fulfilled' ? toArray(paymentRes.value?.data?.data) : []);
       setMyPricing(pricingRes.status === 'fulfilled' ? (pricingRes.value.data.data || null) : null);
       setLoyaltyAccount(loyaltyRes.status === 'fulfilled' ? (loyaltyRes.value.data.data || null) : null);
+      setPaymentSummary(paymentSummaryRes.status === 'fulfilled' ? (paymentSummaryRes.value?.data?.data || null) : null);
     }).finally(() => setLoading(false));
   }, [selectedBinge]);
 
@@ -74,9 +80,15 @@ export default function AccountCenter() {
   const secondaryLink = hasVenueSelected ? '/payments' : '/binges';
   const secondaryLabel = hasVenueSelected ? 'Review Payments' : 'Browse Venues';
 
-  const completedCount = pastBookings.length;
+  // "Completed visits" = actual attended visits only. The past feed also returns
+  // cancelled / no-show / lapsed bookings for the history views; those are not
+  // visits. Single source of truth in utils/bookings.
+  const completedCount = countPastVisits(pastBookings);
   const successfulPayments = payments.filter((payment) => payment.status === 'SUCCESS');
-  const totalSpend = successfulPayments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
+  // FE-001: prefer the server-side lifetime aggregate; the page-derived sum is
+  // only the fallback while the summary is unavailable.
+  const pageSpend = successfulPayments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
+  const totalSpend = paymentSummary?.lifetimeSpend ?? pageSpend;
   const pendingPayments = currentBookings.filter((booking) => booking.paymentStatus !== 'SUCCESS' && booking.status !== 'CANCELLED');
   const loyaltyTier = loyaltyAccount?.tierLevel || 'BRONZE';
   const pricingLabel = myPricing?.pricingSource === 'CUSTOMER'
@@ -179,36 +191,36 @@ export default function AccountCenter() {
         <article className="customer-hub-panel card customer-account-card">
           <div className="customer-hub-panel-head">
             <div>
-              <span className="customer-hub-panel-label">Profile</span>
-              <h2>Your customer profile</h2>
+              <span className="customer-hub-panel-label">Contact &amp; security</span>
+              <h2>Your details live in Settings</h2>
             </div>
-            <span className="customer-account-avatar"><FiUser /></span>
+            <span className="customer-account-avatar"><FiShield /></span>
           </div>
           <div className="customer-account-list">
             <div>
-              <span>Name</span>
-              <strong>{[customer?.firstName, customer?.lastName].filter(Boolean).join(' ') || 'Customer'}</strong>
+              <span>Name &amp; address</span>
+              <strong>
+                {[customer?.firstName, customer?.lastName].filter(Boolean).join(' ') || '—'}
+                {(customer?.city || customer?.postalCode) && ` · ${[customer?.city, customer?.postalCode].filter(Boolean).join(' ')}`}
+              </strong>
             </div>
             <div>
-              <span>Email</span>
-              <strong>{customer?.email || 'Not available'}</strong>
+              <span>Email {customer?.emailVerified ? '✓ verified' : '(unverified)'}</span>
+              <strong>{customer?.email || '—'}</strong>
             </div>
             <div>
               <span>Phone</span>
-              <strong>{customer?.phone ? `${customer?.phoneCountryCode || ''} ${customer.phone}`.trim() : 'Add a phone number to get faster help'}</strong>
+              <strong>{customer?.phone ? `${customer?.phoneCountryCode || ''} ${customer.phone}`.trim() : 'Not set'}</strong>
             </div>
-            <div>
-              <span>Current venue</span>
-              <strong>{selectedBinge?.name || 'Choose a venue to personalize booking flow'}</strong>
-            </div>
-            {(customer?.addressLine1 || customer?.city || customer?.country) && (
-              <div>
-                <span>Address</span>
-                <strong>{[customer?.addressLine1, customer?.addressLine2, customer?.city, customer?.state, customer?.postalCode, customer?.country].filter(Boolean).join(', ')}</strong>
-              </div>
-            )}
           </div>
-          <p className="customer-account-note">Your email and phone power booking updates, reminders, and same-day support.</p>
+          <p className="customer-account-note">
+            Address, phone, email, and password changes all live on the Settings page —
+            one place, one password-change flow.
+          </p>
+          <div className="customer-hub-inline-actions">
+            <Link to="/settings" className="btn btn-primary btn-sm"><FiSettings /> Open Settings</Link>
+            <Link to="/account/sessions" className="btn btn-secondary btn-sm">Active sessions</Link>
+          </div>
         </article>
 
         <article className="customer-hub-panel card customer-account-card">
@@ -243,9 +255,12 @@ export default function AccountCenter() {
             </a>}
           </div>
           <div className="customer-account-policy-list">
-            <p><FiShield /> Cancellation requests are easiest to resolve before the event date and before payment disputes start.</p>
-            <p><FiCreditCard /> Payment help is available for pending, failed, and refund-follow-up scenarios.</p>
-            <p><FiClock /> Support window: {support.hours}</p>
+            <p><FiShield /> {pageContent.cancellationPolicy}</p>
+            <p><FiCreditCard /> {pageContent.paymentHelpPolicy}</p>
+            <p><FiClock /> Support window: {pageContent.supportHours}</p>
+          </div>
+          <div className="customer-hub-inline-actions">
+            <Link to="/help/support" className="btn btn-secondary btn-sm">More <FiArrowRight /></Link>
           </div>
         </article>
       </section>
@@ -364,13 +379,16 @@ export default function AccountCenter() {
           <span className="customer-hub-inline-link">Your current tier: {loyaltyTier}</span>
         </div>
         <div className="customer-benefits-grid">
-          {MEMBER_OFFERS.map((offer) => (
+          {pageContent.memberOffers.map((offer) => (
             <article key={offer.title} className="customer-benefit-card">
               <span className="customer-hub-panel-label">{offer.title}</span>
               <h3>{offer.title}</h3>
               <p>{offer.description}</p>
             </article>
           ))}
+        </div>
+        <div className="customer-hub-inline-actions">
+          <Link to="/help/benefits" className="btn btn-secondary btn-sm">More <FiArrowRight /></Link>
         </div>
       </section>
 
@@ -383,12 +401,15 @@ export default function AccountCenter() {
             </div>
           </div>
           <div className="customer-faq-list">
-            {HELP_FAQS.map((item) => (
+            {pageContent.faqs.slice(0, 4).map((item) => (
               <article key={item.question} className="customer-faq-item">
                 <h3>{item.question}</h3>
                 <p>{item.answer}</p>
               </article>
             ))}
+          </div>
+          <div className="customer-hub-inline-actions">
+            <Link to="/help/faq" className="btn btn-secondary btn-sm">More <FiArrowRight /></Link>
           </div>
         </article>
 
@@ -396,16 +417,17 @@ export default function AccountCenter() {
           <div className="customer-hub-panel-head">
             <div>
               <span className="customer-hub-panel-label">How it works</span>
-              <h2>Your experience in three steps</h2>
+              <h2>Your experience, step by step</h2>
             </div>
           </div>
           <ol className="customer-steps-list">
-            {EXPERIENCE_STEPS.map((step) => (
+            {pageContent.howItWorksSteps.map((step) => (
               <li key={step}>{step}</li>
             ))}
           </ol>
           <div className="customer-hub-inline-actions">
             <Link to={hasVenueSelected ? '/book' : '/platform'} className="btn btn-primary btn-sm">{hasVenueSelected ? 'Plan the next one' : 'Go to Dashboard'} <FiArrowRight /></Link>
+            <Link to="/help/how-it-works" className="btn btn-secondary btn-sm">More <FiArrowRight /></Link>
           </div>
         </article>
       </section>

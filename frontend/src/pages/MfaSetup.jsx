@@ -25,6 +25,7 @@ export default function MfaSetup() {
   const [savedAck, setSavedAck] = useState(false);
   const [showDisable, setShowDisable] = useState(false);
   const [disableCode, setDisableCode] = useState('');
+  const [disablePassword, setDisablePassword] = useState('');
   const inputsRef = useRef([]);
 
   const code = digits.join('');
@@ -66,14 +67,22 @@ export default function MfaSetup() {
 
   const disable = async () => {
     if (!disableCode.trim()) { toast.error('Enter your current 6-digit code'); return; }
+    // The password is NOT blocked on here. Turning 2FA off is a security downgrade
+    // so the server re-authenticates — but accounts created through Google sign-in
+    // have no password to give, and the server is the only side that knows which
+    // is which. Send whatever was entered and let it decide.
     try {
-      await authService.disableMfa({ code: disableCode.trim() });
+      await authService.disableMfa({
+        code: disableCode.trim(),
+        currentPassword: disablePassword,
+      });
       toast.success('MFA disabled');
       setStage('intro');
       setPayload(null);
       setDigits(['', '', '', '', '', '']);
       setShowDisable(false);
       setDisableCode('');
+      setDisablePassword('');
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to disable MFA');
     }
@@ -368,7 +377,7 @@ export default function MfaSetup() {
           <div className="mfa2-modal">
             <button
               className="mfa2-modal-close"
-              onClick={() => { setShowDisable(false); setDisableCode(''); }}
+              onClick={() => { setShowDisable(false); setDisableCode(''); setDisablePassword(''); }}
               aria-label="Close"
               type="button"
             >
@@ -377,8 +386,9 @@ export default function MfaSetup() {
             <div className="mfa2-modal-icon"><FiAlertTriangle /></div>
             <h3>Disable two-factor authentication?</h3>
             <p>
-              Your account will be less secure. Enter a current 6-digit code from your
-              authenticator app to confirm.
+              Your account will be less secure. Confirm with a current 6-digit code from
+              your authenticator app and your account password. If you sign in with
+              Google and have never set a password, leave the password field empty.
             </p>
             <input
               type="text"
@@ -388,12 +398,23 @@ export default function MfaSetup() {
               onChange={(e) => setDisableCode(e.target.value.replace(/\D/g, ''))}
               placeholder="123456"
               className="mfa2-modal-input"
+              aria-label="Authenticator code"
               autoFocus
+            />
+            <input
+              type="password"
+              value={disablePassword}
+              onChange={(e) => setDisablePassword(e.target.value)}
+              placeholder="Account password (leave empty for Google sign-in)"
+              className="mfa2-modal-input"
+              aria-label="Account password"
+              autoComplete="current-password"
+              style={{ marginTop: 10 }}
             />
             <div className="mfa2-actions mfa2-actions-end" style={{ marginTop: 14 }}>
               <button
                 className="mfa2-btn mfa2-btn-ghost"
-                onClick={() => { setShowDisable(false); setDisableCode(''); }}
+                onClick={() => { setShowDisable(false); setDisableCode(''); setDisablePassword(''); }}
                 type="button"
               >
                 Cancel

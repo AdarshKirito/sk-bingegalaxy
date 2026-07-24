@@ -1,0 +1,51 @@
+SK Binge Galaxy
+Copyright (c) 2026 SK Binge Galaxy. All Rights Reserved.
+
+This product is proprietary software. See the LICENSE file for terms.
+
+--------------------------------------------------------------------------------
+THIRD-PARTY COMPONENTS
+--------------------------------------------------------------------------------
+
+This product includes third-party open-source software. Each component remains
+licensed under its own terms, which govern that component only and grant no
+rights to SK Binge Galaxy as a whole.
+
+Authoritative, always-current dependency lists live in the build manifests rather
+than being duplicated here (a hand-maintained list drifts):
+
+  Backend  (Java / Maven)  — backend/pom.xml and each module's pom.xml
+                             Generate a report with:
+                               mvn license:aggregate-third-party-report
+  Frontend (JavaScript)    — frontend/package.json and frontend/package-lock.json
+                             Generate a report with:
+                               npx license-checker --production --summary
+
+Principal frameworks and libraries in use include, without limitation:
+
+  Apache License 2.0
+    - Spring Boot / Spring Framework / Spring Cloud (Pivotal Software, Inc.)
+    - Apache Kafka clients (The Apache Software Foundation)
+    - Jackson (FasterXML, LLC)
+    - Flyway (Redgate Software Ltd)
+
+  MIT License
+    - React and React DOM (Meta Platforms, Inc. and affiliates)
+    - Vite (Evan You and Vite contributors)
+    - Axios, and other frontend packages listed in frontend/package.json
+
+  Eclipse Public License 2.0 / GNU GPL v2 with Classpath Exception
+    - JUnit 5 (EPL 2.0)
+    - Eclipse Temurin / OpenJDK runtime (GPLv2+CPE)
+
+  PostgreSQL License
+    - PostgreSQL JDBC Driver and PostgreSQL server
+
+  Server Side Public License (SSPL)
+    - MongoDB Community Server
+
+Attribution for any component not listed above is available in the generated
+reports named in this file. If you redistribute this product under a written
+agreement with the Owner, you must reproduce this NOTICE file and comply with
+each third-party component's license terms, including any obligation to provide
+that component's source or license text.

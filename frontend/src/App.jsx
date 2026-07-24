@@ -4,7 +4,6 @@ import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { BingeProvider, useBinge } from './context/BingeContext';
-import { CurrencyProvider } from './context/CurrencyContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import PWAUpdatePrompt from './components/PWAUpdatePrompt';
 import { trackPageView } from './services/analytics';
@@ -42,9 +41,12 @@ const AdminRegister = lazy(() => import('./pages/AdminRegister'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const AdminBookings = lazy(() => import('./pages/AdminBookings'));
 const AdminBlockedDates = lazy(() => import('./pages/AdminBlockedDates'));
+const AdminBingeAbout = lazy(() => import('./pages/AdminBingeAbout'));
 const AdminEventTypes = lazy(() => import('./pages/AdminEventTypes'));
 const AdminReports = lazy(() => import('./pages/AdminReports'));
 const AdminBookingCreate = lazy(() => import('./pages/AdminBookingCreate'));
+const AdminTermsEditor = lazy(() => import('./pages/AdminTermsEditor'));
+const Terms = lazy(() => import('./pages/Terms'));
 const AdminUsersConfig = lazy(() => import('./pages/AdminUsersConfig'));
 const AdminRateCodes = lazy(() => import('./pages/AdminRateCodes'));
 const AdminCustomerPricing = lazy(() => import('./pages/AdminCustomerPricing'));
@@ -62,10 +64,13 @@ const AdminFailedRefunds = lazy(() => import('./pages/AdminFailedRefunds'));
 const AdminSlotHolds = lazy(() => import('./pages/AdminSlotHolds'));
 const AdminTaxes = lazy(() => import('./pages/AdminTaxes'));
 const AdminCurrencies = lazy(() => import('./pages/AdminCurrencies'));
+const AdminVenueTimezones = lazy(() => import('./pages/AdminVenueTimezones'));
+const AdminMessages = lazy(() => import('./pages/AdminMessages'));
 const AdminAccountPageEditor = lazy(() => import('./pages/AdminAccountPageEditor'));
 const AdminNotificationTemplates = lazy(() => import('./pages/AdminNotificationTemplates'));
 const AdminOps = lazy(() => import('./pages/AdminOps'));
 const CustomerNotifications = lazy(() => import('./pages/CustomerNotifications'));
+const CustomerMessages = lazy(() => import('./pages/CustomerMessages'));
 const BingeManagement = lazy(() => import('./pages/BingeManagement'));
 const BingeSelector = lazy(() => import('./pages/BingeSelector'));
 const PlatformDashboard = lazy(() => import('./pages/PlatformDashboard'));
@@ -73,6 +78,8 @@ const AdminEntranceDashboard = lazy(() => import('./pages/AdminEntranceDashboard
 const AdminAccount = lazy(() => import('./pages/AdminAccount'));
 const AdminAllUsers = lazy(() => import('./pages/AdminAllUsers'));
 const CompleteProfile = lazy(() => import('./pages/CompleteProfile'));
+const HelpCenter = lazy(() => import('./pages/HelpCenter'));
+const TransferAccept = lazy(() => import('./pages/TransferAccept'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 
 function PageLoader() {
@@ -155,11 +162,16 @@ function SuperAdminRoute({ children, scope }) {
   return <Navigate to="/admin/platform" replace />;
 }
 
-/* Requires binge selected — redirects to selector if not */
+/* Requires binge selected — redirects to selector if not.
+ * Separation of duties: staff (ADMIN/SUPER_ADMIN) accounts are bounced to the
+ * admin console rather than transacting through the customer booking / My
+ * Bookings / payments flow under their staff identity. A staff member who also
+ * wants to be a customer uses a SEPARATE customer account (different email). */
 function BingeRequired({ children }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isAdmin } = useAuth();
   const { selectedBinge } = useBinge();
   if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (isAdmin) return <Navigate to="/admin/platform" replace />;
   if (!selectedBinge) return <Navigate to="/platform" replace />;
   return children;
 }
@@ -199,6 +211,10 @@ function AppFrame() {
           <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPassword /></PublicOnlyRoute>} />
           <Route path="/reset-password" element={<PublicOnlyRoute><ResetPassword /></PublicOnlyRoute>} />
           <Route path="/verify-email" element={<VerifyEmail />} />
+          <Route path="/terms" element={<Terms />} />
+          {/* Booking-transfer magic link landing — public by design: the emailed
+              token is the credential and the recipient may not have an account. */}
+          <Route path="/transfers/:token" element={<TransferAccept />} />
           <Route path="/complete-profile" element={<CompleteProfileRoute><CompleteProfile /></CompleteProfileRoute>} />
           <Route path="/platform" element={<ProtectedRoute><PlatformDashboard /></ProtectedRoute>} />
           <Route path="/binges" element={<ProtectedRoute><BingeSelector /></ProtectedRoute>} />
@@ -212,15 +228,19 @@ function AppFrame() {
           <Route path="/about" element={<BingeRequired><AboutBinge /></BingeRequired>} />
           <Route path="/account" element={<ProtectedRoute><AccountCenter /></ProtectedRoute>} />
           <Route path="/account/notifications" element={<ProtectedRoute><CustomerNotifications /></ProtectedRoute>} />
+          <Route path="/messages" element={<ProtectedRoute><CustomerMessages /></ProtectedRoute>} />
           <Route path="/account/sessions" element={<ProtectedRoute><MySessions /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><CustomerSettings /></ProtectedRoute>} />
-          <Route path="/account/sessions" element={<ProtectedRoute><MySessions /></ProtectedRoute>} />
           <Route path="/account/security/mfa" element={<ProtectedRoute><MfaSetup /></ProtectedRoute>} />
+          {/* Help Center — full pages behind the Dashboard / Account "More" links.
+              CMS-driven per binge (Account Page Editor content). */}
+          <Route path="/help/:topic" element={<ProtectedRoute><HelpCenter /></ProtectedRoute>} />
           <Route path="/payment/:ref" element={<BingeRequired><PaymentPage /></BingeRequired>} />
 
           <Route path="/admin/login" element={<PublicOnlyRoute><AdminLogin /></PublicOnlyRoute>} />
           <Route path="/admin/register" element={<SuperAdminRoute scope="ADMIN_REGISTER"><AdminRegister /></SuperAdminRoute>} />
           <Route path="/admin/platform" element={<AdminRoute><AdminEntranceDashboard /></AdminRoute>} />
+          <Route path="/admin/messages" element={<AdminRoute><AdminMessages /></AdminRoute>} />
           <Route path="/admin/account" element={<AdminRoute><AdminAccount /></AdminRoute>} />
           <Route path="/admin/all-users" element={<SuperAdminRoute scope="ALL_USERS"><AdminAllUsers /></SuperAdminRoute>} />
           <Route path="/admin/customers/:id/edit" element={<SuperAdminRoute scope="CUSTOMER_EDIT"><AdminCustomerEdit /></SuperAdminRoute>} />
@@ -228,12 +248,14 @@ function AppFrame() {
           {/* Authority Handover — native super-admin only (delegated admins must never grant authority to themselves) */}
           <Route path="/admin/super/authority" element={<SuperAdminRoute><AuthorityHandover /></SuperAdminRoute>} />
           <Route path="/admin/home-editor" element={<SuperAdminRoute scope="HOME_CMS"><AdminHomeEditor /></SuperAdminRoute>} />
+          <Route path="/admin/terms-editor" element={<SuperAdminRoute scope="HOME_CMS"><AdminTermsEditor /></SuperAdminRoute>} />
           <Route path="/admin/sessions" element={<AdminRoute><MySessions /></AdminRoute>} />
           <Route path="/admin/security/mfa" element={<AdminRoute><MfaSetup /></AdminRoute>} />
           <Route path="/admin/binges" element={<AdminRoute><BingeManagement /></AdminRoute>} />
           <Route path="/admin/dashboard" element={<AdminBingeRequired><AdminDashboard /></AdminBingeRequired>} />
           <Route path="/admin/bookings" element={<AdminBingeRequired><AdminBookings /></AdminBingeRequired>} />
           <Route path="/admin/blocked-dates" element={<AdminBingeRequired><AdminBlockedDates /></AdminBingeRequired>} />
+          <Route path="/admin/about-binge" element={<AdminBingeRequired><AdminBingeAbout /></AdminBingeRequired>} />
           <Route path="/admin/event-types" element={<AdminBingeRequired><AdminEventTypes /></AdminBingeRequired>} />
           <Route path="/admin/rate-codes" element={<AdminBingeRequired><AdminRateCodes /></AdminBingeRequired>} />
           <Route path="/admin/loyalty-center" element={<SuperAdminRoute scope="LOYALTY"><AdminLoyaltyCenter /></SuperAdminRoute>} />
@@ -249,8 +271,11 @@ function AppFrame() {
           <Route path="/admin/disputes" element={<AdminBingeRequired><AdminDisputes /></AdminBingeRequired>} />
           <Route path="/admin/failed-refunds" element={<AdminBingeRequired><AdminFailedRefunds /></AdminBingeRequired>} />
           <Route path="/admin/slot-holds" element={<AdminBingeRequired><AdminSlotHolds /></AdminBingeRequired>} />
-          <Route path="/admin/taxes" element={<AdminBingeRequired><AdminTaxes /></AdminBingeRequired>} />
+          {/* Taxes are a platform-governance concern — super-admin only (binge-scoped). */}
+          <Route path="/admin/taxes" element={<SuperAdminRoute><AdminBingeRequired><AdminTaxes /></AdminBingeRequired></SuperAdminRoute>} />
           <Route path="/admin/currencies" element={<SuperAdminRoute scope="CURRENCIES"><AdminCurrencies /></SuperAdminRoute>} />
+          {/* Native super-admin only (no scope) — venue timezone changes are high-blast-radius and not delegable. */}
+          <Route path="/admin/venue-timezones" element={<SuperAdminRoute><AdminVenueTimezones /></SuperAdminRoute>} />
           <Route path="/admin/account-page-editor" element={<SuperAdminRoute scope="ACCOUNT_CMS"><AdminAccountPageEditor /></SuperAdminRoute>} />
           <Route path="/admin/binges/:bingeId/account-page-editor" element={<AdminRoute><AdminAccountPageEditor /></AdminRoute>} />
           <Route path="/admin/notification-templates" element={<SuperAdminRoute scope="NOTIFICATIONS"><AdminNotificationTemplates /></SuperAdminRoute>} />
@@ -276,9 +301,7 @@ export function AppContent() {
       <AuthProvider>
         <BingeProvider>
           <ConfirmProvider>
-            <CurrencyProvider>
-              <AppFrame />
-            </CurrencyProvider>
+            <AppFrame />
           </ConfirmProvider>
         </BingeProvider>
       </AuthProvider>

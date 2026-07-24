@@ -1,0 +1,82 @@
+.rp-wrap { position: relative; }
+
+/* ── Token field ── */
+.rp-field {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  min-height: 44px; padding: 6px 8px;
+  border: 1px solid var(--border, #e5e7eb); border-radius: 10px;
+  background: var(--bg-input, #fff); cursor: text;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.rp-field:focus-within {
+  border-color: var(--primary, #6366f1);
+  box-shadow: 0 0 0 3px var(--primary-bg, rgba(99, 102, 241, 0.15));
+}
+
+.rp-chip {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
+  padding: 3px 4px 3px 9px; border-radius: 999px; font-size: 0.82rem;
+  background: var(--bg-card-hover, #eef0f5); color: var(--text, #1f2937);
+  border: 1px solid var(--border, #e5e7eb);
+}
+.rp-chip-group {
+  background: var(--primary-bg, rgba(99, 102, 241, 0.12));
+  border-color: var(--primary, #6366f1); color: var(--primary, #6366f1); font-weight: 600;
+}
+.rp-chip-ico { flex: 0 0 auto; }
+.rp-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-chip-role {
+  font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em;
+  opacity: 0.7; flex: 0 0 auto;
+}
+.rp-chip-x {
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: transparent; color: var(--text-muted, #6b7280);
+  cursor: pointer; padding: 2px; border-radius: 50%; flex: 0 0 auto;
+}
+.rp-chip-x:hover { color: var(--danger, #e74c3c); background: rgba(0, 0, 0, 0.08); }
+
+.rp-input {
+  flex: 1 1 120px; min-width: 120px; border: none; outline: none; background: transparent;
+  color: var(--text, #1f2937); font-size: 0.9rem; padding: 4px 2px;
+}
+.rp-input::placeholder { color: var(--text-muted, #9ca3af); }
+
+/* ── Autocomplete dropdown ──
+   In-flow (not absolute): the suggestions PUSH the Subject/Message fields below it down
+   instead of floating over them. In a tight compose modal a floating overlay covered the
+   very fields the user needed next (and swallowed their clicks); expanding in-flow keeps
+   every field reachable. The modal body scrolls (see .msg-modal-body) so it always fits. */
+.rp-dropdown {
+  position: relative; margin-top: 4px; z-index: 1;
+  max-height: 260px; overflow-y: auto;
+  background: var(--bg-card, #fff); border: 1px solid var(--border, #e5e7eb);
+  border-radius: 10px; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12); padding: 4px;
+}
+.rp-section {
+  padding: 0.4rem 0.6rem 0.2rem; font-size: 0.66rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted, #9ca3af);
+}
+.rp-option {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 0.5rem 0.6rem; border: none; background: transparent; cursor: pointer;
+  border-radius: 8px; color: var(--text, #1f2937);
+}
+.rp-option.active, .rp-option:hover { background: var(--primary-bg, rgba(99, 102, 241, 0.1)); }
+.rp-avatar {
+  flex: 0 0 auto; width: 30px; height: 30px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--bg-card-hover, #eef0f5); color: var(--text-muted, #6b7280); font-size: 0.9rem;
+}
+.rp-avatar-group { background: var(--primary-bg, rgba(99, 102, 241, 0.14)); color: var(--primary, #6366f1); }
+.rp-opt-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.rp-opt-name { font-size: 0.9rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-opt-sub { font-size: 0.76rem; color: var(--text-muted, #6b7280); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-opt-badge {
+  flex: 0 0 auto; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em;
+  padding: 2px 7px; border-radius: 999px;
+  color: var(--primary, #6366f1); background: var(--primary-bg, rgba(99, 102, 241, 0.12));
+  border: 1px solid var(--primary, #6366f1);
+}
+.rp-hint { padding: 0.7rem 0.6rem; text-align: center; color: var(--text-muted, #9ca3af); font-size: 0.82rem; }
+.rp-more { text-align: left; font-style: italic; border-top: 1px solid var(--border, #eee); margin-top: 2px; }

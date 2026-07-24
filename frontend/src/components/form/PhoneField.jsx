@@ -20,7 +20,15 @@ import './FormFields.css';
 export default function PhoneField({
   value,
   onChange,
-  defaultCountry = 'IN',
+  onBlur,
+  // No default value on purpose. A JS default parameter would also fire when a
+  // caller passes `undefined`, which is exactly how "no country chosen yet" would
+  // arrive — and it would silently snap the picker back to India (+91). Instead:
+  //   - prop omitted        → undefined → falls back to 'IN' below (existing forms)
+  //   - prop = 'US' / 'GB'  → that country
+  //   - prop = null / ''    → NO default country (empty picker, no +91) — used by
+  //                           the venue form until a country is selected
+  defaultCountry,
   label = 'Phone',
   required = false,
   disabled = false,
@@ -30,29 +38,42 @@ export default function PhoneField({
   id,
   helpText,
 }) {
+  const resolvedDefaultCountry =
+    defaultCountry === undefined ? 'IN' : (defaultCountry || undefined);
+
   const handleChange = (val) => {
     // The library passes `undefined` while the user is mid-edit; normalise to ''.
     onChange?.(val || '');
   };
 
+  // Stable ids so error/hint text is programmatically associated with the
+  // input (aria-describedby) and screen readers announce the invalid state.
+  const fieldId = id || 'phone-field';
+  const errorId = `${fieldId}-error`;
+  const hintId = `${fieldId}-hint`;
+
   return (
     <div className={`input-group phone-field ${error ? 'has-error' : ''}`}>
-      <label htmlFor={id}>{label}{required ? ' *' : ''}</label>
+      <label htmlFor={fieldId}>{label}{required ? ' *' : ''}</label>
       <PhoneInput
-        id={id}
+        id={fieldId}
         international
         countryCallingCodeEditable={false}
-        defaultCountry={defaultCountry}
+        defaultCountry={resolvedDefaultCountry}
         value={value || ''}
         onChange={handleChange}
+        onBlur={onBlur}
         disabled={disabled}
         placeholder={placeholder}
         autoFocus={autoFocus}
         autoComplete="tel"
         smartCaret
+        aria-required={required || undefined}
+        aria-invalid={!!error}
+        aria-describedby={error ? errorId : (helpText ? hintId : undefined)}
       />
-      {helpText && !error && <span className="field-hint">{helpText}</span>}
-      {error && <span className="field-error">{error}</span>}
+      {helpText && !error && <span className="field-hint" id={hintId}>{helpText}</span>}
+      {error && <span className="field-error" id={errorId} role="alert">{error}</span>}
     </div>
   );
 }

@@ -226,11 +226,13 @@ public class AdminBookingController {
     public ResponseEntity<ApiResponse<BookingDto>> checkIn(
             @PathVariable String bookingRef,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate clientDate,
+            @RequestParam(required = false) Long venueRoomId,
             @RequestHeader(value = "X-User-Id", required = false) Long adminId,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
         BookingDto result = idempotencyService.execute(
             idempotencyKey, "POST", "/api/v1/bookings/admin/" + bookingRef + "/check-in", adminId,
-            java.util.Map.of("bookingRef", bookingRef, "clientDate", String.valueOf(clientDate)),
+            java.util.Map.of("bookingRef", bookingRef, "clientDate", String.valueOf(clientDate),
+                             "venueRoomId", String.valueOf(venueRoomId)),
             BookingDto.class,
             () -> {
                 var booking = bookingService.getBookingEntity(bookingRef);
@@ -250,11 +252,51 @@ public class AdminBookingController {
                     log.warn("Check-in for {} with paymentStatus={} — payment not yet collected",
                         bookingRef, ps);
                 }
+                // Room selection at check-in: if a room was chosen, (re)assign it now. Then, for a
+                // venue that has bookable rooms, a room MUST be set before check-in — the admin has
+                // to confirm which physical space the party occupies.
+                if (venueRoomId != null) {
+                    // Check-in flow carries an implicit remark so a pre-assigned-room
+                    // swap at the desk is audited without blocking the check-in.
+                    bookingService.assignRoomForBooking(bookingRef, venueRoomId, "Room selected at check-in");
+                    booking = bookingService.getBookingEntity(bookingRef);
+                }
+                if (booking.getVenueRoomId() == null
+                        && !bookingService.getAvailableRoomsForBooking(bookingRef).isEmpty()) {
+                    throw new com.skbingegalaxy.common.exception.BusinessException(
+                        "Select a room before checking this booking in.");
+                }
                 UpdateBookingRequest req = new UpdateBookingRequest();
                 req.setCheckedIn(true);
                 return bookingService.updateBooking(bookingRef, req);
             });
         return ResponseEntity.ok(ApiResponse.ok("Check-in recorded", result));
+    }
+
+    /** Rooms an admin may pick for this booking (free for its window, plus the room it holds). */
+    @GetMapping("/{bookingRef}/available-rooms")
+    public ResponseEntity<ApiResponse<java.util.List<com.skbingegalaxy.booking.dto.VenueRoomDto>>> availableRoomsForBooking(
+            @PathVariable String bookingRef) {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.getAvailableRoomsForBooking(bookingRef)));
+    }
+
+    /** Assign / change the physical room for a booking; reflected on the customer's view. */
+    @PatchMapping("/{bookingRef}/room")
+    public ResponseEntity<ApiResponse<BookingDto>> assignRoom(
+            @PathVariable String bookingRef,
+            @RequestBody AssignRoomRequest body) {
+        return ResponseEntity.ok(ApiResponse.ok("Room updated",
+            bookingService.assignRoomForBooking(bookingRef,
+                body != null ? body.getVenueRoomId() : null,
+                body != null ? body.getRemarks() : null)));
+    }
+
+    /** Inline body for the assign-room endpoint. */
+    @lombok.Data
+    public static class AssignRoomRequest {
+        private Long venueRoomId;
+        /** Mandatory (server-enforced) when this call CHANGES an already-assigned room. */
+        private String remarks;
     }
 
     @PostMapping("/{bookingRef}/checkout")
@@ -951,6 +993,17 @@ public class AdminBookingController {
             body, VenueRoomDto.class,
             () -> bookingService.rejectVenueRoom(id, adminId, reason));
         return ResponseEntity.ok(ApiResponse.ok("Room rejected", result));
+    }
+
+    /**
+     * All room blocks across the selected binge in one call — the Blocked
+     * Dates calendar merges these with the venue-wide closures held by
+     * availability-service. Literal path, so it wins over the
+     * {@code /venue-rooms/{roomId}/blocks} pattern below.
+     */
+    @GetMapping("/venue-rooms/blocks")
+    public ResponseEntity<ApiResponse<java.util.List<RoomBlockDto>>> listAllRoomBlocks() {
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.listAllRoomBlocksForBinge()));
     }
 
     // V57: room maintenance / hold windows. Tenant-scoped to the selected binge.

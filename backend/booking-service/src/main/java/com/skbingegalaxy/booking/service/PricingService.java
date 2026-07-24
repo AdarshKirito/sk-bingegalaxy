@@ -29,6 +29,8 @@ public class PricingService {
     private final RateCodeChangeLogRepository rateCodeChangeLogRepository;
     private final BookingRepository bookingRepository;
     private final SurgePricingRuleRepository surgePricingRuleRepository;
+    private final com.skbingegalaxy.booking.repository.BingeRepository bingeRepository;
+    private final VenueClockService venueClock;
     private final com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyMemberService loyaltyMemberService;
     private final BookingReviewRepository bookingReviewRepository;
 
@@ -41,6 +43,44 @@ public class PricingService {
 
     public void clearCurrentAdminId() {
         currentAdminId.remove();
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  CANONICAL PRICING MATH (PRICE-001)
+    // ═══════════════════════════════════════════════════════════
+    // The assembly formula used to be inlined in five booking paths
+    // (create / admin-create / update / reschedule / recurring); any edit to
+    // one path could silently diverge quote-vs-charge or create-vs-modify.
+    // Every path MUST delegate here — do not re-inline these formulas.
+
+    /**
+     * Base charge: {@code basePrice + hourlyRate × (durationMinutes/60)}.
+     * The hourly component is rounded to 2 dp (HALF_UP) BEFORE the add — that
+     * ordering is load-bearing: rounding the sum instead changes totals for
+     * fractional-hour durations.
+     */
+    public static BigDecimal computeBaseAmount(ResolvedEventPrice eventPrice, int durationMinutes) {
+        BigDecimal durationDecimalHours = BigDecimal.valueOf(durationMinutes)
+            .divide(BigDecimal.valueOf(60), 4, java.math.RoundingMode.HALF_UP);
+        return eventPrice.basePrice()
+            .add(eventPrice.hourlyRate().multiply(durationDecimalHours)
+                .setScale(2, java.math.RoundingMode.HALF_UP));
+    }
+
+    /** Guest charge: the first guest is included; extras bill at pricePerGuest. */
+    public static BigDecimal computeGuestAmount(ResolvedEventPrice eventPrice, int numberOfGuests) {
+        return eventPrice.pricePerGuest()
+            .multiply(BigDecimal.valueOf(Math.max(numberOfGuests - 1, 0)));
+    }
+
+    /**
+     * Applies a surge multiplier to a pre-surge total (2 dp HALF_UP).
+     * Null-safe: no surge returns the input unchanged. Component amounts
+     * (base/add-on/guest) stay pre-surge by design — only the total surges.
+     */
+    public static BigDecimal applySurge(BigDecimal preSurgeTotal, BigDecimal surgeMultiplier) {
+        if (surgeMultiplier == null) return preSurgeTotal;
+        return preSurgeTotal.multiply(surgeMultiplier).setScale(2, java.math.RoundingMode.HALF_UP);
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -511,8 +551,23 @@ public class PricingService {
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Resolves the applicable surge multiplier for a given booking date and start time.
-     * Returns the highest matching active surge rule, or null if no surge applies.
+     * Resolves the applicable surge multiplier for a booking date + start time.
+     *
+     * <p>Candidate rules are pre-filtered by day-of-week + time window in SQL,
+     * then each optional trigger is applied in Java:
+     * <ul>
+     *   <li><b>Date window</b> — {@code dateFrom}/{@code dateTo} (seasonal/event pricing).</li>
+     *   <li><b>Lead time</b> — {@code leadTimeMaxHours} for last-minute premiums,
+     *       {@code leadTimeMinHours} for early-bird windows (multiplier &lt; 1 = discount).
+     *       Measured from the venue clock to the booking's start instant.</li>
+     *   <li><b>Occupancy</b> — {@code occupancyThresholdPct}: booked minutes on the date
+     *       vs the operating-window capacity (× max concurrent slots). Demand-based
+     *       surge only kicks in when the date is already ≥ X% full.</li>
+     * </ul>
+     *
+     * <p>Winner among survivors: lowest {@code priority} number, tie → highest
+     * multiplier. Multipliers below 1 are honoured (early-bird discounts);
+     * exactly 1 resolves to "no surge".
      */
     public SurgeResult resolveSurge(java.time.LocalDate bookingDate, java.time.LocalTime startTime) {
         Long bid = BingeContext.getBingeId();
@@ -524,13 +579,70 @@ public class PricingService {
         List<SurgePricingRule> rules = surgePricingRuleRepository.findMatchingRules(bid, dow, minute);
         if (rules.isEmpty()) return null;
 
-        // Take the rule with the highest multiplier
-        SurgePricingRule best = rules.stream()
-            .max(java.util.Comparator.comparing(SurgePricingRule::getMultiplier))
+        java.time.ZoneId venueZone = venueClock.zoneOf(bid);
+        java.time.Instant nowInstant = java.time.Instant.now();
+        java.time.Instant startInstant = java.time.LocalDateTime.of(bookingDate, startTime)
+            .atZone(venueZone).toInstant();
+        long hoursUntilStart = java.time.Duration.between(nowInstant, startInstant).toHours();
+
+        // Occupancy % is computed lazily — only when some candidate needs it.
+        Integer occupancyPct = null;
+
+        List<SurgePricingRule> applicable = new java.util.ArrayList<>();
+        for (SurgePricingRule r : rules) {
+            if (r.getDateFrom() != null && bookingDate.isBefore(r.getDateFrom())) continue;
+            if (r.getDateTo() != null && bookingDate.isAfter(r.getDateTo())) continue;
+            if (r.getLeadTimeMaxHours() != null && hoursUntilStart > r.getLeadTimeMaxHours()) continue;
+            if (r.getLeadTimeMinHours() != null && hoursUntilStart < r.getLeadTimeMinHours()) continue;
+            if (r.getOccupancyThresholdPct() != null) {
+                if (occupancyPct == null) occupancyPct = computeOccupancyPct(bid, bookingDate);
+                if (occupancyPct < r.getOccupancyThresholdPct()) continue;
+            }
+            applicable.add(r);
+        }
+        if (applicable.isEmpty()) return null;
+
+        SurgePricingRule best = applicable.stream()
+            .min(java.util.Comparator
+                .comparing((SurgePricingRule r) -> r.getPriority() != null ? r.getPriority() : 100)
+                .thenComparing(SurgePricingRule::getMultiplier, java.util.Comparator.reverseOrder()))
             .orElse(null);
-        if (best == null || best.getMultiplier().compareTo(BigDecimal.ONE) <= 0) return null;
+        if (best == null || best.getMultiplier() == null
+                || best.getMultiplier().compareTo(BigDecimal.ONE) == 0) return null;
 
         return new SurgeResult(best.getMultiplier(), best.getLabel() != null ? best.getLabel() : best.getName());
+    }
+
+    /**
+     * Occupancy of a date: active booked minutes ÷ (operating-window minutes ×
+     * max concurrent slots). Conservative fallbacks: 10h window when the venue
+     * has no configured hours, capacity 1 when unlimited/unset — an unlimited
+     * venue then reports HIGHER occupancy, which only makes demand rules fire
+     * earlier, never silently suppresses them.
+     */
+    private int computeOccupancyPct(Long bingeId, java.time.LocalDate date) {
+        try {
+            long bookedMinutes = bookingRepository.sumActiveBookedMinutes(bingeId, date);
+            if (bookedMinutes <= 0) return 0;
+            long windowMinutes = 10 * 60L;
+            int concurrent = 1;
+            var binge = bingeRepository.findById(bingeId).orElse(null);
+            if (binge != null) {
+                if (binge.getOpenTime() != null && binge.getCloseTime() != null
+                        && binge.getCloseTime().isAfter(binge.getOpenTime())) {
+                    windowMinutes = java.time.Duration.between(binge.getOpenTime(), binge.getCloseTime()).toMinutes();
+                }
+                if (binge.getMaxConcurrentBookings() != null && binge.getMaxConcurrentBookings() > 0) {
+                    concurrent = binge.getMaxConcurrentBookings();
+                }
+            }
+            long capacity = Math.max(windowMinutes * concurrent, 1);
+            return (int) Math.min(100, (bookedMinutes * 100) / capacity);
+        } catch (RuntimeException ex) {
+            log.warn("Occupancy computation failed for binge {} date {} — demand rules skipped: {}",
+                bingeId, date, ex.getMessage());
+            return 0;
+        }
     }
 
     public record SurgeResult(BigDecimal multiplier, String label) {}
@@ -556,9 +668,7 @@ public class PricingService {
     @org.springframework.cache.annotation.CacheEvict(value = "surgeRules", allEntries = true)
     public com.skbingegalaxy.booking.dto.SurgePricingRuleDto createSurgeRule(com.skbingegalaxy.booking.dto.SurgePricingRuleSaveRequest request) {
         Long bid = requireSelectedBinge("creating surge pricing rule");
-        if (request.getStartMinute() >= request.getEndMinute()) {
-            throw new BusinessException("Start minute must be less than end minute");
-        }
+        validateSurgeRule(request);
         SurgePricingRule rule = SurgePricingRule.builder()
             .bingeId(bid)
             .name(request.getName())
@@ -567,6 +677,12 @@ public class PricingService {
             .endMinute(request.getEndMinute())
             .multiplier(request.getMultiplier())
             .label(request.getLabel())
+            .dateFrom(request.getDateFrom())
+            .dateTo(request.getDateTo())
+            .leadTimeMaxHours(request.getLeadTimeMaxHours())
+            .leadTimeMinHours(request.getLeadTimeMinHours())
+            .occupancyThresholdPct(request.getOccupancyThresholdPct())
+            .priority(request.getPriority() != null ? request.getPriority() : 100)
             .active(request.isActive())
             .build();
         rule = surgePricingRuleRepository.save(rule);
@@ -580,15 +696,19 @@ public class PricingService {
         Long bid = requireSelectedBinge("updating surge pricing rule");
         SurgePricingRule rule = surgePricingRuleRepository.findByIdAndBingeId(id, bid)
             .orElseThrow(() -> new ResourceNotFoundException("SurgePricingRule", "id", id));
-        if (request.getStartMinute() >= request.getEndMinute()) {
-            throw new BusinessException("Start minute must be less than end minute");
-        }
+        validateSurgeRule(request);
         rule.setName(request.getName());
         rule.setDayOfWeek(request.getDayOfWeek());
         rule.setStartMinute(request.getStartMinute());
         rule.setEndMinute(request.getEndMinute());
         rule.setMultiplier(request.getMultiplier());
         rule.setLabel(request.getLabel());
+        rule.setDateFrom(request.getDateFrom());
+        rule.setDateTo(request.getDateTo());
+        rule.setLeadTimeMaxHours(request.getLeadTimeMaxHours());
+        rule.setLeadTimeMinHours(request.getLeadTimeMinHours());
+        rule.setOccupancyThresholdPct(request.getOccupancyThresholdPct());
+        rule.setPriority(request.getPriority() != null ? request.getPriority() : 100);
         rule.setActive(request.isActive());
         rule = surgePricingRuleRepository.save(rule);
         log.info("Surge pricing rule updated: {}", rule.getName());
@@ -616,11 +736,36 @@ public class PricingService {
         log.info("Surge pricing rule deleted: {}", rule.getName());
     }
 
+    /**
+     * Shared invariants for create + update: coherent time window, coherent
+     * date window, coherent lead-time band. Field-level bounds are covered by
+     * bean validation on the request DTO.
+     */
+    private void validateSurgeRule(com.skbingegalaxy.booking.dto.SurgePricingRuleSaveRequest request) {
+        if (request.getStartMinute() >= request.getEndMinute()) {
+            throw new BusinessException("Start minute must be less than end minute");
+        }
+        if (request.getDateFrom() != null && request.getDateTo() != null
+                && request.getDateFrom().isAfter(request.getDateTo())) {
+            throw new BusinessException("Date from must be on or before date to");
+        }
+        if (request.getLeadTimeMinHours() != null && request.getLeadTimeMaxHours() != null
+                && request.getLeadTimeMinHours() > request.getLeadTimeMaxHours()) {
+            throw new BusinessException("Lead-time min hours cannot exceed max hours "
+                + "(min = early-bird floor, max = last-minute ceiling)");
+        }
+    }
+
     private com.skbingegalaxy.booking.dto.SurgePricingRuleDto toSurgeRuleDto(SurgePricingRule r) {
         return com.skbingegalaxy.booking.dto.SurgePricingRuleDto.builder()
             .id(r.getId()).bingeId(r.getBingeId()).name(r.getName())
             .dayOfWeek(r.getDayOfWeek()).startMinute(r.getStartMinute()).endMinute(r.getEndMinute())
-            .multiplier(r.getMultiplier()).label(r.getLabel()).active(r.isActive())
+            .multiplier(r.getMultiplier()).label(r.getLabel())
+            .dateFrom(r.getDateFrom()).dateTo(r.getDateTo())
+            .leadTimeMaxHours(r.getLeadTimeMaxHours()).leadTimeMinHours(r.getLeadTimeMinHours())
+            .occupancyThresholdPct(r.getOccupancyThresholdPct())
+            .priority(r.getPriority())
+            .active(r.isActive())
             .createdAt(r.getCreatedAt()).updatedAt(r.getUpdatedAt())
             .build();
     }

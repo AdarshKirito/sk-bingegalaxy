@@ -12,6 +12,7 @@ import com.skbingegalaxy.common.context.BingeContext;
 import com.skbingegalaxy.common.dto.ApiResponse;
 import com.skbingegalaxy.common.enums.BookingStatus;
 import com.skbingegalaxy.common.enums.PaymentStatus;
+import com.skbingegalaxy.common.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -51,8 +53,9 @@ import java.util.Map;
  * </ul>
  *
  * <p>Backed by the same security as {@link AdminOpsController} — ROLE_ADMIN /
- * ROLE_SUPER_ADMIN. Each endpoint is read-only; recovery actions live on the
- * regular admin endpoints (cancel, release-hold, replay-event).
+ * ROLE_SUPER_ADMIN — plus tenant isolation: every read is scoped to a binge the
+ * caller owns, every action verifies the target row's binge ownership. Only a
+ * SUPER_ADMIN with no binge selected gets the platform-wide view.</p>
  */
 @RestController
 @RequestMapping("/api/v1/bookings/admin/recovery")
@@ -70,13 +73,16 @@ public class AdminRecoveryQueueController {
     /** Bookings that have been PENDING + payment-PENDING for too long — abandoned mid-checkout. */
     @GetMapping("/stuck-pending")
     public ResponseEntity<ApiResponse<Map<String, Object>>> stuckPending(
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String userRole,
             @RequestParam(defaultValue = "60") int olderThanMinutes,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
+        Long bingeId = resolveRecoveryScope(userId, userRole, "viewing the stuck-pending queue");
         if (olderThanMinutes < 1) olderThanMinutes = 60;
         size = capSize(size);
         LocalDateTime cutoff = LocalDateTime.now(ZoneOffset.UTC).minusMinutes(olderThanMinutes);
-        Page<Booking> p = bookingRepository.findStuckPending(cutoff, PageRequest.of(page, size));
+        Page<Booking> p = bookingRepository.findStuckPending(bingeId, cutoff, PageRequest.of(page, size));
         return ResponseEntity.ok(ApiResponse.ok(toQueueResponse("stuck-pending", p, b -> {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("bookingRef", b.getBookingRef());
@@ -92,11 +98,14 @@ public class AdminRecoveryQueueController {
     /** Slot holds whose TTL elapsed but the expiry scheduler hasn't released. Indicates scheduler health issue. */
     @GetMapping("/expired-holds")
     public ResponseEntity<ApiResponse<Map<String, Object>>> expiredHolds(
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String userRole,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
+        Long bingeId = resolveRecoveryScope(userId, userRole, "viewing the expired-holds queue");
         size = capSize(size);
-        Page<SlotHold> p = slotHoldRepository.findExpiredNotReleased(LocalDateTime.now(ZoneOffset.UTC),
-            PageRequest.of(page, size));
+        Page<SlotHold> p = slotHoldRepository.findExpiredNotReleased(bingeId,
+            LocalDateTime.now(ZoneOffset.UTC), PageRequest.of(page, size));
         return ResponseEntity.ok(ApiResponse.ok(toQueueResponse("expired-holds", p, h -> {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("id", h.getId());
@@ -113,13 +122,16 @@ public class AdminRecoveryQueueController {
     /** Customer paid but BOOKING_CONFIRMED never landed — saga side is stuck. */
     @GetMapping("/paid-not-confirmed")
     public ResponseEntity<ApiResponse<Map<String, Object>>> paidNotConfirmed(
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String userRole,
             @RequestParam(defaultValue = "5") int olderThanMinutes,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
+        Long bingeId = resolveRecoveryScope(userId, userRole, "viewing the paid-not-confirmed queue");
         if (olderThanMinutes < 1) olderThanMinutes = 5;
         size = capSize(size);
         LocalDateTime cutoff = LocalDateTime.now(ZoneOffset.UTC).minusMinutes(olderThanMinutes);
-        Page<Booking> p = bookingRepository.findPaidButNotConfirmed(cutoff, PageRequest.of(page, size));
+        Page<Booking> p = bookingRepository.findPaidButNotConfirmed(bingeId, cutoff, PageRequest.of(page, size));
         return ResponseEntity.ok(ApiResponse.ok(toQueueResponse("paid-not-confirmed", p, b -> {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("bookingRef", b.getBookingRef());
@@ -136,15 +148,18 @@ public class AdminRecoveryQueueController {
     /** Bookings that ended NO_SHOW — admins follow up + reconcile partial refunds. */
     @GetMapping("/no-show")
     public ResponseEntity<ApiResponse<Map<String, Object>>> noShow(
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String userRole,
             @RequestParam(required = false) LocalDate from,
             @RequestParam(required = false) LocalDate to,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
+        Long bingeId = resolveRecoveryScope(userId, userRole, "viewing the no-show queue");
         size = capSize(size);
         LocalDate today = venueClock.today(BingeContext.getBingeId());
         LocalDate f = from != null ? from : today.minusDays(7);
         LocalDate t = to != null ? to : today;
-        Page<Booking> p = bookingRepository.findNoShowBookings(f, t, PageRequest.of(page, size));
+        Page<Booking> p = bookingRepository.findNoShowBookings(bingeId, f, t, PageRequest.of(page, size));
         return ResponseEntity.ok(ApiResponse.ok(toQueueResponse("no-show", p, b -> {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("bookingRef", b.getBookingRef());
@@ -160,15 +175,18 @@ public class AdminRecoveryQueueController {
 
     /** Aggregated counts for an ops dashboard widget. */
     @GetMapping("/summary")
-    public ResponseEntity<ApiResponse<Map<String, Object>>> summary() {
-        long stuckPending = bookingRepository.findStuckPending(
+    public ResponseEntity<ApiResponse<Map<String, Object>>> summary(
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String userRole) {
+        Long bingeId = resolveRecoveryScope(userId, userRole, "viewing the recovery summary");
+        long stuckPending = bookingRepository.findStuckPending(bingeId,
             LocalDateTime.now(ZoneOffset.UTC).minusMinutes(60), PageRequest.of(0, 1)).getTotalElements();
-        long expiredHolds = slotHoldRepository.findExpiredNotReleased(
+        long expiredHolds = slotHoldRepository.findExpiredNotReleased(bingeId,
             LocalDateTime.now(ZoneOffset.UTC), PageRequest.of(0, 1)).getTotalElements();
-        long paidNotConfirmed = bookingRepository.findPaidButNotConfirmed(
+        long paidNotConfirmed = bookingRepository.findPaidButNotConfirmed(bingeId,
             LocalDateTime.now(ZoneOffset.UTC).minusMinutes(5), PageRequest.of(0, 1)).getTotalElements();
         LocalDate summaryToday = venueClock.today(BingeContext.getBingeId());
-        long noShow = bookingRepository.findNoShowBookings(
+        long noShow = bookingRepository.findNoShowBookings(bingeId,
             summaryToday.minusDays(7), summaryToday, PageRequest.of(0, 1)).getTotalElements();
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("stuckPending", stuckPending);
@@ -191,7 +209,13 @@ public class AdminRecoveryQueueController {
     @PreAuthorize("hasAnyRole('ADMIN','SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Map<String, Object>>> releaseStaleHold(
             @PathVariable String token,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String userRole,
             @RequestBody(required = false) Map<String, String> body) {
+        SlotHold hold = slotHoldRepository.findByHoldToken(token)
+            .orElseThrow(() -> new ResourceNotFoundException("SlotHold", "token", token));
+        adminBingeScopeService.requireBingeOwnership(hold.getBingeId(), userId, userRole,
+            "releasing a stale slot hold");
         String reason = body != null ? body.getOrDefault("reason", "ADMIN_RECOVERY_RELEASE")
                                      : "ADMIN_RECOVERY_RELEASE";
         // adminAccess=true bypasses customerId ownership check; null customerId is fine.
@@ -213,7 +237,12 @@ public class AdminRecoveryQueueController {
     @PreAuthorize("hasAnyRole('ADMIN','SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Map<String, Object>>> cancelStuckPending(
             @PathVariable String bookingRef,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String userRole,
             @RequestBody(required = false) Map<String, String> body) {
+        Booking target = bookingService.getBookingEntityForSystem(bookingRef);
+        adminBingeScopeService.requireBingeOwnership(target.getBingeId(), userId, userRole,
+            "cancelling a stuck-pending booking");
         String reason = body != null && body.get("reason") != null
             ? body.get("reason")
             : "Admin recovery: stuck-pending cancellation";
@@ -234,8 +263,12 @@ public class AdminRecoveryQueueController {
     @PostMapping("/paid-not-confirmed/{bookingRef}/replay")
     @PreAuthorize("hasAnyRole('ADMIN','SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Map<String, Object>>> replayConfirmation(
-            @PathVariable String bookingRef) {
+            @PathVariable String bookingRef,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String userRole) {
         Booking b = bookingService.getBookingEntityForSystem(bookingRef);
+        adminBingeScopeService.requireBingeOwnership(b.getBingeId(), userId, userRole,
+            "replaying a booking confirmation");
         if (b.getPaymentStatus() != PaymentStatus.SUCCESS
             && b.getPaymentStatus() != PaymentStatus.PARTIALLY_PAID) {
             return ResponseEntity.badRequest().body(ApiResponse.error(
@@ -273,10 +306,14 @@ public class AdminRecoveryQueueController {
     @GetMapping("/funnel")
     @PreAuthorize("hasAnyRole('ADMIN','SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<Map<String, Object>>> funnel(
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String userRole,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-        adminBingeScopeService.requireSelectedBinge("viewing checkout funnel");
-        Long bid = BingeContext.getBingeId();
+        // Ownership (not just presence) of the selected binge — the funnel
+        // exposes another binge's conversion aggregates otherwise.
+        Long bid = adminBingeScopeService
+            .requireManagedBinge(userId, userRole, "viewing checkout funnel").getId();
         LocalDate today = venueClock.today(bid);
         LocalDate f = from != null ? from : today.minusDays(7);
         LocalDate t = to != null ? to : today;
@@ -313,6 +350,19 @@ public class AdminRecoveryQueueController {
     }
 
     // ── helpers ──────────────────────────────────────────────
+
+    /**
+     * Tenant scope for recovery reads. A SUPER_ADMIN with no binge selected
+     * gets the platform-wide view (null). Everyone else must have selected a
+     * binge they own; the returned id is fed into the repository predicate so
+     * the queries can never return another binge's rows.
+     */
+    private Long resolveRecoveryScope(Long userId, String userRole, String action) {
+        if ("SUPER_ADMIN".equalsIgnoreCase(userRole) && BingeContext.getBingeId() == null) {
+            return null;
+        }
+        return adminBingeScopeService.requireManagedBinge(userId, userRole, action).getId();
+    }
 
     private static int capSize(int size) {
         if (size < 1) return 50;

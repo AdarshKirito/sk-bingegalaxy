@@ -42,6 +42,8 @@ public final class LoyaltyV2Constants {
     public static final String LEDGER_STATUS_MATCH_GRANT   = "STATUS_MATCH_GRANT";
     public static final String LEDGER_TRANSFER_IN          = "TRANSFER_IN";
     public static final String LEDGER_TRANSFER_OUT         = "TRANSFER_OUT";
+    /** Binge-admin service-recovery credit (budgeted per binge per month). */
+    public static final String LEDGER_GOODWILL             = "GOODWILL";
 
     // ── Enrollment sources ────────────────────────────────────────────────
     public static final String ENROLL_SILENT_BOOKING  = "SILENT_BOOKING";
@@ -49,6 +51,8 @@ public final class LoyaltyV2Constants {
     public static final String ENROLL_AUTO_DASHBOARD  = "AUTO_DASHBOARD_VIEW";
     public static final String ENROLL_SSO_GOOGLE      = "SSO_GOOGLE";
     public static final String ENROLL_ADMIN_IMPORT    = "ADMIN_IMPORT";
+    /** Desk registration: admin creates the customer account and enrolls them on the spot. */
+    public static final String ENROLL_ADMIN_REGISTRATION = "ADMIN_REGISTRATION";
     public static final String ENROLL_STATUS_MATCH    = "STATUS_MATCH";
     public static final String ENROLL_BACKFILL_V2     = "BACKFILL_V2";
 

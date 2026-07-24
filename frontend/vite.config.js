@@ -4,9 +4,24 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
-const localTempDir = path.join(projectRoot, '.tmp');
 
-fs.mkdirSync(localTempDir, { recursive: true });
+function prepareWritableTempDir(primaryDir, fallbackDir) {
+  for (const dir of [primaryDir, fallbackDir]) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      const probeDir = fs.mkdtempSync(path.join(dir, 'probe-'));
+      fs.rmSync(probeDir, { recursive: true, force: true });
+      return dir;
+    } catch (error) {
+      if (dir === fallbackDir) throw error;
+    }
+  }
+}
+
+const localTempDir = prepareWritableTempDir(
+  path.join(projectRoot, '.tmp'),
+  path.join(projectRoot, '.vite-tmp')
+);
 
 for (const key of ['TMPDIR', 'TMP', 'TEMP']) {
   process.env[key] = localTempDir;
@@ -24,10 +39,13 @@ export default defineConfig(async () => {
     plugins: [
       react(),
       // PWA with Workbox: generateSW mode auto-creates a service worker.
-      // registerType: 'prompt' shows a user-facing notification when a new version is available,
-      // instead of silently updating which could break a user mid-booking.
+      // registerType: 'autoUpdate' — a freshly deployed build is picked up and activated
+      // automatically on the next load (skipWaiting + clientsClaim), so users are never
+      // stranded on a stale cached bundle after a release. The previous 'prompt' mode
+      // required clicking an easily-missed banner, which repeatedly left clients running
+      // outdated code. PWAUpdatePrompt still applies the update the moment it is detected.
       VitePWA({
-        registerType: 'prompt',
+        registerType: 'autoUpdate',
         includeAssets: ['favicon.ico', 'offline.html'],
         manifest: {
           name: 'SK Binge Galaxy',
@@ -42,30 +60,32 @@ export default defineConfig(async () => {
           ],
         },
         workbox: {
+          // Layer our Web Push (push + notificationclick) handlers into the generated
+          // service worker. importScripts keeps Workbox in charge of the SW lifecycle
+          // while adding push display/click behaviour from a small standalone file.
+          // push-sw.js also deletes the legacy 'api-cache' on activate (SEC-009).
+          importScripts: ['push-sw.js'],
           // Precache all built assets
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-          // The country-state-city dataset bundled into the address picker pushes a
-          // single chunk past the default 2 MiB Workbox limit. Bumping to 12 MiB
-          // keeps offline support intact without splitting hot user-facing code.
-          maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
-          // Runtime caching strategies
+          // The country-state-city dataset is split into its own 'address-data'
+          // chunk (see build.rollupOptions) and EXCLUDED from precache — an
+          // ~8.7 MB download/storage tax on every install/update is not
+          // acceptable for a dataset only the address editor needs (PERF-002).
+          // It loads on demand and rides the normal HTTP cache.
+          globIgnores: ['**/address-data-*.js'],
+          maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
+          // ── SEC-009: NO service-worker caching for ANY API response ─────
+          // Identity and tenant (X-Binge-Id) live in headers/cookies, but the
+          // Workbox cache is keyed by URL alone — a cached response can be
+          // replayed across a user or binge switch on a shared device. The old
+          // broad NetworkFirst 'api-cache' rule did exactly that for bookings/
+          // admin reads. Until an explicit allowlist of truly public, identity-
+          // free endpoints is security-reviewed, every /api request bypasses
+          // Cache Storage entirely. Offline UX degrades gracefully: the app
+          // shell (precache) still loads and pages show their offline states.
           runtimeCaching: [
             {
-              // Read-only API data: network-first with short cache fallback.
-              // NetworkFirst is safer than StaleWhileRevalidate for bookings - users see
-              // the latest data when online, and cached data only when offline.
-              urlPattern: /\/api\/v1\/(bookings|availability|event-types|add-ons|binges)/,
-              handler: 'NetworkFirst',
-              options: {
-                cacheName: 'api-cache',
-                networkTimeoutSeconds: 5,
-                expiration: { maxEntries: 100, maxAgeSeconds: 2 * 60 },
-                cacheableResponse: { statuses: [0, 200] },
-              },
-            },
-            {
-              // Auth and mutation endpoints: always network-only
-              urlPattern: /\/api\/v1\/(auth|payments)/,
+              urlPattern: /\/api\//,
               handler: 'NetworkOnly',
             },
             // Google Fonts are intentionally NOT cached by the service worker.
@@ -99,6 +119,16 @@ export default defineConfig(async () => {
     },
     build: {
       sourcemap: 'hidden', // Sourcemaps for Sentry but not served publicly
+      rollupOptions: {
+        output: {
+          // Isolate the huge country-state-city dataset into a stable-named
+          // chunk so Workbox can exclude it from precache (PERF-002).
+          manualChunks(id) {
+            if (id.includes('country-state-city')) return 'address-data';
+            return undefined;
+          },
+        },
+      },
     },
     server: {
       port: 3000,

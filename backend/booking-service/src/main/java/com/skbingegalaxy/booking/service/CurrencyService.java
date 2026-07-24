@@ -107,8 +107,13 @@ public class CurrencyService {
         rate.setDecimalDigits(request.getDecimalDigits() != null ? request.getDecimalDigits() : 2);
         rate.setActive(request.isActive());
         rate.setBase(request.isBase());
-        rate.setManualOverride(true); // edits via admin always mark as manual
-        if (request.getFxSource() != null && !request.getFxSource().isBlank()) {
+        // The admin chooses per-currency whether the rate is pinned (manual) or
+        // auto-managed by the FX refresher. Pinning marks the source MANUAL;
+        // unpinning lets the next refresh cycle take over.
+        rate.setManualOverride(request.isManualOverride());
+        if (request.isManualOverride()) {
+            rate.setFxSource("MANUAL");
+        } else if (request.getFxSource() != null && !request.getFxSource().isBlank()) {
             rate.setFxSource(request.getFxSource().trim().toUpperCase());
         }
         rate.setSupportsDisplay(request.isSupportsDisplay() || existing.isEmpty()); // default true on create

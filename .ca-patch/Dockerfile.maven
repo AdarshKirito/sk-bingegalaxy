@@ -1,0 +1,9 @@
+# Local-only patched Maven base: trusts the AVG Web/Mail Shield MITM root CA so
+# in-container Maven downloads succeed behind AVG's HTTPS interception.
+FROM maven:3.9-eclipse-temurin-17-alpine
+COPY avg-root-ca.crt /usr/local/share/ca-certificates/avg-root-ca.crt
+RUN keytool -importcert -noprompt -trustcacerts \
+      -alias avg-web-shield \
+      -file /usr/local/share/ca-certificates/avg-root-ca.crt \
+      -keystore "$JAVA_HOME/lib/security/cacerts" -storepass changeit \
+ && (apk add --no-cache ca-certificates >/dev/null 2>&1 && update-ca-certificates || true)

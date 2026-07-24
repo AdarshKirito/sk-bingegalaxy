@@ -89,7 +89,7 @@
   padding: 0.5rem 0.8rem;
   border-radius: 999px;
   background: var(--primary-bg);
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .home-hero-copy h1,
@@ -110,7 +110,7 @@
 }
 
 .home-hero-copy h1 span {
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .home-hero-copy p {
@@ -240,7 +240,7 @@
 }
 
 .stage-mini-title {
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .stage-metric-grid {
@@ -264,7 +264,7 @@
 }
 
 .stage-metric-grid svg {
-  color: var(--primary);
+  color: var(--primary-text);
   font-size: 1.2rem;
 }
 
@@ -301,7 +301,7 @@
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .home-section {
@@ -319,7 +319,7 @@
 }
 
 .home-section-kicker {
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .home-section-heading h2 {
@@ -385,7 +385,7 @@
   justify-content: center;
   border-radius: 18px;
   background: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(194, 158, 70, 0.12), rgba(194, 158, 70, 0.1));
-  color: var(--primary);
+  color: var(--primary-text);
   font-size: 1.45rem;
 }
 
@@ -504,7 +504,7 @@
   letter-spacing: 0.16em;
   font-size: 0.7rem;
   font-weight: 700;
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .home-guest-card p {
@@ -524,7 +524,7 @@
 
 .home-package-price {
   font-weight: 700;
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .home-package-note {

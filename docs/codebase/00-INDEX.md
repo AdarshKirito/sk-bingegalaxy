@@ -1,5 +1,7 @@
 # Codebase Reference — Line-by-Line Documentation
 
+> **⚠️ HISTORICAL — superseded (last reconciled 2026-07-17).** These per-file docs are dated 2026-06-06/07 and predate both the July overhaul (migrations V72–V77; sessions, tax, surge, Web Push, per-day opening hours) and the July remediation (slot-hold `consumeHold` is now WIRED into booking creation — the earlier "dead code" note is obsolete; the checkout `/preview` + `/lock-fx` surface described in 06c was DELETED outright). Entity/controller counts here are pre-overhaul (current tree: 87 entities / 47 controllers). For the current, evidence-cited picture use the top-level **`docs/00-AUDIT-INDEX.md` → 28 set** and **`docs/audit/`** (issue register first). The originals as of the 2026-07-11 audit are archived under `docs/_previous/2026-07-11T19-01-30Z/docs/codebase/`. Treat every claim below as historical until independently confirmed against source.
+
 This directory is the **per-file, line/method-level** companion to the top-level
 [`ARCHITECTURE.md`](../../ARCHITECTURE.md). Where `ARCHITECTURE.md` describes the *system*,
 these documents walk **every source file**, module by module, explaining each class, field,

@@ -19,7 +19,11 @@ class MoneyUtilTest {
         assertEquals(2, MoneyUtil.decimalDigits("INR"));
         assertEquals(2, MoneyUtil.decimalDigits("EUR"));
         assertEquals(2, MoneyUtil.decimalDigits("GBP"));
+        assertEquals(2, MoneyUtil.decimalDigits(" usd "));
         assertEquals(0, MoneyUtil.decimalDigits("JPY"));
+        assertEquals(2, MoneyUtil.decimalDigits(null));
+        assertEquals(2, MoneyUtil.decimalDigits(" "));
+        assertEquals(2, MoneyUtil.decimalDigits("XXX"));
         // Unknown currency falls back to a safe default.
         assertEquals(2, MoneyUtil.decimalDigits("XYZ"));
     }
@@ -31,6 +35,36 @@ class MoneyUtilTest {
                 MoneyUtil.round(new BigDecimal("123.456"), "INR"));
         assertEquals(new BigDecimal("124"),
                 MoneyUtil.round(new BigDecimal("123.6"), "JPY"));
+        assertEquals(new BigDecimal("123.457"),
+                MoneyUtil.round(new BigDecimal("123.4567"), 3));
+        assertEquals(BigDecimal.ZERO, MoneyUtil.round(null, "INR"));
+        assertEquals(BigDecimal.ZERO, MoneyUtil.round(null, 2));
+    }
+
+    @Test
+    void zeroPredicatesAndArithmetic_areNullSafe() {
+        assertTrue(MoneyUtil.isZeroOrNull(null));
+        assertTrue(MoneyUtil.isZeroOrNull(new BigDecimal("0.00")));
+        assertFalse(MoneyUtil.isZeroOrNull(new BigDecimal("0.01")));
+
+        assertEquals(new BigDecimal("7"), MoneyUtil.add(new BigDecimal("5"), new BigDecimal("2")));
+        assertEquals(new BigDecimal("5"), MoneyUtil.add(new BigDecimal("5"), null));
+        assertEquals(new BigDecimal("3"), MoneyUtil.sub(new BigDecimal("5"), new BigDecimal("2")));
+        assertEquals(new BigDecimal("-2"), MoneyUtil.sub(null, new BigDecimal("2")));
+    }
+
+    @Test
+    void div_returnsZeroForUnsafeDivisors() {
+        assertEquals(BigDecimal.ZERO, MoneyUtil.div(new BigDecimal("10"), null));
+        assertEquals(BigDecimal.ZERO, MoneyUtil.div(new BigDecimal("10"), BigDecimal.ZERO));
+        assertEquals(new BigDecimal("2.50000000"), MoneyUtil.div(new BigDecimal("10"), new BigDecimal("4")));
+    }
+
+    @Test
+    void nonNegative_clampsNullAndNegativeValues() {
+        assertEquals(BigDecimal.ZERO, MoneyUtil.nonNegative(null));
+        assertEquals(BigDecimal.ZERO, MoneyUtil.nonNegative(new BigDecimal("-0.01")));
+        assertEquals(new BigDecimal("0.01"), MoneyUtil.nonNegative(new BigDecimal("0.01")));
     }
 
     @Test
@@ -39,6 +73,8 @@ class MoneyUtilTest {
         BigDecimal tax = MoneyUtil.applyBps(new BigDecimal("1000.00"), 1800);
         assertEquals(0, tax.compareTo(new BigDecimal("180.00")),
                 "18% (1800 bps) of 1000 must equal 180");
+        assertEquals(BigDecimal.ZERO, MoneyUtil.applyBps(null, 1800));
+        assertEquals(BigDecimal.ZERO, MoneyUtil.applyBps(new BigDecimal("1000.00"), 0));
     }
 
     @Test
@@ -50,6 +86,8 @@ class MoneyUtilTest {
                 "INR");
         assertEquals(0, tax.compareTo(new BigDecimal("180.00")),
                 "Inclusive tax extraction must round-trip with applyBps after currency rounding");
+        assertEquals(BigDecimal.ZERO, MoneyUtil.extractInclusiveTax(null, 1800));
+        assertEquals(BigDecimal.ZERO, MoneyUtil.extractInclusiveTax(new BigDecimal("1180.00"), 0));
     }
 
     @Test

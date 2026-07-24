@@ -32,6 +32,14 @@ public class EmailVerificationToken {
     @Column(nullable = false, length = 12)
     private String otp;
 
+    /**
+     * When set, this token belongs to a CHANGE-EMAIL flow: the OTP was sent to this
+     * new address, and confirming it switches the account email to it (verified).
+     * Null for plain registration-verification tokens.
+     */
+    @Column(name = "pending_email", length = 150)
+    private String pendingEmail;
+
     @Column(name = "otp_attempts", nullable = false)
     @Builder.Default
     private int otpAttempts = 0;

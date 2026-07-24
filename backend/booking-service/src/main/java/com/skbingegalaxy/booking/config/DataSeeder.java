@@ -154,10 +154,14 @@ public class DataSeeder implements CommandLineRunner {
     private void seedVenueRooms(Long bingeId) {
         if (!venueRoomRepository.findByBingeIdOrderBySortOrderAsc(bingeId).isEmpty()) return;
 
+        // Rooms are EXCLUSIVE spaces: capacity 1 = a room hosts one party at a time, so a
+        // room that is booked for a given window is unavailable to anyone else for it. With
+        // maxConcurrentBookings aligned to the room count, "N rooms → at most N concurrent
+        // bookings" holds and "any room" bookings auto-assign the first free room.
         List<VenueRoom> rooms = List.of(
-            VenueRoom.builder().bingeId(bingeId).name("Galaxy Hall").roomType("MAIN_HALL").capacity(25).description("Main screening hall with 4K projector and surround sound").sortOrder(1).build(),
-            VenueRoom.builder().bingeId(bingeId).name("Star Lounge").roomType("PRIVATE_ROOM").capacity(12).description("Intimate private room for small celebrations").sortOrder(2).build(),
-            VenueRoom.builder().bingeId(bingeId).name("Nebula VIP").roomType("VIP_LOUNGE").capacity(8).description("Premium VIP lounge with recliner seating").sortOrder(3).build()
+            VenueRoom.builder().bingeId(bingeId).name("Galaxy Hall").roomType("MAIN_HALL").capacity(1).description("Main screening hall with 4K projector and surround sound").sortOrder(1).build(),
+            VenueRoom.builder().bingeId(bingeId).name("Star Lounge").roomType("PRIVATE_ROOM").capacity(1).description("Intimate private room for small celebrations").sortOrder(2).build(),
+            VenueRoom.builder().bingeId(bingeId).name("Nebula VIP").roomType("VIP_LOUNGE").capacity(1).description("Premium VIP lounge with recliner seating").sortOrder(3).build()
         );
         venueRoomRepository.saveAll(rooms);
         log.info("Seeded {} venue rooms for binge {}", rooms.size(), bingeId);

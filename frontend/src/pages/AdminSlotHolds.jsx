@@ -24,7 +24,16 @@ export default function AdminSlotHolds() {
     setLoading(true);
     try {
       const res = await slotHoldService.adminList();
-      setHolds(toArray(res.data?.data));
+      // Drive every countdown from the server-computed secondsRemaining
+      // (deadline = fetch time + remaining). Parsing the zone-less UTC
+      // `expiresAt` with `new Date()` reads it as browser-LOCAL time, which
+      // made every hold look already-expired for viewers east of UTC — the
+      // page rendered "No active slot holds" while holds were live.
+      const fetchedAt = Date.now();
+      setHolds(toArray(res.data?.data).map((h) => ({
+        ...h,
+        deadlineMs: fetchedAt + Math.max(0, Number(h.secondsRemaining) || 0) * 1000,
+      })));
     } catch {
       toast.error('Failed to load active slot holds');
       setHolds([]);
@@ -65,11 +74,11 @@ export default function AdminSlotHolds() {
     // Server filters to ACTIVE only and excludes expired-but-uncleaned-up
     // entries, but we double-check client-side for the countdown so an
     // expired hold disappears immediately rather than at the next refresh.
-    return holds.filter(h => h.expiresAt && new Date(h.expiresAt).getTime() > now);
+    return holds.filter(h => h.deadlineMs && h.deadlineMs > now);
   }, [holds, now]);
 
-  const fmtCountdown = (expiresAt) => {
-    const remaining = Math.max(0, Math.floor((new Date(expiresAt).getTime() - now) / 1000));
+  const fmtCountdown = (deadlineMs) => {
+    const remaining = Math.max(0, Math.floor((deadlineMs - now) / 1000));
     const m = Math.floor(remaining / 60);
     const s = remaining % 60;
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
@@ -110,7 +119,7 @@ export default function AdminSlotHolds() {
             </thead>
             <tbody>
               {liveHolds.map(h => {
-                const sec = Math.max(0, Math.floor((new Date(h.expiresAt).getTime() - now) / 1000));
+                const sec = Math.max(0, Math.floor((h.deadlineMs - now) / 1000));
                 const low = sec < 60;
                 return (
                   <tr key={h.holdToken}>
@@ -129,8 +138,8 @@ export default function AdminSlotHolds() {
                       </div>
                     </td>
                     <td>{h.numberOfGuests}</td>
-                    <td style={{ fontFamily: 'monospace', color: low ? '#b91c1c' : 'inherit', fontWeight: 600 }}>
-                      {fmtCountdown(h.expiresAt)}
+                    <td style={{ fontFamily: 'monospace', color: low ? 'var(--danger, #b91c1c)' : 'inherit', fontWeight: 600 }}>
+                      {fmtCountdown(h.deadlineMs)}
                     </td>
                     <td>
                       <button

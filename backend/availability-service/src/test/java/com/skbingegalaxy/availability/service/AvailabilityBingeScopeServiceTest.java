@@ -33,6 +33,15 @@ class AvailabilityBingeScopeServiceTest {
         BingeContext.clear();
     }
 
+    /** Arity-proof fixture: only the fields the scope checks care about. */
+    private static BookingBingeDto binge(Long id, Long adminId, boolean active) {
+        BookingBingeDto dto = new BookingBingeDto();
+        dto.setId(id);
+        dto.setAdminId(adminId);
+        dto.setActive(active);
+        return dto;
+    }
+
     @Test
     @DisplayName("Availability actions require a selected binge")
     void requireSelectedBingeRejectsMissingContext() {
@@ -47,7 +56,7 @@ class AvailabilityBingeScopeServiceTest {
     @DisplayName("Availability admin actions reject another admin's binge")
     void requireManagedBingeRejectsForeignBinge() {
         BingeContext.setBingeId(11L);
-        when(bookingBingeClient.getBinge(11L)).thenReturn(ApiResponse.ok(new BookingBingeDto(11L, 44L, true, null, null, null)));
+        when(bookingBingeClient.getBinge(11L, 9L)).thenReturn(ApiResponse.ok(binge(11L, 44L, true)));
 
         assertThatThrownBy(() -> availabilityBingeScopeService.requireManagedBinge(9L, "ADMIN", "managing availability"))
             .isInstanceOf(BusinessException.class)
@@ -60,7 +69,7 @@ class AvailabilityBingeScopeServiceTest {
     @DisplayName("Availability admin actions allow super admins")
     void requireManagedBingeAllowsSuperAdmin() {
         BingeContext.setBingeId(11L);
-        when(bookingBingeClient.getBinge(11L)).thenReturn(ApiResponse.ok(new BookingBingeDto(11L, 44L, true, null, null, null)));
+        when(bookingBingeClient.getBinge(11L, 9L)).thenReturn(ApiResponse.ok(binge(11L, 44L, true)));
 
         BookingBingeDto resolved = availabilityBingeScopeService.requireManagedBinge(9L, "SUPER_ADMIN", "managing availability");
 
@@ -71,7 +80,7 @@ class AvailabilityBingeScopeServiceTest {
     @DisplayName("Availability admin actions reject an unknown binge")
     void requireManagedBingeRejectsUnknownBinge() {
         BingeContext.setBingeId(11L);
-        when(bookingBingeClient.getBinge(11L)).thenReturn(ApiResponse.ok(null));
+        when(bookingBingeClient.getBinge(11L, 9L)).thenReturn(ApiResponse.ok(null));
 
         assertThatThrownBy(() -> availabilityBingeScopeService.requireManagedBinge(9L, "ADMIN", "managing availability"))
             .isInstanceOf(ResourceNotFoundException.class)

@@ -39,4 +39,20 @@ public interface AdminNotificationRepository extends JpaRepository<AdminNotifica
     int markAllReadForUser(@Param("userId") Long userId,
                            @Param("role") String role,
                            @Param("now") LocalDateTime now);
+
+    // ── Messaging ──
+    /** Messages the caller authored (the "Sent" folder). */
+    @Query("SELECT n FROM AdminNotification n WHERE n.senderUserId = :userId ORDER BY n.createdAt DESC")
+    Page<AdminNotification> findSentByUser(@Param("userId") Long userId, Pageable pageable);
+
+    /** All messages in a conversation, oldest first. Id tiebreaks identical timestamps. */
+    @Query("SELECT n FROM AdminNotification n WHERE n.threadId = :threadId ORDER BY n.createdAt ASC, n.id ASC")
+    java.util.List<AdminNotification> findByThreadIdOrderByCreatedAtAsc(@Param("threadId") Long threadId);
+
+    /** Delete the caller's already-read inbox items (clear read). */
+    @Modifying
+    @Query("DELETE FROM AdminNotification n WHERE n.readAt IS NOT NULL "
+            + "  AND (n.recipientUserId = :userId "
+            + "    OR (n.recipientUserId IS NULL AND n.recipientRole = :role))")
+    int clearReadForUser(@Param("userId") Long userId, @Param("role") String role);
 }

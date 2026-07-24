@@ -1,20 +1,20 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { City, State } from 'country-state-city';
-import { FiCrosshair, FiMapPin } from 'react-icons/fi';
+import { FiCrosshair, FiMapPin, FiSliders, FiCheckCircle } from 'react-icons/fi';
 import useGeolocation from '../../hooks/useGeolocation';
 import './FormFields.css';
 
 /**
- * Venue geo-coordinate editor for the admin binge form.
+ * Venue location editor for the admin binge form — ADDRESS-FIRST.
  *
- * Coordinates feed the customer-facing "venues near me" proximity ranking, so we
- * make them easy to set accurately without forcing a paid geocoding integration:
- *   - "Use current location" reads the admin's device GPS (handy when filling the
- *     form on-site at the venue).
- *   - "Derive from city" reuses the offline country-state-city dataset already
- *     bundled for AddressFields to drop an approximate pin from the chosen city —
- *     good enough to rank venues by metro, refine by hand if needed.
- *   - Manual entry covers everything else (e.g. pasted Google Maps coordinates).
+ * Admins fill the structured address (above this field); this widget turns that
+ * address into the map pin that powers the customer "venues near me" proximity
+ * ranking, so nobody has to hand-type latitude/longitude. Resolution order:
+ *   1. Auto-derive from the chosen city as soon as a city is picked (offline
+ *      country-state-city dataset — no paid geocoding API needed).
+ *   2. "Use current location" reads device GPS (handy when filling on-site).
+ *   3. "Enter coordinates manually" (collapsed by default) for edge cases such
+ *      as pasted Google-Maps coordinates or a city missing from the dataset.
  *
  * `value`/`onChange` carry the pair as strings (`{ latitude, longitude }`) so the
  * inputs can be cleared; the parent parses to numbers (or null) at submit time.
@@ -23,10 +23,34 @@ import './FormFields.css';
 export default function VenueCoordinatesField({ value, onChange, address, disabled = false }) {
   const { status, request } = useGeolocation();
   const [error, setError] = useState('');
+  const [showManual, setShowManual] = useState(false);
+  // Remember the last city we auto-derived for, so we re-derive when the admin
+  // changes the city but never clobber a value they set by hand or via GPS.
+  const lastAutoCity = useRef(null);
 
   const latitude = value?.latitude ?? '';
   const longitude = value?.longitude ?? '';
   const locating = status === 'prompting';
+  const hasValue = String(latitude).trim() !== '' && String(longitude).trim() !== '';
+
+  const cityKey = `${address?.country || ''}|${address?.state || ''}|${address?.city || ''}`;
+
+  // Auto-derive coordinates from the address city. Runs only when the pin is
+  // currently empty (so a manual/GPS pin is never overwritten) and the city
+  // actually changed since the last auto-derive.
+  useEffect(() => {
+    if (disabled) return;
+    if (!address?.city) return;
+    if (hasValue) { lastAutoCity.current = cityKey; return; }
+    if (lastAutoCity.current === cityKey) return;
+    const coords = deriveCityCoordinates(address);
+    if (coords) {
+      lastAutoCity.current = cityKey;
+      onChange({ latitude: String(coords.latitude), longitude: String(coords.longitude) });
+      setError('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cityKey, disabled]);
 
   const handleUseCurrent = async () => {
     setError('');
@@ -38,78 +62,85 @@ export default function VenueCoordinatesField({ value, onChange, address, disabl
     }
   };
 
-  const deriveFromCity = () => {
+  const handleDeriveFromCity = () => {
     setError('');
-    const country = address?.country;
-    const stateName = address?.state;
-    const cityName = address?.city;
-    if (!country || !cityName) {
+    if (!address?.country || !address?.city) {
       setError('Pick a country and city in the address above first, or enter coordinates manually.');
       return;
     }
-    const states = State.getStatesOfCountry(country) || [];
-    const stateIso = states.find((s) => s.name === stateName)?.isoCode;
-    const cities = stateIso ? City.getCitiesOfState(country, stateIso) : [];
-    const match = cities.find((c) => c.name === cityName);
-    if (match && match.latitude && match.longitude) {
-      onChange({ latitude: String(round6(Number(match.latitude))), longitude: String(round6(Number(match.longitude))) });
+    const coords = deriveCityCoordinates(address);
+    if (coords) {
+      lastAutoCity.current = cityKey;
+      onChange({ latitude: String(coords.latitude), longitude: String(coords.longitude) });
     } else {
       setError('No coordinates on file for that city. Use current location or enter them manually.');
+      setShowManual(true);
     }
   };
 
   const canDerive = !!(address?.country && address?.city);
-  const hasValue = latitude !== '' || longitude !== '';
 
   return (
     <fieldset className="address-fields" disabled={disabled}>
-      <legend className="address-fields-legend">Map coordinates</legend>
+      <legend className="address-fields-legend">Venue location on the map</legend>
       <p className="address-fields-help">
-        Coordinates place this venue on the customer “venues near me” discovery. Set both, or leave both blank to keep this venue out of proximity results.
+        This drops the pin used by the customer “venues near me” discovery. It is set
+        automatically from the city in the address above — no need to type coordinates.
       </p>
 
-      <div className="address-grid">
-        <div className="input-group">
-          <label>Latitude</label>
-          <input
-            type="number"
-            step="any"
-            min="-90"
-            max="90"
-            inputMode="decimal"
-            value={latitude}
-            onChange={(e) => onChange({ latitude: e.target.value, longitude })}
-            placeholder="12.9716"
-          />
-        </div>
-        <div className="input-group">
-          <label>Longitude</label>
-          <input
-            type="number"
-            step="any"
-            min="-180"
-            max="180"
-            inputMode="decimal"
-            value={longitude}
-            onChange={(e) => onChange({ latitude, longitude: e.target.value })}
-            placeholder="77.5946"
-          />
-        </div>
+      <div className="venue-loc-status">
+        {hasValue ? (
+          <span className="venue-loc-set">
+            <FiCheckCircle aria-hidden="true" />
+            Pinned{address?.city ? ` near ${address.city}` : ''} · {Number(latitude).toFixed(4)}, {Number(longitude).toFixed(4)}
+          </span>
+        ) : (
+          <span className="venue-loc-unset">
+            <FiMapPin aria-hidden="true" />
+            No map location yet — pick a city above, use your current location, or enter it manually.
+          </span>
+        )}
       </div>
 
-      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.6rem' }}>
+      <div className="venue-loc-actions">
         <button type="button" className="btn btn-secondary btn-sm" onClick={handleUseCurrent} disabled={disabled || locating}>
           <FiCrosshair /> {locating ? 'Locating…' : 'Use current location'}
         </button>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={deriveFromCity} disabled={disabled || !canDerive}>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={handleDeriveFromCity} disabled={disabled || !canDerive}>
           <FiMapPin /> Derive from city
         </button>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowManual((s) => !s)} disabled={disabled}>
+          <FiSliders /> {showManual ? 'Hide manual entry' : 'Enter coordinates manually'}
+        </button>
         {hasValue && (
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => onChange({ latitude: '', longitude: '' })} disabled={disabled}>
-            Clear
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => { onChange({ latitude: '', longitude: '' }); lastAutoCity.current = null; }} disabled={disabled}>
+            Clear pin
           </button>
         )}
       </div>
+
+      {showManual && (
+        <div className="address-grid" style={{ marginTop: '0.6rem' }}>
+          <div className="input-group">
+            <label>Latitude</label>
+            <input
+              type="number" step="any" min="-90" max="90" inputMode="decimal"
+              value={latitude}
+              onChange={(e) => onChange({ latitude: e.target.value, longitude })}
+              placeholder="12.9716"
+            />
+          </div>
+          <div className="input-group">
+            <label>Longitude</label>
+            <input
+              type="number" step="any" min="-180" max="180" inputMode="decimal"
+              value={longitude}
+              onChange={(e) => onChange({ latitude, longitude: e.target.value })}
+              placeholder="77.5946"
+            />
+          </div>
+        </div>
+      )}
 
       {error && <span className="field-error" style={{ marginTop: '0.5rem', display: 'block' }}>{error}</span>}
     </fieldset>
@@ -119,6 +150,48 @@ export default function VenueCoordinatesField({ value, onChange, address, disabl
 /** Round to 6 decimals (~0.11 m) — plenty precise for a venue pin, keeps payload tidy. */
 function round6(n) {
   return Math.round(Number(n) * 1e6) / 1e6;
+}
+
+/**
+ * Resolve approximate coordinates for the address's city from the offline
+ * country-state-city dataset. Robust matching, in order:
+ *   1. state-scoped cities (when the state resolves to an ISO code), exact then
+ *      case-insensitive name match;
+ *   2. country-wide cities, exact then case-insensitive name match (covers
+ *      cities picked without a matching state, or free-typed states).
+ * Returns `{ latitude, longitude }` (rounded) or `null` when nothing is found or
+ * the matched record has no coordinates.
+ */
+export function deriveCityCoordinates(address) {
+  const country = address?.country;
+  const stateName = address?.state;
+  const cityName = address?.city;
+  if (!country || !cityName) return null;
+
+  const target = String(cityName).trim().toLowerCase();
+  const pick = (list) => {
+    if (!list || !list.length) return null;
+    const exact = list.find((c) => c.name === cityName)
+      || list.find((c) => String(c.name).trim().toLowerCase() === target);
+    return exact && exact.latitude && exact.longitude ? exact : null;
+  };
+
+  // 1) state-scoped
+  let match = null;
+  if (stateName) {
+    const states = State.getStatesOfCountry(country) || [];
+    const st = states.find((s) => s.name === stateName)
+      || states.find((s) => String(s.name).trim().toLowerCase() === String(stateName).trim().toLowerCase());
+    if (st?.isoCode) {
+      match = pick(City.getCitiesOfState(country, st.isoCode));
+    }
+  }
+  // 2) country-wide fallback
+  if (!match) {
+    match = pick(City.getCitiesOfCountry(country));
+  }
+  if (!match) return null;
+  return { latitude: round6(Number(match.latitude)), longitude: round6(Number(match.longitude)) };
 }
 
 /**

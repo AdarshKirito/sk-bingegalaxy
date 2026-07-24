@@ -26,4 +26,14 @@ public interface LoyaltyLedgerEntryRepository extends JpaRepository<LoyaltyLedge
 
     /** Used by the booking-cancellation listener to find EARN entries on a given booking. */
     List<LoyaltyLedgerEntry> findByWalletIdAndBookingRefAndEntryType(Long walletId, String bookingRef, String entryType);
+
+    /**
+     * Points already granted by a binge for a given entry type since {@code from} —
+     * enforces the per-binge monthly goodwill budget.
+     */
+    @org.springframework.data.jpa.repository.Query("""
+        SELECT COALESCE(SUM(l.pointsDelta), 0) FROM LoyaltyLedgerEntry l
+        WHERE l.bingeId = :bingeId AND l.entryType = :entryType AND l.createdAt >= :from
+        """)
+    long sumPointsByBingeAndTypeSince(Long bingeId, String entryType, java.time.LocalDateTime from);
 }

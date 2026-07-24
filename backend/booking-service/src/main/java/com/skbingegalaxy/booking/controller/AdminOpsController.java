@@ -45,10 +45,13 @@ import java.util.UUID;
  *   depth + outbox poisoned count. Wire to PagerDuty when any value &gt; 0.</li>
  * </ul>
  *
- * <p>Protected by SecurityConfig to {@code ROLE_ADMIN} / {@code ROLE_SUPER_ADMIN}.
+ * <p>Restricted to {@code ROLE_SUPER_ADMIN}: DLT replay and outbox retry are
+ * platform-wide control-plane actions, not per-binge tooling — a single-venue
+ * admin must not be able to replay other venues' events.
  */
 @RestController
 @RequestMapping("/api/v1/bookings/admin/ops")
+@org.springframework.security.access.prepost.PreAuthorize("hasRole('SUPER_ADMIN')")
 @RequiredArgsConstructor
 @Slf4j
 public class AdminOpsController {

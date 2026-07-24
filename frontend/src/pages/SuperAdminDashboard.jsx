@@ -7,6 +7,7 @@ import {
   FiUserX, FiSlash,
 } from 'react-icons/fi';
 import SEO from '../components/SEO';
+import { useConfirm } from '../components/ui/ConfirmProvider';
 import './AdminSecurity.css';
 
 /**
@@ -195,6 +196,7 @@ function OverviewTab({ onJump }) {
    Active sessions
    ────────────────────────────────────────────────────────────── */
 function SessionsTab() {
+  const confirm = useConfirm();
   const [page, setPage] = useState(0);
   const [data, setData] = useState(null);
   const [loading, setLoad] = useState(true);
@@ -210,7 +212,13 @@ function SessionsTab() {
   useEffect(() => { refresh(); }, [refresh]);
 
   const revoke = async (id) => {
-    if (!window.confirm('Force sign-out this session?')) return;
+    const ok = await confirm({
+      title: 'Force sign-out?',
+      message: 'Force sign-out this session? The user will have to log in again on that device.',
+      confirmLabel: 'Sign Out',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
       await authService.revokeAnySession(id);
       toast.success('Session revoked');
@@ -219,9 +227,13 @@ function SessionsTab() {
   };
 
   const revokeAllForUser = async (userId) => {
-    if (!window.confirm(
-      `Revoke EVERY active session for user #${userId}? They will be signed out of all devices.`,
-    )) return;
+    const ok = await confirm({
+      title: 'Revoke all sessions?',
+      message: `Revoke EVERY active session for user #${userId}? They will be signed out of all devices.`,
+      confirmLabel: 'Revoke All',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
       const res = await authService.revokeAllSessionsForUser(userId);
       const n = res.data?.data ?? 0;
@@ -601,6 +613,7 @@ function AuditTab() {
    Admins
    ────────────────────────────────────────────────────────────── */
 function AdminsTab() {
+  const confirm = useConfirm();
   const [admins, setAdmins] = useState([]);
   const [loading, setLoad]  = useState(true);
   const [search, setSearch] = useState('');
@@ -628,12 +641,24 @@ function AdminsTab() {
   }, [admins, search, roleFilter]);
 
   const promote = async (id) => {
-    if (!window.confirm('Promote this admin to SUPER_ADMIN? They gain full platform control.')) return;
+    const ok = await confirm({
+      title: 'Promote to SUPER_ADMIN?',
+      message: 'Promote this admin to SUPER_ADMIN? They gain full platform control.',
+      confirmLabel: 'Promote',
+      variant: 'warning',
+    });
+    if (!ok) return;
     try { await authService.promoteAdmin(id); toast.success('Promoted to SUPER_ADMIN'); refresh(); }
     catch (err) { toast.error(err.response?.data?.message || 'Failed'); }
   };
   const demote = async (id) => {
-    if (!window.confirm('Demote this SUPER_ADMIN to ADMIN? They lose super-admin privileges.')) return;
+    const ok = await confirm({
+      title: 'Demote to ADMIN?',
+      message: 'Demote this SUPER_ADMIN to ADMIN? They lose super-admin privileges.',
+      confirmLabel: 'Demote',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try { await authService.demoteAdmin(id); toast.success('Demoted to ADMIN'); refresh(); }
     catch (err) { toast.error(err.response?.data?.message || 'Failed'); }
   };

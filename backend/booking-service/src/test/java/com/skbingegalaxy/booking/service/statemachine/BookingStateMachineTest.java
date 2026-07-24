@@ -553,6 +553,59 @@ class BookingStateMachineTest {
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    //  LOYALTY-001 — earn-clawback reachability invariant.
+    //  Loyalty points are earned ONLY when a booking reaches COMPLETED
+    //  (LoyaltyV2BookingListener#onBookingCompleted). The "earn → spend →
+    //  cancel" edge (a cancel clawing back points the member already spent)
+    //  can only occur if a COMPLETED booking can reach CANCELLED. These tests
+    //  pin that COMPLETED can NEVER reach CANCELLED — directly or via its one
+    //  legal override hop to CHECKED_IN — so the edge stays unreachable and no
+    //  future state-machine edit can silently open it.
+    // ─────────────────────────────────────────────────────────────────────
+    @Nested
+    @DisplayName("Loyalty earn-clawback reachability (LOYALTY-001)")
+    class LoyaltyClawbackReachability {
+
+        @Test
+        @DisplayName("COMPLETED cannot be overridden straight to CANCELLED")
+        void completed_to_cancelled_notAllowed() {
+            booking.setStatus(BookingStatus.COMPLETED);
+            assertThatThrownBy(() -> stateMachine.override(booking, BookingStatus.CANCELLED,
+                TransitionActor.superAdmin(1L, "Root"), "force"))
+                .isInstanceOf(InvalidTransitionException.class)
+                .hasMessageContaining("not in the allow-list");
+            verify(bookingRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("COMPLETED's only override target is CHECKED_IN — no terminal-escape to other states")
+        void completed_override_targets_are_restricted() {
+            booking.setStatus(BookingStatus.COMPLETED);
+            assertThatThrownBy(() -> stateMachine.override(booking, BookingStatus.NO_SHOW,
+                TransitionActor.superAdmin(1L, "Root"), "force"))
+                .isInstanceOf(InvalidTransitionException.class);
+            assertThatThrownBy(() -> stateMachine.override(booking, BookingStatus.PENDING,
+                TransitionActor.superAdmin(1L, "Root"), "force"))
+                .isInstanceOf(InvalidTransitionException.class);
+        }
+
+        @Test
+        @DisplayName("After the sole COMPLETED→CHECKED_IN hop, CANCELLED is still unreachable (CHECKED_IN has no override-out and the normal table forbids cancel)")
+        void checkedIn_cannot_reach_cancelled() {
+            booking.setStatus(BookingStatus.CHECKED_IN);
+            // CHECKED_IN is not a key in OVERRIDE_TARGETS → override to anything throws.
+            assertThatThrownBy(() -> stateMachine.override(booking, BookingStatus.CANCELLED,
+                TransitionActor.superAdmin(1L, "Root"), "force"))
+                .isInstanceOf(InvalidTransitionException.class);
+            // …and the normal transition table also forbids CHECKED_IN → CANCELLED.
+            assertThat(stateMachine.canTransition(BookingStatus.CHECKED_IN,
+                BookingTransitionEvent.ADMIN_CANCEL, TransitionActor.admin(1L, "a"))).isFalse();
+            assertThat(stateMachine.canTransition(BookingStatus.CHECKED_IN,
+                BookingTransitionEvent.CUSTOMER_CANCEL, TransitionActor.customer(7L, "c"))).isFalse();
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
     //  canTransition() inspector
     // ─────────────────────────────────────────────────────────────────────
     @Nested

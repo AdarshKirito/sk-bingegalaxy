@@ -14,10 +14,12 @@ public class MfaConfirmRequest {
     private String code;
 
     /**
-     * Recovery codes issued alongside the TOTP secret at enrolment. The client must echo
-     * them back here (after showing them to the user) so the server can persist their
-     * hashes. Preserves the invariant that the plaintext codes never round-trip through
-     * server storage — they exist only in email/hand for the user.
+     * @deprecated IGNORED by the server since the V20 MFA hardening. Recovery codes are
+     * generated, hashed and stored server-side at {@code /mfa/enroll}. Accepting them
+     * from the client meant whatever it sent became the account's recovery codes, so an
+     * XSS or MITM could plant a known set and retain permanent access. Retained only so
+     * that older clients still POST a body the server accepts; remove once they are gone.
      */
+    @Deprecated
     private List<String> recoveryCodes;
 }

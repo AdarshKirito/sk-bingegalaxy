@@ -4,6 +4,11 @@ server:
 spring:
   application:
     name: api-gateway
+  # Real deployments run under the `kubernetes` profile; production-only beans
+  # must ride along automatically instead of relying on per-deploy env vars.
+  profiles:
+    group:
+      kubernetes: production
   lifecycle:
     timeout-per-shutdown-phase: 30s
   config:

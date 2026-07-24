@@ -45,6 +45,13 @@ public class TaxContext {
     /** When TRUE the customer supplied a tax id (GSTIN / VAT) — may unlock B2B rules. */
     private boolean buyerHasTaxId;
 
+    /**
+     * Booked duration in minutes — drives FLAT_PER_HOUR rules (hourly analogue of a
+     * per-night occupancy tax). Null when unknown (e.g. anonymous preview without a
+     * slot selected); such rules then charge a single unit.
+     */
+    private Integer durationMinutes;
+
     public String resolvedCountry() {
         return billingCountryCode != null && !billingCountryCode.isBlank()
             ? billingCountryCode : venueCountryCode;

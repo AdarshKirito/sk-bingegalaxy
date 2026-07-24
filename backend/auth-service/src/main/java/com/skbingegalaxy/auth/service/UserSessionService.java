@@ -35,16 +35,39 @@ public class UserSessionService {
 
     private final UserSessionRepository repository;
     private final TokenRevocationService tokenRevocationService;
+    private final SessionRevocationCache sessionRevocationCache;
 
     /**
-     * Create a brand-new session for a fresh login (or rotate the old one if the same
-     * device already has an active session — matched heuristically by UA + IP).
+     * Create a brand-new session for a fresh login — or REUSE the existing active
+     * session when the same device (matched by UA + IP) logs in again. Without the
+     * reuse, every login/profile-completion re-mint inserted a fresh row and the
+     * "My sessions" list filled up with phantom copies of the same device.
+     * Reusing keeps the session id stable, which also keeps the {@code sid} claim
+     * of previously minted access tokens for this device valid.
      */
     @Transactional
     public UserSession recordLogin(Long userId, String refreshJti, LocalDateTime expiresAt) {
         HttpServletRequest req = currentRequest();
         String ua = trim(headerOf(req, "User-Agent"), 512);
         String ip = extractIp(req);
+
+        // Same-device dedup: an active session with identical UA + IP is this
+        // device logging in again. Retire its old refresh JTI and re-point the row.
+        for (UserSession existing : repository.findActiveByUserId(userId)) {
+            boolean sameUa = java.util.Objects.equals(existing.getUserAgent(), ua);
+            boolean sameIp = java.util.Objects.equals(existing.getIpAddress(), ip);
+            if (sameUa && sameIp) {
+                try {
+                    tokenRevocationService.revokeByJti(
+                        existing.getRefreshJti(), userId, "refresh", existing.getExpiresAt());
+                } catch (Exception ex) {
+                    log.debug("Skip revocation-list add for superseded session {}: {}",
+                        existing.getId(), ex.getMessage());
+                }
+                existing.touch(refreshJti, expiresAt);
+                return repository.save(existing);
+            }
+        }
 
         UserSession session = UserSession.builder()
             .userId(userId)
@@ -93,6 +116,8 @@ public class UserSessionService {
             } catch (Exception ex) {
                 log.warn("Failed to add session jti to revocation list: {}", ex.getMessage());
             }
+            // Kill live access tokens for this session at the gateway immediately.
+            sessionRevocationCache.denylist(s.getId());
             return true;
         }).orElse(false);
     }
@@ -110,11 +135,27 @@ public class UserSessionService {
             } catch (Exception ex) {
                 log.debug("Skip revocation-list add for session {}: {}", s.getId(), ex.getMessage());
             }
+            sessionRevocationCache.denylist(s.getId());
         }
         if (!active.isEmpty()) {
             repository.saveAll(active);
         }
         return active.size();
+    }
+
+    /**
+     * Mark the session behind a refresh JTI as signed out (used by /auth/logout).
+     * Without this, logged-out devices kept showing as "active" in My Sessions.
+     */
+    @Transactional
+    public void recordLogout(String refreshJti) {
+        if (refreshJti == null || refreshJti.isBlank()) return;
+        repository.findByRefreshJti(refreshJti).ifPresent(s -> {
+            if (s.getRevokedAt() != null) return;
+            s.revoke(s.getUserId(), "LOGOUT");
+            repository.save(s);
+            sessionRevocationCache.denylist(s.getId());
+        });
     }
 
     @Transactional(readOnly = true)

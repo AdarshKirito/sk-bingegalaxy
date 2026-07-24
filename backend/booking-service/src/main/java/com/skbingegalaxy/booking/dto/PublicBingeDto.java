@@ -33,6 +33,8 @@ public class PublicBingeDto {
     private String city;
     private String state;
     private String country;
+    /** ISO-4217 currency derived from {@link #country}; the binge's sole pricing currency. */
+    private String currency;
     private String postalCode;
 
     /** WGS-84 latitude in decimal degrees; null when the venue is not geocoded. */
@@ -50,6 +52,8 @@ public class PublicBingeDto {
     private String supportPhoneCountryCode;
     private String supportWhatsapp;
     private String supportWhatsappCountryCode;
+    /** V78: the public support phone doubles as the WhatsApp contact. */
+    private boolean supportPhoneIsWhatsapp;
 
     private boolean customerCancellationEnabled;
     private int customerCancellationCutoffMinutes;
@@ -57,6 +61,8 @@ public class PublicBingeDto {
 
     private LocalTime openTime;
     private LocalTime closeTime;
+    /** Optional per-day operating hours (overrides open/close for the matching day). */
+    private java.util.List<BingeDayHours> openingHours;
 
     /** When true, the customer must pick a venue room during booking. */
     private boolean roomSelectionRequired;

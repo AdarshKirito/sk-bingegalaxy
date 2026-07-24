@@ -91,6 +91,23 @@ spring:
                 name: bookingServiceCB
                 fallbackUri: forward:/fallback
 
+        # Booking transfers also live in booking-service. This route carries
+        # both surfaces of the 2-phase transfer flow:
+        #   /api/v1/booking-transfers/by-token/** — recipient magic-link
+        #     endpoints (public; the JWT filter allowlists exactly this
+        #     prefix and the 256-bit accept token is the bearer).
+        # Anything else under /api/v1/booking-transfers/ still requires a JWT.
+        - id: booking-transfer-service
+          uri: lb://booking-service
+          predicates:
+            - Path=/api/v1/booking-transfers/**
+          filters:
+            - StripPrefix=0
+            - name: CircuitBreaker
+              args:
+                name: bookingServiceCB
+                fallbackUri: forward:/fallback
+
         # Loyalty v2 also lives in booking-service.
         - id: booking-service-loyalty-v2
           uri: lb://booking-service

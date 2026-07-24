@@ -18,6 +18,13 @@ public class BookingDto {
     private Long id;
     private String bookingRef;
     private Long bingeId;
+    /**
+     * IANA timezone of the venue this booking belongs to (e.g. "Asia/Kolkata").
+     * {@code bookingDate}/{@code startTime} are venue-local wall-clock values — the UI
+     * uses this to label them with the correct zone so a customer booking from another
+     * timezone is never confused about which clock the time refers to.
+     */
+    private String venueTimezone;
     private Long customerId;
     private String customerName;
     private String customerEmail;
@@ -52,6 +59,12 @@ public class BookingDto {
     private Boolean canCustomerCancel;
     private String customerCancelMessage;
     private Integer cancellationRefundPercentage;
+    /**
+     * UTC instant when this unpaid PENDING booking will be auto-released by the payment
+     * timeout saga. Null for paid/decided bookings. Lets clients show a countdown so
+     * the customer knows the reservation exists AND when it expires.
+     */
+    private LocalDateTime paymentExpiresAt;
     private String pricingSource;
     private String rateCodeName;
     private int rescheduleCount;
@@ -73,9 +86,22 @@ public class BookingDto {
     // ── Surge Pricing ───
     private BigDecimal surgeMultiplier;
     private String surgeLabel;
+    // ── Support console ───
+    /** NONE / L1 / L2 / L3 — support escalation state shown in the console. */
+    private String escalationLevel;
+    private String escalationReason;
+    private BigDecimal goodwillCredit;
+    private String goodwillReason;
     // ── Tax ───
     private BigDecimal subtotalAmount;  // pre-tax subtotal
     private BigDecimal taxAmount;       // exclusive tax charged on top of subtotal
+    /**
+     * Per-rule tax breakdown persisted at pricing time (JSON array of
+     * TaxComputationResult.TaxLine): name, GST/VAT/occupancy type, jurisdiction,
+     * rate or flat×units, amount. Lets the admin reservation panel, customer
+     * confirmation and printed receipt itemise taxes without recomputing.
+     */
+    private String taxBreakdownJson;
     // Multi-currency payment: currency the booking is to be paid in (null/"INR" = domestic)
     // and the locked FX rate (foreign units per 1 INR). Lets the payment screen present + charge
     // the locked foreign amount = totalAmount * fxRate.

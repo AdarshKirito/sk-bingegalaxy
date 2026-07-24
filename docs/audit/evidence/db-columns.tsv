@@ -1,0 +1,1218 @@
+auth_db	auth_audit_log	id	bigint	NOT NULL
+auth_db	auth_audit_log	event_type	varchar(64)	NOT NULL
+auth_db	auth_audit_log	actor_id	bigint	
+auth_db	auth_audit_log	actor_role	varchar(20)	
+auth_db	auth_audit_log	target_id	bigint	
+auth_db	auth_audit_log	target_email	varchar(150)	
+auth_db	auth_audit_log	ip_address	varchar(64)	
+auth_db	auth_audit_log	user_agent	varchar(512)	
+auth_db	auth_audit_log	request_id	varchar(64)	
+auth_db	auth_audit_log	success	boolean	NOT NULL
+auth_db	auth_audit_log	failure_reason	varchar(255)	
+auth_db	auth_audit_log	details	text	
+auth_db	auth_audit_log	created_at	timestamp	NOT NULL
+auth_db	authority_grant_scopes	grant_id	bigint	NOT NULL
+auth_db	authority_grant_scopes	scope	varchar(32)	NOT NULL
+auth_db	authority_grants	id	bigint	NOT NULL
+auth_db	authority_grants	grantee_user_id	bigint	NOT NULL
+auth_db	authority_grants	granted_by	bigint	NOT NULL
+auth_db	authority_grants	reason	varchar(500)	NOT NULL
+auth_db	authority_grants	granted_at	timestamp	NOT NULL
+auth_db	authority_grants	expires_at	timestamp	NOT NULL
+auth_db	authority_grants	revoked_at	timestamp	
+auth_db	authority_grants	revoked_by	bigint	
+auth_db	authority_grants	revoke_reason	varchar(500)	
+auth_db	email_verification_token	id	bigint	NOT NULL
+auth_db	email_verification_token	user_id	bigint	NOT NULL
+auth_db	email_verification_token	token_hash	varchar(128)	NOT NULL
+auth_db	email_verification_token	otp	varchar(12)	NOT NULL
+auth_db	email_verification_token	otp_attempts	integer	NOT NULL
+auth_db	email_verification_token	expires_at	timestamp	NOT NULL
+auth_db	email_verification_token	used	boolean	NOT NULL
+auth_db	email_verification_token	created_at	timestamp	NOT NULL
+auth_db	email_verification_token	pending_email	varchar(150)	
+auth_db	password_history	id	bigint	NOT NULL
+auth_db	password_history	user_id	bigint	NOT NULL
+auth_db	password_history	password_hash	varchar(255)	NOT NULL
+auth_db	password_history	created_at	timestamp	NOT NULL
+auth_db	password_reset_tokens	id	bigint	NOT NULL
+auth_db	password_reset_tokens	token	varchar(128)	NOT NULL
+auth_db	password_reset_tokens	otp	varchar(6)	
+auth_db	password_reset_tokens	user_id	bigint	NOT NULL
+auth_db	password_reset_tokens	expires_at	timestamp	NOT NULL
+auth_db	password_reset_tokens	used	boolean	NOT NULL
+auth_db	password_reset_tokens	created_at	timestamp	
+auth_db	password_reset_tokens	otp_attempts	integer	
+auth_db	resource_locks	id	bigint	NOT NULL
+auth_db	resource_locks	resource_type	varchar(64)	NOT NULL
+auth_db	resource_locks	resource_id	varchar(128)	NOT NULL
+auth_db	resource_locks	locked_by	bigint	NOT NULL
+auth_db	resource_locks	locked_by_name	varchar(200)	
+auth_db	resource_locks	reason	varchar(500)	NOT NULL
+auth_db	resource_locks	locked_at	timestamp	NOT NULL
+auth_db	revoked_token	jti	varchar(64)	NOT NULL
+auth_db	revoked_token	user_id	bigint	
+auth_db	revoked_token	token_type	varchar(16)	NOT NULL
+auth_db	revoked_token	expires_at	timestamp	NOT NULL
+auth_db	revoked_token	revoked_at	timestamp	NOT NULL
+auth_db	site_content	slug	varchar(64)	NOT NULL
+auth_db	site_content	content_json	text	NOT NULL
+auth_db	site_content	updated_at	timestamp	NOT NULL
+auth_db	site_content	updated_by	bigint	
+auth_db	user_session	id	bigint	NOT NULL
+auth_db	user_session	user_id	bigint	NOT NULL
+auth_db	user_session	refresh_jti	varchar(64)	NOT NULL
+auth_db	user_session	ip_address	varchar(64)	
+auth_db	user_session	user_agent	varchar(512)	
+auth_db	user_session	device_label	varchar(255)	
+auth_db	user_session	created_at	timestamp	NOT NULL
+auth_db	user_session	last_seen_at	timestamp	NOT NULL
+auth_db	user_session	expires_at	timestamp	NOT NULL
+auth_db	user_session	revoked_at	timestamp	
+auth_db	user_session	revoked_by	bigint	
+auth_db	user_session	revoke_reason	varchar(64)	
+auth_db	users	id	bigint	NOT NULL
+auth_db	users	first_name	varchar(100)	NOT NULL
+auth_db	users	last_name	varchar(100)	NOT NULL
+auth_db	users	email	varchar(150)	NOT NULL
+auth_db	users	phone	varchar(20)	
+auth_db	users	preferred_experience	varchar(100)	
+auth_db	users	vibe_preference	varchar(120)	
+auth_db	users	reminder_lead_days	integer	
+auth_db	users	birthday_month	varchar(20)	
+auth_db	users	birthday_day	integer	
+auth_db	users	anniversary_month	varchar(20)	
+auth_db	users	anniversary_day	integer	
+auth_db	users	birthday_reminder_sent_year	integer	
+auth_db	users	anniversary_reminder_sent_year	integer	
+auth_db	users	notification_channel	varchar(20)	
+auth_db	users	receives_offers	boolean	
+auth_db	users	weekend_alerts	boolean	
+auth_db	users	concierge_support	boolean	
+auth_db	users	password	varchar(255)	NOT NULL
+auth_db	users	role	varchar(20)	NOT NULL
+auth_db	users	active	boolean	NOT NULL
+auth_db	users	created_at	timestamp	
+auth_db	users	updated_at	timestamp	
+auth_db	users	failed_login_attempts	integer	
+auth_db	users	locked_until	timestamp	
+auth_db	users	email_verified	boolean	NOT NULL
+auth_db	users	email_verified_at	timestamp	
+auth_db	users	mfa_enabled	boolean	NOT NULL
+auth_db	users	mfa_secret	varchar(64)	
+auth_db	users	mfa_enrolled_at	timestamp	
+auth_db	users	mfa_recovery_codes_hash	text	
+auth_db	users	last_password_change_at	timestamp	
+auth_db	users	address_line1	varchar(200)	
+auth_db	users	address_line2	varchar(200)	
+auth_db	users	city	varchar(100)	
+auth_db	users	state	varchar(100)	
+auth_db	users	country	varchar(2)	
+auth_db	users	postal_code	varchar(20)	
+auth_db	users	phone_country_code	varchar(8)	
+auth_db	users	pending_email	varchar(150)	
+auth_db	users	pending_email_otp	varchar(8)	
+auth_db	users	pending_email_token_hash	varchar(64)	
+auth_db	users	pending_email_expires_at	timestamp	
+auth_db	users	personal_phone	varchar(20)	
+auth_db	users	personal_phone_country_code	varchar(8)	
+auth_db	users	otp_failed_attempts	integer	NOT NULL
+auth_db	users	otp_locked_until	timestamp	
+auth_db	users	deleted_at	timestamp	
+auth_db	users	anonymized_at	timestamp	
+auth_db	users	deletion_requested_at	timestamp	
+auth_db	users	consent_given_at	timestamp	
+auth_db	users	consent_marketing	boolean	NOT NULL
+auth_db	users	data_retention_expires_at	timestamp	
+auth_db	users	webauthn_credential_id	text	
+auth_db	users	webauthn_public_key_cose	text	
+auth_db	users	webauthn_enrolled_at	timestamp	
+auth_db	users	webauthn_last_used_at	timestamp	
+auth_db	users	webauthn_aaguid	varchar(64)	
+auth_db	users	must_change_password	boolean	NOT NULL
+auth_db	users	temp_password_logins_remaining	integer	
+auth_db	users	is_guest	boolean	NOT NULL
+availability_db	blocked_dates	id	bigint	NOT NULL
+availability_db	blocked_dates	binge_id	bigint	
+availability_db	blocked_dates	blocked_date	date	NOT NULL
+availability_db	blocked_dates	reason	varchar(255)	
+availability_db	blocked_dates	blocked_by	bigint	NOT NULL
+availability_db	blocked_dates	created_at	timestamp	
+availability_db	blocked_slots	id	bigint	NOT NULL
+availability_db	blocked_slots	binge_id	bigint	
+availability_db	blocked_slots	slot_date	date	NOT NULL
+availability_db	blocked_slots	start_hour	integer	NOT NULL
+availability_db	blocked_slots	end_hour	integer	NOT NULL
+availability_db	blocked_slots	reason	varchar(255)	
+availability_db	blocked_slots	blocked_by	bigint	NOT NULL
+availability_db	blocked_slots	created_at	timestamp	
+booking_db	add_on_images	add_on_id	bigint	NOT NULL
+booking_db	add_on_images	image_url	varchar(1000)	
+booking_db	add_ons	id	bigint	NOT NULL
+booking_db	add_ons	binge_id	bigint	
+booking_db	add_ons	name	varchar(100)	NOT NULL
+booking_db	add_ons	description	varchar(300)	
+booking_db	add_ons	price	numeric(10,2)	NOT NULL
+booking_db	add_ons	active	boolean	NOT NULL
+booking_db	add_ons	stock_per_day	integer	
+booking_db	add_ons	advance_notice_minutes	integer	
+booking_db	add_ons	category_id	bigint	NOT NULL
+booking_db	addon_categories	id	bigint	NOT NULL
+booking_db	addon_categories	binge_id	bigint	
+booking_db	addon_categories	name	varchar(80)	NOT NULL
+booking_db	addon_categories	description	varchar(500)	
+booking_db	addon_categories	image_url	varchar(1000)	
+booking_db	addon_categories	sort_order	integer	NOT NULL
+booking_db	addon_categories	active	boolean	NOT NULL
+booking_db	addon_categories	created_at	timestamp	NOT NULL
+booking_db	addon_categories	updated_at	timestamp	
+booking_db	admin_notifications	id	bigint	NOT NULL
+booking_db	admin_notifications	recipient_user_id	bigint	
+booking_db	admin_notifications	recipient_role	varchar(32)	NOT NULL
+booking_db	admin_notifications	type	varchar(64)	NOT NULL
+booking_db	admin_notifications	severity	varchar(16)	NOT NULL
+booking_db	admin_notifications	title	varchar(200)	NOT NULL
+booking_db	admin_notifications	message	varchar(1000)	NOT NULL
+booking_db	admin_notifications	related_binge_id	bigint	
+booking_db	admin_notifications	action_url	varchar(500)	
+booking_db	admin_notifications	read_at	timestamp	
+booking_db	admin_notifications	created_at	timestamp	NOT NULL
+booking_db	admin_notifications	sender_user_id	bigint	
+booking_db	admin_notifications	sender_role	varchar(32)	NOT NULL
+booking_db	admin_notifications	sender_name	varchar(150)	
+booking_db	admin_notifications	recipient_name	varchar(150)	
+booking_db	admin_notifications	thread_id	bigint	
+booking_db	admin_notifications	parent_id	bigint	
+booking_db	admin_notifications	attachment_url	varchar(500)	
+booking_db	admin_notifications	attachment_type	varchar(20)	
+booking_db	admin_notifications	attachment_name	varchar(255)	
+booking_db	billing_addresses	id	bigint	NOT NULL
+booking_db	billing_addresses	customer_id	bigint	
+booking_db	billing_addresses	booking_ref	varchar(20)	
+booking_db	billing_addresses	full_name	varchar(160)	
+booking_db	billing_addresses	company_name	varchar(200)	
+booking_db	billing_addresses	tax_id	varchar(64)	
+booking_db	billing_addresses	address_line1	varchar(200)	NOT NULL
+booking_db	billing_addresses	address_line2	varchar(200)	
+booking_db	billing_addresses	city	varchar(120)	
+booking_db	billing_addresses	state_code	varchar(16)	
+booking_db	billing_addresses	postal_code	varchar(20)	
+booking_db	billing_addresses	country_code	varchar(8)	NOT NULL
+booking_db	billing_addresses	email	varchar(160)	
+booking_db	billing_addresses	phone	varchar(40)	
+booking_db	billing_addresses	phone_country_code	varchar(8)	
+booking_db	billing_addresses	customer_type	varchar(20)	NOT NULL
+booking_db	billing_addresses	created_at	timestamp	NOT NULL
+booking_db	billing_addresses	updated_at	timestamp	NOT NULL
+booking_db	binge_change_requests	id	bigint	NOT NULL
+booking_db	binge_change_requests	binge_id	bigint	NOT NULL
+booking_db	binge_change_requests	request_type	varchar(40)	NOT NULL
+booking_db	binge_change_requests	current_value	varchar(100)	
+booking_db	binge_change_requests	requested_value	varchar(100)	NOT NULL
+booking_db	binge_change_requests	requested_currency	varchar(3)	
+booking_db	binge_change_requests	reason	varchar(500)	
+booking_db	binge_change_requests	requested_by_admin_id	bigint	NOT NULL
+booking_db	binge_change_requests	status	varchar(20)	NOT NULL
+booking_db	binge_change_requests	decided_by_user_id	bigint	
+booking_db	binge_change_requests	decided_at	timestamp	
+booking_db	binge_change_requests	decision_note	varchar(500)	
+booking_db	binge_change_requests	created_at	timestamp	NOT NULL
+booking_db	binge_module_permissions	id	bigint	NOT NULL
+booking_db	binge_module_permissions	binge_id	bigint	NOT NULL
+booking_db	binge_module_permissions	user_id	bigint	NOT NULL
+booking_db	binge_module_permissions	role	varchar(32)	NOT NULL
+booking_db	binge_module_permissions	module_key	varchar(40)	NOT NULL
+booking_db	binge_module_permissions	action_key	varchar(20)	NOT NULL
+booking_db	binge_module_permissions	enabled	boolean	NOT NULL
+booking_db	binge_module_permissions	locked_by_super_admin	boolean	NOT NULL
+booking_db	binge_module_permissions	granted_by_user_id	bigint	
+booking_db	binge_module_permissions	granted_by_role	varchar(32)	
+booking_db	binge_module_permissions	remarks	varchar(500)	
+booking_db	binge_module_permissions	created_at	timestamp	NOT NULL
+booking_db	binge_module_permissions	updated_at	timestamp	NOT NULL
+booking_db	binge_permission_audit	id	bigint	NOT NULL
+booking_db	binge_permission_audit	binge_id	bigint	NOT NULL
+booking_db	binge_permission_audit	target_user_id	bigint	NOT NULL
+booking_db	binge_permission_audit	module_key	varchar(40)	NOT NULL
+booking_db	binge_permission_audit	action_key	varchar(20)	NOT NULL
+booking_db	binge_permission_audit	old_enabled	boolean	
+booking_db	binge_permission_audit	new_enabled	boolean	NOT NULL
+booking_db	binge_permission_audit	old_locked	boolean	
+booking_db	binge_permission_audit	new_locked	boolean	NOT NULL
+booking_db	binge_permission_audit	changed_by_user_id	bigint	NOT NULL
+booking_db	binge_permission_audit	changed_by_role	varchar(32)	NOT NULL
+booking_db	binge_permission_audit	remarks	varchar(500)	
+booking_db	binge_permission_audit	created_at	timestamp	NOT NULL
+booking_db	binge_site_content	binge_id	bigint	NOT NULL
+booking_db	binge_site_content	slug	varchar(64)	NOT NULL
+booking_db	binge_site_content	content_json	text	NOT NULL
+booking_db	binge_site_content	updated_at	timestamp	NOT NULL
+booking_db	binge_site_content	updated_by	bigint	
+booking_db	binges	id	bigint	NOT NULL
+booking_db	binges	name	varchar(150)	NOT NULL
+booking_db	binges	address	varchar(500)	
+booking_db	binges	admin_id	bigint	NOT NULL
+booking_db	binges	active	boolean	NOT NULL
+booking_db	binges	operational_date	date	
+booking_db	binges	created_at	timestamp	
+booking_db	binges	updated_at	timestamp	
+booking_db	binges	customer_dashboard_config_json	text	
+booking_db	binges	support_email	varchar(150)	
+booking_db	binges	support_phone	varchar(20)	
+booking_db	binges	support_whatsapp	varchar(20)	
+booking_db	binges	customer_cancellation_enabled	boolean	NOT NULL
+booking_db	binges	customer_cancellation_cutoff_minutes	integer	NOT NULL
+booking_db	binges	max_concurrent_bookings	integer	
+booking_db	binges	customer_about_config_json	text	
+booking_db	binges	open_time	time without time zone	
+booking_db	binges	close_time	time without time zone	
+booking_db	binges	address_line1	varchar(200)	
+booking_db	binges	address_line2	varchar(200)	
+booking_db	binges	city	varchar(100)	
+booking_db	binges	state	varchar(100)	
+booking_db	binges	country	varchar(2)	
+booking_db	binges	postal_code	varchar(20)	
+booking_db	binges	support_phone_country_code	varchar(8)	
+booking_db	binges	support_whatsapp_country_code	varchar(8)	
+booking_db	binges	status	varchar(32)	NOT NULL
+booking_db	binges	approval_decided_by	bigint	
+booking_db	binges	approval_decided_at	timestamp	
+booking_db	binges	approval_rejection_reason	varchar(500)	
+booking_db	binges	first_event_created_at	timestamp	
+booking_db	binges	grace_warning_sent_at	timestamp	
+booking_db	binges	auto_deactivated_at	timestamp	
+booking_db	binges	freeze_duration_minutes	integer	NOT NULL
+booking_db	binges	max_pending_cancels_before_freeze	integer	NOT NULL
+booking_db	binges	max_pending_payment_timeouts_before_freeze	integer	NOT NULL
+booking_db	binges	refund_on_successful_payment_cancel	boolean	NOT NULL
+booking_db	binges	refund_on_pending_payment_cancel	boolean	NOT NULL
+booking_db	binges	freeze_policy_enabled	boolean	NOT NULL
+booking_db	binges	max_no_shows_before_freeze	integer	NOT NULL
+booking_db	binges	room_selection_required	boolean	NOT NULL
+booking_db	binges	timezone	varchar(64)	NOT NULL
+booking_db	binges	latitude	double precision	
+booking_db	binges	longitude	double precision	
+booking_db	binges	opening_hours_json	text	
+booking_db	binges	currency	varchar(3)	NOT NULL
+booking_db	binges	max_unpaid_bookings_per_customer	integer	NOT NULL
+booking_db	binges	taxes_enabled	boolean	NOT NULL
+booking_db	binges	access_remarks	varchar(1000)	
+booking_db	booking_add_ons	id	bigint	NOT NULL
+booking_db	booking_add_ons	booking_id	bigint	NOT NULL
+booking_db	booking_add_ons	add_on_id	bigint	NOT NULL
+booking_db	booking_add_ons	quantity	integer	NOT NULL
+booking_db	booking_add_ons	price	numeric(10,2)	NOT NULL
+booking_db	booking_event_log	id	bigint	NOT NULL
+booking_db	booking_event_log	booking_ref	varchar(20)	NOT NULL
+booking_db	booking_event_log	event_type	varchar(30)	NOT NULL
+booking_db	booking_event_log	previous_status	varchar(20)	
+booking_db	booking_event_log	new_status	varchar(20)	NOT NULL
+booking_db	booking_event_log	triggered_by	bigint	
+booking_db	booking_event_log	triggered_by_role	varchar(20)	
+booking_db	booking_event_log	description	varchar(2000)	
+booking_db	booking_event_log	snapshot	jsonb	
+booking_db	booking_event_log	event_version	integer	NOT NULL
+booking_db	booking_event_log	created_at	timestamp	NOT NULL
+booking_db	booking_event_log	triggered_by_name	varchar(160)	
+booking_db	booking_event_log	reason	varchar(1000)	
+booking_db	booking_event_log	ip_address	varchar(45)	
+booking_db	booking_event_log	user_agent	varchar(500)	
+booking_db	booking_event_log	binge_id	bigint	
+booking_db	booking_notes	id	bigint	NOT NULL
+booking_db	booking_notes	booking_ref	varchar(30)	NOT NULL
+booking_db	booking_notes	binge_id	bigint	NOT NULL
+booking_db	booking_notes	author_admin_id	bigint	NOT NULL
+booking_db	booking_notes	author_name	varchar(100)	NOT NULL
+booking_db	booking_notes	body	text	NOT NULL
+booking_db	booking_notes	visibility	varchar(12)	NOT NULL
+booking_db	booking_notes	pinned	boolean	NOT NULL
+booking_db	booking_notes	edited	boolean	NOT NULL
+booking_db	booking_notes	deleted	boolean	NOT NULL
+booking_db	booking_notes	created_at	timestamp	NOT NULL
+booking_db	booking_notes	updated_at	timestamp	NOT NULL
+booking_db	booking_price_snapshots	id	bigint	NOT NULL
+booking_db	booking_price_snapshots	booking_ref	varchar(20)	
+booking_db	booking_price_snapshots	binge_id	bigint	
+booking_db	booking_price_snapshots	customer_id	bigint	
+booking_db	booking_price_snapshots	base_currency_code	varchar(8)	NOT NULL
+booking_db	booking_price_snapshots	display_currency_code	varchar(8)	NOT NULL
+booking_db	booking_price_snapshots	payment_currency_code	varchar(8)	NOT NULL
+booking_db	booking_price_snapshots	settlement_currency_code	varchar(8)	NOT NULL
+booking_db	booking_price_snapshots	subtotal_base	numeric(14,4)	NOT NULL
+booking_db	booking_price_snapshots	surge_amount_base	numeric(14,4)	NOT NULL
+booking_db	booking_price_snapshots	loyalty_redemption_base	numeric(14,4)	NOT NULL
+booking_db	booking_price_snapshots	discount_amount_base	numeric(14,4)	NOT NULL
+booking_db	booking_price_snapshots	platform_fee_base	numeric(14,4)	NOT NULL
+booking_db	booking_price_snapshots	tax_amount_base	numeric(14,4)	NOT NULL
+booking_db	booking_price_snapshots	total_base	numeric(14,4)	NOT NULL
+booking_db	booking_price_snapshots	display_total	numeric(14,4)	NOT NULL
+booking_db	booking_price_snapshots	payment_total	numeric(14,4)	NOT NULL
+booking_db	booking_price_snapshots	settlement_total	numeric(14,4)	
+booking_db	booking_price_snapshots	fx_rate_display	numeric(20,10)	NOT NULL
+booking_db	booking_price_snapshots	fx_rate_payment	numeric(20,10)	NOT NULL
+booking_db	booking_price_snapshots	fx_rate_settlement	numeric(20,10)	NOT NULL
+booking_db	booking_price_snapshots	fx_source	varchar(40)	NOT NULL
+booking_db	booking_price_snapshots	fx_locked_at	timestamp	
+booking_db	booking_price_snapshots	fx_locked_until	timestamp	
+booking_db	booking_price_snapshots	tax_breakdown_json	text	
+booking_db	booking_price_snapshots	pricing_breakdown_json	text	
+booking_db	booking_price_snapshots	billing_country	varchar(8)	
+booking_db	booking_price_snapshots	billing_state	varchar(16)	
+booking_db	booking_price_snapshots	billing_postal_code	varchar(20)	
+booking_db	booking_price_snapshots	customer_type	varchar(20)	
+booking_db	booking_price_snapshots	calculation_version	integer	NOT NULL
+booking_db	booking_price_snapshots	created_at	timestamp	NOT NULL
+booking_db	booking_price_snapshots	created_by	varchar(120)	
+booking_db	booking_read_model	id	bigint	NOT NULL
+booking_db	booking_read_model	booking_ref	varchar(20)	NOT NULL
+booking_db	booking_read_model	customer_id	bigint	
+booking_db	booking_read_model	status	varchar(255)	
+booking_db	booking_read_model	payment_status	varchar(255)	
+booking_db	booking_read_model	total_amount	numeric(10,2)	
+booking_db	booking_read_model	collected_amount	numeric(10,2)	
+booking_db	booking_read_model	booking_date	date	
+booking_db	booking_read_model	start_time	time without time zone	
+booking_db	booking_read_model	duration_minutes	integer	
+booking_db	booking_read_model	number_of_guests	integer	NOT NULL
+booking_db	booking_read_model	checked_in	boolean	NOT NULL
+booking_db	booking_read_model	event_type_id	bigint	
+booking_db	booking_read_model	event_count	integer	NOT NULL
+booking_db	booking_read_model	last_event_id	bigint	
+booking_db	booking_read_model	projected_at	timestamp	
+booking_db	booking_reviews	id	bigint	NOT NULL
+booking_db	booking_reviews	binge_id	bigint	
+booking_db	booking_reviews	booking_id	bigint	NOT NULL
+booking_db	booking_reviews	booking_ref	varchar(20)	NOT NULL
+booking_db	booking_reviews	customer_id	bigint	NOT NULL
+booking_db	booking_reviews	admin_id	bigint	
+booking_db	booking_reviews	reviewer_role	varchar(20)	NOT NULL
+booking_db	booking_reviews	rating	integer	
+booking_db	booking_reviews	comment	varchar(1200)	
+booking_db	booking_reviews	skipped	boolean	NOT NULL
+booking_db	booking_reviews	visible_to_customer	boolean	NOT NULL
+booking_db	booking_reviews	created_at	timestamp	NOT NULL
+booking_db	booking_reviews	updated_at	timestamp	
+booking_db	booking_risk_flags	id	bigint	NOT NULL
+booking_db	booking_risk_flags	booking_ref	varchar(30)	NOT NULL
+booking_db	booking_risk_flags	binge_id	bigint	NOT NULL
+booking_db	booking_risk_flags	customer_id	bigint	NOT NULL
+booking_db	booking_risk_flags	rule_code	varchar(40)	NOT NULL
+booking_db	booking_risk_flags	severity	varchar(10)	NOT NULL
+booking_db	booking_risk_flags	source	varchar(10)	NOT NULL
+booking_db	booking_risk_flags	reason	text	
+booking_db	booking_risk_flags	evidence	text	
+booking_db	booking_risk_flags	created_by_admin_id	bigint	
+booking_db	booking_risk_flags	acknowledged	boolean	NOT NULL
+booking_db	booking_risk_flags	acknowledged_by_admin_id	bigint	
+booking_db	booking_risk_flags	acknowledged_at	timestamp	
+booking_db	booking_risk_flags	acknowledged_note	text	
+booking_db	booking_risk_flags	created_at	timestamp	NOT NULL
+booking_db	booking_risk_flags	updated_at	timestamp	NOT NULL
+booking_db	booking_transfers	id	bigint	NOT NULL
+booking_db	booking_transfers	booking_ref	varchar(20)	NOT NULL
+booking_db	booking_transfers	binge_id	bigint	NOT NULL
+booking_db	booking_transfers	from_customer_id	bigint	NOT NULL
+booking_db	booking_transfers	from_customer_name	varchar(150)	NOT NULL
+booking_db	booking_transfers	from_customer_email	varchar(150)	NOT NULL
+booking_db	booking_transfers	to_name	varchar(150)	NOT NULL
+booking_db	booking_transfers	to_email	varchar(150)	NOT NULL
+booking_db	booking_transfers	to_phone	varchar(20)	
+booking_db	booking_transfers	to_phone_country_code	varchar(8)	
+booking_db	booking_transfers	to_customer_id	bigint	
+booking_db	booking_transfers	status	varchar(20)	NOT NULL
+booking_db	booking_transfers	accept_token	varchar(80)	NOT NULL
+booking_db	booking_transfers	expires_at	timestamp	NOT NULL
+booking_db	booking_transfers	created_at	timestamp	NOT NULL
+booking_db	booking_transfers	accepted_at	timestamp	
+booking_db	booking_transfers	declined_at	timestamp	
+booking_db	booking_transfers	revoked_at	timestamp	
+booking_db	booking_transfers	decline_reason	varchar(500)	
+booking_db	bookings	id	bigint	NOT NULL
+booking_db	bookings	booking_ref	varchar(20)	NOT NULL
+booking_db	bookings	binge_id	bigint	
+booking_db	bookings	customer_id	bigint	NOT NULL
+booking_db	bookings	customer_name	varchar(150)	NOT NULL
+booking_db	bookings	customer_email	varchar(150)	NOT NULL
+booking_db	bookings	customer_phone	varchar(20)	NOT NULL
+booking_db	bookings	event_type_id	bigint	NOT NULL
+booking_db	bookings	booking_date	date	NOT NULL
+booking_db	bookings	start_time	time without time zone	NOT NULL
+booking_db	bookings	duration_hours	integer	NOT NULL
+booking_db	bookings	duration_minutes	integer	
+booking_db	bookings	special_notes	varchar(1000)	
+booking_db	bookings	admin_notes	varchar(1000)	
+booking_db	bookings	base_amount	numeric(10,2)	NOT NULL
+booking_db	bookings	add_on_amount	numeric(10,2)	NOT NULL
+booking_db	bookings	guest_amount	numeric(10,2)	NOT NULL
+booking_db	bookings	total_amount	numeric(10,2)	NOT NULL
+booking_db	bookings	collected_amount	numeric(10,2)	
+booking_db	bookings	number_of_guests	integer	NOT NULL
+booking_db	bookings	status	varchar(20)	NOT NULL
+booking_db	bookings	payment_status	varchar(30)	NOT NULL
+booking_db	bookings	payment_method	varchar(30)	
+booking_db	bookings	checked_in	boolean	NOT NULL
+booking_db	bookings	actual_checkout_time	timestamp	
+booking_db	bookings	actual_used_minutes	integer	
+booking_db	bookings	early_checkout_note	varchar(500)	
+booking_db	bookings	pricing_source	varchar(30)	
+booking_db	bookings	rate_code_name	varchar(100)	
+booking_db	bookings	created_at	timestamp	
+booking_db	bookings	updated_at	timestamp	
+booking_db	bookings	version	bigint	
+booking_db	bookings	reschedule_count	integer	NOT NULL
+booking_db	bookings	original_booking_ref	varchar(20)	
+booking_db	bookings	transferred	boolean	NOT NULL
+booking_db	bookings	original_customer_id	bigint	
+booking_db	bookings	original_customer_name	varchar(150)	
+booking_db	bookings	recurring_group_id	varchar(40)	
+booking_db	bookings	venue_room_id	bigint	
+booking_db	bookings	venue_room_name	varchar(100)	
+booking_db	bookings	loyalty_points_earned	bigint	NOT NULL
+booking_db	bookings	loyalty_points_redeemed	bigint	NOT NULL
+booking_db	bookings	loyalty_discount_amount	numeric(10,2)	
+booking_db	bookings	surge_multiplier	numeric(5,2)	
+booking_db	bookings	surge_label	varchar(100)	
+booking_db	bookings	actual_check_in_time	timestamp	
+booking_db	bookings	customer_phone_country_code	varchar(8)	
+booking_db	bookings	cancellation_actor	varchar(20)	
+booking_db	bookings	subtotal_amount	numeric(12,2)	NOT NULL
+booking_db	bookings	tax_amount	numeric(12,2)	NOT NULL
+booking_db	bookings	tax_breakdown_json	text	
+booking_db	bookings	currency_code	varchar(8)	NOT NULL
+booking_db	bookings	display_amount	numeric(14,2)	
+booking_db	bookings	fx_rate	numeric(18,8)	NOT NULL
+booking_db	bookings	base_currency_code	varchar(8)	
+booking_db	bookings	display_currency_code	varchar(8)	
+booking_db	bookings	payment_currency_code	varchar(8)	
+booking_db	bookings	settlement_currency_code	varchar(8)	
+booking_db	bookings	price_snapshot_id	bigint	
+booking_db	bookings	billing_address_id	bigint	
+booking_db	bookings	fx_locked_until	timestamp	
+booking_db	bookings	calculation_version	integer	NOT NULL
+booking_db	bookings	late_arrival	boolean	NOT NULL
+booking_db	bookings	cancellation_reason	varchar(500)	
+booking_db	bookings	escalation_level	varchar(16)	NOT NULL
+booking_db	bookings	escalation_reason	varchar(500)	
+booking_db	bookings	goodwill_credit	numeric(10,2)	
+booking_db	bookings	goodwill_reason	varchar(500)	
+booking_db	bookings	goodwill_issued_by_admin_id	bigint	
+booking_db	bookings	goodwill_issued_at	timestamp	
+booking_db	bookings	venue_room_price	numeric(10,2)	NOT NULL
+booking_db	cancellation_tiers	id	bigint	NOT NULL
+booking_db	cancellation_tiers	binge_id	bigint	NOT NULL
+booking_db	cancellation_tiers	hours_before_start	integer	NOT NULL
+booking_db	cancellation_tiers	refund_percentage	integer	NOT NULL
+booking_db	cancellation_tiers	label	varchar(100)	
+booking_db	cancellation_tiers	created_at	timestamp	NOT NULL
+booking_db	check_in_tokens	id	bigint	NOT NULL
+booking_db	check_in_tokens	booking_ref	varchar(20)	NOT NULL
+booking_db	check_in_tokens	booking_id	bigint	NOT NULL
+booking_db	check_in_tokens	token_type	varchar(8)	NOT NULL
+booking_db	check_in_tokens	token_value	varchar(128)	NOT NULL
+booking_db	check_in_tokens	issued_by	varchar(150)	
+booking_db	check_in_tokens	issued_at	timestamp	NOT NULL
+booking_db	check_in_tokens	expires_at	timestamp	NOT NULL
+booking_db	check_in_tokens	consumed_at	timestamp	
+booking_db	check_in_tokens	consumed_by	varchar(150)	
+booking_db	check_in_tokens	consumed_ip	varchar(64)	
+booking_db	check_in_tokens	failed_attempts	integer	NOT NULL
+booking_db	check_in_tokens	binge_id	bigint	
+booking_db	credit_notes	id	bigint	NOT NULL
+booking_db	credit_notes	credit_note_number	varchar(40)	NOT NULL
+booking_db	credit_notes	invoice_id	bigint	
+booking_db	credit_notes	booking_ref	varchar(20)	NOT NULL
+booking_db	credit_notes	refund_id	bigint	
+booking_db	credit_notes	amount	numeric(14,4)	NOT NULL
+booking_db	credit_notes	tax_amount	numeric(14,4)	NOT NULL
+booking_db	credit_notes	cancellation_fee	numeric(14,4)	NOT NULL
+booking_db	credit_notes	currency_code	varchar(8)	NOT NULL
+booking_db	credit_notes	reason	varchar(40)	NOT NULL
+booking_db	credit_notes	status	varchar(20)	NOT NULL
+booking_db	credit_notes	created_at	timestamp	NOT NULL
+booking_db	credit_notes	created_by	varchar(120)	
+booking_db	credit_notes	metadata_json	text	
+booking_db	currency_rates	code	varchar(8)	NOT NULL
+booking_db	currency_rates	name	varchar(80)	NOT NULL
+booking_db	currency_rates	symbol	varchar(8)	NOT NULL
+booking_db	currency_rates	rate_to_base	numeric(18,8)	NOT NULL
+booking_db	currency_rates	decimal_digits	integer	NOT NULL
+booking_db	currency_rates	active	boolean	NOT NULL
+booking_db	currency_rates	is_base	boolean	NOT NULL
+booking_db	currency_rates	last_updated	timestamp	NOT NULL
+booking_db	currency_rates	manual_override	boolean	NOT NULL
+booking_db	currency_rates	supports_display	boolean	NOT NULL
+booking_db	currency_rates	supports_payment	boolean	NOT NULL
+booking_db	currency_rates	supports_settlement	boolean	NOT NULL
+booking_db	currency_rates	fx_source	varchar(40)	NOT NULL
+booking_db	currency_rates	created_at	timestamp	NOT NULL
+booking_db	currency_rates	updated_by	varchar(120)	
+booking_db	customer_addon_pricing	id	bigint	NOT NULL
+booking_db	customer_addon_pricing	customer_pricing_profile_id	bigint	NOT NULL
+booking_db	customer_addon_pricing	add_on_id	bigint	NOT NULL
+booking_db	customer_addon_pricing	price	numeric(10,2)	NOT NULL
+booking_db	customer_binge_freezes	id	bigint	NOT NULL
+booking_db	customer_binge_freezes	customer_id	bigint	NOT NULL
+booking_db	customer_binge_freezes	binge_id	bigint	NOT NULL
+booking_db	customer_binge_freezes	freeze_until	timestamp	NOT NULL
+booking_db	customer_binge_freezes	reason	text	
+booking_db	customer_binge_freezes	status	varchar(20)	NOT NULL
+booking_db	customer_binge_freezes	trigger_type	varchar(40)	NOT NULL
+booking_db	customer_binge_freezes	triggered_by_user_id	bigint	
+booking_db	customer_binge_freezes	lifted_by_user_id	bigint	
+booking_db	customer_binge_freezes	lifted_at	timestamp	
+booking_db	customer_binge_freezes	lifted_reason	text	
+booking_db	customer_binge_freezes	created_at	timestamp	NOT NULL
+booking_db	customer_event_pricing	id	bigint	NOT NULL
+booking_db	customer_event_pricing	customer_pricing_profile_id	bigint	NOT NULL
+booking_db	customer_event_pricing	event_type_id	bigint	NOT NULL
+booking_db	customer_event_pricing	base_price	numeric(10,2)	NOT NULL
+booking_db	customer_event_pricing	hourly_rate	numeric(10,2)	NOT NULL
+booking_db	customer_event_pricing	price_per_guest	numeric(10,2)	NOT NULL
+booking_db	customer_pricing_profiles	id	bigint	NOT NULL
+booking_db	customer_pricing_profiles	customer_id	bigint	NOT NULL
+booking_db	customer_pricing_profiles	binge_id	bigint	
+booking_db	customer_pricing_profiles	rate_code_id	bigint	
+booking_db	customer_pricing_profiles	created_at	timestamp	
+booking_db	customer_pricing_profiles	updated_at	timestamp	
+booking_db	customer_pricing_profiles	member_label	varchar(120)	
+booking_db	event_categories	id	bigint	NOT NULL
+booking_db	event_categories	binge_id	bigint	
+booking_db	event_categories	name	varchar(80)	NOT NULL
+booking_db	event_categories	description	varchar(500)	
+booking_db	event_categories	image_url	varchar(1000)	
+booking_db	event_categories	sort_order	integer	NOT NULL
+booking_db	event_categories	active	boolean	NOT NULL
+booking_db	event_categories	created_at	timestamp	NOT NULL
+booking_db	event_categories	updated_at	timestamp	
+booking_db	event_type_images	event_type_id	bigint	NOT NULL
+booking_db	event_type_images	image_url	text	
+booking_db	event_types	id	bigint	NOT NULL
+booking_db	event_types	binge_id	bigint	
+booking_db	event_types	name	varchar(100)	NOT NULL
+booking_db	event_types	description	varchar(500)	
+booking_db	event_types	base_price	numeric(10,2)	NOT NULL
+booking_db	event_types	hourly_rate	numeric(10,2)	NOT NULL
+booking_db	event_types	price_per_guest	numeric(10,2)	NOT NULL
+booking_db	event_types	min_hours	integer	NOT NULL
+booking_db	event_types	max_hours	integer	NOT NULL
+booking_db	event_types	active	boolean	NOT NULL
+booking_db	event_types	min_guests	integer	
+booking_db	event_types	max_guests	integer	
+booking_db	event_types	category_id	bigint	
+booking_db	fx_rate_locks	id	bigint	NOT NULL
+booking_db	fx_rate_locks	lock_token	varchar(64)	NOT NULL
+booking_db	fx_rate_locks	customer_id	bigint	
+booking_db	fx_rate_locks	booking_ref	varchar(20)	
+booking_db	fx_rate_locks	from_currency	varchar(8)	NOT NULL
+booking_db	fx_rate_locks	to_currency	varchar(8)	NOT NULL
+booking_db	fx_rate_locks	fx_rate	numeric(20,10)	NOT NULL
+booking_db	fx_rate_locks	fx_source	varchar(40)	NOT NULL
+booking_db	fx_rate_locks	base_amount	numeric(14,4)	
+booking_db	fx_rate_locks	converted_amount	numeric(14,4)	
+booking_db	fx_rate_locks	locked_at	timestamp	NOT NULL
+booking_db	fx_rate_locks	locked_until	timestamp	NOT NULL
+booking_db	fx_rate_locks	consumed_at	timestamp	
+booking_db	fx_rate_locks	status	varchar(20)	NOT NULL
+booking_db	idempotency_key	idempotency_key	varchar(128)	NOT NULL
+booking_db	idempotency_key	http_method	varchar(8)	NOT NULL
+booking_db	idempotency_key	request_path	varchar(255)	NOT NULL
+booking_db	idempotency_key	user_id	bigint	NOT NULL
+booking_db	idempotency_key	request_hash	varchar(64)	NOT NULL
+booking_db	idempotency_key	response_status	integer	NOT NULL
+booking_db	idempotency_key	response_body	text	
+booking_db	idempotency_key	created_at	timestamp	NOT NULL
+booking_db	idempotency_key	expires_at	timestamp	NOT NULL
+booking_db	invoice_lines	id	bigint	NOT NULL
+booking_db	invoice_lines	invoice_id	bigint	NOT NULL
+booking_db	invoice_lines	line_no	integer	
+booking_db	invoice_lines	description	varchar(400)	NOT NULL
+booking_db	invoice_lines	quantity	numeric(10,2)	NOT NULL
+booking_db	invoice_lines	unit_amount	numeric(14,4)	NOT NULL
+booking_db	invoice_lines	amount	numeric(14,4)	NOT NULL
+booking_db	invoice_lines	tax_amount	numeric(14,4)	NOT NULL
+booking_db	invoice_lines	tax_rate_bps	integer	
+booking_db	invoice_lines	tax_type	varchar(40)	
+booking_db	invoice_lines	line_type	varchar(30)	NOT NULL
+booking_db	invoice_lines	sort_order	integer	NOT NULL
+booking_db	invoices	id	bigint	NOT NULL
+booking_db	invoices	invoice_number	varchar(40)	NOT NULL
+booking_db	invoices	booking_ref	varchar(20)	NOT NULL
+booking_db	invoices	binge_id	bigint	
+booking_db	invoices	customer_id	bigint	
+booking_db	invoices	seller_legal_name	varchar(200)	
+booking_db	invoices	seller_tax_id	varchar(64)	
+booking_db	invoices	seller_address_line	varchar(400)	
+booking_db	invoices	buyer_name	varchar(200)	
+booking_db	invoices	buyer_tax_id	varchar(64)	
+booking_db	invoices	buyer_address_line	varchar(400)	
+booking_db	invoices	buyer_country_code	varchar(8)	
+booking_db	invoices	currency_code	varchar(8)	NOT NULL
+booking_db	invoices	subtotal	numeric(14,4)	NOT NULL
+booking_db	invoices	tax_total	numeric(14,4)	NOT NULL
+booking_db	invoices	grand_total	numeric(14,4)	NOT NULL
+booking_db	invoices	tax_breakdown_json	text	
+booking_db	invoices	snapshot_id	bigint	
+booking_db	invoices	issued_at	timestamp	NOT NULL
+booking_db	invoices	status	varchar(30)	NOT NULL
+booking_db	invoices	pdf_url	varchar(400)	
+booking_db	invoices	created_at	timestamp	NOT NULL
+booking_db	invoices	created_by	varchar(120)	
+booking_db	invoices	billing_address_id	bigint	
+booking_db	invoices	discount_total	numeric(14,4)	
+booking_db	invoices	due_at	timestamp	
+booking_db	invoices	metadata_json	text	
+booking_db	invoices	updated_at	timestamp	NOT NULL
+booking_db	ledger_entries	id	bigint	NOT NULL
+booking_db	ledger_entries	entry_uuid	varchar(40)	NOT NULL
+booking_db	ledger_entries	booking_ref	varchar(20)	
+booking_db	ledger_entries	binge_id	bigint	
+booking_db	ledger_entries	customer_id	bigint	
+booking_db	ledger_entries	payment_id	bigint	
+booking_db	ledger_entries	refund_id	bigint	
+booking_db	ledger_entries	invoice_id	bigint	
+booking_db	ledger_entries	credit_note_id	bigint	
+booking_db	ledger_entries	snapshot_id	bigint	
+booking_db	ledger_entries	entry_type	varchar(40)	NOT NULL
+booking_db	ledger_entries	direction	varchar(8)	NOT NULL
+booking_db	ledger_entries	amount	numeric(14,4)	NOT NULL
+booking_db	ledger_entries	currency_code	varchar(8)	NOT NULL
+booking_db	ledger_entries	reversal_of	bigint	
+booking_db	ledger_entries	description	varchar(400)	
+booking_db	ledger_entries	metadata_json	text	
+booking_db	ledger_entries	occurred_at	timestamp	NOT NULL
+booking_db	ledger_entries	created_at	timestamp	NOT NULL
+booking_db	ledger_entries	recorded_by	varchar(120)	
+booking_db	ledger_entries	fx_rate_to_base	numeric(20,10)	
+booking_db	ledger_entries	amount_in_base	numeric(14,4)	
+booking_db	loyalty_binge_binding	id	bigint	NOT NULL
+booking_db	loyalty_binge_binding	tenant_id	bigint	
+booking_db	loyalty_binge_binding	program_id	bigint	NOT NULL
+booking_db	loyalty_binge_binding	binge_id	bigint	NOT NULL
+booking_db	loyalty_binge_binding	status	varchar(20)	NOT NULL
+booking_db	loyalty_binge_binding	legacy_frozen	boolean	NOT NULL
+booking_db	loyalty_binge_binding	enrolled_at	timestamp	
+booking_db	loyalty_binge_binding	enrolled_by_admin_id	bigint	
+booking_db	loyalty_binge_binding	disabled_at	timestamp	
+booking_db	loyalty_binge_binding	disabled_by_admin_id	bigint	
+booking_db	loyalty_binge_binding	effective_from	timestamp	NOT NULL
+booking_db	loyalty_binge_binding	effective_to	timestamp	
+booking_db	loyalty_binge_binding	created_at	timestamp	NOT NULL
+booking_db	loyalty_binge_binding	updated_at	timestamp	NOT NULL
+booking_db	loyalty_binge_binding	version	bigint	NOT NULL
+booking_db	loyalty_binge_earning_rule	id	bigint	NOT NULL
+booking_db	loyalty_binge_earning_rule	tenant_id	bigint	
+booking_db	loyalty_binge_earning_rule	binding_id	bigint	NOT NULL
+booking_db	loyalty_binge_earning_rule	tier_code	varchar(30)	
+booking_db	loyalty_binge_earning_rule	rule_type	varchar(30)	NOT NULL
+booking_db	loyalty_binge_earning_rule	points_numerator	bigint	NOT NULL
+booking_db	loyalty_binge_earning_rule	amount_denominator	numeric(12,2)	NOT NULL
+booking_db	loyalty_binge_earning_rule	tier_multiplier	numeric(5,2)	NOT NULL
+booking_db	loyalty_binge_earning_rule	qc_multiplier	numeric(5,2)	NOT NULL
+booking_db	loyalty_binge_earning_rule	min_booking_amount	numeric(12,2)	
+booking_db	loyalty_binge_earning_rule	cap_per_booking	bigint	
+booking_db	loyalty_binge_earning_rule	daily_velocity_cap	bigint	
+booking_db	loyalty_binge_earning_rule	effective_from	timestamp	NOT NULL
+booking_db	loyalty_binge_earning_rule	effective_to	timestamp	
+booking_db	loyalty_binge_earning_rule	created_at	timestamp	NOT NULL
+booking_db	loyalty_binge_earning_rule	created_by_admin_id	bigint	
+booking_db	loyalty_binge_perk_override	id	bigint	NOT NULL
+booking_db	loyalty_binge_perk_override	tenant_id	bigint	
+booking_db	loyalty_binge_perk_override	binding_id	bigint	NOT NULL
+booking_db	loyalty_binge_perk_override	perk_id	bigint	NOT NULL
+booking_db	loyalty_binge_perk_override	mode	varchar(20)	NOT NULL
+booking_db	loyalty_binge_perk_override	override_point_cost	bigint	
+booking_db	loyalty_binge_perk_override	override_cooldown_hours	integer	
+booking_db	loyalty_binge_perk_override	override_params_json	text	
+booking_db	loyalty_binge_perk_override	created_at	timestamp	NOT NULL
+booking_db	loyalty_binge_redemption_rule	id	bigint	NOT NULL
+booking_db	loyalty_binge_redemption_rule	tenant_id	bigint	
+booking_db	loyalty_binge_redemption_rule	binding_id	bigint	NOT NULL
+booking_db	loyalty_binge_redemption_rule	points_per_currency_unit	bigint	NOT NULL
+booking_db	loyalty_binge_redemption_rule	min_redemption_points	bigint	NOT NULL
+booking_db	loyalty_binge_redemption_rule	max_redemption_percent	numeric(5,2)	NOT NULL
+booking_db	loyalty_binge_redemption_rule	tier_bonus_pct_json	text	
+booking_db	loyalty_binge_redemption_rule	effective_from	timestamp	NOT NULL
+booking_db	loyalty_binge_redemption_rule	effective_to	timestamp	
+booking_db	loyalty_binge_redemption_rule	created_at	timestamp	NOT NULL
+booking_db	loyalty_binge_redemption_rule	created_by_admin_id	bigint	
+booking_db	loyalty_binge_reward_item	id	bigint	NOT NULL
+booking_db	loyalty_binge_reward_item	tenant_id	bigint	
+booking_db	loyalty_binge_reward_item	binding_id	bigint	NOT NULL
+booking_db	loyalty_binge_reward_item	sku	varchar(60)	NOT NULL
+booking_db	loyalty_binge_reward_item	display_name	varchar(120)	NOT NULL
+booking_db	loyalty_binge_reward_item	description	varchar(500)	
+booking_db	loyalty_binge_reward_item	point_cost	bigint	NOT NULL
+booking_db	loyalty_binge_reward_item	min_tier_code	varchar(30)	
+booking_db	loyalty_binge_reward_item	inventory_remaining	bigint	
+booking_db	loyalty_binge_reward_item	active	boolean	NOT NULL
+booking_db	loyalty_binge_reward_item	effective_from	timestamp	NOT NULL
+booking_db	loyalty_binge_reward_item	effective_to	timestamp	
+booking_db	loyalty_binge_reward_item	created_at	timestamp	NOT NULL
+booking_db	loyalty_guest_shadow	id	bigint	NOT NULL
+booking_db	loyalty_guest_shadow	tenant_id	bigint	
+booking_db	loyalty_guest_shadow	email_hash	varchar(64)	
+booking_db	loyalty_guest_shadow	phone_hash	varchar(64)	
+booking_db	loyalty_guest_shadow	device_fingerprint_hash	varchar(64)	
+booking_db	loyalty_guest_shadow	pending_points	bigint	NOT NULL
+booking_db	loyalty_guest_shadow	pending_qualifying_credits	bigint	NOT NULL
+booking_db	loyalty_guest_shadow	last_booking_ref	varchar(20)	
+booking_db	loyalty_guest_shadow	first_seen_at	timestamp	NOT NULL
+booking_db	loyalty_guest_shadow	last_seen_at	timestamp	NOT NULL
+booking_db	loyalty_guest_shadow	merged_membership_id	bigint	
+booking_db	loyalty_guest_shadow	merged_at	timestamp	
+booking_db	loyalty_guest_shadow	expires_at	timestamp	NOT NULL
+booking_db	loyalty_ledger_entry	id	bigint	NOT NULL
+booking_db	loyalty_ledger_entry	tenant_id	bigint	
+booking_db	loyalty_ledger_entry	wallet_id	bigint	NOT NULL
+booking_db	loyalty_ledger_entry	entry_type	varchar(30)	NOT NULL
+booking_db	loyalty_ledger_entry	points_delta	bigint	NOT NULL
+booking_db	loyalty_ledger_entry	lot_id	bigint	
+booking_db	loyalty_ledger_entry	binge_id	bigint	
+booking_db	loyalty_ledger_entry	booking_ref	varchar(20)	
+booking_db	loyalty_ledger_entry	actor_id	bigint	
+booking_db	loyalty_ledger_entry	actor_role	varchar(20)	
+booking_db	loyalty_ledger_entry	reason_code	varchar(60)	
+booking_db	loyalty_ledger_entry	description	varchar(500)	
+booking_db	loyalty_ledger_entry	correlation_id	varchar(64)	
+booking_db	loyalty_ledger_entry	idempotency_key	varchar(128)	
+booking_db	loyalty_ledger_entry	created_at	timestamp	NOT NULL
+booking_db	loyalty_membership	id	bigint	NOT NULL
+booking_db	loyalty_membership	tenant_id	bigint	
+booking_db	loyalty_membership	program_id	bigint	NOT NULL
+booking_db	loyalty_membership	customer_id	bigint	NOT NULL
+booking_db	loyalty_membership	member_number	varchar(20)	NOT NULL
+booking_db	loyalty_membership	enrolled_at	timestamp	NOT NULL
+booking_db	loyalty_membership	enrollment_source	varchar(30)	NOT NULL
+booking_db	loyalty_membership	current_tier_code	varchar(30)	NOT NULL
+booking_db	loyalty_membership	tier_effective_from	timestamp	NOT NULL
+booking_db	loyalty_membership	tier_effective_until	timestamp	
+booking_db	loyalty_membership	soft_landing_eligible	boolean	NOT NULL
+booking_db	loyalty_membership	qualifying_credits_window	bigint	NOT NULL
+booking_db	loyalty_membership	lifetime_credits	bigint	NOT NULL
+booking_db	loyalty_membership	lifetime_years_at_current_tier	integer	NOT NULL
+booking_db	loyalty_membership	status_match_source	varchar(120)	
+booking_db	loyalty_membership	status_match_expires_at	timestamp	
+booking_db	loyalty_membership	active	boolean	NOT NULL
+booking_db	loyalty_membership	deactivated_at	timestamp	
+booking_db	loyalty_membership	deactivation_reason	varchar(255)	
+booking_db	loyalty_membership	marketing_opt_in	boolean	NOT NULL
+booking_db	loyalty_membership	privacy_flags_json	text	
+booking_db	loyalty_membership	created_at	timestamp	NOT NULL
+booking_db	loyalty_membership	updated_at	timestamp	NOT NULL
+booking_db	loyalty_membership	version	bigint	NOT NULL
+booking_db	loyalty_membership_event	id	bigint	NOT NULL
+booking_db	loyalty_membership_event	tenant_id	bigint	
+booking_db	loyalty_membership_event	membership_id	bigint	NOT NULL
+booking_db	loyalty_membership_event	event_type	varchar(40)	NOT NULL
+booking_db	loyalty_membership_event	from_value_json	text	
+booking_db	loyalty_membership_event	to_value_json	text	
+booking_db	loyalty_membership_event	triggered_by	varchar(20)	NOT NULL
+booking_db	loyalty_membership_event	triggered_by_id	bigint	
+booking_db	loyalty_membership_event	correlation_id	varchar(64)	
+booking_db	loyalty_membership_event	created_at	timestamp	NOT NULL
+booking_db	loyalty_perk_catalog	id	bigint	NOT NULL
+booking_db	loyalty_perk_catalog	tenant_id	bigint	
+booking_db	loyalty_perk_catalog	program_id	bigint	NOT NULL
+booking_db	loyalty_perk_catalog	code	varchar(60)	NOT NULL
+booking_db	loyalty_perk_catalog	display_name	varchar(120)	NOT NULL
+booking_db	loyalty_perk_catalog	description	varchar(500)	
+booking_db	loyalty_perk_catalog	category	varchar(20)	NOT NULL
+booking_db	loyalty_perk_catalog	fulfillment_type	varchar(20)	NOT NULL
+booking_db	loyalty_perk_catalog	delivery_handler_key	varchar(80)	NOT NULL
+booking_db	loyalty_perk_catalog	default_point_cost	bigint	NOT NULL
+booking_db	loyalty_perk_catalog	cooldown_hours	integer	NOT NULL
+booking_db	loyalty_perk_catalog	params_json	text	
+booking_db	loyalty_perk_catalog	active	boolean	NOT NULL
+booking_db	loyalty_perk_catalog	effective_from	timestamp	NOT NULL
+booking_db	loyalty_perk_catalog	effective_to	timestamp	
+booking_db	loyalty_perk_catalog	created_at	timestamp	NOT NULL
+booking_db	loyalty_points_lot	id	bigint	NOT NULL
+booking_db	loyalty_points_lot	tenant_id	bigint	
+booking_db	loyalty_points_lot	wallet_id	bigint	NOT NULL
+booking_db	loyalty_points_lot	binge_id	bigint	
+booking_db	loyalty_points_lot	source_type	varchar(40)	NOT NULL
+booking_db	loyalty_points_lot	source_ref	varchar(64)	
+booking_db	loyalty_points_lot	original_points	bigint	NOT NULL
+booking_db	loyalty_points_lot	remaining_points	bigint	NOT NULL
+booking_db	loyalty_points_lot	earned_at	timestamp	NOT NULL
+booking_db	loyalty_points_lot	expires_at	timestamp	NOT NULL
+booking_db	loyalty_points_lot	created_at	timestamp	NOT NULL
+booking_db	loyalty_points_wallet	id	bigint	NOT NULL
+booking_db	loyalty_points_wallet	tenant_id	bigint	
+booking_db	loyalty_points_wallet	membership_id	bigint	NOT NULL
+booking_db	loyalty_points_wallet	current_balance	bigint	NOT NULL
+booking_db	loyalty_points_wallet	lifetime_earned	bigint	NOT NULL
+booking_db	loyalty_points_wallet	lifetime_redeemed	bigint	NOT NULL
+booking_db	loyalty_points_wallet	lifetime_expired	bigint	NOT NULL
+booking_db	loyalty_points_wallet	lifetime_adjusted	bigint	NOT NULL
+booking_db	loyalty_points_wallet	created_at	timestamp	NOT NULL
+booking_db	loyalty_points_wallet	updated_at	timestamp	NOT NULL
+booking_db	loyalty_points_wallet	version	bigint	NOT NULL
+booking_db	loyalty_program	id	bigint	NOT NULL
+booking_db	loyalty_program	tenant_id	bigint	
+booking_db	loyalty_program	code	varchar(40)	NOT NULL
+booking_db	loyalty_program	display_name	varchar(120)	NOT NULL
+booking_db	loyalty_program	description	varchar(500)	
+booking_db	loyalty_program	active	boolean	NOT NULL
+booking_db	loyalty_program	silent_enrollment_enabled	boolean	NOT NULL
+booking_db	loyalty_program	guest_shadow_enabled	boolean	NOT NULL
+booking_db	loyalty_program	retroactive_credit_days	integer	NOT NULL
+booking_db	loyalty_program	points_expiry_days	integer	NOT NULL
+booking_db	loyalty_program	devaluation_notice_days	integer	NOT NULL
+booking_db	loyalty_program	status_match_enabled	boolean	NOT NULL
+booking_db	loyalty_program	status_challenge_days	integer	NOT NULL
+booking_db	loyalty_program	welcome_bonus_points	bigint	NOT NULL
+booking_db	loyalty_program	birthday_bonus_points	bigint	NOT NULL
+booking_db	loyalty_program	allow_negative_balance	boolean	NOT NULL
+booking_db	loyalty_program	gifting_enabled	boolean	NOT NULL
+booking_db	loyalty_program	created_at	timestamp	NOT NULL
+booking_db	loyalty_program	updated_at	timestamp	NOT NULL
+booking_db	loyalty_qualification_event	id	bigint	NOT NULL
+booking_db	loyalty_qualification_event	tenant_id	bigint	
+booking_db	loyalty_qualification_event	membership_id	bigint	NOT NULL
+booking_db	loyalty_qualification_event	binge_id	bigint	
+booking_db	loyalty_qualification_event	booking_ref	varchar(20)	
+booking_db	loyalty_qualification_event	event_type	varchar(40)	NOT NULL
+booking_db	loyalty_qualification_event	qualification_credits	bigint	NOT NULL
+booking_db	loyalty_qualification_event	event_at	timestamp	NOT NULL
+booking_db	loyalty_qualification_event	expires_from_window_at	timestamp	NOT NULL
+booking_db	loyalty_qualification_event	created_at	timestamp	NOT NULL
+booking_db	loyalty_reward_claim	id	bigint	NOT NULL
+booking_db	loyalty_reward_claim	tenant_id	bigint	
+booking_db	loyalty_reward_claim	membership_id	bigint	NOT NULL
+booking_db	loyalty_reward_claim	perk_id	bigint	
+booking_db	loyalty_reward_claim	binge_reward_item_id	bigint	
+booking_db	loyalty_reward_claim	binge_id	bigint	
+booking_db	loyalty_reward_claim	booking_ref	varchar(20)	
+booking_db	loyalty_reward_claim	points_cost	bigint	NOT NULL
+booking_db	loyalty_reward_claim	status	varchar(20)	NOT NULL
+booking_db	loyalty_reward_claim	fulfillment_code	varchar(80)	
+booking_db	loyalty_reward_claim	fulfillment_payload_json	text	
+booking_db	loyalty_reward_claim	claimed_at	timestamp	NOT NULL
+booking_db	loyalty_reward_claim	fulfilled_at	timestamp	
+booking_db	loyalty_reward_claim	expires_at	timestamp	
+booking_db	loyalty_reward_claim	cancelled_at	timestamp	
+booking_db	loyalty_status_match_request	id	bigint	NOT NULL
+booking_db	loyalty_status_match_request	tenant_id	bigint	
+booking_db	loyalty_status_match_request	membership_id	bigint	NOT NULL
+booking_db	loyalty_status_match_request	competitor_program_name	varchar(120)	NOT NULL
+booking_db	loyalty_status_match_request	competitor_tier_name	varchar(60)	NOT NULL
+booking_db	loyalty_status_match_request	proof_url	varchar(500)	
+booking_db	loyalty_status_match_request	proof_payload_json	text	
+booking_db	loyalty_status_match_request	requested_tier_code	varchar(30)	NOT NULL
+booking_db	loyalty_status_match_request	status	varchar(20)	NOT NULL
+booking_db	loyalty_status_match_request	reviewed_by_admin_id	bigint	
+booking_db	loyalty_status_match_request	reviewed_at	timestamp	
+booking_db	loyalty_status_match_request	review_notes	varchar(500)	
+booking_db	loyalty_status_match_request	challenge_expires_at	timestamp	
+booking_db	loyalty_status_match_request	created_at	timestamp	NOT NULL
+booking_db	loyalty_tier_definition	id	bigint	NOT NULL
+booking_db	loyalty_tier_definition	tenant_id	bigint	
+booking_db	loyalty_tier_definition	program_id	bigint	NOT NULL
+booking_db	loyalty_tier_definition	code	varchar(30)	NOT NULL
+booking_db	loyalty_tier_definition	display_name	varchar(60)	NOT NULL
+booking_db	loyalty_tier_definition	rank_order	integer	NOT NULL
+booking_db	loyalty_tier_definition	qualification_credits_required	bigint	NOT NULL
+booking_db	loyalty_tier_definition	qualification_window_days	integer	NOT NULL
+booking_db	loyalty_tier_definition	lifetime_credits_required	bigint	
+booking_db	loyalty_tier_definition	lifetime_years_held_required	integer	
+booking_db	loyalty_tier_definition	validity_calendar_years_after	integer	
+booking_db	loyalty_tier_definition	soft_landing_tier_code	varchar(30)	
+booking_db	loyalty_tier_definition	color_hex	varchar(9)	
+booking_db	loyalty_tier_definition	icon_key	varchar(40)	
+booking_db	loyalty_tier_definition	effective_from	timestamp	NOT NULL
+booking_db	loyalty_tier_definition	effective_to	timestamp	
+booking_db	loyalty_tier_definition	created_at	timestamp	NOT NULL
+booking_db	loyalty_tier_definition	created_by_admin_id	bigint	
+booking_db	loyalty_tier_perk	id	bigint	NOT NULL
+booking_db	loyalty_tier_perk	tenant_id	bigint	
+booking_db	loyalty_tier_perk	tier_definition_id	bigint	NOT NULL
+booking_db	loyalty_tier_perk	perk_id	bigint	NOT NULL
+booking_db	loyalty_tier_perk	override_point_cost	bigint	
+booking_db	loyalty_tier_perk	auto_grant	boolean	NOT NULL
+booking_db	loyalty_tier_perk	sort_order	integer	NOT NULL
+booking_db	loyalty_tier_perk	created_at	timestamp	NOT NULL
+booking_db	outbox_event	id	bigint	NOT NULL
+booking_db	outbox_event	topic	varchar(100)	NOT NULL
+booking_db	outbox_event	aggregate_key	varchar(30)	NOT NULL
+booking_db	outbox_event	payload	text	NOT NULL
+booking_db	outbox_event	sent	boolean	NOT NULL
+booking_db	outbox_event	created_at	timestamp	NOT NULL
+booking_db	outbox_event	sent_at	timestamp	
+booking_db	outbox_event	attempts	integer	NOT NULL
+booking_db	outbox_event	last_attempt_at	timestamp	
+booking_db	outbox_event	last_error	varchar(1000)	
+booking_db	outbox_event	failed_permanent	boolean	NOT NULL
+booking_db	outbox_event	event_id	varchar(64)	
+booking_db	outbox_event	event_type	varchar(80)	
+booking_db	outbox_event	event_version	integer	
+booking_db	outbox_event	occurred_at	timestamp	
+booking_db	outbox_event	correlation_id	varchar(64)	
+booking_db	processed_event	id	bigint	NOT NULL
+booking_db	processed_event	event_key	varchar(200)	NOT NULL
+booking_db	processed_event	processed_at	timestamp	
+booking_db	rate_code_addon_pricing	id	bigint	NOT NULL
+booking_db	rate_code_addon_pricing	rate_code_id	bigint	NOT NULL
+booking_db	rate_code_addon_pricing	add_on_id	bigint	NOT NULL
+booking_db	rate_code_addon_pricing	price	numeric(10,2)	NOT NULL
+booking_db	rate_code_change_log	id	bigint	NOT NULL
+booking_db	rate_code_change_log	customer_id	bigint	NOT NULL
+booking_db	rate_code_change_log	binge_id	bigint	
+booking_db	rate_code_change_log	previous_rate_code_id	bigint	
+booking_db	rate_code_change_log	previous_rate_code_name	varchar(100)	
+booking_db	rate_code_change_log	new_rate_code_id	bigint	
+booking_db	rate_code_change_log	new_rate_code_name	varchar(100)	
+booking_db	rate_code_change_log	change_type	varchar(30)	
+booking_db	rate_code_change_log	changed_by_admin_id	bigint	
+booking_db	rate_code_change_log	changed_at	timestamp	
+booking_db	rate_code_event_pricing	id	bigint	NOT NULL
+booking_db	rate_code_event_pricing	rate_code_id	bigint	NOT NULL
+booking_db	rate_code_event_pricing	event_type_id	bigint	NOT NULL
+booking_db	rate_code_event_pricing	base_price	numeric(10,2)	NOT NULL
+booking_db	rate_code_event_pricing	hourly_rate	numeric(10,2)	NOT NULL
+booking_db	rate_code_event_pricing	price_per_guest	numeric(10,2)	NOT NULL
+booking_db	rate_codes	id	bigint	NOT NULL
+booking_db	rate_codes	binge_id	bigint	
+booking_db	rate_codes	name	varchar(100)	NOT NULL
+booking_db	rate_codes	description	varchar(500)	
+booking_db	rate_codes	active	boolean	NOT NULL
+booking_db	rate_codes	created_at	timestamp	
+booking_db	rate_codes	updated_at	timestamp	
+booking_db	room_blocks	id	bigint	NOT NULL
+booking_db	room_blocks	room_id	bigint	NOT NULL
+booking_db	room_blocks	start_at	timestamp	NOT NULL
+booking_db	room_blocks	end_at	timestamp	NOT NULL
+booking_db	room_blocks	reason	varchar(500)	
+booking_db	room_blocks	created_by	bigint	
+booking_db	room_blocks	created_at	timestamp	NOT NULL
+booking_db	saga_state	id	bigint	NOT NULL
+booking_db	saga_state	booking_ref	varchar(20)	NOT NULL
+booking_db	saga_state	saga_status	varchar(30)	NOT NULL
+booking_db	saga_state	last_completed_step	varchar(50)	
+booking_db	saga_state	failure_reason	varchar(500)	
+booking_db	saga_state	compensation_attempts	integer	NOT NULL
+booking_db	saga_state	started_at	timestamp	
+booking_db	saga_state	updated_at	timestamp	
+booking_db	saga_state	completed_at	timestamp	
+booking_db	saga_state	version	bigint	
+booking_db	slot_holds	id	bigint	NOT NULL
+booking_db	slot_holds	hold_token	varchar(64)	NOT NULL
+booking_db	slot_holds	binge_id	bigint	NOT NULL
+booking_db	slot_holds	customer_id	bigint	NOT NULL
+booking_db	slot_holds	customer_name	varchar(150)	
+booking_db	slot_holds	customer_email	varchar(150)	
+booking_db	slot_holds	event_type_id	bigint	NOT NULL
+booking_db	slot_holds	booking_date	date	NOT NULL
+booking_db	slot_holds	start_time	time without time zone	NOT NULL
+booking_db	slot_holds	duration_minutes	integer	NOT NULL
+booking_db	slot_holds	number_of_guests	integer	NOT NULL
+booking_db	slot_holds	venue_room_id	bigint	
+booking_db	slot_holds	status	varchar(20)	NOT NULL
+booking_db	slot_holds	expires_at	timestamp	NOT NULL
+booking_db	slot_holds	released_at	timestamp	
+booking_db	slot_holds	release_reason	varchar(80)	
+booking_db	slot_holds	converted_booking_ref	varchar(32)	
+booking_db	slot_holds	created_at	timestamp	NOT NULL
+booking_db	slot_holds	updated_at	timestamp	NOT NULL
+booking_db	slot_holds	version	bigint	NOT NULL
+booking_db	surge_pricing_rules	id	bigint	NOT NULL
+booking_db	surge_pricing_rules	binge_id	bigint	NOT NULL
+booking_db	surge_pricing_rules	name	varchar(100)	NOT NULL
+booking_db	surge_pricing_rules	day_of_week	integer	
+booking_db	surge_pricing_rules	start_minute	integer	NOT NULL
+booking_db	surge_pricing_rules	end_minute	integer	NOT NULL
+booking_db	surge_pricing_rules	multiplier	numeric(5,2)	NOT NULL
+booking_db	surge_pricing_rules	label	varchar(100)	
+booking_db	surge_pricing_rules	active	boolean	NOT NULL
+booking_db	surge_pricing_rules	created_at	timestamp	
+booking_db	surge_pricing_rules	updated_at	timestamp	
+booking_db	system_settings	id	bigint	NOT NULL
+booking_db	system_settings	operational_date	date	NOT NULL
+booking_db	tax_rules	id	bigint	NOT NULL
+booking_db	tax_rules	binge_id	bigint	
+booking_db	tax_rules	name	varchar(120)	NOT NULL
+booking_db	tax_rules	description	varchar(500)	
+booking_db	tax_rules	rate_bps	integer	NOT NULL
+booking_db	tax_rules	applies_to	varchar(20)	NOT NULL
+booking_db	tax_rules	inclusive	boolean	NOT NULL
+booking_db	tax_rules	country_code	varchar(8)	
+booking_db	tax_rules	region_code	varchar(16)	
+booking_db	tax_rules	priority	integer	NOT NULL
+booking_db	tax_rules	active	boolean	NOT NULL
+booking_db	tax_rules	created_at	timestamp	NOT NULL
+booking_db	tax_rules	updated_at	timestamp	NOT NULL
+booking_db	tax_rules	state_code	varchar(16)	
+booking_db	tax_rules	city	varchar(120)	
+booking_db	tax_rules	postal_code	varchar(20)	
+booking_db	tax_rules	product_type	varchar(40)	
+booking_db	tax_rules	customer_type	varchar(20)	
+booking_db	tax_rules	tax_type	varchar(40)	NOT NULL
+booking_db	tax_rules	effective_from	timestamp	
+booking_db	tax_rules	effective_to	timestamp	
+booking_db	tax_rules	rule_version	integer	NOT NULL
+booking_db	tax_rules	created_by	varchar(120)	
+booking_db	tax_rules	updated_by	varchar(120)	
+booking_db	venue_room_images	id	bigint	NOT NULL
+booking_db	venue_room_images	room_id	bigint	NOT NULL
+booking_db	venue_room_images	image_url	varchar(1000)	NOT NULL
+booking_db	venue_room_images	sort_order	integer	NOT NULL
+booking_db	venue_rooms	id	bigint	NOT NULL
+booking_db	venue_rooms	binge_id	bigint	NOT NULL
+booking_db	venue_rooms	name	varchar(100)	NOT NULL
+booking_db	venue_rooms	room_type	varchar(30)	NOT NULL
+booking_db	venue_rooms	capacity	integer	NOT NULL
+booking_db	venue_rooms	description	varchar(500)	
+booking_db	venue_rooms	sort_order	integer	NOT NULL
+booking_db	venue_rooms	active	boolean	NOT NULL
+booking_db	venue_rooms	created_at	timestamp	
+booking_db	venue_rooms	updated_at	timestamp	
+booking_db	venue_rooms	price_addition	numeric(10,2)	NOT NULL
+booking_db	venue_rooms	status	varchar(32)	NOT NULL
+booking_db	venue_rooms	approval_decided_by	bigint	
+booking_db	venue_rooms	approval_decided_at	timestamp	
+booking_db	venue_rooms	approval_rejection_reason	varchar(500)	
+booking_db	waitlist_entries	id	bigint	NOT NULL
+booking_db	waitlist_entries	binge_id	bigint	NOT NULL
+booking_db	waitlist_entries	customer_id	bigint	NOT NULL
+booking_db	waitlist_entries	customer_name	varchar(150)	NOT NULL
+booking_db	waitlist_entries	customer_email	varchar(150)	NOT NULL
+booking_db	waitlist_entries	customer_phone	varchar(20)	
+booking_db	waitlist_entries	event_type_id	bigint	NOT NULL
+booking_db	waitlist_entries	preferred_date	date	NOT NULL
+booking_db	waitlist_entries	preferred_start_time	time without time zone	NOT NULL
+booking_db	waitlist_entries	duration_minutes	integer	NOT NULL
+booking_db	waitlist_entries	number_of_guests	integer	NOT NULL
+booking_db	waitlist_entries	status	varchar(20)	NOT NULL
+booking_db	waitlist_entries	position	integer	NOT NULL
+booking_db	waitlist_entries	offer_expires_at	timestamp	
+booking_db	waitlist_entries	notified_at	timestamp	
+booking_db	waitlist_entries	converted_booking_ref	varchar(20)	
+booking_db	waitlist_entries	created_at	timestamp	NOT NULL
+booking_db	waitlist_entries	updated_at	timestamp	
+booking_db	waitlist_entries	customer_phone_country_code	varchar(8)	
+booking_db	waitlist_entries	priority	integer	NOT NULL
+payment_db	admin_approval_request	id	bigint	NOT NULL
+payment_db	admin_approval_request	action_type	varchar(60)	NOT NULL
+payment_db	admin_approval_request	resource_type	varchar(60)	NOT NULL
+payment_db	admin_approval_request	resource_id	varchar(120)	NOT NULL
+payment_db	admin_approval_request	payload	jsonb	
+payment_db	admin_approval_request	amount	numeric(15,2)	
+payment_db	admin_approval_request	currency	varchar(8)	
+payment_db	admin_approval_request	binge_id	bigint	
+payment_db	admin_approval_request	status	varchar(20)	NOT NULL
+payment_db	admin_approval_request	requested_by	varchar(160)	NOT NULL
+payment_db	admin_approval_request	requested_by_id	bigint	
+payment_db	admin_approval_request	requested_at	timestamp	NOT NULL
+payment_db	admin_approval_request	request_reason	varchar(1000)	
+payment_db	admin_approval_request	reviewed_by	varchar(160)	
+payment_db	admin_approval_request	reviewed_by_id	bigint	
+payment_db	admin_approval_request	reviewed_at	timestamp	
+payment_db	admin_approval_request	review_reason	varchar(1000)	
+payment_db	admin_approval_request	executed_at	timestamp	
+payment_db	admin_approval_request	executed_result	varchar(2000)	
+payment_db	admin_approval_request	expires_at	timestamp	NOT NULL
+payment_db	admin_approval_request	version	bigint	NOT NULL
+payment_db	audit_log	id	bigint	NOT NULL
+payment_db	audit_log	actor	varchar(128)	NOT NULL
+payment_db	audit_log	action	varchar(64)	NOT NULL
+payment_db	audit_log	resource_type	varchar(64)	NOT NULL
+payment_db	audit_log	resource_id	varchar(64)	NOT NULL
+payment_db	audit_log	amount	numeric(12,2)	
+payment_db	audit_log	currency	varchar(8)	
+payment_db	audit_log	binge_id	bigint	
+payment_db	audit_log	metadata	text	
+payment_db	audit_log	created_at	timestamp	NOT NULL
+payment_db	idempotency_key	idempotency_key	varchar(128)	NOT NULL
+payment_db	idempotency_key	http_method	varchar(8)	NOT NULL
+payment_db	idempotency_key	request_path	varchar(255)	NOT NULL
+payment_db	idempotency_key	user_id	bigint	NOT NULL
+payment_db	idempotency_key	request_hash	varchar(64)	NOT NULL
+payment_db	idempotency_key	response_status	integer	NOT NULL
+payment_db	idempotency_key	response_body	text	
+payment_db	idempotency_key	created_at	timestamp	NOT NULL
+payment_db	idempotency_key	expires_at	timestamp	NOT NULL
+payment_db	outbox_event	id	bigint	NOT NULL
+payment_db	outbox_event	topic	varchar(100)	NOT NULL
+payment_db	outbox_event	aggregate_key	varchar(30)	NOT NULL
+payment_db	outbox_event	payload	text	NOT NULL
+payment_db	outbox_event	sent	boolean	NOT NULL
+payment_db	outbox_event	created_at	timestamp	NOT NULL
+payment_db	outbox_event	sent_at	timestamp	
+payment_db	outbox_event	attempts	integer	NOT NULL
+payment_db	outbox_event	last_attempt_at	timestamp	
+payment_db	outbox_event	last_error	varchar(1000)	
+payment_db	outbox_event	failed_permanent	boolean	NOT NULL
+payment_db	payment_disputes	id	bigint	NOT NULL
+payment_db	payment_disputes	payment_id	bigint	NOT NULL
+payment_db	payment_disputes	gateway_dispute_id	varchar(120)	NOT NULL
+payment_db	payment_disputes	binge_id	bigint	
+payment_db	payment_disputes	booking_ref	varchar(60)	NOT NULL
+payment_db	payment_disputes	amount	numeric(10,2)	NOT NULL
+payment_db	payment_disputes	currency	varchar(8)	NOT NULL
+payment_db	payment_disputes	status	varchar(20)	NOT NULL
+payment_db	payment_disputes	reason_code	varchar(80)	
+payment_db	payment_disputes	reason_description	varchar(500)	
+payment_db	payment_disputes	respond_by	timestamp	
+payment_db	payment_disputes	gateway_created_at	timestamp	
+payment_db	payment_disputes	raw_payload	text	
+payment_db	payment_disputes	ops_notes	text	
+payment_db	payment_disputes	created_at	timestamp	NOT NULL
+payment_db	payment_disputes	updated_at	timestamp	NOT NULL
+payment_db	payment_status_history	id	bigint	NOT NULL
+payment_db	payment_status_history	payment_id	bigint	NOT NULL
+payment_db	payment_status_history	booking_ref	varchar(30)	NOT NULL
+payment_db	payment_status_history	from_status	varchar(30)	
+payment_db	payment_status_history	to_status	varchar(30)	NOT NULL
+payment_db	payment_status_history	reason	varchar(500)	
+payment_db	payment_status_history	created_at	timestamp	NOT NULL
+payment_db	payments	id	bigint	NOT NULL
+payment_db	payments	booking_ref	varchar(255)	NOT NULL
+payment_db	payments	customer_id	bigint	NOT NULL
+payment_db	payments	transaction_id	varchar(255)	NOT NULL
+payment_db	payments	gateway_order_id	varchar(255)	
+payment_db	payments	gateway_payment_id	varchar(255)	
+payment_db	payments	amount	numeric(10,2)	NOT NULL
+payment_db	payments	gateway_fee	numeric(10,2)	
+payment_db	payments	tax	numeric(10,2)	
+payment_db	payments	payment_method	varchar(255)	NOT NULL
+payment_db	payments	status	varchar(255)	NOT NULL
+payment_db	payments	currency	varchar(255)	
+payment_db	payments	gateway_response	varchar(255)	
+payment_db	payments	failure_reason	varchar(255)	
+payment_db	payments	paid_at	timestamp	
+payment_db	payments	created_at	timestamp	
+payment_db	payments	updated_at	timestamp	
+payment_db	payments	version	bigint	
+payment_db	payments	customer_email	varchar(255)	
+payment_db	payments	customer_name	varchar(255)	
+payment_db	payments	customer_phone	varchar(20)	
+payment_db	payments	binge_id	bigint	
+payment_db	payments	customer_phone_country_code	varchar(8)	
+payment_db	payments	payment_currency_code	varchar(8)	
+payment_db	payments	display_currency_code	varchar(8)	
+payment_db	payments	settlement_currency_code	varchar(8)	
+payment_db	payments	fx_rate_at_payment	numeric(20,10)	
+payment_db	payments	fx_locked_until	timestamp	
+payment_db	payments	fx_lock_id	varchar(64)	
+payment_db	payments	provider_name	varchar(40)	
+payment_db	payments	tax_amount	numeric(14,4)	
+payment_db	payments	amount_in_settlement	numeric(14,4)	
+payment_db	processed_webhook_event	event_id	varchar(128)	NOT NULL
+payment_db	processed_webhook_event	provider	varchar(32)	NOT NULL
+payment_db	processed_webhook_event	payload_hash	varchar(64)	
+payment_db	processed_webhook_event	received_at	timestamp	NOT NULL
+payment_db	refunds	id	bigint	NOT NULL
+payment_db	refunds	payment_id	bigint	NOT NULL
+payment_db	refunds	amount	numeric(10,2)	NOT NULL
+payment_db	refunds	reason	varchar(255)	
+payment_db	refunds	gateway_refund_id	varchar(255)	
+payment_db	refunds	status	varchar(255)	NOT NULL
+payment_db	refunds	gateway_response	varchar(255)	
+payment_db	refunds	failure_reason	varchar(255)	
+payment_db	refunds	initiated_by	varchar(255)	
+payment_db	refunds	refunded_at	timestamp	
+payment_db	refunds	created_at	timestamp	
+payment_db	refunds	updated_at	timestamp	
+payment_db	refunds	refund_status	varchar(32)	NOT NULL
+payment_db	refunds	retry_of_id	bigint	
+payment_db	refunds	retry_count	integer	NOT NULL

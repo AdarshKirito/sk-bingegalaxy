@@ -69,11 +69,16 @@ public class InvoiceController {
 
     /**
      * Admin: list all invoices for the currently selected binge.
-     * Gateway scopes this to admin via the {@code /admin/} path segment.
+     * Gateway scopes this to admin via the {@code /admin/} path segment;
+     * ownership of the selected binge (not just presence of the header) is
+     * enforced here — the list exposes customer ids and financial totals.
      */
     @GetMapping("/admin/invoices")
-    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> listInvoicesForBinge() {
-        Long bingeId = adminBingeScopeService.requireSelectedBinge("listing invoices");
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> listInvoicesForBinge(
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestHeader("X-User-Role") String userRole) {
+        Long bingeId = adminBingeScopeService
+            .requireManagedBinge(userId, userRole, "listing invoices").getId();
         List<Invoice> invoices = invoiceService.listForBinge(bingeId);
         List<Map<String, Object>> body = invoices.stream().map(this::summarise).toList();
         return ResponseEntity.ok(ApiResponse.ok("Invoices retrieved", body));

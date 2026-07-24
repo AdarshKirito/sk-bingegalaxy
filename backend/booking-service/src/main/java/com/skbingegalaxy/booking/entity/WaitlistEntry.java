@@ -87,6 +87,14 @@ public class WaitlistEntry {
     @Column(length = 20)
     private String convertedBookingRef;
 
+    /**
+     * Token of the {@link SlotHold} created when this entry was OFFERED — the
+     * offer's actual reservation of the slot. Released on expiry/cancel;
+     * released as consumed when the customer books.
+     */
+    @Column(name = "offer_hold_token", length = 64)
+    private String offerHoldToken;
+
     @CreationTimestamp
     @Column(updatable = false)
     private LocalDateTime createdAt;

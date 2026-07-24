@@ -1,5 +1,7 @@
 package com.skbingegalaxy.common.context;
 
+import com.skbingegalaxy.common.exception.MissingBingeContextException;
+
 import java.util.function.Supplier;
 
 /**
@@ -27,11 +29,16 @@ public final class BingeContext {
     /**
      * Returns the Binge ID or throws if not set.
      * Use in code paths where a binge context is mandatory.
+     *
+     * <p>Throws {@link MissingBingeContextException} (HTTP 400) — a missing
+     * {@code X-Binge-Id} is a client precondition, not a server fault, so it must not
+     * surface as a 500 and pollute error monitoring.
      */
     public static Long requireBingeId() {
         Long id = BINGE_ID.get();
         if (id == null) {
-            throw new IllegalStateException("BingeContext not set — X-Binge-Id header missing or BingeContextFilter not applied");
+            throw new MissingBingeContextException(
+                "No binge is selected for this action (X-Binge-Id header missing). Select a binge and retry.");
         }
         return id;
     }

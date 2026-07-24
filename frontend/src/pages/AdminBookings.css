@@ -21,7 +21,7 @@
 .ab-op-banner-value {
   font-size: 1rem;
   font-weight: 700;
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .ab-op-banner-hint {
@@ -126,7 +126,7 @@
 .ab-sub-tab.active {
   font-weight: 700;
   background: var(--primary-transparent, rgba(108, 92, 231, 0.2));
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 /* Filter Row */
@@ -202,7 +202,7 @@
 .ab-table .ab-ref {
   font-family: monospace;
   font-size: 0.8rem;
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .ab-table .ab-customer-name {
@@ -358,7 +358,7 @@
 .ab-detail-tab.active {
   font-weight: 700;
   border-bottom-color: var(--primary);
-  color: var(--primary);
+  color: var(--primary-text);
   background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.04), transparent 70%);
 }
 
@@ -406,7 +406,7 @@
 .ab-warning-banner--orange {
   background: var(--warning-bg);
   border: 1px solid var(--warning);
-  color: var(--warning);
+  color: var(--warning-text);
 }
 
 .ab-warning-banner--info {
@@ -446,7 +446,7 @@
 
 .ab-cancel-box h4 {
   margin-bottom: 0.75rem;
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 /* Payment card */
@@ -522,7 +522,7 @@
 
 .ab-event-log-type {
   font-weight: 600;
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .ab-event-log-time {

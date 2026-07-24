@@ -22,6 +22,9 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
 
        boolean existsByBingeId(Long bingeId);
 
+       /** Latest booking snapshot for a customer at a binge — used to resolve their display identity. */
+       Optional<Booking> findFirstByCustomerIdAndBingeIdOrderByIdDesc(Long customerId, Long bingeId);
+
        boolean existsByEventTypeId(Long eventTypeId);
 
        Optional<Booking> findByBookingRef(String bookingRef);
@@ -55,9 +58,12 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     @Query("SELECT b FROM Booking b WHERE b.bookingDate >= :date AND b.status IN ('PENDING', 'CONFIRMED')")
     Page<Booking> findUpcomingBookings(@Param("date") LocalDate date, Pageable pageable);
 
-    // Customer: current bookings (PENDING or CONFIRMED with today or future date)
+    // Customer: current bookings (active with today or future date). CHECKED_IN is the
+    // on-the-day active state — without it, the moment a customer is checked in for
+    // today's booking it would fall out of BOTH current (not PENDING/CONFIRMED) and past
+    // (not terminal, date not < today) and vanish from My Bookings + its search.
     @EntityGraph(attributePaths = {"eventType"})
-    @Query("SELECT b FROM Booking b WHERE b.customerId = :cid AND b.bookingDate >= :today AND b.status IN ('PENDING', 'CONFIRMED') ORDER BY b.bookingDate ASC, b.startTime ASC")
+    @Query("SELECT b FROM Booking b WHERE b.customerId = :cid AND b.bookingDate >= :today AND b.status IN ('PENDING', 'CONFIRMED', 'CHECKED_IN') ORDER BY b.bookingDate ASC, b.startTime ASC")
     List<Booking> findCustomerCurrentBookings(@Param("cid") Long customerId, @Param("today") LocalDate today);
 
     // Customer: past bookings (COMPLETED, CANCELLED, NO_SHOW, or past-date non-active)
@@ -181,7 +187,7 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     Page<Booking> searchBookingsByDate(@Param("date") LocalDate date, @Param("q") String query, Pageable pageable);
 
     @EntityGraph(attributePaths = {"eventType"})
-    @Query("SELECT b FROM Booking b WHERE b.bingeId = :bid AND b.customerId = :cid AND b.bookingDate >= :today AND b.status IN ('PENDING', 'CONFIRMED') ORDER BY b.bookingDate ASC, b.startTime ASC")
+    @Query("SELECT b FROM Booking b WHERE b.bingeId = :bid AND b.customerId = :cid AND b.bookingDate >= :today AND b.status IN ('PENDING', 'CONFIRMED', 'CHECKED_IN') ORDER BY b.bookingDate ASC, b.startTime ASC")
     List<Booking> findCustomerCurrentBookingsByBinge(@Param("bid") Long bingeId, @Param("cid") Long customerId, @Param("today") LocalDate today);
 
     @EntityGraph(attributePaths = {"eventType"})
@@ -201,16 +207,47 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     long countByBingeIdAndStatus(Long bingeId, BookingStatus status);
 
     /**
-     * Find bookings on {@code date} that are still PENDING/CONFIRMED and whose
-     * start time is at-or-before {@code cutoffTime} — i.e. the customer never
-     * showed up. Used by {@code NoShowAutomationScheduler} to mark NO_SHOW
-     * after the configured grace period.
+     * Candidate set for the no-show sweep: still-active (PENDING/CONFIRMED),
+     * not-yet-checked-in bookings whose {@code bookingDate} falls in
+     * {@code [from, to]}. The date range is only a coarse, index-friendly bound
+     * that brackets <em>every</em> venue timezone (±14h from UTC). The scheduler
+     * then resolves each booking's venue-local clock and only marks NO_SHOW once
+     * the reservation has passed its <b>midpoint</b> (start + duration/2) — never
+     * a fixed grace window — so the cutoff scales with the reservation length.
+     *
+     * <p>bookingDate/startTime are venue-local, so the precise time comparison
+     * MUST happen in the scheduler against {@code VenueClockService}, not here.
      */
-    @Query("SELECT b FROM Booking b WHERE b.bookingDate = :date AND b.status IN ('PENDING','CONFIRMED') AND b.startTime <= :cutoffTime")
-    List<Booking> findNoShowCandidates(@Param("date") LocalDate date, @Param("cutoffTime") LocalTime cutoffTime);
+    @Query("SELECT b FROM Booking b WHERE b.bookingDate BETWEEN :from AND :to "
+         + "AND b.status IN ('PENDING','CONFIRMED') AND b.checkedIn = false")
+    List<Booking> findNoShowSweepCandidates(@Param("from") LocalDate from, @Param("to") LocalDate to);
 
     @Query("SELECT COUNT(b) FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate = :date AND b.checkedIn = :ci AND b.status = 'CHECKED_IN'")
     long countByBingeAndDateAndCheckedIn(@Param("bid") Long bingeId, @Param("date") LocalDate date, @Param("ci") boolean checkedIn);
+
+    /**
+     * Physical-occupancy count for a specific room: bookings currently
+     * CHECKED_IN (i.e. guests physically present, not yet checked out) in
+     * {@code roomId} on {@code date}, excluding {@code excludeId}. Used to stop a
+     * second party being checked into a room that is already at capacity.
+     */
+    @Query("SELECT COUNT(b) FROM Booking b WHERE (:bid IS NULL OR b.bingeId = :bid) "
+         + "AND b.bookingDate = :date AND b.status = 'CHECKED_IN' "
+         + "AND b.venueRoomId = :roomId AND b.id <> :excludeId")
+    long countActiveCheckInsInRoom(@Param("bid") Long bingeId, @Param("date") LocalDate date,
+                                   @Param("roomId") Long roomId, @Param("excludeId") Long excludeId);
+
+    /**
+     * Physical-occupancy count for a room-less venue: bookings currently
+     * CHECKED_IN with no room assigned in this binge on {@code date}, excluding
+     * {@code excludeId}. A room-less venue is a single physical space, so any
+     * live check-in occupies it.
+     */
+    @Query("SELECT COUNT(b) FROM Booking b WHERE (:bid IS NULL OR b.bingeId = :bid) "
+         + "AND b.bookingDate = :date AND b.status = 'CHECKED_IN' "
+         + "AND b.venueRoomId IS NULL AND b.id <> :excludeId")
+    long countActiveCheckInsInVenue(@Param("bid") Long bingeId, @Param("date") LocalDate date,
+                                    @Param("excludeId") Long excludeId);
 
     // Revenue (binge-scoped)
     @Query("SELECT COALESCE(SUM(COALESCE(b.collectedAmount, 0)), 0) FROM Booking b WHERE b.bingeId = :bid AND b.bookingDate = :date AND b.status <> 'CANCELLED' AND b.paymentStatus IN ('SUCCESS', 'PARTIALLY_PAID', 'PARTIALLY_REFUNDED')")
@@ -243,24 +280,34 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     // Recovery queue: bookings paid by the customer but never marked CONFIRMED
     // by the saga. Indicates the BOOKING_CONFIRMED side of the
     // payment.success → confirm transition is stuck.
-    @Query("SELECT b FROM Booking b WHERE b.status = 'PENDING' " +
+    // bingeId=null is the SUPER_ADMIN platform-wide view; binge admins must
+    // always pass an owned bingeId (enforced in AdminRecoveryQueueController).
+    @Query("SELECT b FROM Booking b WHERE (:bingeId IS NULL OR b.bingeId = :bingeId) " +
+           "AND b.status = 'PENDING' " +
            "AND b.paymentStatus = 'SUCCESS' AND b.updatedAt < :cutoff " +
            "ORDER BY b.updatedAt ASC")
-    Page<Booking> findPaidButNotConfirmed(@Param("cutoff") LocalDateTime cutoff, Pageable pageable);
+    Page<Booking> findPaidButNotConfirmed(@Param("bingeId") Long bingeId,
+                                          @Param("cutoff") LocalDateTime cutoff,
+                                          Pageable pageable);
 
     // Recovery queue: NO_SHOW bookings within a date range — admin reviews
     // these to follow up with customers and reconcile partial refunds.
-    @Query("SELECT b FROM Booking b WHERE b.status = 'NO_SHOW' " +
+    @Query("SELECT b FROM Booking b WHERE (:bingeId IS NULL OR b.bingeId = :bingeId) " +
+           "AND b.status = 'NO_SHOW' " +
            "AND b.bookingDate BETWEEN :from AND :to ORDER BY b.bookingDate DESC")
-    Page<Booking> findNoShowBookings(@Param("from") LocalDate from,
+    Page<Booking> findNoShowBookings(@Param("bingeId") Long bingeId,
+                                     @Param("from") LocalDate from,
                                      @Param("to") LocalDate to,
                                      Pageable pageable);
 
     // Recovery queue: stuck pending — paged variant of findStalePendingBookings.
-    @Query("SELECT b FROM Booking b WHERE b.status = 'PENDING' " +
+    @Query("SELECT b FROM Booking b WHERE (:bingeId IS NULL OR b.bingeId = :bingeId) " +
+           "AND b.status = 'PENDING' " +
            "AND b.paymentStatus = 'PENDING' AND b.createdAt < :cutoff " +
            "ORDER BY b.createdAt ASC")
-    Page<Booking> findStuckPending(@Param("cutoff") LocalDateTime cutoff, Pageable pageable);
+    Page<Booking> findStuckPending(@Param("bingeId") Long bingeId,
+                                   @Param("cutoff") LocalDateTime cutoff,
+                                   Pageable pageable);
 
 
     // ── Funnel analytics (binge-scoped via service layer) ────
@@ -398,4 +445,23 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     @org.springframework.data.jpa.repository.Modifying
     @Query("UPDATE Booking b SET b.collectedAmount = CASE WHEN COALESCE(b.collectedAmount, 0) - :amount < 0 THEN 0 ELSE COALESCE(b.collectedAmount, 0) - :amount END WHERE b.bookingRef = :ref")
     int subtractFromCollectedAmount(@Param("ref") String bookingRef, @Param("amount") java.math.BigDecimal amount);
+
+    /** Active escalations for the support console's work queue (newest activity first). */
+    @Query("SELECT b FROM Booking b WHERE b.bingeId = :bingeId "
+         + "AND b.escalationLevel IS NOT NULL AND b.escalationLevel <> 'NONE' "
+         + "ORDER BY b.updatedAt DESC")
+    List<Booking> findActiveEscalations(@Param("bingeId") Long bingeId);
+
+    /**
+     * Total booked minutes on a date across active (non-cancelled, non-no-show)
+     * bookings — the numerator of the occupancy % used by demand-based surge
+     * rules. durationMinutes falls back to durationHours*60 for legacy rows.
+     */
+    @Query("SELECT COALESCE(SUM(COALESCE(b.durationMinutes, b.durationHours * 60)), 0) "
+         + "FROM Booking b WHERE b.bingeId = :bingeId AND b.bookingDate = :date "
+         + "AND b.status IN (com.skbingegalaxy.common.enums.BookingStatus.PENDING, "
+         + "                 com.skbingegalaxy.common.enums.BookingStatus.CONFIRMED, "
+         + "                 com.skbingegalaxy.common.enums.BookingStatus.CHECKED_IN, "
+         + "                 com.skbingegalaxy.common.enums.BookingStatus.COMPLETED)")
+    long sumActiveBookedMinutes(@Param("bingeId") Long bingeId, @Param("date") java.time.LocalDate date);
 }

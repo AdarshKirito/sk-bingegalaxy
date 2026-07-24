@@ -17,7 +17,7 @@
 .auc-bulk-count {
   font-weight: 700;
   font-size: 0.85rem;
-  color: var(--primary);
+  color: var(--primary-text);
   margin-right: 0.25rem;
 }
 
@@ -125,7 +125,7 @@
 .auc-audit-type {
   font-weight: 600;
   font-size: 0.82rem;
-  color: var(--primary);
+  color: var(--primary-text);
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
@@ -183,7 +183,7 @@
 }
 
 .auc-config-hint a {
-  color: var(--primary);
+  color: var(--primary-text);
   text-decoration: underline;
 }
 

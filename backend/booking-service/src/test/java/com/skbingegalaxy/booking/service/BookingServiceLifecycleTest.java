@@ -94,6 +94,10 @@ class BookingServiceLifecycleTest {
                 .thenReturn(TaxComputationResult.builder()
                         .subtotal(BigDecimal.ZERO).totalTax(BigDecimal.ZERO)
                         .totalInclusiveTax(BigDecimal.ZERO).lines(List.of()).build());
+        // TaxService now owns the venue-aware context builder; return a real builder.
+        lenient().when(taxService.venueContext(any())).thenAnswer(inv ->
+                com.skbingegalaxy.booking.tax.provider.TaxContext.builder()
+                        .bingeId(inv.getArgument(0)).customerType("B2C").productType("BOOKING"));
         ReflectionTestUtils.setField(bookingService, "availabilityClient", availabilityClient);
         ReflectionTestUtils.setField(bookingService, "eventPublisher", eventPublisher);
         // Replace mocked SM with a real one wired to the same mocked deps so
@@ -171,7 +175,9 @@ class BookingServiceLifecycleTest {
             assertThatThrownBy(() -> bookingService.createBooking(
                     request, 1L, "John", "john@example.com", "9876543210"))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("pending booking(s)");
+                // Customer-facing copy says "unpaid" (clearer than the internal
+                // PENDING status name); assert the invariant, not the old wording.
+                .hasMessageContaining("unpaid booking(s)");
         }
 
         @Test
@@ -344,16 +350,16 @@ class BookingServiceLifecycleTest {
         }
 
         @Test
-        @DisplayName("customer cannot cancel CONFIRMED booking")
-        void cancelByCustomer_confirmed_throws() {
+        @DisplayName("customer cannot cancel a CHECKED_IN booking (BOOK-004: CONFIRMED is now policy-gated, not status-blocked)")
+        void cancelByCustomer_checkedIn_throws() {
             BingeContext.setBingeId(11L);
-            testBooking.setStatus(BookingStatus.CONFIRMED);
+            testBooking.setStatus(BookingStatus.CHECKED_IN);
             when(bookingRepository.findByBookingRefAndBingeId("SKBG25123456", 11L))
                     .thenReturn(Optional.of(testBooking));
 
             assertThatThrownBy(() -> bookingService.cancelBookingByCustomer("SKBG25123456", 1L))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("Only PENDING bookings");
+                .hasMessageContaining("Only PENDING or CONFIRMED");
         }
 
         @Test
@@ -472,37 +478,42 @@ class BookingServiceLifecycleTest {
         @Test
         @DisplayName("performs early checkout with time remaining")
         void earlyCheckout_earlyDeparture_records() {
+            // NEW time contract: the server clock (venue zone) is the only time
+            // authority; the clientNow argument is ignored. Force the EARLY branch
+            // by scheduling tomorrow, and pin used-time via actualCheckInTime (UTC).
             BingeContext.setBingeId(11L);
             testBooking.setStatus(BookingStatus.CHECKED_IN);
             testBooking.setPaymentStatus(PaymentStatus.SUCCESS);
             testBooking.setCollectedAmount(testBooking.getTotalAmount());
-            testBooking.setBookingDate(LocalDate.now());
+            testBooking.setBookingDate(LocalDate.now(ZoneOffset.UTC).plusDays(1));
             testBooking.setStartTime(LocalTime.of(14, 0));
             testBooking.setDurationMinutes(180);
             testBooking.setDurationHours(3);
+            testBooking.setActualCheckInTime(LocalDateTime.now(ZoneOffset.UTC).minusMinutes(60));
 
             when(bookingRepository.findByBookingRefAndBingeId("SKBG25123456", 11L))
                     .thenReturn(Optional.of(testBooking));
             when(bookingRepository.save(any(Booking.class))).thenAnswer(inv -> inv.getArgument(0));
 
-            // Checkout 1 hour in (at 15:00 when booking was 14:00-17:00)
-            LocalDateTime checkoutTime = LocalDateTime.of(LocalDate.now(), LocalTime.of(15, 0));
-            BookingDto result = bookingService.earlyCheckout("SKBG25123456", checkoutTime);
+            BookingDto result = bookingService.earlyCheckout("SKBG25123456", LocalDateTime.now(ZoneOffset.UTC));
 
             assertThat(testBooking.getStatus()).isEqualTo(BookingStatus.COMPLETED);
             assertThat(testBooking.isCheckedIn()).isFalse();
-            assertThat(testBooking.getActualUsedMinutes()).isEqualTo(60);
+            // Checked in 60 minutes before the real clock — allow scheduling slack.
+            assertThat(testBooking.getActualUsedMinutes()).isBetween(59, 62);
             assertThat(testBooking.getEarlyCheckoutNote()).contains("Early checkout");
         }
 
         @Test
         @DisplayName("normal checkout when past scheduled end time")
         void earlyCheckout_pastEndTime_normalCheckout() {
+            // Force the "past scheduled end" branch deterministically: yesterday's
+            // booking is always past its end regardless of when the suite runs.
             BingeContext.setBingeId(11L);
             testBooking.setStatus(BookingStatus.CHECKED_IN);
             testBooking.setPaymentStatus(PaymentStatus.SUCCESS);
             testBooking.setCollectedAmount(testBooking.getTotalAmount());
-            testBooking.setBookingDate(LocalDate.now());
+            testBooking.setBookingDate(LocalDate.now(ZoneOffset.UTC).minusDays(1));
             testBooking.setStartTime(LocalTime.of(14, 0));
             testBooking.setDurationMinutes(180);
             testBooking.setDurationHours(3);
@@ -511,12 +522,13 @@ class BookingServiceLifecycleTest {
                     .thenReturn(Optional.of(testBooking));
             when(bookingRepository.save(any(Booking.class))).thenAnswer(inv -> inv.getArgument(0));
 
-            // Checkout after scheduled end (18:00 when booking was 14:00-17:00)
-            LocalDateTime checkoutTime = LocalDateTime.of(LocalDate.now(), LocalTime.of(18, 0));
-            BookingDto result = bookingService.earlyCheckout("SKBG25123456", checkoutTime);
+            BookingDto result = bookingService.earlyCheckout("SKBG25123456", LocalDateTime.now(ZoneOffset.UTC));
 
             assertThat(testBooking.getStatus()).isEqualTo(BookingStatus.COMPLETED);
-            assertThat(testBooking.getActualCheckoutTime()).isEqualTo(checkoutTime);
+            // Stored checkout instant = server "now" (UTC) — never the client clock.
+            assertThat(testBooking.getActualCheckoutTime())
+                    .isCloseTo(LocalDateTime.now(ZoneOffset.UTC),
+                            org.assertj.core.api.Assertions.within(2, java.time.temporal.ChronoUnit.MINUTES));
             // Session minutes are now recorded for normal checkouts too (production-grade audit trail).
             assertThat(testBooking.getActualUsedMinutes()).isNotNull();
         }
@@ -664,6 +676,47 @@ class BookingServiceLifecycleTest {
 
             assertThat(testBooking.getStatus()).isEqualTo(BookingStatus.CHECKED_IN);
             assertThat(testBooking.isCheckedIn()).isTrue();
+        }
+
+        @Test
+        @DisplayName("check-in blocked when a room-less venue is already occupied by a checked-in reservation")
+        void checkIn_blockedWhenVenueOccupied() {
+            BingeContext.setBingeId(11L);
+            testBooking.setStatus(BookingStatus.CONFIRMED);
+            testBooking.setVenueRoomId(null);
+            when(bookingRepository.findByBookingRefAndBingeId("SKBG25123456", 11L))
+                    .thenReturn(Optional.of(testBooking));
+            // Another party is physically present in the (room-less) venue.
+            when(bookingRepository.countActiveCheckInsInVenue(eq(11L), any(), eq(1L))).thenReturn(1L);
+
+            UpdateBookingRequest request = new UpdateBookingRequest();
+            request.setCheckedIn(true);
+
+            assertThatThrownBy(() -> bookingService.updateBooking("SKBG25123456", request))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("already occupied");
+            assertThat(testBooking.getStatus()).isEqualTo(BookingStatus.CONFIRMED);
+        }
+
+        @Test
+        @DisplayName("check-in blocked when the assigned room is already at capacity")
+        void checkIn_blockedWhenRoomAtCapacity() {
+            BingeContext.setBingeId(11L);
+            testBooking.setStatus(BookingStatus.CONFIRMED);
+            testBooking.setVenueRoomId(5L);
+            when(bookingRepository.findByBookingRefAndBingeId("SKBG25123456", 11L))
+                    .thenReturn(Optional.of(testBooking));
+            when(venueRoomRepository.findById(5L)).thenReturn(Optional.of(
+                    VenueRoom.builder().id(5L).bingeId(11L).name("Private Room").roomType("PRIVATE_ROOM").capacity(1).build()));
+            when(bookingRepository.countActiveCheckInsInRoom(eq(11L), any(), eq(5L), eq(1L))).thenReturn(1L);
+
+            UpdateBookingRequest request = new UpdateBookingRequest();
+            request.setCheckedIn(true);
+
+            assertThatThrownBy(() -> bookingService.updateBooking("SKBG25123456", request))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Private Room");
+            assertThat(testBooking.getStatus()).isEqualTo(BookingStatus.CONFIRMED);
         }
 
                 @Test

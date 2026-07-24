@@ -1,18 +1,29 @@
-import { useState } from 'react';
-import { authService } from '../services/endpoints';
+import { useState, useEffect } from 'react';
+import { authService, siteContentService } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import { FiUserPlus, FiShield, FiSettings, FiEye, FiEyeOff } from 'react-icons/fi';
 import PhoneField, { splitPhone, validatePhone } from '../components/form/PhoneField';
+import AddressFields, { EMPTY_ADDRESS, validateAddress } from '../components/form/AddressFields';
+import { ADMIN_ONBOARDING_TERMS_SLUG, DEFAULT_ADMIN_TERMS_TITLE, parseTerms } from '../content/legalContent';
 import './Auth.css';
 
 export default function AdminRegister() {
-  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '', password: '', confirmPassword: '' });
+  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '', password: '', confirmPassword: '', consentGiven: false, address: { ...EMPTY_ADDRESS } });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [touched, setTouched] = useState({});
   const [showPw, setShowPw] = useState(false);
   const [showCpw, setShowCpw] = useState(false);
   const [generatedPw, setGeneratedPw] = useState('');
+  const [terms, setTerms] = useState({ title: DEFAULT_ADMIN_TERMS_TITLE, body: '' });
+
+  useEffect(() => {
+    let cancelled = false;
+    siteContentService.getPublic(ADMIN_ONBOARDING_TERMS_SLUG)
+      .then((res) => { if (!cancelled) setTerms(parseTerms(res.data?.data?.contentJson, { title: DEFAULT_ADMIN_TERMS_TITLE, body: '' })); })
+      .catch(() => { /* terms box shows a fallback note */ });
+    return () => { cancelled = true; };
+  }, []);
 
   const generatePassword = () => {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*';
@@ -33,7 +44,9 @@ export default function AdminRegister() {
   const fieldErrors = {
     firstName: touched.firstName && !form.firstName.trim() ? 'First name is required' : '',
     email: touched.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email) ? 'Enter a valid email' : '',
-    phone: touched.phone && !validatePhone(form.phone) ? 'Enter a valid phone number' : '',
+    // validatePhone returns the error message ('' when valid) — use it directly.
+    // (The previous `!validatePhone(...)` inverted this, flagging valid numbers.)
+    phone: touched.phone ? validatePhone(form.phone, { required: true }) : '',
     password: touched.password ? (form.password.length < 10 ? 'Min 10 characters' : !PW_REGEX.test(form.password) ? 'Must include uppercase, lowercase, number & special character (@$!%*?&#)' : '') : '',
     confirmPassword: touched.confirmPassword && form.password !== form.confirmPassword ? 'Passwords do not match' : '',
   };
@@ -62,23 +75,42 @@ export default function AdminRegister() {
       return;
     }
     const phoneParts = splitPhone(form.phone);
-    if (!validatePhone(form.phone)) {
-      const message = 'Enter a valid phone number';
-      setError(message);
-      toast.error(message);
+    const phoneErr = validatePhone(form.phone, { required: true });
+    if (phoneErr) {
+      setError(phoneErr);
+      toast.error(phoneErr);
+      return;
+    }
+    if (!form.consentGiven) {
+      const msg = 'Please confirm the new admin accepts the administrator terms below.';
+      setError(msg);
+      toast.error(msg);
+      return;
+    }
+    const addressErrors = validateAddress(form.address);
+    if (Object.keys(addressErrors).length) {
+      const msg = Object.values(addressErrors)[0];
+      setError(msg);
+      toast.error(msg);
       return;
     }
     setLoading(true);
     try {
-      const { confirmPassword, phone, ...rest } = form;
+      const { confirmPassword, phone, address, ...rest } = form;
       const data = {
         ...rest,
         phone: phoneParts.phone,
         phoneCountryCode: phoneParts.phoneCountryCode,
+        addressLine1: address.addressLine1 || '',
+        addressLine2: address.addressLine2 || '',
+        city: address.city || '',
+        state: address.state || '',
+        country: address.country || '',
+        postalCode: address.postalCode || '',
       };
       await authService.adminRegister(data);
       toast.success('New admin account created successfully!');
-      setForm({ firstName: '', lastName: '', email: '', phone: '', password: '', confirmPassword: '' });
+      setForm({ firstName: '', lastName: '', email: '', phone: '', password: '', confirmPassword: '', consentGiven: false, address: { ...EMPTY_ADDRESS } });
       setTouched({});
       setError('');
       setGeneratedPw('');
@@ -133,32 +165,37 @@ export default function AdminRegister() {
             <form onSubmit={handleSubmit} noValidate>
               <div className="grid-2">
                 <div className={`input-group ${fieldErrors.firstName ? 'has-error' : ''}`}>
-                  <label>First Name</label>
-                  <input name="firstName" value={form.firstName} onChange={handleChange} onBlur={handleBlur('firstName')} required minLength={2} placeholder="John" autoFocus />
-                  {fieldErrors.firstName && <span className="field-error">{fieldErrors.firstName}</span>}
+                  <label htmlFor="admin-reg-firstName">First Name</label>
+                  <input id="admin-reg-firstName" name="firstName" value={form.firstName} onChange={handleChange} onBlur={handleBlur('firstName')} required minLength={2} placeholder="John" autoFocus aria-invalid={!!fieldErrors.firstName} aria-describedby={fieldErrors.firstName ? 'admin-reg-firstName-error' : undefined} />
+                  {fieldErrors.firstName && <span id="admin-reg-firstName-error" role="alert" className="field-error">{fieldErrors.firstName}</span>}
                 </div>
                 <div className="input-group">
-                  <label>Last Name</label>
-                  <input name="lastName" value={form.lastName} onChange={handleChange} required placeholder="Doe" />
+                  <label htmlFor="admin-reg-lastName">Last Name</label>
+                  <input id="admin-reg-lastName" name="lastName" value={form.lastName} onChange={handleChange} required placeholder="Doe" />
                 </div>
               </div>
               <div className={`input-group ${fieldErrors.email ? 'has-error' : ''}`}>
-                <label>Email</label>
-                <input type="email" name="email" value={form.email} onChange={handleChange} onBlur={handleBlur('email')} required placeholder="admin@example.com" />
-                {fieldErrors.email && <span className="field-error">{fieldErrors.email}</span>}
+                <label htmlFor="admin-reg-email">Email</label>
+                <input id="admin-reg-email" type="email" name="email" value={form.email} onChange={handleChange} onBlur={handleBlur('email')} required placeholder="admin@example.com" aria-invalid={!!fieldErrors.email} aria-describedby={fieldErrors.email ? 'admin-reg-email-error' : undefined} />
+                {fieldErrors.email && <span id="admin-reg-email-error" role="alert" className="field-error">{fieldErrors.email}</span>}
               </div>
-              <div className={`input-group ${fieldErrors.phone ? 'has-error' : ''}`}>
-                <label>Phone</label>
-                <PhoneField
-                  value={form.phone}
-                  onChange={(val) => setForm(f => ({ ...f, phone: val || '' }))}
-                  onBlur={handleBlur('phone')}
-                  required
+              <PhoneField
+                value={form.phone}
+                onChange={(val) => setForm(f => ({ ...f, phone: val || '' }))}
+                onBlur={handleBlur('phone')}
+                required
+                error={fieldErrors.phone}
+              />
+              <div className="input-group">
+                <AddressFields
+                  legend="Admin address"
+                  description="Postal address for the new administrator — used for records and platform correspondence."
+                  value={form.address}
+                  onChange={(addr) => setForm(f => ({ ...f, address: addr }))}
                 />
-                {fieldErrors.phone && <span className="field-error">{fieldErrors.phone}</span>}
               </div>
               <div className={`input-group ${fieldErrors.password ? 'has-error' : ''}`}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <label htmlFor="admin-reg-password" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   Password
                   <button type="button" className="btn btn-secondary btn-sm" onClick={generatePassword}
                     style={{ fontSize: '0.7rem', padding: '0.15rem 0.5rem', lineHeight: 1.4 }}>
@@ -166,8 +203,8 @@ export default function AdminRegister() {
                   </button>
                 </label>
                 <div className="input-password-wrap">
-                  <input type={showPw ? 'text' : 'password'} name="password" value={form.password} onChange={(e) => { handleChange(e); setGeneratedPw(''); }} onBlur={handleBlur('password')} required placeholder="••••••••" minLength={8} />
-                  <button type="button" className="pw-toggle" onClick={() => setShowPw(v => !v)} aria-label={showPw ? 'Hide password' : 'Show password'} tabIndex={-1}>
+                  <input id="admin-reg-password" type={showPw ? 'text' : 'password'} name="password" value={form.password} onChange={(e) => { handleChange(e); setGeneratedPw(''); }} onBlur={handleBlur('password')} required placeholder="••••••••" minLength={8} aria-invalid={!!fieldErrors.password} aria-describedby={fieldErrors.password ? 'admin-reg-password-error' : undefined} />
+                  <button type="button" className="pw-toggle" onClick={() => setShowPw(v => !v)} aria-label={showPw ? 'Hide password' : 'Show password'}>
                     {showPw ? <FiEyeOff /> : <FiEye />}
                   </button>
                 </div>
@@ -176,18 +213,39 @@ export default function AdminRegister() {
                     Generated — copy and share with the new admin before submitting
                   </span>
                 )}
-                {fieldErrors.password && <span className="field-error">{fieldErrors.password}</span>}
+                {fieldErrors.password && <span id="admin-reg-password-error" role="alert" className="field-error">{fieldErrors.password}</span>}
               </div>
               <div className={`input-group ${fieldErrors.confirmPassword ? 'has-error' : ''}`}>
-                <label>Confirm Password</label>
+                <label htmlFor="admin-reg-confirmPassword">Confirm Password</label>
                 <div className="input-password-wrap">
-                  <input type={showCpw ? 'text' : 'password'} name="confirmPassword" value={form.confirmPassword} onChange={handleChange} onBlur={handleBlur('confirmPassword')} required placeholder="••••••••" />
-                  <button type="button" className="pw-toggle" onClick={() => setShowCpw(v => !v)} aria-label={showCpw ? 'Hide password' : 'Show password'} tabIndex={-1}>
+                  <input id="admin-reg-confirmPassword" type={showCpw ? 'text' : 'password'} name="confirmPassword" value={form.confirmPassword} onChange={handleChange} onBlur={handleBlur('confirmPassword')} required placeholder="••••••••" aria-invalid={!!fieldErrors.confirmPassword} aria-describedby={fieldErrors.confirmPassword ? 'admin-reg-confirmPassword-error' : undefined} />
+                  <button type="button" className="pw-toggle" onClick={() => setShowCpw(v => !v)} aria-label={showCpw ? 'Hide password' : 'Show password'}>
                     {showCpw ? <FiEyeOff /> : <FiEye />}
                   </button>
                 </div>
-                {fieldErrors.confirmPassword && <span className="field-error">{fieldErrors.confirmPassword}</span>}
+                {fieldErrors.confirmPassword && <span id="admin-reg-confirmPassword-error" role="alert" className="field-error">{fieldErrors.confirmPassword}</span>}
               </div>
+
+              <div className="input-group" style={{ marginTop: '0.25rem' }}>
+                <label style={{ fontWeight: 600, marginBottom: '0.4rem' }}>{terms.title || DEFAULT_ADMIN_TERMS_TITLE}</label>
+                <div style={{
+                  maxHeight: '160px', overflowY: 'auto', padding: '0.7rem 0.85rem',
+                  border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                  background: 'var(--bg-input)', color: 'var(--text-secondary)',
+                  fontSize: '0.82rem', lineHeight: 1.5, whiteSpace: 'pre-wrap',
+                }}>
+                  {terms.body || 'No administrator terms have been published yet. A super-admin can add them under Terms & Legal Content.'}
+                </div>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.55rem', fontWeight: 400, cursor: 'pointer', marginTop: '0.6rem' }}>
+                  <input type="checkbox" checked={form.consentGiven}
+                    onChange={(e) => setForm({ ...form, consentGiven: e.target.checked })}
+                    style={{ marginTop: '0.2rem', width: 'auto' }} required />
+                  <span style={{ fontSize: '0.85rem', lineHeight: 1.4 }}>
+                    The new administrator has read and accepts the terms above and consents to data processing.
+                  </span>
+                </label>
+              </div>
+
               <button type="submit" className="btn btn-primary auth-btn" disabled={loading}>
                 {loading ? <><span className="btn-spinner" /> Creating...</> : 'Create Admin Account'}
               </button>

@@ -76,6 +76,14 @@ public class AuthService {
     @Value("${app.otp.length:6}")
     private int otpLength;
 
+    /**
+     * How many logins an admin-issued temporary password is valid for before the
+     * customer must use "Forgot password". Default 2 (the front-desk admin
+     * "consumed" the first of three when they created and read out the password).
+     */
+    @Value("${app.temp-password.max-logins:2}")
+    private int tempPasswordMaxLogins;
+
     private static final int MAX_LOGIN_ATTEMPTS = 5;
     private static final int LOCKOUT_MINUTES = 15;
     /** After this many failures the client must present a solved CAPTCHA before we check credentials. */
@@ -88,6 +96,10 @@ public class AuthService {
     void initDummyHash() {
         this.dummyHash = passwordEncoder.encode("timing-safety-dummy-" + java.util.UUID.randomUUID());
     }
+
+    /** Same OAuth Web client id the frontend uses; blank means Google sign-in is not configured. */
+    @Value("${app.google.client-id:}")
+    private String googleClientId;
 
     @Value("${app.admin.email:admin@skbingegalaxy.com}")
     private String supportEmail;
@@ -104,6 +116,15 @@ public class AuthService {
     // ── Google OAuth login ───────────────────────────────────
     @Transactional
     public AuthResponse googleLogin(String credential) {
+        // Fail clearly when the server hasn't been given a Google client id — every
+        // token would otherwise fail audience verification and surface as a vague
+        // "Google login failed". Tell the user to use email sign-in instead.
+        if (googleClientId == null || googleClientId.isBlank()) {
+            log.warn("Rejected Google login attempt — Google sign-in is not configured (app.google.client-id is empty)");
+            throw new BusinessException(
+                "Google sign-in isn't available on this server. Please sign in with your email and password.",
+                HttpStatus.UNAUTHORIZED);
+        }
         try {
             GoogleIdToken idToken = googleIdTokenVerifier.verify(credential);
             if (idToken == null) {
@@ -223,7 +244,13 @@ public class AuthService {
     }
 
     // ── Customer login ───────────────────────────────────────
-    @Transactional
+    // noRollbackFor BusinessException: a failed login throws (bad creds / CAPTCHA / lockout)
+    // to set the HTTP status, but the failed-attempt increment + account lock + audit rows
+    // MUST persist. With the default rollback-on-RuntimeException, every throw would undo the
+    // increment, so the counter never grows and lockout/CAPTCHA would never trigger across
+    // requests (brute-force protection silently dead). CaptchaRequiredException extends
+    // BusinessException, so it is covered too.
+    @Transactional(noRollbackFor = BusinessException.class)
     public AuthResponse login(LoginRequest request) {
         // Constant-time login: always perform password check to prevent email enumeration via timing
         User user = userRepository.findByEmail(request.getEmail().toLowerCase()).orElse(null);
@@ -287,10 +314,35 @@ public class AuthService {
         }
 
         user.resetFailedAttempts();
+
+        // ── Temporary-password gate ──────────────────────────────────────────
+        // Admin-issued temp passwords are valid for a limited number of logins,
+        // and every such login forces a password change. Once the allowance is
+        // spent the temp password is dead and the customer must use Forgot-password.
+        boolean mustChange = false;
+        if (user.isMustChangePassword()) {
+            Integer remaining = user.getTempPasswordLoginsRemaining();
+            if (remaining != null && remaining <= 0) {
+                userRepository.save(user); // persist the failed-attempt reset
+                auditService.failure(AuthAuditService.EventType.LOGIN_FAILED, user.getId(), user.getRole(),
+                    user.getId(), user.getEmail(), "TEMP_PASSWORD_EXPIRED");
+                throw new BusinessException(
+                    "Your temporary password has expired. Please use \"Forgot password\" to set a new one.",
+                    HttpStatus.UNAUTHORIZED);
+            }
+            if (remaining != null) {
+                user.setTempPasswordLoginsRemaining(remaining - 1);
+            }
+            mustChange = true;
+        }
+
         userRepository.save(user);
-        log.info("Customer login: userId={}", user.getId());
-        auditService.success(AuthAuditService.EventType.LOGIN_SUCCESS, user.getId(), user.getRole(), user.getId(), user.getEmail(), null);
-        return buildAuthResponse(user);
+        log.info("Customer login: userId={}{}", user.getId(), mustChange ? " (temp password — change required)" : "");
+        auditService.success(AuthAuditService.EventType.LOGIN_SUCCESS, user.getId(), user.getRole(), user.getId(), user.getEmail(),
+            mustChange ? "temporary password" : null);
+        AuthResponse response = buildAuthResponse(user);
+        response.setMustChangePassword(mustChange);
+        return response;
     }
 
     // ── Refresh token ───────────────────────────────────────
@@ -324,23 +376,25 @@ public class AuthService {
         // Rotate: revoke the presented refresh token so it can't be reused.
         tokenRevocationService.revoke(refreshToken);
 
-        // Mint fresh tokens and rotate the existing session row (so each device keeps a
-        // stable session id across refreshes). Fall back to creating a new session if
-        // no existing row was found (e.g. legacy token from before sessions shipped).
-        TokenPair pair = mintTokenPair(user);
-        String newAccess = pair.access;
-        String newRefresh = pair.refresh;
+        // Mint the refresh token and rotate the existing session row FIRST (so each
+        // device keeps a stable session id across refreshes), then bind the new
+        // access token to that row via `sid`. Fall back to creating a new session
+        // if no existing row was found (e.g. legacy token from before sessions shipped).
+        MintContext ctx = mintContext(user);
+        String newRefresh = mintRefresh(user, ctx);
+        Long sessionId = null;
         try {
             String newJti = jwtProvider.getJtiFromToken(newRefresh);
             java.time.LocalDateTime newExp = jwtProvider.getExpiryFromToken(newRefresh);
             if (newJti != null && newExp != null) {
-                if (sessionService.rotate(jti, newJti, newExp).isEmpty()) {
-                    sessionService.recordLogin(user.getId(), newJti, newExp);
-                }
+                sessionId = sessionService.rotate(jti, newJti, newExp)
+                    .orElseGet(() -> sessionService.recordLogin(user.getId(), newJti, newExp))
+                    .getId();
             }
         } catch (Exception ex) {
             log.warn("Session rotate failed for userId={}: {}", user.getId(), ex.getMessage());
         }
+        String newAccess = mintAccess(user, ctx, sessionId);
         log.info("Token refreshed for: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
         auditService.success(AuthAuditService.EventType.TOKEN_REFRESHED, user.getId(), user.getRole(), user.getId(), user.getEmail(), null);
         return AuthResponse.builder()
@@ -351,7 +405,9 @@ public class AuthService {
     }
 
     // ── Admin login ──────────────────────────────────────────
-    @Transactional
+    // noRollbackFor BusinessException — see login(): the failed-attempt increment + lockout
+    // must survive the auth-failure throw, otherwise brute-force protection never engages.
+    @Transactional(noRollbackFor = BusinessException.class)
     public AuthResponse adminLogin(LoginRequest request) {
         // Constant-time login: always perform password check to prevent email enumeration via timing
         User user = userRepository.findByEmail(request.getEmail().toLowerCase()).orElse(null);
@@ -404,12 +460,25 @@ public class AuthService {
         // SUPER_ADMIN accounts must always have MFA enrolled. This is enforced at promotion time
         // (promoteToSuperAdmin blocks promotion without MFA), but we double-check here as a
         // defence-in-depth measure against out-of-band DB modifications.
-        if (user.getRole() == UserRole.SUPER_ADMIN && !user.isMfaEnabled()) {
+        //
+        // Bootstrap escape hatch: SUPER_ADMIN_REQUIRE_MFA defaults to "true" so production keeps
+        // the hard requirement. Local/dev deployments that wipe the DB on every rebuild leave the
+        // seeded super-admin with no MFA and nobody able to enroll them (chicken-and-egg), so those
+        // set SUPER_ADMIN_REQUIRE_MFA=false to log in with password only. Admins who DID enrol MFA
+        // are still challenged below regardless of this flag — it only removes the "must enrol" wall.
+        // Mirrors the adjacent SUPER_ADMIN_REQUIRE_WEBAUTHN toggle.
+        boolean superAdminMfaRequired = Boolean.parseBoolean(
+            System.getenv().getOrDefault("SUPER_ADMIN_REQUIRE_MFA", "true"));
+        if (superAdminMfaRequired && user.getRole() == UserRole.SUPER_ADMIN && !user.isMfaEnabled()) {
             log.warn("SUPER_ADMIN login blocked: MFA not enrolled for userId={}", user.getId());
             auditService.failure(AuthAuditService.EventType.LOGIN_FAILED, user.getId(), user.getRole(), user.getId(), user.getEmail(), "SUPER_ADMIN_MFA_NOT_ENROLLED");
             throw new BusinessException(
                 "Super admin accounts require MFA. Please contact another super admin to enroll TOTP before logging in.",
                 HttpStatus.FORBIDDEN);
+        }
+        if (!superAdminMfaRequired && user.getRole() == UserRole.SUPER_ADMIN && !user.isMfaEnabled()) {
+            log.warn("SECURITY: SUPER_ADMIN userId={} logged in WITHOUT MFA — SUPER_ADMIN_REQUIRE_MFA=false. "
+                + "This must never be set in production. Enrol TOTP via the MFA setup page and remove the override.", user.getId());
         }
 
         // FIDO2/WebAuthn gate: warn if SUPER_ADMIN does not have a hardware key enrolled.
@@ -510,6 +579,7 @@ public class AuthService {
         String newHash = passwordEncoder.encode(request.getNewPassword());
         user.setPassword(newHash);
         user.setLastPasswordChangeAt(java.time.LocalDateTime.now(ZoneOffset.UTC));
+        clearTempPasswordState(user); // setting a real password ends the temp-password lifecycle
         userRepository.save(user);
         passwordHistoryService.record(user.getId(), newHash);
 
@@ -558,6 +628,7 @@ public class AuthService {
         String newHash = passwordEncoder.encode(request.getNewPassword());
         user.setPassword(newHash);
         user.setLastPasswordChangeAt(java.time.LocalDateTime.now(ZoneOffset.UTC));
+        clearTempPasswordState(user); // setting a real password ends the temp-password lifecycle
         userRepository.save(user);
         passwordHistoryService.record(user.getId(), newHash);
 
@@ -608,6 +679,7 @@ public class AuthService {
         String newHash = passwordEncoder.encode(request.getNewPassword());
         user.setPassword(newHash);
         user.setLastPasswordChangeAt(java.time.LocalDateTime.now(ZoneOffset.UTC));
+        clearTempPasswordState(user); // a real password ends the temporary-password lifecycle
         userRepository.save(user);
         passwordHistoryService.record(userId, newHash);
 
@@ -630,16 +702,26 @@ public class AuthService {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
 
-        // Phone uniqueness check (only if changed)
-        if (!java.util.Objects.equals(user.getPhone(), request.getPhone())
-                && userRepository.existsByPhone(request.getPhone())) {
-            throw new DuplicateResourceException("User", "phone", request.getPhone());
+        // Phone is a SENSITIVE contact channel (account recovery, booking SMS):
+        // changing it requires password re-auth via PUT /auth/change-phone. The
+        // plain profile update may only echo the UNCHANGED phone — otherwise a
+        // hijacked session could silently rotate the number and lock the owner
+        // out. Fail loudly so clients route through the verified flow.
+        if (request.getPhone() != null
+                && !java.util.Objects.equals(user.getPhone(), request.getPhone())) {
+            throw new BusinessException(
+                "Phone changes need verification — use the 'Change phone' flow (it asks for your password).",
+                HttpStatus.BAD_REQUEST);
+        }
+        if (request.getPhoneCountryCode() != null && user.getPhone() != null
+                && !java.util.Objects.equals(user.getPhoneCountryCode(), request.getPhoneCountryCode())) {
+            throw new BusinessException(
+                "Phone changes need verification — use the 'Change phone' flow (it asks for your password).",
+                HttpStatus.BAD_REQUEST);
         }
 
         user.setFirstName(request.getFirstName().trim());
         user.setLastName(request.getLastName() == null ? null : request.getLastName().trim());
-        user.setPhone(request.getPhone());
-        user.setPhoneCountryCode(request.getPhoneCountryCode());
         user.setAddressLine1(trimToNull(request.getAddressLine1()));
         user.setAddressLine2(trimToNull(request.getAddressLine2()));
         user.setCity(trimToNull(request.getCity()));
@@ -691,6 +773,104 @@ public class AuthService {
             userId,
             com.skbingegalaxy.common.util.LogSanitizer.maskEmail(oldEmail),
             com.skbingegalaxy.common.util.LogSanitizer.maskEmail(newEmail));
+        return toDto(user);
+    }
+
+    // ── Verified contact changes (settings page) ───────────────────────────
+
+    /**
+     * Step 1 of the verified email change: re-authenticate with the current
+     * password, validate the new address, then send a 6-digit code to the NEW
+     * address. Nothing changes until {@link #confirmEmailChange} succeeds.
+     */
+    @Transactional
+    public void requestEmailChange(Long userId, String newEmail, String currentPassword) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+        if (currentPassword == null || !passwordEncoder.matches(currentPassword, user.getPassword())) {
+            auditService.failure(AuthAuditService.EventType.PASSWORD_CHANGED, userId, user.getRole(),
+                userId, user.getEmail(), "BAD_CURRENT_PASSWORD_FOR_EMAIL_CHANGE_REQUEST");
+            throw new BusinessException("Current password is incorrect", HttpStatus.BAD_REQUEST);
+        }
+        String normalized = newEmail == null ? "" : newEmail.trim().toLowerCase();
+        if (normalized.isBlank() || !normalized.matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")) {
+            throw new BusinessException("Please provide a valid new email address", HttpStatus.BAD_REQUEST);
+        }
+        if (normalized.equalsIgnoreCase(user.getEmail())) {
+            throw new BusinessException("New email must be different from your current email", HttpStatus.BAD_REQUEST);
+        }
+        if (userRepository.existsByEmail(normalized)) {
+            throw new DuplicateResourceException("User", "email", normalized);
+        }
+        emailVerificationService.issueEmailChange(user, normalized);
+        log.info("Email-change OTP issued for user {} -> {}", userId,
+            com.skbingegalaxy.common.util.LogSanitizer.maskEmail(normalized));
+    }
+
+    /**
+     * Step 2: the 6-digit code (sent to the new inbox) proves ownership — apply
+     * the switch. The new address is verified by construction; every other
+     * session is revoked because a credential identifier changed.
+     */
+    @Transactional
+    public UserDto confirmEmailChange(Long userId, String otp) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+        String newEmail = emailVerificationService.confirmEmailChange(userId, otp);
+        // Uniqueness could have raced between request and confirm — re-check.
+        if (userRepository.existsByEmail(newEmail)) {
+            throw new DuplicateResourceException("User", "email", newEmail);
+        }
+        String oldEmail = user.getEmail();
+        user.setEmail(newEmail);
+        user.setEmailVerified(true);
+        user.setEmailVerifiedAt(java.time.LocalDateTime.now(ZoneOffset.UTC));
+        user = userRepository.save(user);
+        try {
+            sessionService.revokeAllForUser(userId, userId, "EMAIL_CHANGED_VERIFIED");
+        } catch (Exception ex) {
+            log.warn("Failed to revoke sessions after verified email change for userId={}: {}", userId, ex.getMessage());
+        }
+        auditService.success(AuthAuditService.EventType.PASSWORD_CHANGED, userId, user.getRole(),
+            userId, user.getEmail(), "verified email change from " +
+                com.skbingegalaxy.common.util.LogSanitizer.maskEmail(oldEmail));
+        log.info("User {} completed VERIFIED email change {} -> {}", userId,
+            com.skbingegalaxy.common.util.LogSanitizer.maskEmail(oldEmail),
+            com.skbingegalaxy.common.util.LogSanitizer.maskEmail(newEmail));
+        return toDto(user);
+    }
+
+    /**
+     * Verified phone change: requires the current password (re-auth). SMS OTP is
+     * intentionally not used — the SMS provider is deployment-optional, so password
+     * re-auth is the consistent security bar across environments.
+     */
+    @Transactional
+    public UserDto changePhone(Long userId, String newPhone, String newCountryCode, String currentPassword) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+        if (currentPassword == null || !passwordEncoder.matches(currentPassword, user.getPassword())) {
+            auditService.failure(AuthAuditService.EventType.PASSWORD_CHANGED, userId, user.getRole(),
+                userId, user.getEmail(), "BAD_CURRENT_PASSWORD_FOR_PHONE_CHANGE");
+            throw new BusinessException("Current password is incorrect", HttpStatus.BAD_REQUEST);
+        }
+        String phone = trimToNull(newPhone);
+        if (phone != null && !phone.matches("^\\d{4,15}$")) {
+            throw new BusinessException("Phone must be 4-15 digits without spaces or symbols", HttpStatus.BAD_REQUEST);
+        }
+        String cc = trimToNull(newCountryCode);
+        if (cc != null && !cc.matches("^\\+\\d{1,4}$")) {
+            throw new BusinessException("Phone country code must look like '+91'", HttpStatus.BAD_REQUEST);
+        }
+        if (phone != null && !phone.equals(user.getPhone()) && userRepository.existsByPhone(phone)) {
+            throw new DuplicateResourceException("User", "phone", phone);
+        }
+        user.setPhone(phone);
+        user.setPhoneCountryCode(cc);
+        user = userRepository.save(user);
+        auditService.success(AuthAuditService.EventType.PASSWORD_CHANGED, userId, user.getRole(),
+            userId, user.getEmail(), "phone number changed (password re-auth)");
+        log.info("User {} changed phone number (re-authenticated)", userId);
         return toDto(user);
     }
 
@@ -762,21 +942,22 @@ public class AuthService {
         user.setPostalCode(trimToNull(request.getPostalCode()));
         user = userRepository.save(user);
         log.info("Profile completed for: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
-        // Return fresh tokens so the JWT includes the phone claim
-        TokenPair pair = mintTokenPair(user);
-        String token = pair.access;
-        String refreshToken = pair.refresh;
-        return AuthResponse.builder()
-            .token(token)
-            .refreshToken(refreshToken)
-            .user(toDto(user))
-            .build();
+        // Return fresh tokens so the JWT includes the phone claim. Goes through
+        // buildAuthResponse so the re-mint rotates/reuses THIS device's session row
+        // instead of minting an orphan refresh token (which used to spawn a phantom
+        // "device" in My Sessions on the next refresh cycle).
+        return buildAuthResponse(user);
     }
 
     // ── Admin: search customers ──────────────────────────────
     @Transactional(readOnly = true)
     public org.springframework.data.domain.Page<UserDto> searchCustomers(String query, org.springframework.data.domain.Pageable pageable) {
         return userRepository.searchCustomers(query, pageable).map(this::toDto);
+    }
+
+    /** Search staff (ADMIN + SUPER_ADMIN) by name/email for the messaging recipient picker. */
+    public org.springframework.data.domain.Page<UserDto> searchStaff(String query, org.springframework.data.domain.Pageable pageable) {
+        return userRepository.searchStaff(query == null ? "" : query.trim(), pageable).map(this::toDto);
     }
 
     // ── Admin: list all customers ────────────────────────────
@@ -961,9 +1142,40 @@ public class AuthService {
     }
 
     // ── Admin: create customer ───────────────────────────────
+    /**
+     * Front-desk customer provisioning. The account is created with a
+     * <b>temporary</b> password (never a long-lived one the admin keeps): the
+     * customer is forced to change it on login and may only use it for
+     * {@link #tempPasswordMaxLogins} logins before "Forgot password" is required.
+     * The temp password is hashed for storage, returned once to the creating
+     * admin (so they can read it out), and delivered to the customer by email
+     * <i>and</i> SMS.
+     */
     @Transactional
     public UserDto adminCreateCustomer(AdminCreateCustomerRequest request) {
-        String email = request.getEmail().toLowerCase();
+        boolean guest = Boolean.TRUE.equals(request.getGuest());
+
+        // Guest profiles ("no email / not opting for email"): only a name is
+        // required. A synthetic placeholder email satisfies the unique/not-null
+        // constraint but is never contacted; the password is random and never
+        // surfaced or sent, so the profile cannot log in.
+        String email;
+        if (guest) {
+            if (request.getEmail() != null && !request.getEmail().isBlank()) {
+                throw new BusinessException(
+                    "Guest profiles must not carry an email — uncheck 'No email' to create a full account.",
+                    HttpStatus.BAD_REQUEST);
+            }
+            email = "guest-" + java.util.UUID.randomUUID().toString().substring(0, 12)
+                + "@guests.skbingegalaxy.invalid"; // RFC 2606 reserved TLD — never deliverable
+        } else {
+            if (request.getEmail() == null || request.getEmail().isBlank()) {
+                throw new BusinessException(
+                    "Email is required (or mark the customer as a no-email guest).",
+                    HttpStatus.BAD_REQUEST);
+            }
+            email = request.getEmail().toLowerCase();
+        }
         if (userRepository.existsByEmail(email)) {
             throw new DuplicateResourceException("User", "email", email);
         }
@@ -972,8 +1184,10 @@ public class AuthService {
             throw new DuplicateResourceException("User", "phone", request.getPhone());
         }
 
-        // Generate a secure random password if none provided (admin-created customers)
-        String rawPassword = (request.getPassword() != null && !request.getPassword().isBlank())
+        // Admin-created customers ALWAYS get a temporary password (server-side
+        // generated when the admin didn't supply one). Guests get a random one
+        // that is never communicated — an unusable credential by construction.
+        String tempPassword = (!guest && request.getPassword() != null && !request.getPassword().isBlank())
             ? request.getPassword()
             : generateSecurePassword();
 
@@ -989,14 +1203,116 @@ public class AuthService {
             .state(trimToNull(request.getState()))
             .country(trimToNull(request.getCountry()))
             .postalCode(trimToNull(request.getPostalCode()))
-            .password(passwordEncoder.encode(rawPassword))
+            .password(passwordEncoder.encode(tempPassword))
             .role(UserRole.CUSTOMER)
             .active(true)
+            .guest(guest)
+            // Guests hold no usable credential: nothing to change, zero temp logins.
+            .mustChangePassword(!guest)
+            .tempPasswordLoginsRemaining(guest ? 0 : tempPasswordMaxLogins)
             .build();
 
         user = userRepository.save(user);
-        log.info("Admin created customer: {}", com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
-        return toDto(user);
+
+        if (guest) {
+            log.info("Admin created GUEST customer profile: id={} (no credentials issued)", user.getId());
+            auditService.success(AuthAuditService.EventType.CUSTOMER_CREATED,
+                currentActorId(), currentActorRole(), user.getId(), user.getEmail(),
+                "admin-created guest profile (no email, no credentials)");
+            return toDto(user); // no temporaryPassword, no email/SMS notification
+        }
+
+        log.info("Admin created customer with temporary password: {} (temp logins={})",
+            com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()), tempPasswordMaxLogins);
+        auditService.success(AuthAuditService.EventType.CUSTOMER_CREATED,
+            currentActorId(), currentActorRole(), user.getId(), user.getEmail(),
+            "admin-created customer (temporary password)");
+
+        sendTempPasswordNotification(user, tempPassword);
+
+        UserDto dto = toDto(user);
+        dto.setTemporaryPassword(tempPassword); // surfaced to the creating admin only
+        return dto;
+    }
+
+    /**
+     * Re-issues a fresh temporary password for an admin-created customer who
+     * never changed theirs (e.g. lost the email/SMS). Resets the login counter
+     * and re-sends by email + SMS. Returns the new temp password to the admin.
+     */
+    @Transactional
+    public UserDto regenerateTempPassword(Long userId) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+        if (user.getRole() != UserRole.CUSTOMER) {
+            throw new BusinessException("Temporary passwords can only be issued for customer accounts",
+                HttpStatus.BAD_REQUEST);
+        }
+        String tempPassword = generateSecurePassword();
+        user.setPassword(passwordEncoder.encode(tempPassword));
+        user.setMustChangePassword(true);
+        user.setTempPasswordLoginsRemaining(tempPasswordMaxLogins);
+        user.setLastPasswordChangeAt(java.time.LocalDateTime.now(ZoneOffset.UTC));
+        userRepository.save(user);
+        // Invalidate any live sessions so the old credential can't linger.
+        try { sessionService.revokeAllForUser(user.getId(), currentActorId(), "TEMP_PASSWORD_REISSUED"); }
+        catch (Exception e) { log.warn("Failed to revoke sessions on temp-password reissue for {}: {}", user.getId(), e.getMessage()); }
+        auditService.success(AuthAuditService.EventType.PASSWORD_RESET_COMPLETED,
+            currentActorId(), currentActorRole(), user.getId(), user.getEmail(),
+            "admin re-issued temporary password");
+        sendTempPasswordNotification(user, tempPassword);
+        log.info("Admin re-issued temporary password for customer {}",
+            com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()));
+        UserDto dto = toDto(user);
+        dto.setTemporaryPassword(tempPassword);
+        return dto;
+    }
+
+    /**
+     * Deliver a temporary password to the customer over both EMAIL and SMS
+     * (best-effort; failure to enqueue must not break account creation). The SMS
+     * event carries no email so the email-keyed dedup never suppresses it.
+     */
+    private void sendTempPasswordNotification(User user, String tempPassword) {
+        String name = user.getFirstName() != null ? user.getFirstName() : "there";
+        String emailBody = String.format(
+            "Hi %s,%n%nAn account was created for you at SK Binge Galaxy so we can manage your reservation.%n%n"
+            + "Email: %s%nTemporary password: %s%n%n"
+            + "Please sign in and you'll be asked to set your own password. For your security this temporary "
+            + "password only works for the next %d sign-in(s); after that use \"Forgot password\" to set a new one.%n%n"
+            + "Never share this password with anyone.",
+            name, user.getEmail(), tempPassword, tempPasswordMaxLogins);
+        String smsBody = String.format(
+            "SK Binge Galaxy: temporary password %s for %s. Valid for %d login(s); you'll be asked to change it.",
+            tempPassword, user.getEmail(), tempPasswordMaxLogins);
+        try {
+            NotificationEvent emailEv = NotificationEvent.builder()
+                .type("ACCOUNT_TEMP_PASSWORD")
+                .channel(NotificationChannel.EMAIL)
+                .recipientEmail(user.getEmail())
+                .recipientName(name)
+                .recipientPhone(user.getPhone())
+                .recipientPhoneCountryCode(user.getPhoneCountryCode())
+                .subject("Your SK Binge Galaxy temporary password")
+                .body(emailBody)
+                .build();
+            kafkaTemplate.send(KafkaTopics.NOTIFICATION_SEND, emailEv);
+            if (user.getPhone() != null && !user.getPhone().isBlank()) {
+                NotificationEvent smsEv = NotificationEvent.builder()
+                    .type("ACCOUNT_TEMP_PASSWORD")
+                    .channel(NotificationChannel.SMS)
+                    .recipientName(name)
+                    .recipientPhone(user.getPhone())
+                    .recipientPhoneCountryCode(user.getPhoneCountryCode())
+                    .subject("SK Binge Galaxy temporary password")
+                    .body(smsBody)
+                    .build();
+                kafkaTemplate.send(KafkaTopics.NOTIFICATION_SEND, smsEv);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to enqueue temporary-password notification for {}: {}",
+                com.skbingegalaxy.common.util.LogSanitizer.maskEmail(user.getEmail()), e.getMessage());
+        }
     }
 
     // ── Admin register ────────────────────────────────────────
@@ -1025,6 +1341,11 @@ public class AuthService {
             .password(passwordEncoder.encode(request.getPassword()))
             .role(UserRole.ADMIN)
             .active(true)
+            // DPDP: the creating super-admin accepts the onboarding terms on the
+            // new admin's behalf (the Add-Admin form requires the consent checkbox),
+            // so record the consent timestamp like the customer register path does.
+            .consentGivenAt(java.time.LocalDateTime.now(ZoneOffset.UTC))
+            .consentMarketing(request.isConsentMarketing())
             .build();
 
         user = userRepository.save(user);
@@ -1047,19 +1368,23 @@ public class AuthService {
      * {@link #refreshToken(String)}.
      */
     private AuthResponse buildAuthResponse(User user) {
-        TokenPair pair = mintTokenPair(user);
-        String accessToken = pair.access;
-        String refreshToken = pair.refresh;
+        // Mint the refresh token FIRST so the session row exists before the access
+        // token is built — the access token carries the session id as its `sid`
+        // claim, which is what lets the gateway kill it instantly on revoke.
+        MintContext ctx = mintContext(user);
+        String refreshToken = mintRefresh(user, ctx);
+        Long sessionId = null;
         try {
             String jti = jwtProvider.getJtiFromToken(refreshToken);
             java.time.LocalDateTime exp = jwtProvider.getExpiryFromToken(refreshToken);
             if (jti != null && exp != null) {
-                sessionService.recordLogin(user.getId(), jti, exp);
+                sessionId = sessionService.recordLogin(user.getId(), jti, exp).getId();
             }
         } catch (Exception ex) {
             // Session tracking must not break login
             log.warn("Failed to record user session for userId={}: {}", user.getId(), ex.getMessage());
         }
+        String accessToken = mintAccess(user, ctx, sessionId);
         return AuthResponse.builder()
             .token(accessToken)
             .refreshToken(refreshToken)
@@ -1068,41 +1393,54 @@ public class AuthService {
     }
 
     /**
-     * Holder for an access+refresh pair so we can mint both with the same Authority
-     * Handover delegation snapshot in a single DB read.
+     * Authority Handover snapshot shared by both tokens of a mint. Looking up grants
+     * here (rather than in {@link JwtProvider}) keeps the JWT layer decoupled from
+     * authority persistence, makes the dependency direction one-way
+     * (auth-service → authority-service), and ensures refresh-token rotation picks
+     * up newly granted or revoked authority on the next refresh cycle.
      */
-    private record TokenPair(String access, String refresh) {}
+    private record MintContext(java.util.Set<com.skbingegalaxy.common.enums.AuthorityScope> scopes,
+                               long delegationExpiryMs) {}
 
-    /**
-     * Mint an access+refresh JWT pair. If the user has any active Authority Handover
-     * grants, both tokens carry the union of granted scopes plus the earliest grant
-     * expiry as {@code delegationExpiresAt}. The native {@code role} claim is unchanged
-     * — the gateway is responsible for elevating {@code X-User-Role} on a per-path
-     * basis when the request matches a granted scope.
-     *
-     * <p>Looking up grants here (rather than in {@link JwtProvider}) keeps the JWT
-     * layer decoupled from authority persistence, makes the dependency direction
-     * one-way (auth-service → authority-service), and ensures refresh-token rotation
-     * picks up newly granted or revoked authority on the next refresh cycle.
-     */
-    private TokenPair mintTokenPair(User user) {
+    private MintContext mintContext(User user) {
         try {
             java.util.Set<com.skbingegalaxy.common.enums.AuthorityScope> scopes =
                 authorityService.getActiveScopesForUser(user.getId());
             if (scopes.isEmpty()) {
-                return new TokenPair(jwtProvider.generateToken(user), jwtProvider.generateRefreshToken(user));
+                return new MintContext(java.util.Set.of(), 0L);
             }
-            long expiryMs = authorityService.getEarliestGrantExpiryEpochMillis(user.getId());
-            return new TokenPair(
-                jwtProvider.generateToken(user, scopes, expiryMs),
-                jwtProvider.generateRefreshToken(user, scopes, expiryMs)
-            );
+            return new MintContext(scopes, authorityService.getEarliestGrantExpiryEpochMillis(user.getId()));
         } catch (Exception ex) {
             // Authority lookup must NEVER break login. Fall back to non-delegated tokens.
             log.warn("Authority lookup failed during token mint for userId={}: {}", user.getId(), ex.getMessage());
-            return new TokenPair(jwtProvider.generateToken(user), jwtProvider.generateRefreshToken(user));
+            return new MintContext(java.util.Set.of(), 0L);
         }
     }
+
+    private String mintRefresh(User user, MintContext ctx) {
+        return ctx.scopes().isEmpty()
+            ? jwtProvider.generateRefreshToken(user)
+            : jwtProvider.generateRefreshToken(user, ctx.scopes(), ctx.delegationExpiryMs());
+    }
+
+    /**
+     * Access token bound to a session row via {@code sid}. When no session row
+     * exists (session tracking failed — never fatal to login) we dispatch to
+     * the legacy unbound mint, which is byte-for-byte what the sid overload
+     * produces for a null id; keeping both call paths distinct also keeps the
+     * pre-sid unit-test contracts intact.
+     */
+    private String mintAccess(User user, MintContext ctx, Long sessionId) {
+        if (ctx.scopes().isEmpty()) {
+            return sessionId != null
+                ? jwtProvider.generateToken(user, sessionId)
+                : jwtProvider.generateToken(user);
+        }
+        return sessionId != null
+            ? jwtProvider.generateToken(user, ctx.scopes(), ctx.delegationExpiryMs(), sessionId)
+            : jwtProvider.generateToken(user, ctx.scopes(), ctx.delegationExpiryMs());
+    }
+
 
     /** Build an MFA challenge response (no tokens issued; caller must resubmit with code). */
     private AuthResponse buildMfaChallenge(User user) {
@@ -1152,6 +1490,8 @@ public class AuthService {
             .emailVerified(user.isEmailVerified())
             .mfaEnabled(user.isMfaEnabled())
             .lastPasswordChangeAt(user.getLastPasswordChangeAt())
+            .mustChangePassword(user.isMustChangePassword())
+            .guest(user.isGuest())
             .build();
     }
 
@@ -1292,6 +1632,12 @@ public class AuthService {
         }
     }
 
+    /** Ends the temporary-password lifecycle: the account now has a real, self-chosen password. */
+    private static void clearTempPasswordState(User user) {
+        user.setMustChangePassword(false);
+        user.setTempPasswordLoginsRemaining(null);
+    }
+
     private String generateSecurePassword() {
         String upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
         String lower = "abcdefghijklmnopqrstuvwxyz";
@@ -1415,26 +1761,58 @@ public class AuthService {
         );
     }
 
-    /** Confirm MFA enrollment by providing a valid code from the authenticator app. */
+    /**
+     * Confirm MFA enrollment by providing a valid code from the authenticator app.
+     *
+     * <p>Recovery codes are NOT accepted from the caller: they were generated,
+     * hashed and stored server-side at {@code beginMfaEnrollment}. Previously the
+     * client echoed them back for storage, which meant whatever it sent became the
+     * account's recovery codes — an XSS or MITM could plant a known set and keep
+     * permanent access.
+     */
     @Transactional
-    public void confirmMfaEnrollment(Long userId, String code, java.util.List<String> recoveryCodes) {
+    public void confirmMfaEnrollment(Long userId, String code) {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
-        if (recoveryCodes == null || recoveryCodes.isEmpty()) {
-            throw new BusinessException("Recovery codes must be echoed back on MFA confirmation", HttpStatus.BAD_REQUEST);
-        }
-        totpService.confirmEnrollment(userId, code, recoveryCodes);
+        totpService.confirmEnrollment(userId, code);
         auditService.success(AuthAuditService.EventType.MFA_ENROLLED, userId, user.getRole(), userId, user.getEmail(), null);
         log.info("MFA enrolled for userId={}", userId);
     }
 
-    /** Disable MFA for the current user. Requires a valid code (or recovery code). */
+    /**
+     * Disable MFA for the current user.
+     *
+     * <p>Requires BOTH the account password and a valid TOTP/recovery code.
+     * Turning off 2FA is a security-downgrade operation, so a live session alone
+     * must not be sufficient — otherwise an unlocked laptop or a stolen session
+     * cookie is enough to strip the account's second factor.
+     */
     @Transactional
-    public void disableMfa(Long userId, String code) {
+    public void disableMfa(Long userId, String code, String currentPassword) {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
         if (!user.isMfaEnabled()) {
             return; // idempotent
+        }
+        // Google-created accounts have never had a password: googleLogin seeds a
+        // random one the user cannot know and, unlike register(), never stamps
+        // lastPasswordChangeAt. Demanding a password from them would make 2FA
+        // impossible to turn off — a permanent lockout, not extra security. For
+        // those accounts possession of the authenticator (verified below) is the
+        // strongest factor available, so it stands alone and the event is audited
+        // distinctly for review.
+        boolean hasUsablePassword = user.getLastPasswordChangeAt() != null;
+        if (hasUsablePassword) {
+            if (currentPassword == null || currentPassword.isBlank()
+                    || user.getPassword() == null
+                    || !passwordEncoder.matches(currentPassword, user.getPassword())) {
+                auditService.failure(AuthAuditService.EventType.MFA_DISABLED, userId, user.getRole(),
+                    userId, user.getEmail(), "BAD_PASSWORD_REAUTH");
+                throw new BusinessException("Your current password is incorrect.", HttpStatus.BAD_REQUEST);
+            }
+        } else {
+            log.info("MFA disable for userId={} without password re-auth — account has no "
+                + "password set (federated sign-in); authenticator code is the sole factor", userId);
         }
         totpService.disable(userId, code);
         auditService.success(AuthAuditService.EventType.MFA_DISABLED, userId, user.getRole(), userId, user.getEmail(), null);

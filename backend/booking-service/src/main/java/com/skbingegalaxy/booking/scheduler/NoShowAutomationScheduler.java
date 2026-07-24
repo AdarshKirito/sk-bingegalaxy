@@ -2,6 +2,7 @@ package com.skbingegalaxy.booking.scheduler;
 
 import com.skbingegalaxy.booking.entity.Booking;
 import com.skbingegalaxy.booking.repository.BookingRepository;
+import com.skbingegalaxy.booking.service.VenueClockService;
 import com.skbingegalaxy.booking.service.statemachine.BookingStateMachine;
 import com.skbingegalaxy.booking.service.statemachine.BookingTransitionEvent;
 import com.skbingegalaxy.booking.service.statemachine.TransitionActor;
@@ -16,14 +17,17 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
-import java.time.LocalTime;
 import java.util.List;
 
 /**
  * Marks active (CONFIRMED / PENDING) bookings as {@link BookingStatus#NO_SHOW}
- * once their start time has passed by more than {@code app.no-show.grace-minutes}
- * minutes and the customer never checked in.
+ * once the reservation has passed its <b>midpoint</b> — i.e. {@code startTime +
+ * duration/2} in the <i>venue's</i> local time — and the customer never checked
+ * in. A 18:00–20:00 booking therefore only no-shows after 19:00, never at a
+ * fixed "start + 30 min" offset, so the grace scales with how long the
+ * reservation actually is.
  *
  * <p>This complements two pre-existing flows:
  * <ul>
@@ -31,14 +35,19 @@ import java.util.List;
  *       ({@link com.skbingegalaxy.booking.service.BookingService#auditEndOfDay})
  *       which an admin runs once after 23:59 to close out the day. That flow
  *       also <i>advances the operational date</i>.</li>
- *   <li>This scheduler, which runs every 15 minutes and only marks
- *       NO_SHOW for the <i>current</i> operational day, never advancing the
- *       date. It exists so a 19:00 booking that no-shows is reflected in the
- *       UI by ~19:30, not the next morning.</li>
+ *   <li>This scheduler, which runs every 15 minutes and reflects no-shows in
+ *       the UI shortly after each reservation's midpoint, never advancing the
+ *       date.</li>
  * </ul>
  *
- * <p>Cluster-safe via ShedLock; the scheduler is idempotent: the next run
- * simply finds an empty candidate list because rows are now NO_SHOW.
+ * <p><b>Timezone contract:</b> {@code bookingDate}/{@code startTime} are
+ * venue-local. The candidate set is bounded by a ±1 day window around the UTC
+ * date (covers every venue offset), then the precise midpoint comparison is
+ * done against {@link VenueClockService} — never {@code LocalDateTime.now(UTC)}
+ * directly, which would skew the cutoff for any non-UTC venue.
+ *
+ * <p>Cluster-safe via ShedLock; idempotent: the next run simply finds fewer
+ * candidates because rows are now NO_SHOW.
  */
 @Component
 @RequiredArgsConstructor
@@ -47,9 +56,14 @@ public class NoShowAutomationScheduler {
 
     private final BookingRepository bookingRepository;
     private final BookingStateMachine stateMachine;
+    private final VenueClockService venueClock;
 
-    @Value("${app.no-show.grace-minutes:30}")
-    private int graceMinutes;
+    /**
+     * Optional safety floor (minutes after start) below which a no-show is never
+     * raised, even if the midpoint is sooner. Defaults to 0 → pure midpoint.
+     */
+    @Value("${app.no-show.min-grace-minutes:0}")
+    private int minGraceMinutes;
 
     @Value("${app.no-show.enabled:true}")
     private boolean enabled;
@@ -60,16 +74,10 @@ public class NoShowAutomationScheduler {
     public void sweep() {
         if (!enabled) return;
 
-        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
-        LocalDate today = now.toLocalDate();
-        LocalTime cutoff = now.toLocalTime().minusMinutes(graceMinutes);
-        // Skip if the cutoff would wrap before midnight (i.e. early in the day)
-        // — there's nothing to sweep when grace > minutes-since-midnight.
-        if (now.toLocalTime().isBefore(LocalTime.of(0, 0).plusMinutes(graceMinutes))) {
-            return;
-        }
-
-        List<Booking> candidates = bookingRepository.findNoShowCandidates(today, cutoff);
+        LocalDate todayUtc = LocalDate.now(ZoneOffset.UTC);
+        // ±1 day brackets every venue timezone; the exact cutoff is venue-local below.
+        List<Booking> candidates = bookingRepository.findNoShowSweepCandidates(
+            todayUtc.minusDays(1), todayUtc.plusDays(1));
         if (candidates.isEmpty()) return;
 
         int marked = 0;
@@ -78,18 +86,40 @@ public class NoShowAutomationScheduler {
                 if (b.isCheckedIn() || b.getStatus() == BookingStatus.CHECKED_IN) {
                     continue; // race: customer just checked in
                 }
+                ZoneId venueZone = venueClock.zoneOf(b.getBingeId());
+                LocalDateTime venueNow = LocalDateTime.now(venueZone);
+                LocalDateTime noShowAt = noShowThreshold(b);
+                if (venueNow.isBefore(noShowAt)) {
+                    continue; // not yet past the reservation midpoint
+                }
                 stateMachine.transition(
                     b, BookingTransitionEvent.MARK_NO_SHOW,
                     TransitionActor.system(),
-                    "No check-in within " + graceMinutes + " min of start time");
+                    "No check-in by reservation midpoint (" + noShowAt.toLocalTime() + ")");
                 marked++;
             } catch (Exception e) {
                 log.warn("Failed to auto-NO_SHOW booking {}: {}", b.getBookingRef(), e.getMessage());
             }
         }
         if (marked > 0) {
-            log.info("Auto-no-show sweep marked {} booking(s) (grace={}min, cutoff={})",
-                marked, graceMinutes, cutoff);
+            log.info("Auto-no-show sweep marked {} booking(s) past their reservation midpoint", marked);
         }
+    }
+
+    /** Venue-local instant at/after which the booking is a no-show: start + max(duration/2, minGrace). */
+    private LocalDateTime noShowThreshold(Booking b) {
+        int durMin = effectiveDurationMinutes(b);
+        int offset = Math.max(durMin / 2, minGraceMinutes);
+        // Never zero — guard against malformed zero-duration rows so we still
+        // require *some* time to elapse past the scheduled start.
+        offset = Math.max(offset, 1);
+        return LocalDateTime.of(b.getBookingDate(), b.getStartTime()).plusMinutes(offset);
+    }
+
+    private static int effectiveDurationMinutes(Booking b) {
+        if (b.getDurationMinutes() != null && b.getDurationMinutes() > 0) {
+            return b.getDurationMinutes();
+        }
+        return Math.max(b.getDurationHours(), 0) * 60;
     }
 }

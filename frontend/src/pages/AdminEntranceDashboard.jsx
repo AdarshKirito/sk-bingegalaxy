@@ -4,7 +4,10 @@ import { useAuth } from '../context/AuthContext';
 import { useBinge } from '../context/BingeContext';
 import { useConfirm } from '../components/ui/ConfirmProvider';
 import { adminService } from '../services/endpoints';
+import { parseServerDate } from '../services/timeFormat';
+import { currencyForCountry } from '../utils/currency';
 import SEO from '../components/SEO';
+import TimezonePicker from '../components/TimezonePicker';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import { toast } from 'react-toastify';
 import {
@@ -94,12 +97,59 @@ export default function AdminEntranceDashboard() {
     } catch { /* ignore */ }
   };
 
-  const handleApprove = async (binge) => {
+  // Approval confirmation: the super-admin verifies the venue's timezone (with live
+  // venue-local time), country → payment currency, decides whether the tax system
+  // runs at this venue, AND which binge-operation modules the owning admin starts
+  // with (V71 permission matrix) — BEFORE the venue goes live.
+  const [approveModal, setApproveModal] = useState(null); // { binge, taxesEnabled, disabledModules: Set, accessRemarks }
+
+  const handleApprove = (binge) => {
     if (decidingId) return;
+    setApproveModal({
+      binge,
+      // Pre-filled with what the admin submitted; the super-admin can correct any of
+      // these before the venue goes live (admins can't set timezone/currency at all).
+      timezone: binge.timezone || '',
+      country: (binge.country || '').toUpperCase(),
+      taxesEnabled: binge.taxesEnabled !== false,
+      disabledModules: new Set(),
+      accessRemarks: '',
+    });
+  };
+
+  const toggleApprovalModule = (key) => {
+    setApproveModal((m) => {
+      const next = new Set(m.disabledModules);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return { ...m, disabledModules: next };
+    });
+  };
+
+  const confirmApprove = async () => {
+    const { binge, taxesEnabled, disabledModules, accessRemarks, timezone, country } = approveModal;
+    // Approval is the genuineness gate — never let a venue go live with a missing
+    // country (currency/tax/payment methods derive from it) or timezone.
+    if (!/^[A-Z]{2}$/.test(country || '')) {
+      toast.error('Set a valid 2-letter country code before approving.');
+      return;
+    }
+    if (!timezone) {
+      toast.error('Set the venue timezone before approving.');
+      return;
+    }
     setDecidingId(binge.id);
     try {
-      await adminService.approveBinge(binge.id);
+      await adminService.approveBinge(binge.id, {
+        taxesEnabled,
+        timezone: timezone || undefined,
+        // Only send country when the super-admin actually changed it, so a normal
+        // approval never re-derives currency/taxes needlessly.
+        country: (country && country !== (binge.country || '').toUpperCase()) ? country : undefined,
+        disabledModules: Array.from(disabledModules || []),
+        accessRemarks: accessRemarks || undefined,
+      });
       toast.success(`Approved: ${binge.name}`);
+      setApproveModal(null);
       // Refresh both queues since the approved binge now also appears in the
       // main admin list as active.
       await Promise.all([
@@ -110,6 +160,16 @@ export default function AdminEntranceDashboard() {
       toast.error(e?.response?.data?.message || 'Failed to approve binge');
     } finally {
       setDecidingId(null);
+    }
+  };
+
+  const venueLocalTime = (timezone) => {
+    try {
+      return new Intl.DateTimeFormat(undefined, {
+        timeZone: timezone, weekday: 'short', hour: '2-digit', minute: '2-digit',
+      }).format(new Date());
+    } catch {
+      return null;
     }
   };
 
@@ -141,7 +201,9 @@ export default function AdminEntranceDashboard() {
 
   const handleSelect = (binge) => {
     saveRecentBinge(binge);
-    selectBinge({ id: binge.id, name: binge.name, address: binge.address });
+    // The store normalises to the canonical selected-binge shape — pass the
+    // full object so support contacts / timezone / policies aren't dropped.
+    selectBinge(binge);
     toast.success(`Entered: ${binge.name}`);
     navigate('/admin/dashboard');
   };
@@ -267,7 +329,7 @@ export default function AdminEntranceDashboard() {
                     {b.address && <p>{b.address}</p>}
                     <p style={{ fontSize: '0.85rem', opacity: 0.75 }}>
                       Requested by admin #{b.adminId}
-                      {b.createdAt && ` • ${new Date(b.createdAt).toLocaleString()}`}
+                      {b.createdAt && ` • ${parseServerDate(b.createdAt)?.toLocaleString() || ''}`}
                     </p>
                     <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
                       <button
@@ -296,6 +358,154 @@ export default function AdminEntranceDashboard() {
           )}
         </section>
       )}
+
+      {approveModal && (() => {
+        const b = approveModal.binge;
+        const ccy = b.currency || currencyForCountry(b.country);
+        return (
+          <div className="modal-overlay" onClick={() => !decidingId && setApproveModal(null)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px' }}>
+              <div className="modal-header">
+                <h2>Approve “{b.name}”</h2>
+                <button type="button" className="btn btn-secondary btn-sm"
+                        onClick={() => setApproveModal(null)} disabled={!!decidingId}><FiXCircle /></button>
+              </div>
+              <p style={{ marginTop: 0, color: 'var(--text-muted)' }}>
+                Verify this is a genuine venue and correct anything before it goes live —
+                bookings, slot times, prices, taxes and payment methods all derive from these.
+              </p>
+
+              {/* ── Genuineness review: everything the admin submitted, read-only, so a
+                     super-admin can judge whether this is a real venue. ── */}
+              <div className="entrance-review" style={{
+                border: '1px solid var(--border)', borderRadius: 10, padding: '0.7rem 0.85rem',
+                margin: '0.5rem 0 0.9rem', display: 'grid', gridTemplateColumns: '1fr 1fr',
+                gap: '0.5rem 1rem', fontSize: '0.84rem',
+              }}>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <small style={{ color: 'var(--text-muted)' }}>Address</small>
+                  <div>{b.address || [b.addressLine1, b.addressLine2, b.city, b.state, b.postalCode].filter(Boolean).join(', ') || '— none provided'}</div>
+                  <small style={{ color: (b.latitude && b.longitude) ? 'var(--success-text, green)' : 'var(--warning-text, #b45309)' }}>
+                    {(b.latitude && b.longitude) ? `Geocoded (${b.latitude}, ${b.longitude})` : 'Not geocoded — no map coordinates'}
+                  </small>
+                </div>
+                <div>
+                  <small style={{ color: 'var(--text-muted)' }}>Public contact</small>
+                  <div>{b.supportEmail || '— no email'}</div>
+                  <div>{b.supportPhone ? `${b.supportPhoneCountryCode || ''} ${b.supportPhone}` : '— no phone'}</div>
+                </div>
+                <div>
+                  <small style={{ color: 'var(--text-muted)' }}>Owner (private)</small>
+                  <div>{b.ownerEmail || '— no email'}</div>
+                  <div>{b.ownerPhone ? `${b.ownerPhoneCountryCode || ''} ${b.ownerPhone}` : '— no phone'}</div>
+                </div>
+                <div>
+                  <small style={{ color: 'var(--text-muted)' }}>Operating hours</small>
+                  <div>{(b.openTime && b.closeTime) ? `${String(b.openTime).slice(0, 5)}–${String(b.closeTime).slice(0, 5)}` : '— not set'}</div>
+                </div>
+                <div>
+                  <small style={{ color: 'var(--text-muted)' }}>Submitted</small>
+                  <div>{b.createdAt ? new Date(b.createdAt).toLocaleString() : '—'}</div>
+                </div>
+              </div>
+
+              {/* ── Correctable at approval ── */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem 1rem', margin: '0.4rem 0 0.75rem' }}>
+                <div>
+                  <small style={{ color: 'var(--text-muted)' }}>Country (sets currency, taxes, payment methods)</small>
+                  <input
+                    type="text" maxLength={2}
+                    value={approveModal.country}
+                    onChange={(e) => setApproveModal((m) => ({ ...m, country: e.target.value.toUpperCase().replace(/[^A-Z]/g, '') }))}
+                    placeholder="e.g. US, IN, AE"
+                    style={{ width: '100%', textTransform: 'uppercase' }}
+                  />
+                  {/^[A-Z]{2}$/.test(approveModal.country) ? (
+                    <small>
+                      Payment currency: <strong>{currencyForCountry(approveModal.country)}</strong>
+                      {approveModal.country !== (b.country || '').toUpperCase() && b.country
+                        ? ` (was ${b.country} → ${ccy})` : ''}
+                    </small>
+                  ) : (
+                    <small style={{ color: 'var(--warning-text, #b45309)' }}>Enter a valid 2-letter country code.</small>
+                  )}
+                </div>
+                <div>
+                  <small style={{ color: 'var(--text-muted)' }}>Timezone — set it freely</small>
+                  <TimezonePicker
+                    id="approve-timezone"
+                    value={approveModal.timezone}
+                    onChange={(tz) => setApproveModal((m) => ({ ...m, timezone: tz }))}
+                    required
+                  />
+                  {approveModal.timezone && venueLocalTime(approveModal.timezone) && (
+                    <small>Local time now: {venueLocalTime(approveModal.timezone)}</small>
+                  )}
+                </div>
+              </div>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', margin: '0.5rem 0 1rem' }}>
+                <input
+                  type="checkbox"
+                  checked={approveModal.taxesEnabled}
+                  onChange={(e) => setApproveModal((m) => ({ ...m, taxesEnabled: e.target.checked }))}
+                  style={{ marginTop: '0.2rem' }}
+                />
+                <span>
+                  <strong>Enable the tax system for this venue</strong>
+                  <br />
+                  <small style={{ color: 'var(--text-muted)' }}>
+                    The venue country's standard tax (e.g. GST/VAT) is auto-assigned and applied to
+                    every booking. You can toggle this later or edit rules in the tax console.
+                  </small>
+                </span>
+              </label>
+
+              {/* V71: which binge-operation options the owning admin may use from day one.
+                  Everything starts enabled; untick to disable. Editable later on the
+                  binge's About / Access page. */}
+              <div style={{ margin: '0.25rem 0 0.9rem' }}>
+                <strong style={{ fontSize: '0.9rem' }}>Options available to this venue's admin</strong>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: '0.25rem 0.75rem', marginTop: '0.4rem', maxHeight: 170, overflowY: 'auto' }}>
+                  {[
+                    ['REPORTS', 'Reports'], ['MESSAGES', 'Messages'], ['VENUE', 'Venue'],
+                    ['ROOMS', 'Rooms'], ['EVENT_TYPES', 'Event Types'], ['RATE_CODES', 'Rate Codes'],
+                    ['SURGE_RULES', 'Surge Rules'], ['BLOCKED_DATES', 'Blocked Dates'], ['SLOT_HOLDS', 'Slot Holds'],
+                    ['PEOPLE', 'People'], ['USERS', 'Users'], ['WAITLIST', 'Waitlist'],
+                    ['CUSTOMER_FREEZES', 'Customer Freezes'], ['RISK_FLAGS', 'Risk Flags'],
+                    ['SUPPORT_CONSOLE', 'Support Console'], ['DISPUTES', 'Disputes'], ['FAILED_REFUNDS', 'Failed Refunds'],
+                  ].map(([key, label]) => (
+                    <label key={key} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem' }}>
+                      <input type="checkbox"
+                        checked={!approveModal.disabledModules.has(key)}
+                        onChange={() => toggleApprovalModule(key)} />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                <small style={{ color: 'var(--text-muted)' }}>
+                  Unticked options return “disabled by Super Admin” for this admin. Change anytime
+                  from Binges → the venue's About page.
+                </small>
+              </div>
+              <div className="input-group" style={{ marginBottom: '0.9rem' }}>
+                <label>Access remarks (optional)</label>
+                <input value={approveModal.accessRemarks}
+                  onChange={(e) => setApproveModal((m) => ({ ...m, accessRemarks: e.target.value }))}
+                  placeholder="Why any options are off, onboarding notes…" maxLength={1000} />
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                <button type="button" className="btn btn-secondary"
+                        onClick={() => setApproveModal(null)} disabled={!!decidingId}>Cancel</button>
+                <button type="button" className="btn btn-primary" onClick={confirmApprove} disabled={!!decidingId}>
+                  <FiCheckCircle style={{ marginRight: 4 }} />
+                  {decidingId ? 'Approving…' : 'Confirm & Approve'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── Recent venues ─────────────────────────────────────────── */}
       {recentBinges.length > 0 && (
         <section className="entrance-panel">
@@ -421,6 +631,12 @@ export default function AdminEntranceDashboard() {
             <Link to="/admin/home-editor" className="entrance-nav-card">
               <h3><FiSettings /> Edit Home Page</h3>
               <p>Update hero, packages and gallery seen by every visitor</p>
+            </Link>
+          )}
+          {isSuperAdmin && (
+            <Link to="/admin/terms-editor" className="entrance-nav-card">
+              <h3><FiSettings /> Terms &amp; Legal Content</h3>
+              <p>Edit the Terms customers and new admins must accept at sign-up</p>
             </Link>
           )}
           <Link to="/admin/security/mfa" className="entrance-nav-card">

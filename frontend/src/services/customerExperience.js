@@ -103,7 +103,14 @@ export function mergeSupportContact(supportContact, binge) {
     ...(supportContact || {}),
   };
   if (binge) {
-    if (binge.supportEmail) base.email = binge.supportEmail;
+    // Inside a venue, THAT venue's channels are authoritative: a channel the
+    // venue admin did not provide must be HIDDEN, not silently replaced by the
+    // platform-level contact. Otherwise customers call the platform about
+    // venue matters the platform can't resolve.
+    base.email = binge.supportEmail || '';
+    base.phoneRaw = '';
+    base.phoneDisplay = '';
+    base.whatsappRaw = '';
     if (binge.supportPhone) {
       const digits = binge.supportPhone.replace(/\D/g, '');
       const cc = (binge.supportPhoneCountryCode || '').replace(/\D/g, '');
@@ -127,6 +134,12 @@ export function mergeSupportContact(supportContact, binge) {
     if (binge.supportWhatsapp) {
       const digits = binge.supportWhatsapp.replace(/\D/g, '');
       const cc = (binge.supportWhatsappCountryCode || '').replace(/\D/g, '');
+      base.whatsappRaw = cc ? `${cc}${digits}` : (digits.length === 10 ? `91${digits}` : digits);
+    } else if (binge.supportPhoneIsWhatsapp && binge.supportPhone) {
+      // V78: "this phone is also WhatsApp" — reuse the public support phone
+      // for the WhatsApp deep-link when no separate WA number was provided.
+      const digits = binge.supportPhone.replace(/\D/g, '');
+      const cc = (binge.supportPhoneCountryCode || '').replace(/\D/g, '');
       base.whatsappRaw = cc ? `${cc}${digits}` : (digits.length === 10 ? `91${digits}` : digits);
     }
   }
@@ -178,10 +191,13 @@ export function getCallSupportHref(supportContact) {
   return `tel:${contact.phoneRaw}`;
 }
 
-export function downloadBookingSummary(booking, { customerName, venueName } = {}) {
+export function downloadBookingSummary(booking, { customerName, venueName, currency } = {}) {
   if (typeof window === 'undefined' || !booking) {
     return;
   }
+  // Amounts are denominated in the VENUE's currency — label with its ISO code
+  // (never a hardcoded rupee marker; a US venue's summary must read "USD").
+  const currencyCode = (currency || booking.paymentCurrencyCode || 'INR').toUpperCase();
 
   const addOnLines = (booking.addOns || []).map((addOn) => {
     const name = addOn.name || addOn.addOnName || 'Add-on';
@@ -200,7 +216,7 @@ export function downloadBookingSummary(booking, { customerName, venueName } = {}
     `Status: ${booking.status || 'PENDING'}`,
     `Payment status: ${booking.paymentStatus || 'PENDING'}`,
     `Payment method: ${booking.paymentMethod || 'To be decided'}`,
-    `Total amount: Rs ${Number(booking.totalAmount || 0).toLocaleString()}`,
+    `Total amount: ${currencyCode} ${Number(booking.totalAmount || 0).toLocaleString()}`,
     '',
     'Add-ons',
     '-------',

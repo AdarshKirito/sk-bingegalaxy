@@ -66,8 +66,8 @@ LIMIT 20;
 
 **Immediate mitigation:**
 1. Check Kafka connectivity: `kubectl exec -n sk-binge-galaxy deploy/booking-service -- curl -s http://kafka:9092`
-2. If Kafka is healthy, check outbox for `failedPermanent=true` rows — reset via admin API: `POST /api/v1/admin/outbox/retry-all`
-3. If payment was collected: manually advance the saga via `POST /api/v1/admin/recovery/advance-saga/{bookingRef}` (SUPER_ADMIN only)
+2. If Kafka is healthy, check outbox for `failedPermanent=true` rows — reset via admin API: `POST /api/v1/bookings/admin/ops/outbox/retry-failed` (SUPER_ADMIN only)
+3. If payment was collected: replay the confirmation side of the saga via `POST /api/v1/bookings/admin/recovery/paid-not-confirmed/{bookingRef}/replay` (ADMIN/SUPER_ADMIN; idempotent — already-CONFIRMED bookings return as-is). The paid-but-unconfirmed queue is at `GET /api/v1/bookings/admin/recovery/paid-not-confirmed`.
 
 **Root cause fix:** The outbox poller runs every 2s with ShedLock. If it's stuck, restart the booking-service pod with the outbox lock held: `kubectl rollout restart deploy/booking-service -n sk-binge-galaxy`
 

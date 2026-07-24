@@ -13,15 +13,20 @@ internal:
     # No default — boot fails fast if the shared Feign secret is not
     # provided via env, rather than silently running with a well-known
     # placeholder that would let anyone forge internal API calls.
-    secret: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET must be set}
+    secret: ${INTERNAL_API_SECRET}
 
 spring:
   application:
     name: booking-service
+  servlet:
+    multipart:
+      # Message attachments (photo/video) and venue/room images. Video needs headroom.
+      max-file-size: 25MB
+      max-request-size: 26MB
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/booking_db}
     username: ${SPRING_DATASOURCE_USERNAME:booking_svc}
-    password: ${SPRING_DATASOURCE_PASSWORD:?SPRING_DATASOURCE_PASSWORD must be set}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:8}
@@ -75,9 +80,15 @@ spring:
     consumer:
       group-id: booking-group
       auto-offset-reset: earliest
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      # Wrap the deserializers in ErrorHandlingDeserializer so a single poison/
+      # unparseable record (e.g. pre-type-header records on booking.cancelled)
+      # can NEVER block a partition forever — it is surfaced to the DLQ error
+      # handler and skipped instead of the container looping on the same offset.
+      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       properties:
+        spring.deserializer.key.delegate.class: org.apache.kafka.common.serialization.StringDeserializer
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
         spring.json.trusted.packages: com.skbingegalaxy.*
     listener:
       observation-enabled: true
@@ -111,11 +122,20 @@ app:
     return-otp-in-response: ${CHECKIN_RETURN_OTP_IN_RESPONSE:true}
   no-show:
     enabled:              ${NO_SHOW_AUTOMATION_ENABLED:true}
-    grace-minutes:        ${NO_SHOW_GRACE_MINUTES:30}
+    # No-show fires once a reservation passes its midpoint (start + duration/2),
+    # venue-local. min-grace-minutes is only a safety floor; 0 = pure midpoint.
+    min-grace-minutes:    ${NO_SHOW_MIN_GRACE_MINUTES:0}
     check-interval-ms:    ${NO_SHOW_CHECK_INTERVAL_MS:900000}
   cqrs:
     reconciliation-cron: ${CQRS_RECONCILIATION_CRON:0 15 2 * * *}
     reconciliation-zone: ${CQRS_RECONCILIATION_ZONE:Asia/Kolkata}
+  fx:
+    # Automatic FX reference-rate refresh (currencies admin page). Rows pinned
+    # with manualOverride=true are never auto-updated.
+    refresh-enabled: ${FX_REFRESH_ENABLED:true}
+    refresh-cron: ${FX_REFRESH_CRON:0 10 */6 * * *}
+    er-api-url: ${FX_ER_API_URL:https://open.er-api.com/v6/latest/}
+    frankfurter-url: ${FX_FRANKFURTER_URL:https://api.frankfurter.dev/v1/latest}
 springdoc:
   api-docs:
     enabled: ${SPRINGDOC_ENABLED:true}

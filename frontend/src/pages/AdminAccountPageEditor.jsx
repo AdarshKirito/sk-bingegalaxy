@@ -20,6 +20,7 @@ import {
   defaultAccountPageContent,
   mergeAccountPageContent,
 } from '../content/accountPageDefaults';
+import { invalidateAccountPageContent } from '../hooks/useAccountPageContent';
 import './AdminAccountPageEditor.css';
 
 // ── Tiny helpers ──────────────────────────────────────────────────────────────
@@ -107,6 +108,9 @@ export default function AdminAccountPageEditor() {
       } else {
         await siteContentService.upsert(ACCOUNT_PAGE_CMS_SLUG, payload);
       }
+      // Customer pages cache this document per session — drop it so the editor's
+      // own browser (admin previewing as customer) sees the fresh copy too.
+      invalidateAccountPageContent();
       toast.success(
         isBingeMode
           ? 'Binge account page content saved. Customers viewing this venue will see the changes on their next page load.'

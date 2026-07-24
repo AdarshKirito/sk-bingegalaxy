@@ -106,6 +106,12 @@ public class LoyaltyV2BookingListener {
                     && evt.refundAmount() != null)
                     ? evt.refundAmount().divide(evt.totalAmount(), 4, RoundingMode.FLOOR)
                     : BigDecimal.ONE;
+            // Clamp to [0,1]: semantically we never reverse/refund MORE than 100% of the points
+            // earned/redeemed for this booking. Defends the REVERSE_REDEEM credit below (which is
+            // NOT balance-capped) against a misconfigured cancellation tier (refundPercentage > 100)
+            // or a bad event crediting the member free points.
+            if (proportion.compareTo(BigDecimal.ONE) > 0) proportion = BigDecimal.ONE;
+            if (proportion.signum() < 0) proportion = BigDecimal.ZERO;
 
             // ── 1. Refund REDEEMED points proportionally ────────────────
             //    The original REDEEM ledger entry is negative; we want the

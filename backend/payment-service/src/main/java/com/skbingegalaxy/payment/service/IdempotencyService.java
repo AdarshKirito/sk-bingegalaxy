@@ -44,9 +44,20 @@ import java.util.function.Supplier;
 @Slf4j
 public class IdempotencyService {
 
+    /** Marker status for a claim whose work has not completed yet. */
+    private static final int STATUS_IN_PROGRESS = 0;
+
+    /** How long an unfinished claim blocks concurrent duplicates before it is presumed crashed. */
+    private static final int IN_PROGRESS_TTL_MINUTES = 5;
+
     private final IdempotencyKeyRepository repository;
     private final ObjectMapper objectMapper;
     private final PaymentMetrics metrics;
+
+    /** Self-proxy so the REQUIRES_NEW claim/release methods go through AOP. */
+    @org.springframework.context.annotation.Lazy
+    @org.springframework.beans.factory.annotation.Autowired
+    private IdempotencyService self;
 
     @Value("${app.idempotency.ttl-hours:24}")
     private int ttlHours;
@@ -55,6 +66,14 @@ public class IdempotencyService {
      * Execute {@code work} at most once per (key, method, path, userId) tuple,
      * returning the cached response on replay. When {@code key} is blank the
      * caller is not requesting idempotency — {@code work} is invoked directly.
+     *
+     * <p>Concurrency (claim-first): an in-progress claim row is committed in
+     * its own transaction BEFORE the work runs, so two SIMULTANEOUS requests
+     * with the same key collide on the composite primary key — exactly one
+     * moves money; the other gets 409 (or the cached response once the winner
+     * finished). The previous check-then-act version only defended sequential
+     * retries. Crashed claims expire after {@value #IN_PROGRESS_TTL_MINUTES}
+     * minutes and become re-claimable.</p>
      */
     @Transactional
     public <T> T execute(String key,
@@ -72,6 +91,7 @@ public class IdempotencyService {
         }
 
         String payloadHash = sha256(safeSerialize(requestPayload));
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
 
         Optional<IdempotencyKey> existing = repository
             .findByIdempotencyKeyAndHttpMethodAndRequestPathAndUserId(key, httpMethod, requestPath, userId);
@@ -79,10 +99,10 @@ public class IdempotencyService {
         if (existing.isPresent()) {
             IdempotencyKey stored = existing.get();
             // Expired rows are treated as "not present" and replaced by the current run.
-            if (stored.getExpiresAt() != null && stored.getExpiresAt().isBefore(LocalDateTime.now(ZoneOffset.UTC))) {
+            if (stored.getExpiresAt() != null && stored.getExpiresAt().isBefore(now)) {
                 log.info("Idempotency key {} expired — re-running work", key);
-                repository.delete(stored);
-                // fall through to miss path
+                self.deleteRow(stored);
+                // fall through to claim path
             } else if (!stored.getRequestHash().equals(payloadHash)) {
                 metrics.idempotencyMismatch();
                 log.warn("Idempotency key {} reused with a different payload (method={}, path={}, user={})",
@@ -91,6 +111,12 @@ public class IdempotencyService {
                     "Idempotency-Key was previously used with a different request payload. "
                         + "Pick a new key for a new operation.",
                     HttpStatus.CONFLICT);
+            } else if (stored.getResponseBody() == null) {
+                // A null body is the in-progress marker: claims are inserted
+                // body-less and only completed work fills the response in.
+                throw new BusinessException(
+                    "A request with this Idempotency-Key is still being processed. Please retry shortly.",
+                    HttpStatus.CONFLICT);
             } else {
                 metrics.idempotencyHit();
                 log.debug("Idempotency hit for key {} (method={}, path={})", key, httpMethod, requestPath);
@@ -98,21 +124,51 @@ public class IdempotencyService {
             }
         }
 
-        T response = work.get();
+        // ── Claim ────────────────────────────────────────────────────────────
+        try {
+            self.insertClaim(key, httpMethod, requestPath, userId, payloadHash);
+        } catch (org.springframework.dao.DataIntegrityViolationException race) {
+            Optional<IdempotencyKey> winner = repository
+                .findByIdempotencyKeyAndHttpMethodAndRequestPathAndUserId(key, httpMethod, requestPath, userId);
+            if (winner.isPresent() && winner.get().getResponseBody() != null) {
+                if (!winner.get().getRequestHash().equals(payloadHash)) {
+                    metrics.idempotencyMismatch();
+                    throw new BusinessException(
+                        "Idempotency-Key was previously used with a different request payload. "
+                            + "Pick a new key for a new operation.",
+                        HttpStatus.CONFLICT);
+                }
+                metrics.idempotencyHit();
+                return deserialize(winner.get().getResponseBody(), responseType);
+            }
+            throw new BusinessException(
+                "A request with this Idempotency-Key is already being processed. Please retry shortly.",
+                HttpStatus.CONFLICT);
+        }
+
+        T response;
+        try {
+            response = work.get();
+        } catch (RuntimeException | Error e) {
+            try {
+                self.releaseClaim(key, httpMethod, requestPath, userId);
+            } catch (Exception releaseFailure) {
+                log.warn("Could not release idempotency claim after failure: {}", releaseFailure.getMessage());
+            }
+            throw e;
+        }
 
         try {
-            IdempotencyKey row = IdempotencyKey.builder()
-                .idempotencyKey(key)
-                .httpMethod(httpMethod)
-                .requestPath(requestPath)
-                .userId(userId)
-                .requestHash(payloadHash)
-                .responseStatus(200)
-                .responseBody(objectMapper.writeValueAsString(response))
-                .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusHours(ttlHours))
-                .build();
-            repository.save(row);
-            metrics.idempotencyStored();
+            IdempotencyKey row = repository
+                .findByIdempotencyKeyAndHttpMethodAndRequestPathAndUserId(key, httpMethod, requestPath, userId)
+                .orElse(null);
+            if (row != null) {
+                row.setResponseStatus(200);
+                row.setResponseBody(objectMapper.writeValueAsString(response));
+                row.setExpiresAt(LocalDateTime.now(ZoneOffset.UTC).plusHours(ttlHours));
+                repository.save(row);
+                metrics.idempotencyStored();
+            }
         } catch (JsonProcessingException e) {
             // Serialization failures are developer errors, not client errors.
             // We've already performed the real work — don't roll it back because
@@ -120,6 +176,35 @@ public class IdempotencyService {
             log.error("Failed to cache idempotency response for key {}: {}", key, e.getMessage());
         }
         return response;
+    }
+
+    /** Commits the in-progress claim immediately so concurrent duplicates collide on the PK. */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    public void insertClaim(String key, String httpMethod, String requestPath, Long userId, String payloadHash) {
+        repository.saveAndFlush(IdempotencyKey.builder()
+            .idempotencyKey(key)
+            .httpMethod(httpMethod)
+            .requestPath(requestPath)
+            .userId(userId)
+            .requestHash(payloadHash)
+            .responseStatus(STATUS_IN_PROGRESS)
+            .responseBody(null)
+            .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(IN_PROGRESS_TTL_MINUTES))
+            .build());
+    }
+
+    /** Frees a claim after the work failed — own transaction, the caller's is rolling back. */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    public void releaseClaim(String key, String httpMethod, String requestPath, Long userId) {
+        repository.findByIdempotencyKeyAndHttpMethodAndRequestPathAndUserId(key, httpMethod, requestPath, userId)
+            .filter(row -> row.getResponseBody() == null)
+            .ifPresent(repository::delete);
+    }
+
+    /** Deletes an expired row in its own transaction (see claim path). */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    public void deleteRow(IdempotencyKey row) {
+        repository.delete(row);
     }
 
     /** Hourly pruning of expired idempotency rows. Cluster-safe via ShedLock. */

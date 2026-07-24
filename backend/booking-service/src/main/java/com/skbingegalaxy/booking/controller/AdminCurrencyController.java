@@ -36,6 +36,7 @@ public class AdminCurrencyController {
     private static final String LOCK_TYPE = "CURRENCY";
 
     private final CurrencyService currencyService;
+    private final com.skbingegalaxy.booking.service.FxRateRefreshService fxRateRefreshService;
     private final HttpAuthorityLockClient lockClient;
 
     private boolean isSuperAdmin(String role) {
@@ -68,6 +69,24 @@ public class AdminCurrencyController {
     @GetMapping
     public ResponseEntity<ApiResponse<List<CurrencyRateDto>>> listAll() {
         return ResponseEntity.ok(ApiResponse.ok(currencyService.listAll()));
+    }
+
+    /**
+     * On-demand FX refresh (same code path as the 6-hourly scheduler). Rows with
+     * {@code manualOverride=true} are never touched. Returns a summary the UI
+     * shows as a toast ("Updated 12 rates from ER_API, 2 manual rates skipped").
+     */
+    @PostMapping("/refresh")
+    public ResponseEntity<ApiResponse<com.skbingegalaxy.booking.service.FxRateRefreshService.RefreshSummary>> refreshRates(
+            @RequestHeader("X-User-Role") String role) {
+        if (!isSuperAdmin(role)) {
+            return ResponseEntity.status(403).body(ApiResponse.error("Only super admins can manage currencies"));
+        }
+        var summary = fxRateRefreshService.refreshAll("ADMIN_MANUAL");
+        if (!summary.success()) {
+            return ResponseEntity.status(502).body(ApiResponse.error(summary.error()));
+        }
+        return ResponseEntity.ok(ApiResponse.ok("Rates refreshed", summary));
     }
 
     @PostMapping

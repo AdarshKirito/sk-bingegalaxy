@@ -28,10 +28,11 @@ public class PublicTaxController {
             @RequestParam("subtotal") BigDecimal subtotal,
             @RequestParam(value = "baseAmount",   required = false) BigDecimal baseAmount,
             @RequestParam(value = "addOnAmount",  required = false) BigDecimal addOnAmount,
-            @RequestParam(value = "guestAmount",  required = false) BigDecimal guestAmount) {
+            @RequestParam(value = "guestAmount",  required = false) BigDecimal guestAmount,
+            @RequestParam(value = "durationMinutes", required = false) Integer durationMinutes) {
         Long bingeId = BingeContext.getBingeId();
         TaxComputationResult result = taxService.compute(
-            bingeId,
+            taxService.venueContext(bingeId).durationMinutes(durationMinutes).build(),
             subtotal != null ? subtotal : BigDecimal.ZERO,
             baseAmount != null ? baseAmount : subtotal,
             addOnAmount != null ? addOnAmount : BigDecimal.ZERO,

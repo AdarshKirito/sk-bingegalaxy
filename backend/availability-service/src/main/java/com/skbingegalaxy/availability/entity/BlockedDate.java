@@ -7,6 +7,10 @@ import org.hibernate.annotations.CreationTimestamp;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
+// Venue-wide blocks only. Per-ROOM maintenance/hold windows live in
+// booking-service's room_blocks (V57) — that store is already enforced in the
+// room picker and every booking/reschedule path, so this service deliberately
+// does not duplicate room scoping.
 @Entity
 @Table(name = "blocked_dates", uniqueConstraints = {
     @UniqueConstraint(name = "uk_blocked_dates_binge_date", columnNames = {"bingeId", "blockedDate"})

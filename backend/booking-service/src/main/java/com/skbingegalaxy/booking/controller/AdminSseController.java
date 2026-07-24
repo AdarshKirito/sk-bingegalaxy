@@ -46,4 +46,21 @@ public class AdminSseController {
         log.info("Admin {} subscribed to SSE for binge {} ({})", adminId, binge.getId(), binge.getName());
         return eventBus.subscribe(binge.getId());
     }
+
+    /**
+     * A stale tab (or the platform entrance) opening the stream without a
+     * selected binge used to bubble a BusinessException out of the SSE
+     * handler; the JSON error body then couldn't be written into the preset
+     * {@code text/event-stream} response (HttpMessageNotWritableException),
+     * spamming a full stack trace per reconnect. Complete the stream quietly
+     * instead — the client's EventSource just closes and retries later, and
+     * the real 4xx contract of the other admin endpoints is untouched.
+     */
+    @ExceptionHandler(com.skbingegalaxy.common.exception.BusinessException.class)
+    public SseEmitter onScopeError(com.skbingegalaxy.common.exception.BusinessException ex) {
+        log.debug("SSE subscription rejected: {}", ex.getMessage());
+        SseEmitter emitter = new SseEmitter(0L);
+        emitter.complete();
+        return emitter;
+    }
 }

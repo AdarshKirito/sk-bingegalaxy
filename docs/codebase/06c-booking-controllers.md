@@ -16,13 +16,18 @@ The customer core. Reads: `{bookingRef}`, `my`/`my/current`/`my/past`, `my/revie
 public catalog (`event-types`, `add-ons`, `event-categories`, `addon-categories`,
 `booked-slots`, `slot-capacity`), `my-pricing`, `venue-rooms`/`venue-rooms/available`,
 `surge-rules`, `{ref}/timeline`. Writes: create is `POST /` (in this controller via the wizard
-payload), `{ref}/cancel` (customer self-cancel), `{ref}/reschedule`, `{ref}/transfer`,
+payload), `{ref}/cancel` (customer self-cancel), `{ref}/reschedule`,
 `recurring` + `recurring/{groupId}`, customer review GET/POST, and admin review GET/POST. Each
 write resolves the customer from the gateway `X-User-*` headers.
+> **Removed (July 2026):** the singular `POST /{ref}/transfer` endpoint was deleted (API-002) —
+> transfers now run exclusively through the consent flow at `/{ref}/transfers` (magic-link
+> accept).
 
-### `CheckoutController.java` — `/api/v1/bookings/checkout`
-`POST /preview` (→ `CheckoutQuoteService.preview`, the pre-commit total) and `POST /lock-fx`
-(→ `FxLockService.lockFx`, freezes an FX rate for the checkout window).
+### ~~`CheckoutController.java`~~ — REMOVED (July 2026)
+The whole checkout/FX-lock surface (`POST /checkout/preview`, `POST /checkout/lock-fx`,
+`FxLockService`, `FxRateLock`) was deleted in the PRICE-002 remediation. Pricing previews come
+from the server-computed booking totals; FX rates are pinned per booking at creation and
+auto-refreshed by `FxRateRefreshScheduler`.
 
 ### `SlotHoldController.java` — `/api/v1/bookings/slot-holds`
 Customer: `GET /{token}`, `DELETE /{token}` (release), `GET /my`. Admin: `GET /admin`,

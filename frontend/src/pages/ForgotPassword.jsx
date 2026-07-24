@@ -37,7 +37,7 @@ export default function ForgotPassword() {
 
         {sent ? (
           <div style={{ textAlign: 'center', padding: '1rem 0' }}>
-            <p style={{ color: 'var(--success)', marginBottom: '1rem' }}>✓ Reset instructions sent to {email}</p>
+            <p style={{ color: 'var(--success-text)', marginBottom: '1rem' }}>✓ Reset instructions sent to {email}</p>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
               Check your email for a reset link or OTP.
             </p>

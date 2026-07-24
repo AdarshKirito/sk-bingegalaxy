@@ -28,12 +28,14 @@ import java.time.ZoneOffset;
  * outcome. The first recorder wins; subsequent duplicates short-circuit
  * before any side effects.
  *
- * <p>A separate {@link #recordNew} call uses a {@code REQUIRES_NEW}
- * transaction so the dedup insert commits independently of the main callback
- * transaction. That way, if the main transaction later rolls back, we don't
- * lose the dedup record and re-process the same event on redelivery; if the
- * dedup insert fails for any reason, the main flow can continue (at worst
- * we'll see another duplicate delivery).
+ * <p>{@link #recordNew} JOINS the caller's transaction (PAY-008): the dedup
+ * marker and the business state it guards commit or roll back TOGETHER. A
+ * marker that outlives a rolled-back business transaction would permanently
+ * suppress redelivery of an event whose effects never happened — losing a
+ * capture, refund settlement or dispute transition forever. The reverse
+ * (marker rolls back with the business state) is safe because every webhook
+ * handler here is idempotent: redelivery re-runs against terminal-state
+ * checks under the payment row lock and converges.
  */
 @Service
 @RequiredArgsConstructor
@@ -55,13 +57,14 @@ public class WebhookDedupService {
     }
 
     /**
-     * Record a fresh event. Uses {@code REQUIRES_NEW} so the dedup record
-     * commits before the caller's outer transaction, guaranteeing that even
-     * a crash between this call and the caller's commit leaves the event
-     * marked as processed (the alternative — reprocessing on retry — is a
-     * duplicate-charge hazard and is worse).
+     * Record a fresh event IN the caller's transaction (PAY-008): "processed"
+     * becomes durable only together with the processing's effects. On a crash
+     * or rollback both vanish and the gateway's redelivery re-processes the
+     * event against idempotent handlers. Two concurrent deliveries race on the
+     * unique {@code (event_id, provider)} constraint — the loser's transaction
+     * rolls back wholesale and its redelivery short-circuits as a duplicate.
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.REQUIRED)
     public void recordNew(String eventId, String payload) {
         if (eventId == null || eventId.isBlank()) return;
         try {

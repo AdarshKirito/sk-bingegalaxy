@@ -19,6 +19,15 @@ public interface AdminApprovalRequestRepository
     Page<AdminApprovalRequest> findByActionTypeAndStatusOrderByRequestedAtDesc(
             String actionType, AdminApprovalRequest.Status status, Pageable pageable);
 
+    // Tenant-scoped variants (SEC-010): binge admins may only ever see their
+    // own binge's approval rows. The unscoped queries above are reserved for
+    // the SUPER_ADMIN platform view.
+    Page<AdminApprovalRequest> findByBingeIdAndStatusOrderByRequestedAtDesc(
+            Long bingeId, AdminApprovalRequest.Status status, Pageable pageable);
+
+    Page<AdminApprovalRequest> findByBingeIdAndActionTypeAndStatusOrderByRequestedAtDesc(
+            Long bingeId, String actionType, AdminApprovalRequest.Status status, Pageable pageable);
+
     /**
      * Bulk-fail any approval requests whose TTL has passed without a decision.
      * Run by a scheduler. Safe to run frequently — uses the indexed status +

@@ -391,10 +391,10 @@ public class EventListener {
             Date: %s
             Start Time: %s
             Duration: %d hours
-            Total Amount: ₹%.2f
-            
+            Total Amount: %s %.2f
+
             Please complete payment to secure your reservation.
-            
+
             Thank you,
             SK Binge Galaxy Team""",
             event.getCustomerName(),
@@ -403,6 +403,9 @@ public class EventListener {
             event.getBookingDate(),
             event.getStartTime(),
             event.getDurationHours(),
+            // Amount is denominated in the BINGE's native currency; old events
+            // on the wire predate the currency field, so fall back to INR.
+            event.getCurrency() != null ? event.getCurrency() : "INR",
             event.getTotalAmount().doubleValue()
         );
     }
@@ -430,15 +433,16 @@ public class EventListener {
             
             Booking Reference: %s
             Transaction ID: %s
-            Amount: ₹%.2f
+            Amount: %s %.2f
             Payment Method: %s
-            
+
             Your booking is now fully confirmed. We look forward to hosting you!
-            
+
             Thank you,
             SK Binge Galaxy Team""",
             event.getBookingRef(),
             event.getTransactionId(),
+            event.getCurrency() != null ? event.getCurrency() : "INR",
             event.getAmount().doubleValue(),
             event.getPaymentMethod()
         );

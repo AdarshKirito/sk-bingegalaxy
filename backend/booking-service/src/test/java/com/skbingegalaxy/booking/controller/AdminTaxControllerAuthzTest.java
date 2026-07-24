@@ -26,8 +26,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Verifies the controller-layer gate that prevents binge admins from editing
- * or deleting GLOBAL (binge_id IS NULL) tax rules. Only SUPER_ADMIN may.
+ * Verifies the controller-layer governance gate: tax management (binge-scoped
+ * AND global) is SUPER_ADMIN-only. Regular binge admins get 403 on every
+ * mutation — tax configuration is a platform-compliance concern (see the
+ * controller javadoc for the governance-tightening rationale).
  */
 @WebMvcTest(controllers = AdminTaxController.class,
     excludeAutoConfiguration = {
@@ -61,8 +63,6 @@ class AdminTaxControllerAuthzTest {
 
     @Test
     void update_global_byAdmin_returns403() throws Exception {
-        when(taxService.isGlobalRule(GLOBAL_RULE_ID)).thenReturn(true);
-
         mockMvc.perform(put(URL_GLOBAL)
                 .header("X-User-Role", "ADMIN")
                 .header("X-User-Id", "500")
@@ -70,21 +70,19 @@ class AdminTaxControllerAuthzTest {
                 .content(objectMapper.writeValueAsString(sampleDto())))
             .andExpect(status().isForbidden())
             .andExpect(jsonPath("$.message").value(
-                "Only super admins can edit global tax rules"));
+                "Only super admins can manage tax rules"));
 
         verify(taxService, never()).updateRule(anyLong(), any());
     }
 
     @Test
     void delete_global_byAdmin_returns403() throws Exception {
-        when(taxService.isGlobalRule(GLOBAL_RULE_ID)).thenReturn(true);
-
         mockMvc.perform(delete(URL_GLOBAL)
                 .header("X-User-Role", "ADMIN")
                 .header("X-User-Id", "500"))
             .andExpect(status().isForbidden())
             .andExpect(jsonPath("$.message").value(
-                "Only super admins can delete global tax rules"));
+                "Only super admins can manage tax rules"));
 
         verify(taxService, never()).deleteRule(anyLong());
     }
@@ -117,33 +115,31 @@ class AdminTaxControllerAuthzTest {
     }
 
     @Test
-    void update_bingeScoped_byAdmin_proceeds() throws Exception {
-        // For binge-owned rules the controller does NOT short-circuit: the
-        // service-layer scope check enforces ownership. Verify the gate
-        // doesn't accidentally fire here.
-        when(taxService.isGlobalRule(BINGE_RULE_ID)).thenReturn(false);
-        when(taxService.updateRule(eqLong(BINGE_RULE_ID), any())).thenReturn(sampleDto());
-
+    void update_bingeScoped_byAdmin_returns403() throws Exception {
+        // Governance tightening: even BINGE-scoped rules are super-admin-only.
+        // A regular admin must be rejected before the service layer is reached.
         mockMvc.perform(put(URL_BINGE)
                 .header("X-User-Role", "ADMIN")
                 .header("X-User-Id", "500")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(sampleDto())))
-            .andExpect(status().isOk());
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.message").value(
+                "Only super admins can manage tax rules"));
 
-        verify(taxService).updateRule(eqLong(BINGE_RULE_ID), any());
+        verify(taxService, never()).updateRule(anyLong(), any());
     }
 
     @Test
-    void delete_bingeScoped_byAdmin_proceeds() throws Exception {
-        when(taxService.isGlobalRule(BINGE_RULE_ID)).thenReturn(false);
-
+    void delete_bingeScoped_byAdmin_returns403() throws Exception {
         mockMvc.perform(delete(URL_BINGE)
                 .header("X-User-Role", "ADMIN")
                 .header("X-User-Id", "500"))
-            .andExpect(status().isOk());
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.message").value(
+                "Only super admins can manage tax rules"));
 
-        verify(taxService).deleteRule(BINGE_RULE_ID);
+        verify(taxService, never()).deleteRule(anyLong());
     }
 
     private static long eqLong(long v) {

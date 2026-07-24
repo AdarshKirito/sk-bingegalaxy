@@ -1,9 +1,20 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-export default function Modal({ open, onClose, title, children, style }) {
+/**
+ * Shared modal on the native <dialog> element (focus trap, focus restore and
+ * aria-modal come free from showModal()).
+ *
+ * Dismissal follows the WAI-ARIA dialog pattern: a single Escape press or a
+ * single backdrop click closes the dialog. Modals holding unsaved input can
+ * opt into `confirmClose` — the first Escape/backdrop attempt then arms a
+ * short confirmation window (announced via aria-live for screen readers) and
+ * only a second attempt closes.
+ */
+export default function Modal({ open, onClose, title, children, style, confirmClose = false }) {
   const dialogRef = useRef(null);
-  const backdropClickCount = useRef(0);
-  const backdropTimer = useRef(null);
+  const dismissCount = useRef(0);
+  const dismissTimer = useRef(null);
+  const [confirmHint, setConfirmHint] = useState(false);
 
   useEffect(() => {
     if (!dialogRef.current) return;
@@ -14,41 +25,45 @@ export default function Modal({ open, onClose, title, children, style }) {
     }
   }, [open]);
 
+  const requestClose = () => {
+    if (!confirmClose) {
+      onClose?.();
+      return;
+    }
+    dismissCount.current += 1;
+    if (dismissCount.current >= 2) {
+      dismissCount.current = 0;
+      clearTimeout(dismissTimer.current);
+      setConfirmHint(false);
+      onClose?.();
+    } else {
+      setConfirmHint(true);
+      clearTimeout(dismissTimer.current);
+      dismissTimer.current = setTimeout(() => {
+        dismissCount.current = 0;
+        setConfirmHint(false);
+      }, 3000);
+    }
+  };
+
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
     const handleCancel = (e) => {
       e.preventDefault();
-      // Require double-press of Escape to close
-      backdropClickCount.current += 1;
-      if (backdropClickCount.current >= 2) {
-        backdropClickCount.current = 0;
-        clearTimeout(backdropTimer.current);
-        onClose?.();
-      } else {
-        clearTimeout(backdropTimer.current);
-        backdropTimer.current = setTimeout(() => { backdropClickCount.current = 0; }, 600);
-      }
+      requestClose();
     };
     dialog.addEventListener('cancel', handleCancel);
     return () => {
       dialog.removeEventListener('cancel', handleCancel);
-      clearTimeout(backdropTimer.current);
+      clearTimeout(dismissTimer.current);
     };
-  }, [onClose]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onClose, confirmClose]);
 
   const handleBackdropClick = (e) => {
     if (e.target !== dialogRef.current) return;
-    // Require double-tap on backdrop to close
-    backdropClickCount.current += 1;
-    if (backdropClickCount.current >= 2) {
-      backdropClickCount.current = 0;
-      clearTimeout(backdropTimer.current);
-      onClose?.();
-    } else {
-      clearTimeout(backdropTimer.current);
-      backdropTimer.current = setTimeout(() => { backdropClickCount.current = 0; }, 600);
-    }
+    requestClose();
   };
 
   if (!open) return null;
@@ -72,6 +87,18 @@ export default function Modal({ open, onClose, title, children, style }) {
               style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: 'var(--text-muted)', padding: '0.25rem' }}>
               &times;
             </button>
+          </div>
+        )}
+        {confirmClose && (
+          <div role="status" aria-live="assertive" style={{ position: 'absolute', top: '0.5rem', left: '50%', transform: 'translateX(-50%)' }}>
+            {confirmHint && (
+              <span style={{
+                background: 'var(--bg-secondary, rgba(0,0,0,0.75))', color: 'var(--text)',
+                padding: '0.25rem 0.75rem', borderRadius: '4px', fontSize: '0.85em', whiteSpace: 'nowrap',
+              }}>
+                You may have unsaved changes — press Escape again to close
+              </span>
+            )}
           </div>
         )}
         {children}

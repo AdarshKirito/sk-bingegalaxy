@@ -4,6 +4,7 @@ import { adminService, toArray } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import { FiTrash2 } from 'react-icons/fi';
 import './AdminPages.css';
+import { venueMoney } from '../utils/venueLocale';
 
 export default function AdminRateCodes() {
   const [searchParams] = useSearchParams();
@@ -177,7 +178,7 @@ export default function AdminRateCodes() {
                     <tr key={ep.eventTypeId} style={{ borderBottom: '1px solid var(--border)' }}>
                       <td style={{ padding: '0.5rem' }}>
                         {ep.eventTypeName}
-                        {def && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Default: ₹{def.basePrice} / ₹{def.hourlyRate}/hr / ₹{def.pricePerGuest}/guest</span>}
+                        {def && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Default: {venueMoney(def.basePrice)} / {venueMoney(def.hourlyRate)}/hr / {venueMoney(def.pricePerGuest)}/guest</span>}
                       </td>
                       <td style={{ padding: '0.5rem', textAlign: 'right' }}>
                         <input type="number" step="0.01" style={smallInputStyle} value={ep.basePrice}
@@ -218,7 +219,7 @@ export default function AdminRateCodes() {
                     <tr key={ap.addOnId} style={{ borderBottom: '1px solid var(--border)' }}>
                       <td style={{ padding: '0.5rem' }}>
                         {ap.addOnName}
-                        {def && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Default: ₹{def.price}</span>}
+                        {def && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Default: {venueMoney(def.price)}</span>}
                       </td>
                       <td style={{ padding: '0.5rem', textAlign: 'right' }}>
                         <input type="number" step="0.01" style={smallInputStyle} value={ap.price}
@@ -313,9 +314,9 @@ export default function AdminRateCodes() {
                           {rc.eventPricings.map(ep => (
                             <tr key={ep.eventTypeId} style={{ borderBottom: '1px solid var(--border)' }}>
                               <td style={{ padding: '0.3rem' }}>{ep.eventTypeName}</td>
-                              <td style={{ padding: '0.3rem', textAlign: 'right' }}>₹{ep.basePrice}</td>
-                              <td style={{ padding: '0.3rem', textAlign: 'right' }}>₹{ep.hourlyRate}/hr</td>
-                              <td style={{ padding: '0.3rem', textAlign: 'right' }}>₹{ep.pricePerGuest}</td>
+                              <td style={{ padding: '0.3rem', textAlign: 'right' }}>{venueMoney(ep.basePrice)}</td>
+                              <td style={{ padding: '0.3rem', textAlign: 'right' }}>{venueMoney(ep.hourlyRate)}/hr</td>
+                              <td style={{ padding: '0.3rem', textAlign: 'right' }}>{venueMoney(ep.pricePerGuest)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -334,7 +335,7 @@ export default function AdminRateCodes() {
                           {rc.addonPricings.map(ap => (
                             <tr key={ap.addOnId} style={{ borderBottom: '1px solid var(--border)' }}>
                               <td style={{ padding: '0.3rem' }}>{ap.addOnName}</td>
-                              <td style={{ padding: '0.3rem', textAlign: 'right' }}>₹{ap.price}</td>
+                              <td style={{ padding: '0.3rem', textAlign: 'right' }}>{venueMoney(ap.price)}</td>
                             </tr>
                           ))}
                         </tbody>

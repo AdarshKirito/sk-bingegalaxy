@@ -5,6 +5,7 @@ import { useConfirm } from '../components/ui/ConfirmProvider';
 import { toast } from 'react-toastify';
 import { FiRefreshCw, FiRotateCcw, FiDollarSign, FiExternalLink } from 'react-icons/fi';
 import './AdminPages.css';
+import { venueMoney, venueDateTime } from '../utils/venueLocale';
 
 /**
  * Failed-refund queue.
@@ -21,8 +22,10 @@ import './AdminPages.css';
  * Binge-scoped server-side (X-Binge-Id) — renders inside the admin-binge shell.
  */
 
-const fmt = (v) => (v == null ? '—' : new Date(v).toLocaleString());
-const money = (v) => (v == null ? '—' : `₹${Number(v).toLocaleString()}`);
+// Venue-scoped: refunds belong to the selected binge, so timestamps render in
+// the VENUE's timezone and amounts in the VENUE's currency.
+const fmt = (v) => (v == null ? '—' : venueDateTime(v));
+const money = (v) => (v == null ? '—' : venueMoney(v));
 
 export default function AdminFailedRefunds() {
   const confirm = useConfirm();
@@ -140,7 +143,7 @@ export default function AdminFailedRefunds() {
                     {r.bookingRef && (
                       <div>
                         <strong>Booking:</strong>{' '}
-                        <Link to={`/admin/bookings?ref=${encodeURIComponent(r.bookingRef)}`} style={{ color: 'var(--primary)' }}>
+                        <Link to={`/admin/bookings?ref=${encodeURIComponent(r.bookingRef)}`} style={{ color: 'var(--primary-text)' }}>
                           {r.bookingRef} <FiExternalLink style={{ verticalAlign: '-2px' }} />
                         </Link>
                       </div>

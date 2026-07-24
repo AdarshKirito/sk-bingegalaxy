@@ -39,6 +39,8 @@ public class LoyaltyMemberService {
     private final PointsWalletService walletService;
     private final RedeemEngine redeemEngine;
     private final LoyaltyPointsWalletRepository walletRepository;
+    private final LoyaltyBingeBindingRepository bindingRepository;
+    private final LoyaltyLedgerEntryRepository ledgerRepository;
 
     private static final List<String> STUB_TIER_ORDER =
             List.of(LoyaltyV2Constants.TIER_BRONZE, LoyaltyV2Constants.TIER_SILVER,
@@ -215,6 +217,80 @@ public class LoyaltyMemberService {
             ));
         }
         return getMemberProfile(customerId);
+    }
+
+    // ── Binge admin: goodwill (service-recovery) credit ──────────────────
+
+    /** Remaining goodwill budget for a binge in the current calendar month (UTC). */
+    public record GoodwillBudget(boolean enabled, long monthlyCapPoints,
+                                 long usedThisMonth, long remaining) {}
+
+    @Transactional(readOnly = true)
+    public GoodwillBudget goodwillBudget(Long bingeId) {
+        LoyaltyProgram program = configService.requireDefaultProgram();
+        LoyaltyBingeBinding binding = bindingRepository
+                .findByProgramIdAndBingeId(program.getId(), bingeId).orElse(null);
+        if (binding == null || !binding.isGoodwillEnabled()) {
+            return new GoodwillBudget(false, 0, 0, 0);
+        }
+        long used = ledgerRepository.sumPointsByBingeAndTypeSince(
+                bingeId, LoyaltyV2Constants.LEDGER_GOODWILL, startOfMonthUtc());
+        return new GoodwillBudget(true, binding.getGoodwillMonthlyCapPoints(), used,
+                Math.max(0, binding.getGoodwillMonthlyCapPoints() - used));
+    }
+
+    /**
+     * Binge-admin service-recovery credit: "we disappointed this guest — give
+     * them points". Unlike {@link #adjustPoints} (super-admin, unbounded),
+     * goodwill is gated per binge by a super-admin-granted permission and a
+     * monthly points budget, and the ledger entry is stamped with the binge so
+     * spend is auditable per venue.
+     */
+    @Transactional
+    public MemberProfile grantGoodwill(Long customerId, Long bingeId, long points,
+                                       String reason, String bookingRef, Long adminId) {
+        if (points <= 0) throw new BusinessException("Goodwill points must be positive");
+        if (reason == null || reason.isBlank()) {
+            throw new BusinessException("A reason is required for goodwill credits");
+        }
+        GoodwillBudget budget = goodwillBudget(bingeId);
+        if (!budget.enabled()) {
+            throw new BusinessException(
+                "Goodwill credits are not enabled for this binge. Ask a super admin to "
+                + "grant the permission in the Loyalty Center.");
+        }
+        if (points > budget.remaining()) {
+            throw new BusinessException("Goodwill budget exceeded: " + budget.remaining()
+                + " of " + budget.monthlyCapPoints() + " points remain this month.");
+        }
+
+        LoyaltyMembership m = enrollmentService.findForCustomer(customerId)
+                .orElseGet(() -> enrollmentService.enrollExplicit(
+                        customerId, LoyaltyV2Constants.ENROLL_ADMIN_IMPORT));
+
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+        LoyaltyProgram program = configService.requireDefaultProgram();
+        String idempotencyKey = "goodwill:" + bingeId + ":" + customerId + ":"
+                + now.toEpochSecond(ZoneOffset.UTC) + ":" + points;
+
+        walletService.credit(new PointsWalletService.CreditRequest(
+                m.getId(), points,
+                LoyaltyV2Constants.LEDGER_GOODWILL, "SERVICE_RECOVERY",
+                "goodwill:binge=" + bingeId,
+                bingeId, bookingRef,
+                now, now.plusDays(program.getPointsExpiryDays()),
+                idempotencyKey, null,
+                "GOODWILL", reason.trim(),
+                adminId, "ADMIN"
+        ));
+        log.info("[loyalty-v2] GOODWILL binge={} customer={} points={} by admin {} ({})",
+                bingeId, customerId, points, adminId, reason.trim());
+        return getMemberProfile(customerId);
+    }
+
+    private static LocalDateTime startOfMonthUtc() {
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+        return now.toLocalDate().withDayOfMonth(1).atStartOfDay();
     }
 
     // ── Private helpers ───────────────────────────────────────────────────

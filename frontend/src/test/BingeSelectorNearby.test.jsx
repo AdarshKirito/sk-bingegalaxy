@@ -20,6 +20,17 @@ vi.mock('../context/BingeContext', () => ({
   useBinge: () => ({ selectedBinge: null, selectBinge: mockSelectBinge, clearBinge: vi.fn() }),
 }));
 
+// BingeSelector reads the signed-in user for its greeting/guard copy.
+vi.mock('../context/AuthContext', () => ({
+  useAuth: () => ({
+    user: { id: 1, firstName: 'Test', email: 'test@example.com' },
+    isAuthenticated: true,
+    isAdmin: false,
+    isSuperAdmin: false,
+    loading: false,
+  }),
+}));
+
 vi.mock('../services/endpoints', () => ({
   bookingService: {
     getAllActiveBinges: mockGetAllActiveBinges,

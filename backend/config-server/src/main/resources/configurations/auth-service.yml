@@ -21,7 +21,7 @@ internal:
     # allowing a delegated admin to mutate a locked resource). No default
     # — boot fails fast if not provided so we never silently run with a
     # well-known placeholder.
-    secret: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET must be set}
+    secret: ${INTERNAL_API_SECRET}
 
 spring:
   servlet:
@@ -30,10 +30,18 @@ spring:
       max-request-size: 2MB
   application:
     name: auth-service
+  # Shared with the API gateway: session-revocation denylist (auth:revoked-sid:*).
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      password: ${SPRING_DATA_REDIS_PASSWORD:}
+      timeout: 2s
+      connect-timeout: 2s
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/auth_db}
     username: ${SPRING_DATASOURCE_USERNAME:auth_svc}
-    password: ${SPRING_DATASOURCE_PASSWORD:?SPRING_DATASOURCE_PASSWORD must be set}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:8}
@@ -106,6 +114,20 @@ app:
   cookie:
     secure: ${COOKIE_SECURE:true}
     domain: ${COOKIE_DOMAIN:}
+  crypto:
+    # AES-256 key (base64, exactly 32 bytes) encrypting TOTP secrets at rest.
+    # Generate with: openssl rand -base64 32
+    # If empty, the key is DERIVED from JWT_SECRET so encryption is still applied —
+    # but rotating JWT_SECRET would then make every enrolled TOTP secret
+    # undecryptable. Set this explicitly before enrolling users in production.
+    secret-key: ${CRYPTO_SECRET_KEY:}
+  totp:
+    issuer: ${TOTP_ISSUER:SK Binge Galaxy}
+    # Brute-force throttle. A 6-digit code with a +/-1 step window leaves only 3
+    # valid codes per million at any instant, so an unthrottled verify endpoint is
+    # guessable; these cap the search.
+    max-failed-attempts: ${TOTP_MAX_FAILED_ATTEMPTS:5}
+    lock-minutes: ${TOTP_LOCK_MINUTES:15}
   admin:
     email: ${ADMIN_EMAIL:admin@skbingegalaxy.com}
     password: ${ADMIN_PASSWORD}
@@ -114,9 +136,11 @@ app:
   google:
     client-id: ${GOOGLE_CLIENT_ID}
   recaptcha:
-    # Google reCAPTCHA v3 secret key. Must be set in production.
-    # In dev/test, the StubCaptchaValidationService bypasses this.
-    secret-key: ${RECAPTCHA_SECRET_KEY:changeme-dev-only-stub-is-used}
+    # Google reCAPTCHA v3 secret key. No default: only the production-profile
+    # RecaptchaValidationService binds this, so a production boot fails fast
+    # when the key is unset instead of validating against a placeholder.
+    # Dev/test uses StubCaptchaValidationService, which never reads it.
+    secret-key: ${RECAPTCHA_SECRET_KEY}
     # v3 score threshold: 0.0 (bot) to 1.0 (human). Default 0.5.
     score-threshold: ${RECAPTCHA_SCORE_THRESHOLD:0.5}
   otp:

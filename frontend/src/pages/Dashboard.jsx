@@ -2,34 +2,31 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { useAuth } from '../context/AuthContext';
-import { authService, bookingService, paymentService } from '../services/endpoints';
+import { bookingService, paymentService } from '../services/endpoints';
 import { formatTime12h } from '../utils/format';
-import { useFormatMoney } from '../context/CurrencyContext';
+import { useVenueLocale } from '../hooks/useVenueLocale';
 import { normalizeDashboardExperience } from '../services/dashboardExperience';
 import useBingeStore from '../stores/bingeStore';
-import {
-  EXPERIENCE_STEPS,
-  HELP_FAQS,
-  mergeSupportContact,
-  MEMBER_OFFERS,
-} from '../services/customerExperience';
+import { useAccountPageContent, spliceHours } from '../hooks/useAccountPageContent';
 import { FiCalendar, FiClock, FiArrowLeft, FiArrowRight, FiCreditCard, FiMapPin, FiDollarSign, FiTag, FiGift, FiHeart, FiStar, FiFilm, FiBriefcase, FiSmile, FiRepeat, FiShield, FiUser, FiMessageCircle } from 'react-icons/fi';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import Pagination from '../components/ui/Pagination';
 import SEO from '../components/SEO';
+import { countPastVisits, paidVisitCount, completedVisitSpend } from '../utils/bookings';
 import './Dashboard.css';
 
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { selectedBinge } = useBingeStore();
+  // CMS-driven help/benefits/trust copy — binge override → global → defaults.
+  const { content: pageContent } = useAccountPageContent(selectedBinge?.id);
   const [currentBookings, setCurrentBookings] = useState([]);
   const [pastBookings, setPastBookings] = useState([]);
   const [payments, setPayments] = useState([]); // Removed unused state
   const [eventTypes, setEventTypes] = useState([]);
   const [dashboardExperience, setDashboardExperience] = useState(() => normalizeDashboardExperience(null));
   const [myPricing, setMyPricing] = useState(null);
-  const [supportContact, setSupportContact] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loyaltyAccount, setLoyaltyAccount] = useState(null);
   const [page, setPage] = useState(1);
@@ -46,7 +43,6 @@ export default function Dashboard() {
 
   useEffect(() => {
     const loads = [
-      authService.getSupportContact().then(r => setSupportContact(r.data.data || null)).catch(() => null),
       bookingService.getCurrentBookings().then(r => setCurrentBookings(toList(r.data?.data ?? r.data))).catch(() => null),
       bookingService.getPastBookings().then(r => setPastBookings(toList(r.data?.data ?? r.data))).catch(() => null),
       paymentService.getMyPayments().then(r => setPayments(toList(r.data?.data ?? r.data))).catch(() => null),
@@ -74,11 +70,12 @@ export default function Dashboard() {
   const paged = sortedCurrentBookings.slice((page - 1) * perPage, page * perPage);
 
   const upcomingCount = currentBookings.length;
-  const pastCount = pastBookings.length;
-  const totalSpend = pastBookings
-    .filter(b => b.paymentStatus === 'SUCCESS')
-    .reduce((sum, b) => sum + (b.totalAmount || 0), 0);
-  const support = mergeSupportContact(supportContact, selectedBinge);
+  // "Past Visits" counts actual attended visits only. The past feed also carries
+  // cancelled / no-show / lapsed-unpaid bookings (needed by My Bookings and
+  // Payments); those are history, not visits. See utils/bookings.
+  const pastCount = countPastVisits(pastBookings);
+  const paidVisits = paidVisitCount(pastBookings);
+  const totalSpend = completedVisitSpend(pastBookings);
   const loyaltyTier = loyaltyAccount?.tierLevel || 'BRONZE';
   const pricingLabel = myPricing?.pricingSource === 'CUSTOMER'
     ? (myPricing.memberLabel || 'Custom')
@@ -115,9 +112,11 @@ export default function Dashboard() {
     if (lowerName.includes('hd') || lowerName.includes('screen')) return { tag: 'Movie Night', blurb: 'Keep it simple and cinematic with a focused private-screening setup.', theme: 'cinema' };
     return { tag: 'Private Event', blurb: 'Shape the room around your plan instead of fitting into a public showtime.', theme: 'luxury' };
   };
-  // Informational amounts render in the customer's selected display currency
-  // (CurrencySwitcher). All values here are base-INR; formatMoney converts + formats.
-  const formatAmount = useFormatMoney();
+  // NATIVE per-binge currency model: every amount on this dashboard belongs to
+  // the selected binge and is ALREADY denominated in that binge's currency —
+  // formatting only picks the right symbol/decimals, never converts.
+  const { money } = useVenueLocale();
+  const formatAmount = (amount, source) => money(amount, source);
   const formatDuration = (booking) => {
     const totalMinutes = booking?.durationMinutes || ((booking?.durationHours || 0) * 60);
     if (!totalMinutes) return 'Flexible duration';
@@ -445,7 +444,7 @@ export default function Dashboard() {
             </div>
             <div>
               <span>Paid bookings</span>
-              <strong>{loading ? '–' : pastBookings.filter(b => b.paymentStatus === 'SUCCESS').length}</strong>
+              <strong>{loading ? '–' : paidVisits}</strong>
             </div>
           </div>
         </article>
@@ -477,7 +476,7 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="dash-loyalty-offers">
-              {MEMBER_OFFERS.map((offer) => (
+              {pageContent.memberOffers.map((offer) => (
                 <article key={offer.title} className="dash-loyalty-offer">
                   <span className="dash-card-kicker">{offer.title}</span>
                   <h3>{offer.title}</h3>
@@ -486,23 +485,30 @@ export default function Dashboard() {
               ))}
             </div>
           )}
+          <div className="dash-inline-actions">
+            <Link to="/help/benefits" className="btn btn-secondary btn-sm">More <FiArrowRight /></Link>
+          </div>
         </article>
 
         <article className="dash-help-card card">
           <div className="dash-section-header">
             <div>
               <span className="dash-section-kicker">Help and trust</span>
-              <h2>Support is visible before anything goes wrong</h2>
+              <h2>{pageContent.helpAndTrustHeading}</h2>
             </div>
           </div>
           <div className="dash-help-points">
-            <p><FiShield /> Payment, cancellation, and schedule questions are easiest to resolve before the booking date.</p>
-            <p><FiMessageCircle /> WhatsApp support is the fastest route for booking changes during {support.hours}.</p>
-            <p><FiUser /> Account preferences and celebration reminders now live in one dedicated account area.</p>
+            {pageContent.helpAndTrustPoints.map((point, idx) => (
+              <p key={point}>
+                {idx === 0 ? <FiShield /> : idx === 1 ? <FiMessageCircle /> : <FiUser />}{' '}
+                {spliceHours(point, pageContent.supportHours)}
+              </p>
+            ))}
           </div>
           <div className="dash-inline-actions">
             <Link to="/account" className="btn btn-primary btn-sm">Manage Account</Link>
             <Link to="/my-bookings" className="btn btn-secondary btn-sm">Open Booking Control</Link>
+            <Link to="/help/support" className="btn btn-secondary btn-sm">More <FiArrowRight /></Link>
           </div>
         </article>
       </section>
@@ -686,12 +692,15 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="dash-faq-list">
-            {HELP_FAQS.slice(0, 3).map((item) => (
+            {pageContent.faqs.slice(0, 3).map((item) => (
               <article key={item.question} className="dash-faq-item">
                 <h3>{item.question}</h3>
                 <p>{item.answer}</p>
               </article>
             ))}
+          </div>
+          <div className="dash-inline-actions">
+            <Link to="/help/faq" className="btn btn-secondary btn-sm">More <FiArrowRight /></Link>
           </div>
         </article>
 
@@ -703,10 +712,13 @@ export default function Dashboard() {
             </div>
           </div>
           <ol className="dash-steps-list">
-            {EXPERIENCE_STEPS.map((step) => (
+            {pageContent.howItWorksSteps.map((step) => (
               <li key={step}>{step}</li>
             ))}
           </ol>
+          <div className="dash-inline-actions">
+            <Link to="/help/how-it-works" className="btn btn-secondary btn-sm">More <FiArrowRight /></Link>
+          </div>
         </article>
       </section>
     </div>

@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { adminService, authService, toArray } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import './AdminPages.css';
+import { venueMoney } from '../utils/venueLocale';
 
 export default function AdminCustomerPricing() {
   const [searchParams] = useSearchParams();
@@ -258,7 +259,7 @@ export default function AdminCustomerPricing() {
                         {cust.rateCodeName}
                       </span>
                     )}
-                    {cust.dirty && <span style={{ marginLeft: '0.5rem', fontSize: '0.7rem', color: 'var(--warning)' }}>• unsaved</span>}
+                    {cust.dirty && <span style={{ marginLeft: '0.5rem', fontSize: '0.7rem', color: 'var(--warning-text)' }}>• unsaved</span>}
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '0.4rem' }}>
@@ -308,7 +309,7 @@ export default function AdminCustomerPricing() {
                             <tr key={ep.eventTypeId} style={{ borderBottom: '1px solid var(--border)' }}>
                               <td style={{ padding: '0.4rem' }}>
                                 {ep.eventTypeName}
-                                {def && <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block' }}>Default: ₹{def.basePrice} / ₹{def.hourlyRate}/hr</span>}
+                                {def && <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block' }}>Default: {venueMoney(def.basePrice)} / {venueMoney(def.hourlyRate)}/hr</span>}
                               </td>
                               <td style={{ padding: '0.4rem', textAlign: 'right' }}>
                                 <input type="number" step="0.01" style={smallInputStyle} value={ep.basePrice}
@@ -346,7 +347,7 @@ export default function AdminCustomerPricing() {
                             <tr key={ap.addOnId} style={{ borderBottom: '1px solid var(--border)' }}>
                               <td style={{ padding: '0.4rem' }}>
                                 {ap.addOnName}
-                                {def && <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block' }}>Default: ₹{def.price}</span>}
+                                {def && <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block' }}>Default: {venueMoney(def.price)}</span>}
                               </td>
                               <td style={{ padding: '0.4rem', textAlign: 'right' }}>
                                 <input type="number" step="0.01" style={smallInputStyle} value={ap.price}

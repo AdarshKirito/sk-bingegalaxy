@@ -104,3 +104,50 @@
   font-size: 0.75rem;
   color: var(--text-muted, #9ca3af);
 }
+
+/* ── Venue location (address-derived map pin) ── */
+.venue-loc-status {
+  margin: 0.5rem 0 0.2rem;
+  font-size: 0.85rem;
+}
+.venue-loc-set {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--success, #16a34a); font-weight: 600;
+}
+.venue-loc-unset {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--text-muted, #6b7280);
+}
+.venue-loc-actions {
+  display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem;
+}
+
+/* ── Per-day operating hours ── */
+.oh-toolbar { margin: 0.4rem 0 0.6rem; }
+.oh-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.oh-row {
+  display: grid;
+  grid-template-columns: 7.5rem 6rem 1fr;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  background: var(--bg-card, #fff);
+}
+.oh-row-closed { opacity: 0.75; }
+.oh-day { font-weight: 600; font-size: 0.88rem; color: var(--text, #1f2937); }
+.oh-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer; color: var(--text-muted, #6b7280); }
+.oh-toggle input { cursor: pointer; }
+.oh-times { display: inline-flex; align-items: center; gap: 0.5rem; }
+.oh-times input[type="time"] {
+  padding: 0.35rem 0.5rem; border-radius: 6px;
+  border: 1px solid var(--border, #e5e7eb);
+  background: var(--bg-input, #fff); color: var(--text, #1f2937);
+}
+.oh-sep { color: var(--text-muted, #9ca3af); font-size: 0.8rem; }
+.oh-times-closed { color: var(--text-muted, #9ca3af); font-size: 0.82rem; font-style: italic; }
+@media (max-width: 560px) {
+  .oh-row { grid-template-columns: 5.5rem 5rem 1fr; gap: 0.4rem; }
+  .oh-times input[type="time"] { width: 100%; }
+}

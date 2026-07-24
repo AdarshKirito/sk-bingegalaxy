@@ -30,6 +30,12 @@ public class BookingEvent extends EventEnvelope {
     private int durationHours;
     private Integer durationMinutes;
     private BigDecimal totalAmount;
+    /**
+     * ISO-4217 code {@link #totalAmount} is denominated in (the binge's native
+     * currency, e.g. "INR", "USD"). Nullable for events emitted before the
+     * native-currency model — consumers must fall back to INR.
+     */
+    private String currency;
     private String status;
     private String specialNotes;
     /**
@@ -39,4 +45,15 @@ public class BookingEvent extends EventEnvelope {
      * cut-off. Nullable for backward compatibility with old events on the wire.
      */
     private Integer customerCancellationCutoffMinutes;
+
+    /**
+     * BOOK-004 — set ONLY on {@code booking.cancelled} events: the amount of
+     * COLLECTED money (base currency) the cancellation policy owes back to the
+     * customer. payment-service turns this into real gateway refunds against
+     * the booking's captured payments; the resulting {@code payment.refunded}
+     * events are what reduce the booking's collected amount — booking-service
+     * no longer zeroes it locally. Null/zero = nothing to refund (unpaid
+     * booking, or policy tier grants 0%).
+     */
+    private BigDecimal refundAmount;
 }

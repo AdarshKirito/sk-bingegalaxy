@@ -25,9 +25,10 @@ class BingeContextTest {
 
     @Test
     void requireBingeId_throws_whenNotSet() {
+        // Missing X-Binge-Id is a client precondition (HTTP 400), not a server 500.
         assertThatThrownBy(BingeContext::requireBingeId)
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("BingeContext not set");
+                .isInstanceOf(com.skbingegalaxy.common.exception.MissingBingeContextException.class)
+                .hasMessageContaining("No binge is selected");
     }
 
     @Test

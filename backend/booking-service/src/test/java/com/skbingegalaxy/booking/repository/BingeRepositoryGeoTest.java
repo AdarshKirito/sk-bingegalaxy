@@ -64,6 +64,9 @@ class BingeRepositoryGeoTest {
         Binge binge = bingeRepository.save(Binge.builder()
             .name(name).adminId(1L).active(active).status(status)
             .latitude(lat).longitude(lng).timezone("Asia/Kolkata")
+            // country is NOT NULL since V79 — it derives the venue's currency,
+            // taxes and payment methods, so a venue cannot exist without one.
+            .country("IN")
             .build());
         if (withEvent) {
             eventTypeRepository.save(EventType.builder()

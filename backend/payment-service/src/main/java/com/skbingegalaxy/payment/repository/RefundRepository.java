@@ -80,4 +80,36 @@ public interface RefundRepository extends JpaRepository<Refund, Long> {
             com.skbingegalaxy.payment.entity.RefundStatus refundStatus,
             Long bingeId,
             org.springframework.data.domain.Pageable pageable);
+
+    /**
+     * Sum of refunds that hold (or may still claim) part of the payment's
+     * refundable amount — settled AND in-flight attempts. The over-refund
+     * guard MUST use this, not the settled-only sum: two PROCESSING refunds
+     * that each pass a settled-only check could together exceed the payment.
+     */
+    @Query("SELECT COALESCE(SUM(r.amount), 0) FROM Refund r "
+         + "WHERE r.payment.id = :paymentId AND r.refundStatus IN :statuses")
+    BigDecimal sumByPaymentIdAndRefundStatusIn(
+            @Param("paymentId") Long paymentId,
+            @Param("statuses") List<com.skbingegalaxy.payment.entity.RefundStatus> statuses);
+
+    /** In-flight gateway refunds that need webhook/reconciliation settlement. */
+    List<Refund> findByRefundStatusAndCreatedAtBefore(
+            com.skbingegalaxy.payment.entity.RefundStatus refundStatus,
+            java.time.LocalDateTime cutoff);
+
+    /**
+     * Loads a refund with its parent payment eagerly — the PAY-006 orchestration
+     * reads payment fields OUTSIDE any transaction (during the provider leg),
+     * where a lazy proxy would throw.
+     */
+    @Query("SELECT r FROM Refund r JOIN FETCH r.payment WHERE r.id = :id")
+    Optional<Refund> findWithPaymentById(@Param("id") Long id);
+
+    /**
+     * Recovery lookup by the stable provider receipt (PAY-006): a settlement
+     * webhook can reference an intent whose finalize step crashed before the
+     * gateway refund id was recorded locally.
+     */
+    Optional<Refund> findByGatewayReceipt(String gatewayReceipt);
 }

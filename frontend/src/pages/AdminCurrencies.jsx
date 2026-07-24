@@ -4,10 +4,10 @@ import { useConfirm } from '../components/ui/ConfirmProvider';
 import { useAuth } from '../context/AuthContext';
 import LockBadge, { useResourceLock } from '../components/authority/LockBadge';
 import { toast } from 'react-toastify';
-import { FiPlus, FiEdit2, FiTrash2, FiX, FiDollarSign, FiToggleLeft, FiToggleRight, FiLock, FiUnlock } from 'react-icons/fi';
+import { FiPlus, FiEdit2, FiTrash2, FiX, FiDollarSign, FiToggleLeft, FiToggleRight, FiLock, FiUnlock, FiRefreshCw } from 'react-icons/fi';
+import { formatServerDateTime, formatRelativeTime, parseServerDate } from '../services/timeFormat';
 import './AdminPages.css';
-
-const FX_SOURCES = ['MANUAL', 'ECB', 'OPENEXCHANGE', 'FIXER'];
+import './AdminCurrencies.css';
 
 const emptyForm = {
   code: '',
@@ -20,7 +20,13 @@ const emptyForm = {
   supportsDisplay: true,
   supportsPayment: false,
   supportsSettlement: false,
-  fxSource: 'MANUAL',
+  manualOverride: false,
+};
+
+/** Rates older than 48h are flagged — the 6-hourly refresher should never let that happen. */
+const isStale = (lastUpdated) => {
+  const d = parseServerDate(lastUpdated);
+  return d ? (Date.now() - d.getTime()) > 48 * 3600 * 1000 : true;
 };
 
 export default function AdminCurrencies() {
@@ -31,6 +37,22 @@ export default function AdminCurrencies() {
   const [modal, setModal] = useState({ open: false, mode: 'create', item: null });
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefreshRates = async () => {
+    setRefreshing(true);
+    try {
+      const res = await currencyService.refreshRates();
+      const s = res.data?.data;
+      toast.success(
+        `Updated ${s?.updated ?? 0} rate${s?.updated === 1 ? '' : 's'} from ${s?.provider || 'provider'}`
+        + (s?.skippedManual ? ` · ${s.skippedManual} pinned rate${s.skippedManual === 1 ? '' : 's'} untouched` : '')
+      );
+      fetchAll();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Rate refresh failed — provider unreachable');
+    } finally { setRefreshing(false); }
+  };
 
   const fetchAll = () => {
     setLoading(true);
@@ -56,7 +78,7 @@ export default function AdminCurrencies() {
       supportsDisplay: c.supportsDisplay !== false,
       supportsPayment: !!c.supportsPayment,
       supportsSettlement: !!c.supportsSettlement,
-      fxSource: c.fxSource || 'MANUAL',
+      manualOverride: !!c.manualOverride,
     });
     setModal({ open: true, mode: 'edit', item: c });
   };
@@ -80,7 +102,7 @@ export default function AdminCurrencies() {
         supportsDisplay: !!form.supportsDisplay,
         supportsPayment: !!form.supportsPayment,
         supportsSettlement: !!form.supportsSettlement,
-        fxSource: form.fxSource || 'MANUAL',
+        manualOverride: !!form.manualOverride,
       });
       toast.success(modal.mode === 'create' ? 'Currency created' : 'Currency updated');
       setModal({ open: false, mode: 'create', item: null });
@@ -109,20 +131,28 @@ export default function AdminCurrencies() {
   };
 
   return (
-    <div className="admin-page">
+    <div className="admin-page curr-page">
       <div className="admin-page-header">
         <div>
           <h1><FiDollarSign /> Currencies</h1>
-          <p className="page-subtitle">Manage display currencies and exchange rates. The base currency cannot be deleted.</p>
+          <p className="page-subtitle">
+            Rates auto-refresh every 6 hours from a reference-rate provider. Pin a currency
+            ("manual") to freeze its rate; unpinned rates are always kept current.
+          </p>
         </div>
-        <button className="btn btn-primary" onClick={openCreate}><FiPlus /> Add Currency</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-secondary" onClick={handleRefreshRates} disabled={refreshing}>
+            <FiRefreshCw /> {refreshing ? 'Refreshing…' : 'Refresh rates now'}
+          </button>
+          <button className="btn btn-primary" onClick={openCreate}><FiPlus /> Add Currency</button>
+        </div>
       </div>
 
       {loading ? <p>Loading…</p> : (
         <div className="admin-table-wrap">
           <table className="admin-table">
             <thead>
-              <tr><th>Code</th><th>Name</th><th>Symbol</th><th>Rate to Base</th><th>Decimals</th><th>Roles</th><th>FX Source</th><th>Base</th><th>Status</th><th></th></tr>
+              <tr><th>Code</th><th>Name</th><th>Symbol</th><th>Rate to Base</th><th>Decimals</th><th>Roles</th><th>Rate Source</th><th>Updated</th><th>Base</th><th>Status</th><th></th></tr>
             </thead>
             <tbody>
               {list.map(c => (
@@ -174,13 +204,18 @@ export default function AdminCurrencies() {
                 <label className="checkbox-label"><input type="checkbox" checked={form.supportsPayment} onChange={e => setForm(f => ({ ...f, supportsPayment: e.target.checked }))} /> Supports payment</label>
                 <label className="checkbox-label"><input type="checkbox" checked={form.supportsSettlement} onChange={e => setForm(f => ({ ...f, supportsSettlement: e.target.checked }))} /> Supports settlement</label>
               </div>
-              <label>FX Source
-                <select value={form.fxSource} onChange={e => setForm(f => ({ ...f, fxSource: e.target.value }))}>
-                  {FX_SOURCES.map(v => <option key={v} value={v}>{v}</option>)}
-                </select>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={form.manualOverride}
+                  onChange={e => setForm(f => ({ ...f, manualOverride: e.target.checked }))}
+                />{' '}
+                Pin this rate (manual override — auto-refresh will never change it)
               </label>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                Marking a currency as Base will set all other currencies to non-base. Bookings remain stored in the base currency.
+                Unpinned rates are refreshed automatically every 6 hours from the FX provider,
+                so the value entered above is only a starting point. Marking a currency as Base
+                will set all other currencies to non-base; bookings remain stored in the base currency.
               </p>
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setModal({ open: false, mode: 'create', item: null })}>Cancel</button>
@@ -274,7 +309,21 @@ function CurrencyRow({ c, isSuperAdmin, confirm, onEdit, onToggle, onDelete }) {
         {c.supportsPayment && <span className="badge badge-info" style={{ marginRight: 4 }}>P</span>}
         {c.supportsSettlement && <span className="badge badge-info">S</span>}
       </td>
-      <td>{c.fxSource || 'MANUAL'}</td>
+      <td>
+        {c.manualOverride
+          ? <span className="badge badge-warning" title="Rate pinned by an admin — auto-refresh will not touch it">PINNED · {c.fxSource || 'MANUAL'}</span>
+          : <span className="badge badge-success" title="Kept current by the automatic FX refresher">AUTO · {c.fxSource || '—'}</span>}
+      </td>
+      <td title={formatServerDateTime(c.lastUpdated)}>
+        {c.base ? '—' : (
+          <>
+            {formatRelativeTime(c.lastUpdated) || '—'}
+            {!c.manualOverride && isStale(c.lastUpdated) && (
+              <span className="badge badge-danger" style={{ marginLeft: 6 }} title="No successful refresh in 48h — check the FX provider">STALE</span>
+            )}
+          </>
+        )}
+      </td>
       <td>{c.base ? <span className="badge badge-info">Base</span> : '—'}</td>
       <td><span className={`badge ${c.active ? 'badge-success' : 'badge-muted'}`}>{c.active ? 'Active' : 'Inactive'}</span></td>
       <td className="row-actions">

@@ -46,6 +46,7 @@ public class UserAnonymizationService {
 
     private final UserRepository userRepository;
     private final UserSessionRepository sessionRepository;
+    private final org.springframework.kafka.core.KafkaTemplate<String, Object> kafkaTemplate;
 
     /**
      * Submit an erasure request: soft-deletes the account and starts the retention clock.
@@ -126,10 +127,15 @@ public class UserAnonymizationService {
     private void doAnonymize(User user) {
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         String placeholder = "deleted-" + user.getId();
+        // Captured BEFORE overwrite: the erasure fan-out event needs the
+        // original email so email-keyed copies (Mongo notifications, push
+        // subscriptions) can be located and redacted downstream.
+        String originalEmail = user.getEmail();
+        String anonymizedEmail = placeholder + "@anonymized.invalid";
 
         user.setFirstName("Deleted");
         user.setLastName("User");
-        user.setEmail(placeholder + "@anonymized.invalid");
+        user.setEmail(anonymizedEmail);
         user.setPhone(null);
         user.setPhoneCountryCode(null);
         user.setAddressLine1(null);
@@ -143,6 +149,26 @@ public class UserAnonymizationService {
         user.setDeletedAt(user.getDeletedAt() != null ? user.getDeletedAt() : now);
         user.setAnonymizedAt(now);
         userRepository.save(user);
+
+        // Erasure fan-out: booking/payment/notification hold PII snapshots
+        // this service cannot reach. A publish failure leaves residual PII
+        // downstream — logged at ERROR so ops can replay via the admin
+        // anonymize endpoint (doAnonymize is idempotent per service).
+        try {
+            kafkaTemplate.send(
+                com.skbingegalaxy.common.constants.KafkaTopics.USER_ANONYMIZED,
+                String.valueOf(user.getId()),
+                com.skbingegalaxy.common.event.UserAnonymizedEvent.builder()
+                    .userId(user.getId())
+                    .originalEmail(originalEmail)
+                    .anonymizedEmail(anonymizedEmail)
+                    .anonymizedAt(now)
+                    .build());
+        } catch (Exception e) {
+            log.error("Failed to publish user.anonymized for user {} — downstream PII copies "
+                + "NOT redacted; re-trigger anonymization via the admin endpoint. Cause: {}",
+                user.getId(), e.getMessage());
+        }
 
         log.info("User {} anonymized — PII replaced, anonymizedAt={}", user.getId(), now);
     }

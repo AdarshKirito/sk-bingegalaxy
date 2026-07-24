@@ -63,9 +63,12 @@ public class PaymentMetrics {
     public void signatureFailure()        { counter("skbg_payment_signature_failures_total").increment(); }
 
     // ── Refund / lifecycle ─────────────────────────────────────────────────
-    public void refundIssued()    { counter("skbg_payment_refund_total", "outcome", "issued").increment(); }
-    public void refundRejected()  { counter("skbg_payment_refund_total", "outcome", "rejected").increment(); }
-    public void refundAutoLate()  { counter("skbg_payment_refund_total", "outcome", "auto_late_capture").increment(); }
+    public void refundIssued()         { counter("skbg_payment_refund_total", "outcome", "issued").increment(); }
+    public void refundRejected()       { counter("skbg_payment_refund_total", "outcome", "rejected").increment(); }
+    public void refundAutoLate()       { counter("skbg_payment_refund_total", "outcome", "auto_late_capture").increment(); }
+    public void refundGatewayFailed()  { counter("skbg_payment_refund_total", "outcome", "gateway_failed").increment(); }
+    public void refundPendingGateway() { counter("skbg_payment_refund_total", "outcome", "pending_gateway").increment(); }
+    public void refundSettled()        { counter("skbg_payment_refund_total", "outcome", "settled").increment(); }
 
     // ── Saga compensation ──────────────────────────────────────────────────
     public void sagaCompensated() { counter("skbg_saga_compensation_total").increment(); }

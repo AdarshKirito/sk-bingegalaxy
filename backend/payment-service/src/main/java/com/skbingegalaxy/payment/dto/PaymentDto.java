@@ -39,4 +39,23 @@ public class PaymentDto {
      * simulation mode is enabled.
      */
     private String razorpayKeyId;
+
+    /**
+     * Which gateway is handling this charge ("razorpay", "stripe"), so the
+     * checkout page knows which SDK flow to run instead of inferring it from the
+     * shape of the order id.
+     */
+    private String providerName;
+
+    /**
+     * Ephemeral, provider-specific values the browser needs to complete checkout —
+     * for Stripe: {@code stripeClientSecret}, {@code stripeAccountId},
+     * {@code stripePublishableKey}.
+     *
+     * <p>Only populated on the initiation response; never persisted and never
+     * returned by ordinary payment reads. The client secret authorises confirming
+     * exactly one PaymentIntent, so it is safe to hand to the browser — but there
+     * is no reason to include it in every subsequent status poll.
+     */
+    private java.util.Map<String, String> checkoutFields;
 }

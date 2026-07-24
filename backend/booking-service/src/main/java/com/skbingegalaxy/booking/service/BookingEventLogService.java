@@ -119,6 +119,15 @@ public class BookingEventLogService {
                 && !booking.getCustomerName().isBlank()) {
             return booking.getCustomerName().trim();
         }
+        // For admin/super-admin actions, capture the acting staff member's display name
+        // from the gateway-injected X-User-Name header (request-scoped) so the audit trail
+        // reads "Priya (Super Admin)" rather than a bare "Super Admin". Snapshotted here so
+        // later renames / deletions never rewrite history. Falls through to the role label
+        // when there is no request context (schedulers, Kafka consumers) or no name header.
+        String requestName = com.skbingegalaxy.booking.web.RequestContext.currentUserName();
+        if (requestName != null && !requestName.isBlank()) {
+            return requestName.trim();
+        }
         if ("SUPER_ADMIN".equalsIgnoreCase(role)) return "Super Admin";
         if ("ADMIN".equalsIgnoreCase(role)) return "Admin";
         return null;

@@ -69,33 +69,65 @@ public class InternalTaxProvider implements TaxProvider {
                 case ADDONS -> MoneyUtil.zeroIfNull(addOnAmount);
                 case GUEST  -> MoneyUtil.zeroIfNull(guestAmount);
             };
-            if (taxable.signum() <= 0) continue;
+
+            TaxRule.CalcMethod method = rule.getCalcMethod() != null
+                ? rule.getCalcMethod() : TaxRule.CalcMethod.PERCENT;
 
             BigDecimal amount;
             String formula;
-            if (rule.isInclusive()) {
-                amount = MoneyUtil.extractInclusiveTax(taxable, rule.getRateBps())
-                    .setScale(2, MoneyUtil.ROUND);
-                totalInclusive = totalInclusive.add(amount);
-                formula = String.format("%s * %d / (10000 + %d)",
-                    taxable.toPlainString(), rule.getRateBps(), rule.getRateBps());
-            } else {
-                amount = MoneyUtil.applyBps(taxable, rule.getRateBps())
-                    .setScale(2, MoneyUtil.ROUND);
+            Integer units = null;
+
+            if (method == TaxRule.CalcMethod.FLAT_PER_BOOKING
+                    || method == TaxRule.CalcMethod.FLAT_PER_HOUR) {
+                // Flat fees (county amusement fee, per-hour occupancy charge) apply
+                // whenever the rule matches the jurisdiction — even for a booking whose
+                // taxable segment is 0 (e.g. fully discounted). They are always
+                // exclusive: a flat charge added on top of the price.
+                BigDecimal flat = MoneyUtil.zeroIfNull(rule.getFlatAmount());
+                if (flat.signum() <= 0) continue;
+                if (method == TaxRule.CalcMethod.FLAT_PER_HOUR) {
+                    int minutes = ctx != null && ctx.getDurationMinutes() != null
+                        ? Math.max(ctx.getDurationMinutes(), 0) : 0;
+                    // Round partial hours UP (standard occupancy-tax practice); an
+                    // unknown duration charges a single unit so previews never under-quote.
+                    units = minutes > 0 ? (minutes + 59) / 60 : 1;
+                    amount = flat.multiply(BigDecimal.valueOf(units)).setScale(2, MoneyUtil.ROUND);
+                    formula = String.format("%s * %d hour(s)", flat.toPlainString(), units);
+                } else {
+                    units = 1;
+                    amount = flat.setScale(2, MoneyUtil.ROUND);
+                    formula = flat.toPlainString() + " flat per booking";
+                }
                 totalExclusive = totalExclusive.add(amount);
-                formula = String.format("%s * %d / 10000",
-                    taxable.toPlainString(), rule.getRateBps());
+            } else {
+                if (taxable.signum() <= 0) continue;
+                if (rule.isInclusive()) {
+                    amount = MoneyUtil.extractInclusiveTax(taxable, rule.getRateBps())
+                        .setScale(2, MoneyUtil.ROUND);
+                    totalInclusive = totalInclusive.add(amount);
+                    formula = String.format("%s * %d / (10000 + %d)",
+                        taxable.toPlainString(), rule.getRateBps(), rule.getRateBps());
+                } else {
+                    amount = MoneyUtil.applyBps(taxable, rule.getRateBps())
+                        .setScale(2, MoneyUtil.ROUND);
+                    totalExclusive = totalExclusive.add(amount);
+                    formula = String.format("%s * %d / 10000",
+                        taxable.toPlainString(), rule.getRateBps());
+                }
             }
 
             lines.add(TaxComputationResult.TaxLine.builder()
                 .ruleId(rule.getId())
                 .name(rule.getName())
                 .rateBps(rule.getRateBps())
-                .inclusive(rule.isInclusive())
+                .inclusive(method == TaxRule.CalcMethod.PERCENT && rule.isInclusive())
                 .taxableAmount(taxable)
                 .amount(amount)
                 .taxType(rule.getTaxType())
                 .jurisdiction(buildJurisdiction(rule))
+                .calcMethod(method.name())
+                .flatAmount(rule.getFlatAmount())
+                .units(units)
                 .formula(formula)
                 .build());
         }

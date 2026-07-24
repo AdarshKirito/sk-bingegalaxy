@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.skbingegalaxy.booking.dto.TaxComputationResult;
 import com.skbingegalaxy.booking.dto.TaxRuleDto;
 import com.skbingegalaxy.booking.entity.TaxRule;
+import com.skbingegalaxy.booking.repository.BingeRepository;
 import com.skbingegalaxy.booking.repository.TaxRuleRepository;
 import com.skbingegalaxy.booking.tax.provider.TaxContext;
 import com.skbingegalaxy.booking.tax.provider.TaxProvider;
@@ -38,18 +39,47 @@ public class TaxService {
     private final TaxRuleRepository taxRuleRepository;
     private final ObjectMapper objectMapper;
     private final TaxProvider taxProvider;
+    private final BingeRepository bingeRepository;
+    private final VenueClockService venueClock;
 
     private static final BigDecimal BPS_DIVISOR = new BigDecimal("10000");
 
-    /** Backward-compatible compute: delegates to {@link TaxProvider} with a
-     *  minimal context (binge-only). New callers should use
-     *  {@link #compute(TaxContext, BigDecimal, BigDecimal, BigDecimal, BigDecimal)}. */
+    /**
+     * Builds the canonical, <b>venue-aware</b> tax context for a binge. This is the
+     * single source of truth used by every tax entry point (customer preview,
+     * checkout quote, booking creation, admin booking, reschedule) so a
+     * jurisdiction-scoped rule (e.g. Indian GST with {@code countryCode=IN}) is
+     * resolved identically everywhere — never applied at booking time but dropped
+     * from the preview because the context lacked the venue's location.
+     *
+     * <p>Place-of-supply = the venue: country/state/city/postal are taken from the
+     * binge, and the venue timezone drives effective-date evaluation. Callers may
+     * override billing fields afterwards (a customer's GSTIN billing state wins
+     * over the venue per {@link TaxContext#resolvedState()}).
+     */
+    public TaxContext.TaxContextBuilder venueContext(Long bingeId) {
+        TaxContext.TaxContextBuilder b = TaxContext.builder()
+            .bingeId(bingeId)
+            .customerType("B2C")
+            .productType("BOOKING")
+            .venueZone(venueClock.zoneOf(bingeId));
+        if (bingeId != null) {
+            bingeRepository.findById(bingeId).ifPresent(binge ->
+                b.venueCountryCode(binge.getCountry())
+                 .venueStateCode(binge.getState())
+                 .venueCity(binge.getCity())
+                 .venuePostalCode(binge.getPostalCode()));
+        }
+        return b;
+    }
+
+    /** Venue-aware compute keyed only by binge — used by the customer tax preview. */
     public TaxComputationResult compute(Long bingeId,
                                         BigDecimal subtotal,
                                         BigDecimal baseAmount,
                                         BigDecimal addOnAmount,
                                         BigDecimal guestAmount) {
-        return compute(TaxContext.builder().bingeId(bingeId).build(),
+        return compute(venueContext(bingeId).build(),
             subtotal, baseAmount, addOnAmount, guestAmount);
     }
 
@@ -59,6 +89,25 @@ public class TaxService {
                                         BigDecimal baseAmount,
                                         BigDecimal addOnAmount,
                                         BigDecimal guestAmount) {
+        // Per-binge tax master switch (super-admin controlled). This is THE choke
+        // point every tax entry path funnels through — customer preview, checkout
+        // quote, customer/admin/recurring creation, price update, reschedule — so
+        // disabling taxes for a venue is guaranteed consistent everywhere.
+        if (ctx != null && ctx.getBingeId() != null) {
+            boolean enabled = bingeRepository.findById(ctx.getBingeId())
+                .map(com.skbingegalaxy.booking.entity.Binge::isTaxesEnabled)
+                .orElse(true);
+            if (!enabled) {
+                return TaxComputationResult.builder()
+                    .subtotal(subtotal)
+                    .totalTax(BigDecimal.ZERO)
+                    .totalInclusiveTax(BigDecimal.ZERO)
+                    .lines(List.of())
+                    .breakdownJson(null)
+                    .provider("DISABLED")
+                    .build();
+            }
+        }
         return taxProvider.computeTaxes(ctx, subtotal, baseAmount, addOnAmount, guestAmount);
     }
 
@@ -100,7 +149,9 @@ public class TaxService {
             .bingeId(global ? null : BingeContext.requireBingeId())
             .name(request.getName().trim())
             .description(request.getDescription())
-            .rateBps(request.getRateBps())
+            .rateBps(request.getRateBps() != null ? request.getRateBps() : 0)
+            .calcMethod(request.getCalcMethod() != null ? request.getCalcMethod() : TaxRule.CalcMethod.PERCENT)
+            .flatAmount(request.getFlatAmount())
             .appliesTo(request.getAppliesTo() != null ? request.getAppliesTo() : TaxRule.AppliesTo.TOTAL)
             .inclusive(request.isInclusive())
             .countryCode(request.getCountryCode())
@@ -136,7 +187,9 @@ public class TaxService {
         }
         rule.setName(request.getName().trim());
         rule.setDescription(request.getDescription());
-        rule.setRateBps(request.getRateBps());
+        rule.setRateBps(request.getRateBps() != null ? request.getRateBps() : 0);
+        rule.setCalcMethod(request.getCalcMethod() != null ? request.getCalcMethod() : TaxRule.CalcMethod.PERCENT);
+        rule.setFlatAmount(request.getFlatAmount());
         rule.setAppliesTo(request.getAppliesTo() != null ? request.getAppliesTo() : rule.getAppliesTo());
         rule.setInclusive(request.isInclusive());
         rule.setCountryCode(request.getCountryCode());
@@ -172,8 +225,18 @@ public class TaxService {
 
     private void validateRule(TaxRuleDto r) {
         if (r.getName() == null || r.getName().isBlank()) throw new BusinessException("Tax rule name is required");
-        if (r.getRateBps() == null || r.getRateBps() < 0 || r.getRateBps() > 100000) {
-            throw new BusinessException("Rate (bps) must be between 0 and 100000 (0%–1000%)");
+        TaxRule.CalcMethod method = r.getCalcMethod() != null ? r.getCalcMethod() : TaxRule.CalcMethod.PERCENT;
+        if (method == TaxRule.CalcMethod.PERCENT) {
+            if (r.getRateBps() == null || r.getRateBps() < 0 || r.getRateBps() > 100000) {
+                throw new BusinessException("Rate (bps) must be between 0 and 100000 (0%–1000%)");
+            }
+        } else {
+            if (r.getFlatAmount() == null || r.getFlatAmount().signum() <= 0) {
+                throw new BusinessException("Flat amount must be > 0 for " + method + " rules");
+            }
+            if (r.isInclusive()) {
+                throw new BusinessException("Flat taxes cannot be price-inclusive — they are added on top");
+            }
         }
     }
 
@@ -184,6 +247,8 @@ public class TaxService {
             .name(r.getName())
             .description(r.getDescription())
             .rateBps(r.getRateBps())
+            .calcMethod(r.getCalcMethod() != null ? r.getCalcMethod() : TaxRule.CalcMethod.PERCENT)
+            .flatAmount(r.getFlatAmount())
             .appliesTo(r.getAppliesTo())
             .inclusive(r.isInclusive())
             .countryCode(r.getCountryCode())

@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { bookingService } from '../services/endpoints';
+import { bookingService, toArray } from '../services/endpoints';
 import { formatTime12h, formatTimeRange12h } from '../utils/format';
+import { parseServerDate, formatTimeInZone } from '../services/timeFormat';
+import { parseTaxBreakdown, taxLineRateLabel } from '../components/TaxBreakdown';
 import SEO from '../components/SEO';
 import { toast } from 'react-toastify';
 import {
@@ -26,11 +28,13 @@ import DOMPurify from 'dompurify';
 import useBingeStore from '../stores/bingeStore';
 import PhoneField, { splitPhone } from '../components/form/PhoneField';
 import BookingTimelinePanel from '../components/booking/BookingTimelinePanel';
-import { useFormatMoney } from '../context/CurrencyContext';
+import VenueTimeNote from '../components/VenueTimeNote';
+import { formatCurrency } from '../utils/currency';
+import loyaltyV2 from '../services/loyaltyV2';
 import './CustomerHub.css';
 
-// formatAmount lives inside the component now (uses the customer's selected display
-// currency via useFormatMoney). All amounts passed in are base-INR and get converted.
+// formatAmount lives inside the component: amounts are ALREADY denominated in the
+// booking's own currency (native per-binge model) — formatting never converts.
 
 const formatLabel = (value, fallback = 'Pending') => {
   if (!value) return fallback;
@@ -60,11 +64,28 @@ export default function BookingConfirmation() {
   const [error, setError] = useState(null);
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
+  const [pendingTransfer, setPendingTransfer] = useState(null);
   const [recurringGroupBookings, setRecurringGroupBookings] = useState(null);
   const [rescheduleForm, setRescheduleForm] = useState({ newBookingDate: '', newStartTime: '', newDurationMinutes: '' });
   const [transferForm, setTransferForm] = useState({ recipientName: '', recipientEmail: '', recipientPhone: '' });
   const [actionLoading, setActionLoading] = useState(false);
-  const formatAmount = useFormatMoney();
+  // Format in the booking's own (binge) currency — no customer-side conversion.
+  const formatAmount = (v) => formatCurrency(v, booking?.paymentCurrencyCode || 'INR');
+
+  // Projected loyalty earn — points are credited at completion, so before that we
+  // show the estimate ("~X pts on completion") the way airline confirmations do.
+  const [projectedEarn, setProjectedEarn] = useState(null);
+  useEffect(() => {
+    if (!booking || (booking.loyaltyPointsEarned || 0) > 0) { setProjectedEarn(null); return; }
+    const state = String(booking.status || '').toUpperCase();
+    if (state === 'CANCELLED' || state === 'NO_SHOW' || state === 'COMPLETED') { setProjectedEarn(null); return; }
+    if (!booking.bingeId || !booking.totalAmount) { setProjectedEarn(null); return; }
+    let cancelled = false;
+    loyaltyV2.getEarnQuote({ bingeId: booking.bingeId, bookingAmount: booking.totalAmount })
+      .then((q) => { if (!cancelled) setProjectedEarn(q && q.eligible && q.points > 0 ? q : null); })
+      .catch(() => { if (!cancelled) setProjectedEarn(null); });
+    return () => { cancelled = true; };
+  }, [booking]);
 
   useEffect(() => {
     bookingService.getByRef(ref)
@@ -102,6 +123,19 @@ export default function BookingConfirmation() {
     }
   };
 
+  const openTransferModal = async () => {
+    setTransferForm({ recipientName: '', recipientEmail: '', recipientPhone: '' });
+    setPendingTransfer(null);
+    setTransferOpen(true);
+    try {
+      const res = await bookingService.listTransfers(ref);
+      const transfers = toArray(res.data?.data);
+      setPendingTransfer(transfers.find(t => t.status === 'PENDING') || null);
+    } catch {
+      // Listing is best-effort UX; the backend rejects duplicate requests anyway.
+    }
+  };
+
   const handleTransfer = async () => {
     if (!transferForm.recipientName.trim() || !transferForm.recipientEmail.trim()) {
       toast.error('Recipient name and email are required.');
@@ -116,12 +150,26 @@ export default function BookingConfirmation() {
         recipientPhone: phoneParts.phone,
         recipientPhoneCountryCode: phoneParts.phoneCountryCode,
       };
-      const res = await bookingService.transferBooking(ref, payload);
-      setBooking(res.data.data);
-      toast.success('Booking transferred successfully');
+      const res = await bookingService.requestTransfer(ref, payload);
+      const transfer = res.data.data;
+      toast.success(`Transfer request sent to ${transfer?.toEmail || transferForm.recipientEmail}. The booking stays yours until they accept.`);
       setTransferOpen(false);
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to transfer');
+      toast.error(err.response?.data?.message || 'Failed to send transfer request');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRevokeTransfer = async () => {
+    if (!pendingTransfer) return;
+    setActionLoading(true);
+    try {
+      await bookingService.revokeTransfer(ref, pendingTransfer.id);
+      toast.success('Transfer request revoked');
+      setPendingTransfer(null);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to revoke transfer request');
     } finally {
       setActionLoading(false);
     }
@@ -161,7 +209,11 @@ export default function BookingConfirmation() {
   const earlyCheckoutDisplay = (() => {
     if (!booking.earlyCheckoutNote && !booking.actualCheckoutTime) return null;
     if (booking.actualCheckoutTime) {
-      const checkoutTime = new Date(booking.actualCheckoutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      // Checkout is a UTC instant — render it in the VENUE's zone, matching the
+      // wall clock at the venue where the checkout physically happened.
+      const checkoutTime = booking.venueTimezone
+        ? formatTimeInZone(booking.actualCheckoutTime, booking.venueTimezone)
+        : (parseServerDate(booking.actualCheckoutTime)?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || '');
       const mins = booking.actualUsedMinutes;
       if (mins != null) {
         const h = Math.floor(mins / 60);
@@ -326,7 +378,7 @@ export default function BookingConfirmation() {
               </button>
             )}
             {booking.canCustomerTransfer && (
-              <button className="btn btn-secondary btn-sm" onClick={() => { setTransferForm({ recipientName: '', recipientEmail: '', recipientPhone: '' }); setTransferOpen(true); }}>
+              <button className="btn btn-secondary btn-sm" onClick={openTransferModal}>
                 <FiSend /> Transfer
               </button>
             )}
@@ -342,6 +394,15 @@ export default function BookingConfirmation() {
           <span className="customer-flow-kicker">Reservation digest</span>
           <h2>{eventLabel}</h2>
           <p>{booking.bookingDate} at {formatTime12h(booking.startTime)}</p>
+          {booking.venueTimezone && (
+            <div style={{ marginTop: '0.35rem', marginBottom: '0.25rem' }}>
+              <VenueTimeNote
+                timezone={booking.venueTimezone}
+                date={booking.bookingDate}
+                time={booking.startTime}
+              />
+            </div>
+          )}
           <div className="customer-flow-badges">
             <span className={`badge ${statusBadge}`}>{bookingStatusLabel}</span>
             <span className={`badge ${paymentBadge}`}>Payment: {paymentStatusLabel}</span>
@@ -433,16 +494,53 @@ export default function BookingConfirmation() {
                 <strong>{booking.surgeMultiplier}× multiplier</strong>
               </div>
             )}
+            {booking.surgeMultiplier && Number(booking.surgeMultiplier) < 1 && (
+              <div className="customer-flow-row" style={{ color: '#059669' }}>
+                <span>🌙 {booking.surgeLabel || 'Off-peak discount'}</span>
+                <strong>{booking.surgeMultiplier}× multiplier</strong>
+              </div>
+            )}
             {(booking.loyaltyPointsRedeemed || 0) > 0 && (
               <div className="customer-flow-row" style={{ color: '#5b21b6' }}>
                 <span>🎁 Loyalty discount ({booking.loyaltyPointsRedeemed} pts)</span>
                 <strong>−{formatAmount(booking.loyaltyDiscountAmount)}</strong>
               </div>
             )}
+            {(booking.taxAmount || 0) > 0 && (
+              <>
+                {(booking.subtotalAmount || 0) > 0 && (
+                  <div className="customer-flow-row">
+                    <span>Subtotal (pre-tax)</span>
+                    <strong>{formatAmount(booking.subtotalAmount)}</strong>
+                  </div>
+                )}
+                {parseTaxBreakdown(booking.taxBreakdownJson).map((l, i) => (
+                  <div className="customer-flow-row" key={l.ruleId ?? i} style={{ fontSize: '0.88em' }}>
+                    <span>
+                      {l.name} ({taxLineRateLabel(l)}
+                      {l.taxType && l.taxType !== 'GENERIC' ? ` · ${l.taxType}` : ''}
+                      {l.jurisdiction && l.jurisdiction !== 'GLOBAL' ? ` · ${l.jurisdiction}` : ''})
+                    </span>
+                    <strong>{formatAmount(l.amount)}</strong>
+                  </div>
+                ))}
+                <div className="customer-flow-row">
+                  <span>Total tax</span>
+                  <strong>{formatAmount(booking.taxAmount)}</strong>
+                </div>
+              </>
+            )}
             {(booking.loyaltyPointsEarned || 0) > 0 && (
               <div className="customer-flow-row" style={{ color: '#059669' }}>
                 <span>⭐ Points earned</span>
                 <strong>+{booking.loyaltyPointsEarned} pts</strong>
+              </div>
+            )}
+            {!(booking.loyaltyPointsEarned > 0) && projectedEarn && (
+              <div className="customer-flow-row" style={{ color: '#059669' }}>
+                <span>⭐ Points on completion (est.)</span>
+                <strong>~{Number(projectedEarn.points).toLocaleString()} pts
+                  {projectedEarn.qualifyingCredits > 0 ? ` · +${Number(projectedEarn.qualifyingCredits).toLocaleString()} tier credits` : ''}</strong>
               </div>
             )}
             <div className="customer-flow-row">
@@ -614,31 +712,54 @@ export default function BookingConfirmation() {
             <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
               {booking.bookingRef} — {eventLabel}
             </p>
-            <label style={{ display: 'block', marginBottom: '1rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Name</span>
-              <input type="text" className="form-control" placeholder="Full name of the new guest"
-                value={transferForm.recipientName}
-                onChange={(e) => setTransferForm(prev => ({ ...prev, recipientName: e.target.value }))} />
-            </label>
-            <label style={{ display: 'block', marginBottom: '1rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Email</span>
-              <input type="email" className="form-control" placeholder="name@example.com"
-                value={transferForm.recipientEmail}
-                onChange={(e) => setTransferForm(prev => ({ ...prev, recipientEmail: e.target.value }))} />
-            </label>
-            <label style={{ display: 'block', marginBottom: '1.5rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Phone (optional)</span>
-              <PhoneField
-                value={transferForm.recipientPhone}
-                onChange={(val) => setTransferForm(prev => ({ ...prev, recipientPhone: val || '' }))}
-              />
-            </label>
-            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-              <button className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => setTransferOpen(false)}>Cancel</button>
-              <button className="btn btn-primary btn-sm" disabled={actionLoading} onClick={handleTransfer}>
-                {actionLoading ? 'Transferring...' : 'Confirm Transfer'}
-              </button>
-            </div>
+            {pendingTransfer ? (
+              <>
+                <p style={{ fontSize: '0.9rem', marginBottom: '0.75rem' }}>
+                  A transfer request is already pending for <strong>{pendingTransfer.toEmail}</strong>.
+                </p>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
+                  The booking stays yours until they accept. Revoke this request if you want to send a new one.
+                </p>
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                  <button className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => setTransferOpen(false)}>Close</button>
+                  <button className="btn btn-danger btn-sm" disabled={actionLoading} onClick={handleRevokeTransfer}>
+                    {actionLoading ? 'Revoking...' : 'Revoke Request'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <label style={{ display: 'block', marginBottom: '1rem' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Name</span>
+                  <input type="text" className="form-control" placeholder="Full name of the new guest"
+                    value={transferForm.recipientName}
+                    onChange={(e) => setTransferForm(prev => ({ ...prev, recipientName: e.target.value }))} />
+                </label>
+                <label style={{ display: 'block', marginBottom: '1rem' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Email</span>
+                  <input type="email" className="form-control" placeholder="name@example.com"
+                    value={transferForm.recipientEmail}
+                    onChange={(e) => setTransferForm(prev => ({ ...prev, recipientEmail: e.target.value }))} />
+                </label>
+                <label style={{ display: 'block', marginBottom: '1rem' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Phone (optional)</span>
+                  <PhoneField
+                    value={transferForm.recipientPhone}
+                    onChange={(val) => setTransferForm(prev => ({ ...prev, recipientPhone: val || '' }))}
+                  />
+                </label>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
+                  The recipient will receive an email link to accept or decline. Your booking stays
+                  yours until they accept; the request expires automatically if they don't respond.
+                </p>
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                  <button className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => setTransferOpen(false)}>Cancel</button>
+                  <button className="btn btn-primary btn-sm" disabled={actionLoading} onClick={handleTransfer}>
+                    {actionLoading ? 'Sending...' : 'Send Transfer Request'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -693,7 +814,19 @@ export default function BookingConfirmation() {
                 {(booking.loyaltyDiscountAmount || 0) > 0 && (
                   <tr><td>Loyalty discount</td><td>−{formatAmount(booking.loyaltyDiscountAmount)}</td></tr>
                 )}
-                {(booking.taxAmount || 0) > 0 && <tr><td>Tax</td><td>{formatAmount(booking.taxAmount)}</td></tr>}
+                {/* Itemised taxes — exactly what was charged, from the persisted breakdown */}
+                {parseTaxBreakdown(booking.taxBreakdownJson).map((l, i) => (
+                  <tr key={l.ruleId ?? i}>
+                    <td>
+                      {l.name} ({taxLineRateLabel(l)}
+                      {l.taxType && l.taxType !== 'GENERIC' ? ` · ${l.taxType}` : ''}
+                      {l.jurisdiction && l.jurisdiction !== 'GLOBAL' ? ` · ${l.jurisdiction}` : ''})
+                      {l.inclusive ? ' — included in price' : ''}
+                    </td>
+                    <td>{formatAmount(l.amount)}</td>
+                  </tr>
+                ))}
+                {(booking.taxAmount || 0) > 0 && <tr><td>Total tax</td><td>{formatAmount(booking.taxAmount)}</td></tr>}
               </tbody>
               <tfoot>
                 <tr className="rpo-total-row"><td>Total</td><td>{formatAmount(booking.totalAmount)}</td></tr>

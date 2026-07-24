@@ -57,6 +57,11 @@ public class PaymentEventListener {
         // protects against duplicate deliveries.
         Booking pre = bookingService.getBookingEntityForSystem(event.getBookingRef());
 
+        if (rejectOnBingeMismatch(event, pre, "PAYMENT_SUCCESS")) {
+            markProcessed(key);
+            return;
+        }
+
         // FX lock expiry audit: if an FX rate was committed at booking creation
         // (fxLockedUntil is set) and that window has now passed, log a WARNING for
         // reconciliation. In a well-functioning system this should never fire because
@@ -174,6 +179,11 @@ public class PaymentEventListener {
         if (isDuplicate(key)) return;
 
         log.info("Payment failed event for booking: {}", event.getBookingRef());
+        Booking preFail = bookingService.getBookingEntityForSystem(event.getBookingRef());
+        if (rejectOnBingeMismatch(event, preFail, "PAYMENT_FAILED")) {
+            markProcessed(key);
+            return;
+        }
         bookingService.updatePaymentStatus(event.getBookingRef(), PaymentStatus.FAILED, null);
         analyticsMetrics.paymentFailed();
 
@@ -227,11 +237,40 @@ public class PaymentEventListener {
         if (isDuplicate(key)) return;
 
         log.info("Payment refunded event for booking: {}, status: {}", event.getBookingRef(), event.getStatus());
-        PaymentStatus status = PaymentStatus.PARTIALLY_REFUNDED.name().equals(event.getStatus())
-            ? PaymentStatus.PARTIALLY_REFUNDED
-            : PaymentStatus.REFUNDED;
-        bookingService.updatePaymentStatus(event.getBookingRef(), status, null);
+        Booking preRefund = bookingService.getBookingEntityForSystem(event.getBookingRef());
+        if (rejectOnBingeMismatch(event, preRefund, "PAYMENT_REFUNDED")) {
+            markProcessed(key);
+            return;
+        }
+        // Apply the refund to the running collected total FIRST, then derive the
+        // booking-level payment status from the NET position (collected vs total) —
+        // never from the single payment's refund flag alone. This makes the status
+        // self-correcting regardless of the order in which payment.refunded and
+        // payment.success arrive, which is essential for the "change payment method"
+        // flow: it fires a full refund of the old payment AND an immediate
+        // re-collection under the new method, on two different Kafka topics with no
+        // cross-topic ordering guarantee. The previous logic set REFUNDED purely from
+        // event.getStatus(), so if the re-collection's payment.success was processed
+        // first, the booking stayed stuck at REFUNDED with collected == total — the
+        // phantom "fully refunded, ₹0 collected" banner on a fully-paid booking.
         bookingService.subtractFromCollectedAmount(event.getBookingRef(), event.getRefundAmount());
+
+        Booking netBooking = bookingService.getBookingEntityForSystem(event.getBookingRef());
+        java.math.BigDecimal collected = netBooking.getCollectedAmount() != null
+            ? netBooking.getCollectedAmount() : java.math.BigDecimal.ZERO;
+        java.math.BigDecimal total = netBooking.getTotalAmount() != null
+            ? netBooking.getTotalAmount() : java.math.BigDecimal.ZERO;
+        final java.math.BigDecimal epsilon = new java.math.BigDecimal("0.01");
+
+        PaymentStatus status;
+        if (collected.compareTo(epsilon) <= 0) {
+            status = PaymentStatus.REFUNDED;            // nothing left collected → genuinely refunded
+        } else if (total.signum() > 0 && collected.compareTo(total) >= 0) {
+            status = PaymentStatus.SUCCESS;             // still (or again) fully covered, e.g. a method swap
+        } else {
+            status = PaymentStatus.PARTIALLY_REFUNDED;  // some money refunded, a balance is still retained
+        }
+        bookingService.updatePaymentStatus(event.getBookingRef(), status, null);
 
         try {
             Booking refreshed = bookingService.getBookingEntityForSystem(event.getBookingRef());
@@ -246,6 +285,35 @@ public class PaymentEventListener {
                 event.getBookingRef(), ex.getMessage());
         }
         markProcessed(key);
+    }
+
+    /**
+     * SEC-011 event fence: a payment event whose binge doesn't match the
+     * booking's own binge must never mutate the booking. This can only mean a
+     * mis-stamped payment row or a tampered event — mutating on it would let
+     * one tenant's payment drive another tenant's booking lifecycle. The event
+     * is flagged for ops and swallowed (deterministic — redelivery can't fix
+     * it). Events from older producers carry no binge and pass unverified.
+     */
+    private boolean rejectOnBingeMismatch(PaymentEvent event, Booking booking, String context) {
+        if (event.getBingeId() == null || booking.getBingeId() == null
+                || event.getBingeId().equals(booking.getBingeId())) {
+            return false;
+        }
+        log.error("TENANT_MISMATCH: {} event (txn {}) carries binge {} but booking {} belongs to binge {} — "
+            + "mutation refused, flagged for manual review",
+            context, event.getTransactionId(), event.getBingeId(),
+            event.getBookingRef(), booking.getBingeId());
+        try {
+            eventLogService.logEvent(booking, BookingEventType.MANUAL_REVIEW_FLAGGED,
+                booking.getStatus().name(), null, "SYSTEM",
+                String.format("TENANT_MISMATCH: %s event (txn %s) from binge %d refused — booking is binge %d",
+                    context, event.getTransactionId(), event.getBingeId(), booking.getBingeId()));
+        } catch (Exception ex) {
+            log.warn("Could not write TENANT_MISMATCH timeline entry for {}: {}",
+                event.getBookingRef(), ex.getMessage());
+        }
+        return true;
     }
 
     private boolean isDuplicate(String eventKey) {

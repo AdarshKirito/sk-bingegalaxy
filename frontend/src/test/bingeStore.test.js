@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import useBingeStore from '../stores/bingeStore';
+import useBingeStore, { normalizeSelectedBinge } from '../stores/bingeStore';
 
 describe('useBingeStore', () => {
   beforeEach(() => {
@@ -13,14 +13,42 @@ describe('useBingeStore', () => {
     expect(result.current.selectedBinge).toBeNull();
   });
 
-  it('selects a binge and persists to localStorage', () => {
+  it('selects a binge and persists the normalized shape to localStorage', () => {
     const { result } = renderHook(() => useBingeStore());
     const binge = { id: 1, name: 'Main Branch', address: '123 Main St' };
 
     act(() => result.current.selectBinge(binge));
 
-    expect(result.current.selectedBinge).toEqual(binge);
-    expect(JSON.parse(localStorage.getItem('selectedBinge'))).toEqual(binge);
+    expect(result.current.selectedBinge).toMatchObject(binge);
+    expect(JSON.parse(localStorage.getItem('selectedBinge'))).toMatchObject(binge);
+  });
+
+  it('normalizes the selected binge to one canonical shape regardless of entry path', () => {
+    const fullBinge = {
+      id: 7,
+      name: 'Galaxy Central',
+      address: '1 Orbit Lane',
+      supportEmail: 'help@galaxy.test',
+      supportPhone: '9999999999',
+      customerCancellationEnabled: true,
+      customerCancellationCutoffMinutes: 120,
+      timezone: 'Asia/Dubai',
+      // Extra payload from the list endpoint that must NOT be persisted
+      reviews: [{ id: 1 }],
+      heroImageUrl: 'https://cdn/img.png',
+    };
+
+    const normalized = normalizeSelectedBinge(fullBinge);
+
+    expect(normalized.supportEmail).toBe('help@galaxy.test');
+    expect(normalized.timezone).toBe('Asia/Dubai');
+    expect(normalized.customerCancellationCutoffMinutes).toBe(120);
+    expect(normalized).not.toHaveProperty('reviews');
+    expect(normalized).not.toHaveProperty('heroImageUrl');
+  });
+
+  it('defaults timezone when the source object lacks one', () => {
+    expect(normalizeSelectedBinge({ id: 3, name: 'X' }).timezone).toBe('Asia/Kolkata');
   });
 
   it('clears selected binge and removes from localStorage', () => {

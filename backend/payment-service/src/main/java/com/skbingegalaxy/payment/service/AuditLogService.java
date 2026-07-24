@@ -31,6 +31,8 @@ public class AuditLogService {
 
     public static final String ACTION_REFUND_ISSUED   = "REFUND_ISSUED";
     public static final String ACTION_REFUND_AUTO     = "REFUND_AUTO_LATE_CAPTURE";
+    public static final String ACTION_REFUND_FAILED   = "REFUND_GATEWAY_FAILED";
+    public static final String ACTION_REFUND_SETTLED  = "REFUND_GATEWAY_SETTLED";
     public static final String ACTION_PAYMENT_CANCEL  = "PAYMENT_CANCELLED";
     public static final String ACTION_CASH_RECORDED   = "CASH_RECORDED";
     public static final String ACTION_PAYMENT_ADDED   = "PAYMENT_ADDED";

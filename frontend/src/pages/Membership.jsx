@@ -9,6 +9,7 @@ import {
 import SEO from '../components/SEO';
 import { SkeletonGrid } from '../components/ui/Skeleton';
 import loyaltyV2 from '../services/loyaltyV2';
+import { parseServerDate } from '../services/timeFormat';
 import './Membership.css';
 
 /**
@@ -31,7 +32,7 @@ const TIER_THRESHOLDS = {
 
 const TIER_BENEFITS = {
   BRONZE: [
-    { icon: <FiStar />,   title: '10 points per ₹1', body: 'Base earn rate on every booking.' },
+    { icon: <FiStar />,   title: 'Points on every booking', body: 'Base earn rate set per venue country — your exact earn shows at checkout.' },
     { icon: <FiGift />,   title: 'Birthday surprise',  body: 'A small gift in your booking month.' },
   ],
   SILVER: [
@@ -314,8 +315,10 @@ export default function Membership() {
             <div className="how-ico"><FiStar /></div>
             <h3>1. Earn points on every booking</h3>
             <p>
-              You get <strong>10 points for every ₹1</strong> you spend on stays and
-              experiences. Some venues may add tier or campaign multipliers on top.
+              Every booking earns points at a rate set for the venue's country —
+              a point is worth roughly the same wherever you book. Your exact earn
+              estimate shows at checkout; venues may add tier or campaign
+              multipliers on top.
             </p>
           </div>
 
@@ -346,8 +349,9 @@ export default function Membership() {
             <h3>3. Redeem points at checkout</h3>
             <p>
               At booking, toggle <strong>"Use points"</strong> to apply your balance —
-              100 points is worth ₹1 off. Partial redemptions are fine, and we always
-              spend your oldest points first so nothing is left on the table.
+              the discount preview shows exactly what your points are worth in the
+              venue's currency. Partial redemptions are fine, and we always spend
+              your oldest points first so nothing is left on the table.
             </p>
           </div>
 
@@ -451,7 +455,7 @@ export default function Membership() {
                     </span>
                   </div>
                   <div className="sm-h-meta">
-                    <span className="sm-date">{new Date(r.createdAt).toLocaleDateString()}</span>
+                    <span className="sm-date">{parseServerDate(r.createdAt)?.toLocaleDateString() || ''}</span>
                     {isChallenge && r.challengeExpiresAt && (
                       <span className="sm-challenge-hint">
                         <FiClock style={{ verticalAlign: '-1px', marginRight: 3 }} />
@@ -506,7 +510,7 @@ function LedgerRow({ entry }) {
           <div className="ledger-desc">{entry.description}</div>
         )}
         <div className="ledger-sub">
-          <span>{new Date(entry.createdAt).toLocaleString()}</span>
+          <span>{parseServerDate(entry.createdAt)?.toLocaleString() || ''}</span>
           {entry.bookingRef && (
             <Link to={`/booking/${entry.bookingRef}`} className="ledger-booking-link">
               Booking {entry.bookingRef}

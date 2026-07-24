@@ -53,6 +53,9 @@ public class WaitlistService {
     // Used to verify the slot is not admin-blocked before issuing an offer
     // (Item 26 — out-of-order: cancellation arrives after admin block).
     private final com.skbingegalaxy.booking.client.AvailabilityClient availabilityClient;
+    // BOOK-002: an OFFER reserves the slot with a real SlotHold for the offer
+    // window, so a direct booking cannot take it from the offered customer.
+    private final SlotHoldService slotHoldService;
 
     @Value("${internal.api.secret}")
     private String internalApiSecret;
@@ -138,6 +141,7 @@ public class WaitlistService {
 
         entry.setStatus(WaitlistStatus.CANCELLED);
         waitlistRepository.save(entry);
+        releaseOfferHold(entry, "WAITLIST_CANCELLED");
         log.info("Customer {} cancelled waitlist entry {}", customerId, entryId);
     }
 
@@ -188,6 +192,7 @@ public class WaitlistService {
         }
         entry.setStatus(WaitlistStatus.CANCELLED);
         waitlistRepository.save(entry);
+        releaseOfferHold(entry, "WAITLIST_ADMIN_CANCELLED");
         log.info("Admin {} cancelled waitlist entry {} (binge {})", adminId, entryId, bingeId);
         return toDto(entry);
     }
@@ -207,6 +212,7 @@ public class WaitlistService {
         entry.setStatus(WaitlistStatus.OFFERED);
         entry.setNotifiedAt(LocalDateTime.now(ZoneOffset.UTC));
         entry.setOfferExpiresAt(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(offerExpiryMinutes));
+        reserveOfferHold(entry);
         waitlistRepository.save(entry);
         sendWaitlistNotification(entry);
         log.info("Admin {} manually offered waitlist entry {} (binge {})", adminId, entryId, bingeId);
@@ -296,6 +302,7 @@ public class WaitlistService {
                 entry.setStatus(WaitlistStatus.OFFERED);
                 entry.setNotifiedAt(LocalDateTime.now(ZoneOffset.UTC));
                 entry.setOfferExpiresAt(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(offerExpiryMinutes));
+                reserveOfferHold(entry);
                 waitlistRepository.save(entry);
                 funnelMetrics.waitlistOffered();
 
@@ -347,12 +354,71 @@ public class WaitlistService {
             entry.setStatus(WaitlistStatus.EXPIRED);
             waitlistRepository.save(entry);
             funnelMetrics.waitlistExpired();
+            // Release the offer's slot reservation BEFORE promoting the next
+            // entry — otherwise the just-expired hold still counts as occupancy
+            // and the next candidate would be skipped.
+            releaseOfferHold(entry, "WAITLIST_OFFER_EXPIRED");
             log.info("Waitlist offer expired for entry {} (customer {})", entry.getId(), entry.getCustomerId());
 
             // Try to promote next in queue
             promoteWaitlistOnCancellation(entry.getBingeId(), entry.getPreferredDate());
         }
         return expired.size();
+    }
+
+    /**
+     * Creates the SlotHold that backs a waitlist OFFER (BOOK-002). Best-effort:
+     * a hold failure downgrades the offer to the legacy unreserved behaviour
+     * rather than blocking the promotion.
+     */
+    private void reserveOfferHold(WaitlistEntry entry) {
+        try {
+            String token = slotHoldService.createOfferHold(
+                entry.getBingeId(), entry.getCustomerId(), entry.getCustomerName(),
+                entry.getCustomerEmail(), entry.getEventType(),
+                entry.getPreferredDate(), entry.getPreferredStartTime(),
+                entry.getDurationMinutes(), entry.getNumberOfGuests(),
+                entry.getOfferExpiresAt());
+            entry.setOfferHoldToken(token);
+        } catch (Exception e) {
+            log.warn("Could not reserve offer hold for waitlist entry {} — offer proceeds unreserved: {}",
+                entry.getId(), e.getMessage());
+        }
+    }
+
+    private void releaseOfferHold(WaitlistEntry entry, String reason) {
+        if (entry.getOfferHoldToken() != null) {
+            slotHoldService.releaseQuietly(entry.getOfferHoldToken(), reason);
+        }
+    }
+
+    /**
+     * Closes the OFFERED → BOOKED loop (BOOK-002): fired after a booking
+     * commit; if the booking matches an outstanding offer for the same
+     * customer + slot, the entry converts and its offer hold is released.
+     * AFTER_COMMIT keeps a listener failure from ever rolling back a booking.
+     */
+    @org.springframework.transaction.event.TransactionalEventListener(
+        phase = org.springframework.transaction.event.TransactionPhase.AFTER_COMMIT)
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    public void onBookingCreated(com.skbingegalaxy.booking.event.BookingCreatedEvent event) {
+        try {
+            waitlistRepository
+                .findFirstByCustomerIdAndBingeIdAndPreferredDateAndPreferredStartTimeAndStatus(
+                    event.customerId(), event.bingeId(), event.bookingDate(),
+                    event.startTime(), WaitlistStatus.OFFERED)
+                .ifPresent(entry -> {
+                    entry.setStatus(WaitlistStatus.BOOKED);
+                    entry.setConvertedBookingRef(event.bookingRef());
+                    waitlistRepository.save(entry);
+                    funnelMetrics.waitlistConverted();
+                    releaseOfferHold(entry, "WAITLIST_CONVERTED");
+                    log.info("Waitlist entry {} converted to booking {} for customer {}",
+                        entry.getId(), event.bookingRef(), entry.getCustomerId());
+                });
+        } catch (Exception e) {
+            log.error("Waitlist conversion check failed for booking {}: {}", event.bookingRef(), e.getMessage());
+        }
     }
 
     private void sendWaitlistNotification(WaitlistEntry entry) {

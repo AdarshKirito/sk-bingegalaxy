@@ -1,5 +1,6 @@
 package com.skbingegalaxy.auth.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.skbingegalaxy.common.enums.UserRole;
 import lombok.*;
 
@@ -41,4 +42,24 @@ public class UserDto {
     private boolean emailVerified;
     private boolean mfaEnabled;
     private LocalDateTime lastPasswordChangeAt;
+
+    /** True while the account still holds an admin-issued temporary password. */
+    private boolean mustChangePassword;
+
+    /**
+     * Guest customer profile — created by an admin for a walk-in with no email
+     * (or who opted out). Holds no usable credentials and cannot log in; UIs
+     * badge these and skip email-based flows.
+     */
+    private boolean guest;
+
+    /**
+     * The one-time temporary password, returned ONLY by the admin "create
+     * customer" / "resend temp password" responses so the front-desk admin can
+     * read it out at the counter. Null on every other DTO. Never persisted in
+     * plaintext — it is hashed for storage and the customer also receives it by
+     * email + SMS.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String temporaryPassword;
 }

@@ -27,6 +27,29 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
     private static final java.util.Set<String> VALID_ROLES = java.util.Set.of(
         "CUSTOMER", "ADMIN", "SUPER_ADMIN");
 
+    /** Must match SessionRevocationCache.KEY_PREFIX in auth-service. */
+    private static final String REVOKED_SID_PREFIX = "auth:revoked-sid:";
+
+    /**
+     * Session-revocation denylist (written by auth-service on session revoke /
+     * force-logout). Optional: when Redis is unavailable the check fails OPEN —
+     * availability over strictness, matching the rate-limiter's degradation mode —
+     * and revoked access tokens fall back to dying at natural (15-min) expiry.
+     */
+    private final org.springframework.data.redis.core.ReactiveStringRedisTemplate redis;
+
+    public JwtAuthenticationFilter(
+            org.springframework.beans.factory.ObjectProvider<org.springframework.data.redis.core.ReactiveStringRedisTemplate> redisProvider) {
+        // ObjectProvider (not a required param): the filter degrades to
+        // expiry-only revocation when Redis auto-config is absent instead of
+        // failing gateway startup. Tests pass null to exercise that path.
+        this.redis = redisProvider != null ? redisProvider.getIfAvailable() : null;
+        if (this.redis == null) {
+            log.warn("JwtAuthenticationFilter: no reactive Redis available — revoked sessions "
+                + "will keep working until access-token expiry");
+        }
+    }
+
     private static final List<String> PUBLIC_PATHS = List.of(
         "/api/v1/auth/register",
         "/api/v1/auth/login",
@@ -54,6 +77,10 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         // Security is enforced by HMAC-SHA256 signature verification in DisputeWebhookService,
         // not by JWT auth. Must be public so Razorpay's servers can reach this endpoint.
         "/api/v1/payments/webhooks/",
+        // Email-provider delivery webhooks (SendGrid/Mailgun/SES) — server-to-server,
+        // no JWT. Security is HMAC-SHA256 over the raw body, verified fail-closed in
+        // DeliveryWebhookController (X-Webhook-Signature).
+        "/api/v1/notifications/webhooks/",
         "/api/v1/site-content/public",
         // Booking-transfer recipient endpoints — token IS the bearer (magic-link
         // pattern). Recipient may not yet have an account; the token proves the
@@ -150,6 +177,19 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
                 return exchange.getResponse().setComplete();
             }
 
+            // ── Forced password-change gate (server-side) ────────────────────────
+            // A token minted while the account still holds an admin-issued temporary
+            // password is restricted to the change-password / profile / logout surface.
+            // This is the authoritative enforcement — the SPA also forces the change at
+            // login, but a token can't be replayed against any other API behind it.
+            Boolean mustChangePassword = claims.get("mustChangePassword", Boolean.class);
+            if (Boolean.TRUE.equals(mustChangePassword) && !isPasswordChangeAllowedPath(path)) {
+                log.info("Blocking restricted (temp-password) token from {} — change required", path);
+                exchange.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
+                exchange.getResponse().getHeaders().add("X-Password-Change-Required", "true");
+                return exchange.getResponse().setComplete();
+            }
+
             if (isSuperAdminPath(path) && !"SUPER_ADMIN".equals(role)) {
                 // Defer hard reject until after we've evaluated Authority Handover
                 // delegation claims below — a delegated admin with the matching scope
@@ -169,6 +209,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
             }
 
             String firstName = claims.get("firstName", String.class);
+            String lastName = claims.get("lastName", String.class);
             String phone = claims.get("phone", String.class);
             String phoneCountryCode = claims.get("phoneCountryCode", String.class);
             String subject = claims.getSubject();
@@ -222,7 +263,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
                 .header("X-User-Id", subject)
                 .header("X-User-Email", email != null ? email : "")
                 .header("X-User-Role", effectiveRole)
-                .header("X-User-Name", firstName != null ? firstName : "Customer")
+                .header("X-User-Name", fullName(firstName, lastName))
                 .header("X-User-Phone", phone != null ? phone : "")
                 .header("X-User-Phone-Country-Code", phoneCountryCode != null ? phoneCountryCode : "");
             if (delegated) {
@@ -231,13 +272,53 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
                 mutator.header("X-Authority-Native-Role", role);
             }
             ServerHttpRequest mutatedRequest = mutator.build();
+            ServerWebExchange mutatedExchange = exchange.mutate().request(mutatedRequest).build();
 
-            return chain.filter(exchange.mutate().request(mutatedRequest).build());
+            // ── Session-revocation gate ──────────────────────────────────────
+            // Tokens minted since the sid rollout carry the id of their session
+            // row; force-revoking that session (My Sessions "Revoke", super-admin
+            // force-logout, logout) denylists the sid in Redis, so the token dies
+            // HERE instead of surviving to its natural expiry.
+            Object sidClaim = claims.get("sid");
+            if (sidClaim instanceof Number sidNum && redis != null) {
+                ServerWebExchange finalExchange = mutatedExchange;
+                String finalPath = path;
+                return redis.hasKey(REVOKED_SID_PREFIX + sidNum.longValue())
+                    .onErrorResume(ex -> {
+                        log.warn("Revoked-session check failed for path {} — failing open: {}",
+                            finalPath, ex.getMessage());
+                        return Mono.just(false);
+                    })
+                    .defaultIfEmpty(false)
+                    .flatMap(revoked -> {
+                        if (Boolean.TRUE.equals(revoked)) {
+                            log.info("Rejected revoked session sid={} path={}", sidNum, finalPath);
+                            finalExchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
+                            finalExchange.getResponse().getHeaders().add("X-Session-Revoked", "true");
+                            return finalExchange.getResponse().setComplete();
+                        }
+                        return chain.filter(finalExchange);
+                    });
+            }
+
+            return chain.filter(mutatedExchange);
         } catch (Exception e) {
             log.warn("JWT validation failed for path {}: {}", path, e.getMessage());
             exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
             return exchange.getResponse().setComplete();
         }
+    }
+
+    /**
+     * "First Last" from the JWT name claims. Legacy tokens (no lastName claim)
+     * degrade to first name only; a token with neither falls back to "Customer"
+     * so downstream NOT-NULL name snapshots never receive a blank.
+     */
+    private static String fullName(String firstName, String lastName) {
+        String first = firstName == null ? "" : firstName.trim();
+        String last = lastName == null ? "" : lastName.trim();
+        String full = (first + " " + last).trim();
+        return full.isEmpty() ? "Customer" : full;
     }
 
     private String extractToken(ServerHttpRequest request) {
@@ -256,7 +337,53 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
     }
 
     private boolean isPublicPath(String path) {
-        return PUBLIC_PATHS.stream().anyMatch(path::startsWith);
+        String normalized = normalizePath(path);
+        return PUBLIC_PATHS.stream().anyMatch(p -> matchesAtBoundary(normalized, p));
+    }
+
+    /**
+     * Normalize a request path defensively before any allow-list / role-gate decision:
+     * collapse {@code ./} and {@code ../} so a crafted path can never slip a privileged
+     * segment past the segment checks (e.g. {@code /api/v1/bookings/binges/../admin/x}).
+     * Falls back to the raw path if the value cannot be parsed as a URI (illegal chars) —
+     * this fails SAFE, because the downstream service {@code SecurityConfig} re-enforces
+     * every rule as defence-in-depth.
+     */
+    private static String normalizePath(String path) {
+        try {
+            return java.net.URI.create(path).normalize().getPath();
+        } catch (RuntimeException e) {
+            return path;
+        }
+    }
+
+    /**
+     * Segment-boundary prefix match. A path matches a prefix only when it equals the
+     * prefix or continues at a path separator, so the public {@code /api/v1/bookings/binges}
+     * whitelists {@code /binges} and {@code /binges/{id}} but NEVER a different sibling
+     * such as {@code /api/v1/bookings/binges-secret}. Trailing slashes on a prefix are
+     * treated as boundaries (e.g. {@code .../webhooks/} matches {@code .../webhooks/razorpay}).
+     */
+    private static boolean matchesAtBoundary(String path, String prefix) {
+        String base = prefix.endsWith("/") ? prefix.substring(0, prefix.length() - 1) : prefix;
+        return path.equals(base) || path.startsWith(base + "/");
+    }
+
+    /**
+     * Endpoints a restricted (temporary-password) session may still reach: just
+     * enough to set a new password, read its own profile so the SPA can boot, and
+     * sign out. Everything else is blocked until the password is changed.
+     */
+    private static final List<String> PASSWORD_CHANGE_ALLOWED_PATHS = List.of(
+        "/api/v1/auth/change-password",
+        "/api/v1/auth/profile",
+        "/api/v1/auth/me",
+        "/api/v1/auth/logout"
+    );
+
+    private boolean isPasswordChangeAllowedPath(String path) {
+        String normalized = normalizePath(path);
+        return PASSWORD_CHANGE_ALLOWED_PATHS.stream().anyMatch(p -> matchesAtBoundary(normalized, p));
     }
 
     /**
@@ -268,8 +395,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
      * Uses normalized path to prevent path-traversal bypass (e.g., /../admin/).
      */
     private boolean isAdminPath(String path) {
-        String normalized = java.net.URI.create(path).normalize().getPath();
-        String[] segments = normalized.split("/");
+        String[] segments = normalizePath(path).split("/");
         // ["", "api", "v1|v2", "service", "admin|super-admin", ...]
         if (segments.length < 5) return false;
         String fifth = segments[4];
@@ -283,8 +409,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
      * route is automatically locked down without code changes here.
      */
     private boolean isSuperAdminPath(String path) {
-        String normalized = java.net.URI.create(path).normalize().getPath();
-        String[] segments = normalized.split("/");
+        String[] segments = normalizePath(path).split("/");
         return segments.length >= 5 && "super-admin".equals(segments[4]);
     }
 

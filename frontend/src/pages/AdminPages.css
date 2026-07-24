@@ -350,7 +350,7 @@
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--primary);
+  color: var(--primary-text);
   padding: 0.38rem 0.78rem;
   border-radius: 999px;
   border: 1px solid rgba(var(--gold-rgb), 0.18);
@@ -622,19 +622,19 @@
 
 .adm-badge-active {
   background: rgba(16, 185, 129, 0.1);
-  color: var(--success);
+  color: var(--success-text);
   border: 1px solid rgba(16, 185, 129, 0.2);
 }
 
 .adm-badge-inactive {
   background: rgba(239, 68, 68, 0.08);
-  color: var(--danger);
+  color: var(--danger-text);
   border: 1px solid rgba(239, 68, 68, 0.15);
 }
 
 .adm-badge-info {
   background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.1), rgba(var(--accent-rgb), 0.05));
-  color: var(--primary);
+  color: var(--primary-text);
   border: 1px solid rgba(var(--primary-rgb), 0.15);
 }
 
@@ -646,7 +646,7 @@
 
 .adm-badge-danger {
   background: rgba(239, 68, 68, 0.1);
-  color: var(--danger);
+  color: var(--danger-text);
   border: 1px solid rgba(239, 68, 68, 0.22);
 }
 
@@ -825,7 +825,7 @@
   font-weight: 700;
 }
 
-.adm-table .success { color: var(--success); }
+.adm-table .success { color: var(--success-text); }
 .adm-table .warning { color: var(--warning, #f59e0b); }
 
 /* ── Operational Panel ─────────────────────────────────── */
@@ -850,7 +850,7 @@
 .adm-op-value {
   font-weight: 700;
   font-size: 1rem;
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .adm-op-value.mono {
@@ -893,7 +893,7 @@
 
 .adm-empty-icon {
   font-size: 2.5rem;
-  color: var(--primary);
+  color: var(--primary-text);
   opacity: 0.6;
 }
 
@@ -1068,11 +1068,11 @@
 }
 
 .adm-list-item-status.success {
-  color: var(--success);
+  color: var(--success-text);
 }
 
 .adm-list-item-status.danger {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .adm-summary {
@@ -1171,7 +1171,7 @@
 
 .adm-subtab.active {
   background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.18), rgba(var(--accent-rgb), 0.12));
-  color: var(--primary);
+  color: var(--primary-text);
   box-shadow: inset 0 0 0 1px rgba(var(--primary-rgb), 0.12);
 }
 

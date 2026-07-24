@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
 public class BookingBingeClientFallback implements BookingBingeClient {
 
     @Override
-    public ApiResponse<BookingBingeDto> getBinge(Long bingeId) {
+    public ApiResponse<BookingBingeDto> getBinge(Long bingeId, Long userId) {
         log.warn("Circuit breaker OPEN: booking-service unavailable for binge id={}", bingeId);
         return ApiResponse.error("Booking service temporarily unavailable");
     }

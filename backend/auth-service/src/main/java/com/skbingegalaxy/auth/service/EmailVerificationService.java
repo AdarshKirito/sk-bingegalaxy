@@ -160,6 +160,83 @@ public class EmailVerificationService {
         return verificationRequired;
     }
 
+    // ── Verified email change (settings page) ─────────────────────────────
+    // request → OTP is sent to the NEW address (proves ownership of the inbox the
+    // account is moving to) → confirm applies the switch, already verified.
+
+    /** Issues a change-email OTP to {@code newEmail}. Invalidates prior tokens. */
+    @Transactional
+    public void issueEmailChange(User user, String newEmail) {
+        tokenRepository.invalidateAllForUser(user.getId());
+        String plaintextToken = UUID.randomUUID().toString().replace("-", "");
+        String otp = generateOtp();
+        EmailVerificationToken entry = EmailVerificationToken.builder()
+            .userId(user.getId())
+            .tokenHash(sha256Hex(plaintextToken))
+            .otp(otp)
+            .pendingEmail(newEmail.toLowerCase())
+            .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(Math.min(expirationMinutes, 30)))
+            .build();
+        tokenRepository.save(entry);
+
+        try {
+            NotificationEvent event = NotificationEvent.builder()
+                .channel(NotificationChannel.EMAIL)
+                .recipientEmail(newEmail)
+                .recipientName(user.getFirstName())
+                .subject("Confirm your new email – SK Binge Galaxy")
+                .body(String.format(
+                    "Hi %s,%n%nUse this 6-digit code to confirm changing your SK Binge Galaxy "
+                    + "account email to this address: %s%n%nThe code expires in %d minutes. "
+                    + "If you didn't request this change, ignore this message — your account "
+                    + "email stays unchanged until the code is entered.",
+                    user.getFirstName(), otp, Math.min(expirationMinutes, 30)))
+                .type("EMAIL_CHANGE_VERIFICATION")
+                .templateData(Map.of(
+                    "otp", otp,
+                    "expiryMinutes", String.valueOf(Math.min(expirationMinutes, 30)),
+                    "name", user.getFirstName()))
+                .build();
+            kafkaTemplate.send(KafkaTopics.NOTIFICATION_SEND, event);
+        } catch (Exception ex) {
+            log.warn("Failed to enqueue email-change notification: {}", ex.getMessage());
+        }
+    }
+
+    /**
+     * Validates the change-email OTP and returns the address to switch to.
+     * Same hardening as {@link #verifyWithOtp}: expiry, attempt cap, constant-time compare.
+     */
+    @Transactional
+    public String confirmEmailChange(Long userId, String otp) {
+        if (otp == null || otp.isBlank()) {
+            throw new BusinessException("Verification code is required", HttpStatus.BAD_REQUEST);
+        }
+        EmailVerificationToken token = tokenRepository.findLatestUnusedForUser(userId)
+            .orElseThrow(() -> new BusinessException("No pending email change for this account", HttpStatus.BAD_REQUEST));
+        if (token.getPendingEmail() == null) {
+            throw new BusinessException("No pending email change for this account", HttpStatus.BAD_REQUEST);
+        }
+        if (token.isExpired()) {
+            throw new BusinessException("The code has expired. Please request the change again.", HttpStatus.BAD_REQUEST);
+        }
+        if (token.isAttemptsExhausted(otpMaxAttempts)) {
+            token.setUsed(true);
+            tokenRepository.save(token);
+            throw new BusinessException("Too many incorrect attempts. Please request the change again.", HttpStatus.TOO_MANY_REQUESTS);
+        }
+        if (!MessageDigest.isEqual(
+                otp.trim().getBytes(StandardCharsets.UTF_8),
+                token.getOtp().getBytes(StandardCharsets.UTF_8))) {
+            token.incrementAttempts();
+            tokenRepository.save(token);
+            throw new BusinessException("Invalid verification code", HttpStatus.BAD_REQUEST);
+        }
+        token.setUsed(true);
+        tokenRepository.save(token);
+        return token.getPendingEmail();
+    }
+
     // ── helpers ──────────────────────────────────────────────
     private String generateOtp() {
         StringBuilder sb = new StringBuilder(6);

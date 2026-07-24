@@ -135,9 +135,23 @@ public class User {
     @Builder.Default
     private boolean mfaEnabled = false;
 
-    /** Base32-encoded TOTP secret; null until enrolment completes. */
-    @Column(name = "mfa_secret", length = 64)
+    /**
+     * TOTP secret, AES-256-GCM encrypted at rest (V20). Null until enrolment
+     * starts. Always read/written through {@code SecretCipher} — never use this
+     * value directly as a Base32 secret. Legacy rows hold unprefixed plaintext
+     * and are re-encrypted on next write.
+     */
+    @Column(name = "mfa_secret", length = 255)
     private String mfaSecret;
+
+    /** Consecutive failed TOTP/recovery attempts; reset on success (V20). */
+    @Column(name = "mfa_failed_attempts", nullable = false)
+    @Builder.Default
+    private int mfaFailedAttempts = 0;
+
+    /** While in the future, MFA verification is refused — brute-force throttle (V20). */
+    @Column(name = "mfa_locked_until")
+    private LocalDateTime mfaLockedUntil;
 
     @Column(name = "mfa_enrolled_at")
     private LocalDateTime mfaEnrolledAt;
@@ -148,6 +162,28 @@ public class User {
 
     @Column(name = "last_password_change_at")
     private LocalDateTime lastPasswordChangeAt;
+
+    // ── Temporary-password onboarding (V16) ──────────────────────────────────
+    // Set for admin-created customers who receive a one-time temp password by
+    // email + SMS. They are forced to change it on login, and the temp password
+    // is only valid for a limited number of logins before Forgot-password is
+    // required. Normal accounts: mustChangePassword=false, counter=null.
+
+    @Column(name = "must_change_password", nullable = false)
+    @Builder.Default
+    private boolean mustChangePassword = false;
+
+    @Column(name = "temp_password_logins_remaining")
+    private Integer tempPasswordLoginsRemaining;
+
+    // ── Guest customer profile (V18) ──────────────────────────────────────────
+    // Created by an admin for walk-in reservations when the customer has no email
+    // or opted out ("no email"). Gets a synthetic placeholder email and a random
+    // unusable password; no credentials are ever issued or communicated, so the
+    // profile cannot log in until an admin upgrades it to a full account.
+    @Column(name = "is_guest", nullable = false)
+    @Builder.Default
+    private boolean guest = false;
 
     // ── FIDO2 / WebAuthn hardware security key (V15) ─────────────────────────
     // Required for SUPER_ADMIN accounts. Phishing-resistant by cryptographic design:

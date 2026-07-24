@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useBinge } from '../context/BingeContext';
-import { useFormatMoney } from '../context/CurrencyContext';
+import { formatCurrency } from '../utils/currency';
 import { authService, bookingService, toArray } from '../services/endpoints';
 import { formatTime12h } from '../utils/format';
+import VenueTimeNote from '../components/VenueTimeNote';
+import { parseServerDate } from '../services/timeFormat';
 import {
   buildSupportEmailHref,
   buildSupportWhatsAppHref,
@@ -110,11 +112,22 @@ export default function MyBookings() {
   const [waitlistEntries, setWaitlistEntries] = useState([]);
   const [rescheduleModal, setRescheduleModal] = useState(null);
   const [transferModal, setTransferModal] = useState(null);
+  const [pendingTransfer, setPendingTransfer] = useState(null);
+  // Tracks which booking's transfer modal is open so a slow listTransfers
+  // response can't attach another booking's pending transfer (see guard below).
+  const transferModalRef = useRef(null);
   const [rescheduleForm, setRescheduleForm] = useState({ newBookingDate: '', newStartTime: '', newDurationMinutes: '' });
   const [transferForm, setTransferForm] = useState({ recipientName: '', recipientEmail: '', recipientPhone: '' });
   const [actionLoading, setActionLoading] = useState(false);
   const [recurringGroupBookings, setRecurringGroupBookings] = useState(null); // null = closed, 'loading' = fetching, [] = empty, [...] = results
   const perPage = 6;
+  // Ticks every 30s so the "auto-releases in Xm" chips on unpaid holds stay honest
+  // without re-rendering the whole grid every second.
+  const [holdTick, setHoldTick] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setHoldTick(Date.now()), 30000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -197,10 +210,9 @@ export default function MyBookings() {
   }[paymentStatus] || paymentStatus || 'PENDING');
 
   // Informational amounts (booking totals, spend stats) render in the customer's
-  // selected display currency. The "Pay Balance" CTA uses formatINR so it always shows
-  // the exact base-INR charge the customer will be billed, never a converted value.
-  const formatAmount = useFormatMoney();
-  const formatINR = (amount) => `₹${Number(amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  // Each amount is shown in ITS booking's own currency (native per-binge pricing) — the
+  // exact currency the customer will be charged in. No customer-side conversion.
+  const money = (amount, currency) => formatCurrency(amount, currency || 'INR');
   const formatDuration = (booking) => {
     const totalMinutes = booking.durationMinutes || ((booking.durationHours || 0) * 60);
     if (!totalMinutes) return 'Flexible duration';
@@ -215,7 +227,13 @@ export default function MyBookings() {
   const sortedPast = [...pastBookings].sort((left, right) => new Date(`${right.bookingDate}T${right.startTime || '00:00'}`) - new Date(`${left.bookingDate}T${left.startTime || '00:00'}`));
   const allBookings = [...sortedUpcoming, ...sortedPast];
   const support = mergeSupportContact(supportContact, selectedBinge);
-  const baseBookings = tab === 'upcoming' ? sortedUpcoming : tab === 'past' ? sortedPast : allBookings;
+  // When the customer is actively searching, scan EVERY reservation (upcoming +
+  // past) rather than only the active tab. Otherwise a search for a completed or
+  // cancelled booking while sitting on the "Upcoming" tab returns nothing and
+  // reads as "search is broken". With no query we respect the selected tab.
+  const baseBookings = debouncedQuery
+    ? allBookings
+    : (tab === 'upcoming' ? sortedUpcoming : tab === 'past' ? sortedPast : allBookings);
   const filteredBookings = useMemo(() => {
     const today = new Date();
     const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -258,6 +276,10 @@ export default function MyBookings() {
     .filter(booking => booking.paymentStatus === 'SUCCESS')
     .reduce((sum, booking) => sum + (booking.totalAmount || 0), 0);
   const unpaidBalance = pendingPayments.reduce((sum, booking) => sum + (booking.totalAmount || 0), 0);
+  // Cross-booking stat tiles: format in the customer's predominant booking currency.
+  // (Summing across different-currency binges is imperfect but rare; per-booking rows
+  // always show their own currency.)
+  const primaryCurrency = allBookings[0]?.paymentCurrencyCode || nextBooking?.paymentCurrencyCode || 'INR';
 
   // Active-filter counter shown in summary pill (Stripe / Linear style).
   const activeFilterCount = (statusFilter !== 'ALL' ? 1 : 0)
@@ -355,9 +377,22 @@ export default function MyBookings() {
     }
   };
 
-  const openTransferModal = (booking) => {
+  const openTransferModal = async (booking) => {
     setTransferForm({ recipientName: '', recipientEmail: '', recipientPhone: '' });
+    setPendingTransfer(null);
     setTransferModal(booking);
+    transferModalRef.current = booking.bookingRef;
+    try {
+      const res = await bookingService.listTransfers(booking.bookingRef);
+      // Stale-response guard: the user may have closed this modal (or opened a
+      // different booking's) while the request was in flight. Attaching the
+      // wrong booking's pending transfer would point Revoke at the wrong row.
+      if (transferModalRef.current !== booking.bookingRef) return;
+      const transfers = toArray(res.data?.data);
+      setPendingTransfer(transfers.find(t => t.status === 'PENDING') || null);
+    } catch {
+      // Listing is best-effort UX; the backend rejects duplicate requests anyway.
+    }
   };
 
   const handleTransfer = async () => {
@@ -374,13 +409,26 @@ export default function MyBookings() {
         recipientPhone: phoneParts.phone,
         recipientPhoneCountryCode: phoneParts.phoneCountryCode,
       };
-      const res = await bookingService.transferBooking(transferModal.bookingRef, payload);
-      const updated = res.data.data;
-      setCurrentBookings(prev => prev.map(b => b.bookingRef === updated.bookingRef ? updated : b));
-      toast.success('Booking transferred successfully');
+      const res = await bookingService.requestTransfer(transferModal.bookingRef, payload);
+      const transfer = res.data.data;
+      toast.success(`Transfer request sent to ${transfer?.toEmail || transferForm.recipientEmail}. The booking stays yours until they accept.`);
       setTransferModal(null);
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to transfer booking');
+      toast.error(err.response?.data?.message || 'Failed to send transfer request');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRevokeTransfer = async () => {
+    if (!pendingTransfer) return;
+    setActionLoading(true);
+    try {
+      await bookingService.revokeTransfer(transferModal.bookingRef, pendingTransfer.id);
+      toast.success('Transfer request revoked');
+      setPendingTransfer(null);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to revoke transfer request');
     } finally {
       setActionLoading(false);
     }
@@ -447,12 +495,12 @@ export default function MyBookings() {
                 <span className={`badge ${statusBadge(nextBooking.status)}`}>{nextBooking.status}</span>
                 <span className={`badge ${paymentBadge(nextBooking.paymentStatus)}`}>{paymentLabel(nextBooking.paymentStatus)}</span>
               </div>
-              <strong>{formatAmount(nextBooking.totalAmount)}</strong>
+              <strong>{money(nextBooking.totalAmount, nextBooking.paymentCurrencyCode)}</strong>
               <div className="customer-hub-inline-actions">
                 <Link to={`/booking/${nextBooking.bookingRef}`} className="btn btn-primary btn-sm">View Booking</Link>
                 {(nextBooking.paymentStatus !== 'SUCCESS' || (nextBooking.balanceDue > 0.01)) && (
                   <Link to={`/payment/${nextBooking.bookingRef}`} className="btn btn-secondary btn-sm">
-                    {nextBooking.balanceDue > 0.01 ? `Pay Balance ${formatINR(nextBooking.balanceDue)}` : 'Pay Pending Balance'}
+                    {nextBooking.balanceDue > 0.01 ? `Pay Balance ${money(nextBooking.balanceDue, nextBooking.paymentCurrencyCode)}` : 'Pay Pending Balance'}
                   </Link>
                 )}
               </div>
@@ -477,7 +525,7 @@ export default function MyBookings() {
         <article className="customer-hub-stat card">
           <span className="customer-hub-stat-icon"><FiCreditCard /></span>
           <span className="customer-hub-stat-label">Pending Balance</span>
-          <strong>{loading ? '-' : formatAmount(unpaidBalance)}</strong>
+          <strong>{loading ? '-' : money(unpaidBalance, primaryCurrency)}</strong>
           <p>Outstanding amount across pending reservations.</p>
         </article>
         <article className="customer-hub-stat card">
@@ -489,7 +537,7 @@ export default function MyBookings() {
         <article className="customer-hub-stat card">
           <span className="customer-hub-stat-icon"><FiClock /></span>
           <span className="customer-hub-stat-label">Total Spend</span>
-          <strong>{loading ? '-' : formatAmount(totalSpend)}</strong>
+          <strong>{loading ? '-' : money(totalSpend, primaryCurrency)}</strong>
           <p>Across all successfully paid reservations.</p>
         </article>
       </section>
@@ -568,7 +616,7 @@ export default function MyBookings() {
           <article className="customer-mini-card">
             <div>
               <span className="customer-booking-ref">Pending balance</span>
-              <h3>{formatAmount(unpaidBalance)}</h3>
+              <h3>{money(unpaidBalance, primaryCurrency)}</h3>
               <p>{pendingPayments.length} booking{pendingPayments.length === 1 ? '' : 's'} still need payment.</p>
             </div>
             <div className="customer-mini-card-actions">
@@ -691,6 +739,9 @@ export default function MyBookings() {
               {filteredBookings.length !== baseBookings.length && (
                 <> · filtered from {baseBookings.length}</>
               )}
+              {debouncedQuery && tab !== 'all' && (
+                <> · searching all reservations</>
+              )}
             </span>
             <span className="customer-hub-summary-actions">
               {activeFilterCount > 0 && (
@@ -742,13 +793,30 @@ export default function MyBookings() {
                 <span><FiClock /> {entry.preferredStartTime} for {entry.durationMinutes}m</span>
               </div>
               {entry.status === 'OFFERED' && entry.offerExpiresAt && (
-                <p style={{ fontSize: '0.85rem', color: 'var(--success)', fontWeight: 600, margin: '0.5rem 0' }}>
-                  A spot opened up! Offer expires at {new Date(entry.offerExpiresAt).toLocaleTimeString()}
+                <p style={{ fontSize: '0.85rem', color: 'var(--success-text)', fontWeight: 600, margin: '0.5rem 0' }}>
+                  A spot opened up! Offer expires at {parseServerDate(entry.offerExpiresAt)?.toLocaleTimeString() || ''}
                 </p>
               )}
               <div className="customer-booking-actions">
                 {entry.status === 'OFFERED' && (
-                  <Link to="/book" state={{ eventTypeId: entry.eventTypeId, prefillBooking: { eventTypeId: entry.eventTypeId, durationMinutes: entry.durationMinutes, numberOfGuests: entry.numberOfGuests || 1 } }} className="btn btn-primary btn-sm">Book Now</Link>
+                  <Link
+                    to="/book"
+                    state={{
+                      eventTypeId: entry.eventTypeId,
+                      // Land directly on the OFFERED slot (date + time included) so
+                      // the customer confirms it instead of re-hunting for the slot.
+                      prefillBooking: {
+                        eventTypeId: entry.eventTypeId,
+                        bookingDate: entry.preferredDate,
+                        startTime: entry.preferredStartTime,
+                        durationMinutes: entry.durationMinutes,
+                        numberOfGuests: entry.numberOfGuests || 1,
+                      },
+                    }}
+                    className="btn btn-primary btn-sm"
+                  >
+                    Book Now
+                  </Link>
                 )}
                 {(entry.status === 'WAITING' || entry.status === 'OFFERED') && (
                   <button type="button" className="btn btn-danger btn-sm" onClick={() => handleLeaveWaitlist(entry.id)}>Leave Waitlist</button>
@@ -774,6 +842,17 @@ export default function MyBookings() {
                 <div className="customer-booking-topline">
                   <span className={`badge ${statusBadge(booking.status)}`}>{booking.status}</span>
                   <span className={`badge ${paymentBadge(booking.paymentStatus)}`}>{paymentLabel(booking.paymentStatus)}</span>
+                  {booking.paymentExpiresAt && booking.status === 'PENDING' && (() => {
+                    const expiry = parseServerDate(booking.paymentExpiresAt)?.getTime();
+                    if (!expiry) return null;
+                    const minsLeft = Math.ceil((expiry - holdTick) / 60000);
+                    return (
+                      <span className={`badge ${minsLeft > 5 ? 'badge-warning' : 'badge-danger'}`}
+                            title="Unpaid reservations are released automatically — pay before the timer ends to keep it. Cancelling before then is always free.">
+                        {minsLeft > 0 ? `⏳ auto-releases in ${minsLeft}m` : '⏳ auto-release imminent'}
+                      </span>
+                    );
+                  })()}
                 </div>
 
                 <div className="customer-booking-head">
@@ -781,7 +860,7 @@ export default function MyBookings() {
                     <span className="customer-booking-ref">{booking.bookingRef}</span>
                     <h3>{booking.eventType?.name ?? booking.eventType}</h3>
                   </div>
-                  <strong>{formatAmount(booking.totalAmount)}</strong>
+                  <strong>{money(booking.totalAmount, booking.paymentCurrencyCode)}</strong>
                 </div>
 
                 <div className="customer-booking-meta">
@@ -790,6 +869,15 @@ export default function MyBookings() {
                   <span><FiCreditCard /> {booking.paymentMethod?.replace('_', ' ') || 'Payment method at checkout'}</span>
                   {booking.venueRoomName && <span><FiMapPin /> {booking.venueRoomName}</span>}
                 </div>
+                {booking.venueTimezone && (
+                  <div style={{ marginTop: '0.25rem' }}>
+                    <VenueTimeNote
+                      timezone={booking.venueTimezone}
+                      date={booking.bookingDate}
+                      time={booking.startTime}
+                    />
+                  </div>
+                )}
 
                 {(booking.surgeMultiplier > 1 || booking.loyaltyPointsEarned > 0 || booking.loyaltyPointsRedeemed > 0) && (
                   <div className="customer-booking-tags">
@@ -832,7 +920,7 @@ export default function MyBookings() {
                   )}
                   {(booking.paymentStatus !== 'SUCCESS' || (booking.balanceDue > 0.01)) && booking.status !== 'CANCELLED' && booking.status !== 'COMPLETED' && (
                     <Link to={`/payment/${booking.bookingRef}`} className="btn btn-primary btn-sm">
-                      {booking.balanceDue > 0.01 ? `Pay Balance ${formatINR(booking.balanceDue)}` : 'Pay Pending Balance'}
+                      {booking.balanceDue > 0.01 ? `Pay Balance ${money(booking.balanceDue, booking.paymentCurrencyCode)}` : 'Pay Pending Balance'}
                     </Link>
                   )}
                   {(booking.eventType?.id || booking.eventTypeId) && (
@@ -867,10 +955,10 @@ export default function MyBookings() {
                 )}
 
                 <div className="customer-booking-actions customer-booking-actions-support">
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => downloadBookingSummary(booking, { customerName, venueName: selectedBinge?.name })}>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => downloadBookingSummary(booking, { customerName, venueName: selectedBinge?.name, currency: selectedBinge?.currency })}>
                     <FiDownload /> Download Summary
                   </button>
-                  {(booking.paymentStatus === 'PAID' || booking.paymentStatus === 'PARTIALLY_REFUNDED' || booking.paymentStatus === 'REFUNDED') && (
+                  {['SUCCESS', 'PARTIALLY_REFUNDED', 'REFUNDED'].includes(booking.paymentStatus) && (
                     <button type="button" className="btn btn-secondary btn-sm"
                             onClick={() => triggerInvoiceDownload(booking.bookingRef)}
                             title="Download the official PDF invoice for this booking">
@@ -1026,31 +1114,54 @@ export default function MyBookings() {
             <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
               {transferModal.bookingRef} — {transferModal.eventType?.name ?? transferModal.eventType}
             </p>
-            <label style={{ display: 'block', marginBottom: '1rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Name</span>
-              <input type="text" className="form-control" placeholder="Full name of the new guest"
-                value={transferForm.recipientName}
-                onChange={(e) => setTransferForm(prev => ({ ...prev, recipientName: e.target.value }))} />
-            </label>
-            <label style={{ display: 'block', marginBottom: '1rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Email</span>
-              <input type="email" className="form-control" placeholder="name@example.com"
-                value={transferForm.recipientEmail}
-                onChange={(e) => setTransferForm(prev => ({ ...prev, recipientEmail: e.target.value }))} />
-            </label>
-            <label style={{ display: 'block', marginBottom: '1.5rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Phone (optional)</span>
-              <PhoneField
-                value={transferForm.recipientPhone}
-                onChange={(val) => setTransferForm(prev => ({ ...prev, recipientPhone: val || '' }))}
-              />
-            </label>
-            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-              <button className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => setTransferModal(null)}>Cancel</button>
-              <button className="btn btn-primary btn-sm" disabled={actionLoading} onClick={handleTransfer}>
-                {actionLoading ? 'Transferring...' : 'Confirm Transfer'}
-              </button>
-            </div>
+            {pendingTransfer ? (
+              <>
+                <p style={{ fontSize: '0.9rem', marginBottom: '0.75rem' }}>
+                  A transfer request is already pending for <strong>{pendingTransfer.toEmail}</strong>.
+                </p>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
+                  The booking stays yours until they accept. Revoke this request if you want to send a new one.
+                </p>
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                  <button className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => setTransferModal(null)}>Close</button>
+                  <button className="btn btn-danger btn-sm" disabled={actionLoading} onClick={handleRevokeTransfer}>
+                    {actionLoading ? 'Revoking...' : 'Revoke Request'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <label style={{ display: 'block', marginBottom: '1rem' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Name</span>
+                  <input type="text" className="form-control" placeholder="Full name of the new guest"
+                    value={transferForm.recipientName}
+                    onChange={(e) => setTransferForm(prev => ({ ...prev, recipientName: e.target.value }))} />
+                </label>
+                <label style={{ display: 'block', marginBottom: '1rem' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Email</span>
+                  <input type="email" className="form-control" placeholder="name@example.com"
+                    value={transferForm.recipientEmail}
+                    onChange={(e) => setTransferForm(prev => ({ ...prev, recipientEmail: e.target.value }))} />
+                </label>
+                <label style={{ display: 'block', marginBottom: '1rem' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Recipient Phone (optional)</span>
+                  <PhoneField
+                    value={transferForm.recipientPhone}
+                    onChange={(val) => setTransferForm(prev => ({ ...prev, recipientPhone: val || '' }))}
+                  />
+                </label>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
+                  The recipient will receive an email link to accept or decline. Your booking stays
+                  yours until they accept; the request expires automatically if they don't respond.
+                </p>
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                  <button className="btn btn-secondary btn-sm" disabled={actionLoading} onClick={() => setTransferModal(null)}>Cancel</button>
+                  <button className="btn btn-primary btn-sm" disabled={actionLoading} onClick={handleTransfer}>
+                    {actionLoading ? 'Sending...' : 'Send Transfer Request'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

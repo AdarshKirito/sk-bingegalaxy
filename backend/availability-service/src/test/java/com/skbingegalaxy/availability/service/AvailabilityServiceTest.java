@@ -20,7 +20,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.Collections;
 import java.util.List;
 
@@ -41,6 +44,11 @@ class AvailabilityServiceTest {
     void setUp() {
         ReflectionTestUtils.setField(availabilityService, "openingHour", 9);
         ReflectionTestUtils.setField(availabilityService, "closingHour", 22);
+        ReflectionTestUtils.setField(availabilityService, "defaultTimezoneStr", "Asia/Kolkata");
+        // Real system clock by default so existing "today"/"tomorrow"-relative tests are
+        // unaffected. Tests that need a deterministic "now" override this per-test via
+        // ReflectionTestUtils.setField(availabilityService, "clock", Clock.fixed(...)).
+        ReflectionTestUtils.setField(availabilityService, "clock", Clock.systemUTC());
     }
 
     @AfterEach
@@ -174,6 +182,93 @@ class AvailabilityServiceTest {
             assertThat(result.getBlockedSlots()).hasSize(2);
             assertThat(result.getAvailableSlots()).hasSize(24);
         }
+
+        @Test
+        @DisplayName("Regression: today's slot whose start time has already passed (venue-local) is unavailable")
+        void todaysPastSlot_isUnavailable() {
+            // Fixed "now" = 2026-07-02T10:30:00Z = 16:00 in Asia/Kolkata (the venue's zone) —
+            // mirrors the real incident: a 10:00 slot booked while it's already 16:00 venue-local.
+            Instant fixedInstant = Instant.parse("2026-07-02T10:30:00Z");
+            ReflectionTestUtils.setField(availabilityService, "clock",
+                    Clock.fixed(fixedInstant, ZoneId.of("UTC")));
+            LocalDate date = LocalDate.of(2026, 7, 2);
+
+            when(blockedDateRepository.existsByBlockedDate(date)).thenReturn(false);
+            when(blockedSlotRepository.findBySlotDate(date)).thenReturn(Collections.emptyList());
+
+            DayAvailabilityDto result = availabilityService.getSlotsForDate(date);
+
+            // 10:00 (already passed) must not be offered as bookable.
+            assertThat(result.getAvailableSlots())
+                    .extracting(SlotDto::getStartMinute)
+                    .doesNotContain(600);
+            // 17:00 (still ahead of 16:00 "now") must remain bookable.
+            assertThat(result.getAvailableSlots())
+                    .extracting(SlotDto::getStartMinute)
+                    .contains(1020);
+        }
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  BOOK-003 — DST spring-forward slot guard
+    // ══════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("DST spring-forward (BOOK-003)")
+    class DstTransitionTests {
+
+        @Test
+        @DisplayName("America/Chicago spring-forward day: the non-existent 02:00–03:00 wall-clock slots are never offered")
+        void springForward_skipsNonExistentSlots() {
+            // America/Chicago springs forward on 2026-03-08 at 02:00 → 03:00, so the
+            // wall-clock times 02:00 and 02:30 never occur that day and must not be offered.
+            ReflectionTestUtils.setField(availabilityService, "defaultTimezoneStr", "America/Chicago");
+            ReflectionTestUtils.setField(availabilityService, "openingHour", 0);
+            ReflectionTestUtils.setField(availabilityService, "closingHour", 6);
+            // Fixed "now" well before the date so no slot is filtered as "past".
+            ReflectionTestUtils.setField(availabilityService, "clock",
+                    Clock.fixed(Instant.parse("2026-03-01T12:00:00Z"), ZoneId.of("UTC")));
+
+            LocalDate springForward = LocalDate.of(2026, 3, 8);
+            when(blockedDateRepository.existsByBlockedDate(springForward)).thenReturn(false);
+            when(blockedSlotRepository.findBySlotDate(springForward)).thenReturn(Collections.emptyList());
+
+            DayAvailabilityDto result = availabilityService.getSlotsForDate(springForward);
+
+            // The gap slots (02:00 = 120, 02:30 = 150) must appear in NEITHER list —
+            // they are non-existent wall-clock times, not merely blocked.
+            List<Integer> allStartMinutes = new java.util.ArrayList<>();
+            result.getAvailableSlots().forEach(s -> allStartMinutes.add(s.getStartMinute()));
+            result.getBlockedSlots().forEach(s -> allStartMinutes.add(s.getStartMinute()));
+            assertThat(allStartMinutes).doesNotContain(120, 150);
+            // The surrounding real slots still exist: 01:30 (90) and 03:00 (180).
+            assertThat(allStartMinutes).contains(90, 180);
+        }
+
+        @Test
+        @DisplayName("Non-DST venue (Asia/Kolkata) is unaffected — every window slot is emitted")
+        void nonDstVenue_allSlotsEmitted() {
+            // Same early-morning window, but IST never observes DST → no slot is skipped.
+            ReflectionTestUtils.setField(availabilityService, "defaultTimezoneStr", "Asia/Kolkata");
+            ReflectionTestUtils.setField(availabilityService, "openingHour", 0);
+            ReflectionTestUtils.setField(availabilityService, "closingHour", 6);
+            ReflectionTestUtils.setField(availabilityService, "clock",
+                    Clock.fixed(Instant.parse("2026-03-01T12:00:00Z"), ZoneId.of("UTC")));
+
+            LocalDate date = LocalDate.of(2026, 3, 8);
+            when(blockedDateRepository.existsByBlockedDate(date)).thenReturn(false);
+            when(blockedSlotRepository.findBySlotDate(date)).thenReturn(Collections.emptyList());
+
+            DayAvailabilityDto result = availabilityService.getSlotsForDate(date);
+
+            // 00:00–06:00 = 6 hours = 12 half-hour slots, all present (none is a DST gap).
+            int total = result.getAvailableSlots().size() + result.getBlockedSlots().size();
+            assertThat(total).isEqualTo(12);
+            List<Integer> allStartMinutes = new java.util.ArrayList<>();
+            result.getAvailableSlots().forEach(s -> allStartMinutes.add(s.getStartMinute()));
+            result.getBlockedSlots().forEach(s -> allStartMinutes.add(s.getStartMinute()));
+            assertThat(allStartMinutes).contains(120, 150);
+        }
     }
 
     // ══════════════════════════════════════════════════════
@@ -237,6 +332,44 @@ class AvailabilityServiceTest {
 
             // Request: 14:00 (840 min) for 60 min — doesn't overlap blocked 10:00-12:00
             boolean result = availabilityService.isSlotAvailable(date, 840, 60);
+
+            assertThat(result).isTrue();
+        }
+
+        @Test
+        @DisplayName("Regression: rejects a same-day slot whose start time has already passed (venue-local)")
+        void todaysPastSlot_returnsFalse() {
+            // Same fixed "now" as the getSlotsForDate regression test: 16:00 Asia/Kolkata.
+            // This is the exact check booking-service calls (via Feign) at booking-creation
+            // time, so it's the authoritative guard against creating an already-elapsed booking.
+            Instant fixedInstant = Instant.parse("2026-07-02T10:30:00Z");
+            ReflectionTestUtils.setField(availabilityService, "clock",
+                    Clock.fixed(fixedInstant, ZoneId.of("UTC")));
+            LocalDate date = LocalDate.of(2026, 7, 2);
+
+            when(blockedDateRepository.existsByBlockedDate(date)).thenReturn(false);
+            // No blockedSlotRepository stub: the past-time check short-circuits before
+            // that lookup is ever reached.
+
+            // 10:00 (600 min), already 6 hours in the past venue-local.
+            boolean result = availabilityService.isSlotAvailable(date, 600, 120);
+
+            assertThat(result).isFalse();
+        }
+
+        @Test
+        @DisplayName("Same-day slot still ahead of venue-local now remains available")
+        void todaysFutureSlot_returnsTrue() {
+            Instant fixedInstant = Instant.parse("2026-07-02T10:30:00Z"); // 16:00 Asia/Kolkata
+            ReflectionTestUtils.setField(availabilityService, "clock",
+                    Clock.fixed(fixedInstant, ZoneId.of("UTC")));
+            LocalDate date = LocalDate.of(2026, 7, 2);
+
+            when(blockedDateRepository.existsByBlockedDate(date)).thenReturn(false);
+            when(blockedSlotRepository.findBySlotDate(date)).thenReturn(Collections.emptyList());
+
+            // 17:00 (1020 min), still ahead of 16:00 "now".
+            boolean result = availabilityService.isSlotAvailable(date, 1020, 60);
 
             assertThat(result).isTrue();
         }

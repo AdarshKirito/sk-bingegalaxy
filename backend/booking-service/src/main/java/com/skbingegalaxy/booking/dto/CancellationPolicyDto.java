@@ -30,6 +30,17 @@ public class CancellationPolicyDto {
     @Min(value = 1, message = "maxPendingPaymentTimeoutsBeforeFreeze must be at least 1")
     private Integer maxPendingPaymentTimeoutsBeforeFreeze;
 
+    /**
+     * Concurrent unpaid (PENDING) bookings a customer may hold at this venue before
+     * new bookings are stopped. Admin decides this per binge (was a platform hardcode).
+     *
+     * <p>Intentionally NOT {@code @NotNull}: clients running the previous bundle (stale
+     * PWA service worker) don't send this field — null means "keep the current value"
+     * so their policy saves keep working instead of failing validation.
+     */
+    @Min(value = 1, message = "maxUnpaidBookingsPerCustomer must be at least 1")
+    private Integer maxUnpaidBookingsPerCustomer;
+
     /** Whether tiered refunds apply when cancelling after a successful payment. */
     @NotNull
     private Boolean refundOnSuccessfulPaymentCancel;

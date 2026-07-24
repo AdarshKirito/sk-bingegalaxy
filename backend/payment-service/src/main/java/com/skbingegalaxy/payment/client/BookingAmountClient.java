@@ -55,15 +55,23 @@ public class BookingAmountClient {
 
             if (response != null && response.get("data") instanceof Map<?, ?> data) {
                 Object remaining = data.get("remainingBalance");
+                Object total = data.get("totalAmount");
                 Object status = data.get("status");
                 Object payCcy = data.get("paymentCurrencyCode");
                 Object fxRate = data.get("fxRate");
+                Object customerId = data.get("customerId");
+                Object bingeId = data.get("bingeId");
+                Object bingeCountry = data.get("bingeCountry");
                 if (remaining != null) {
                     return new BookingSnapshot(
                         new BigDecimal(remaining.toString()),
+                        total != null ? new BigDecimal(total.toString()) : null,
                         status != null ? status.toString() : null,
                         payCcy != null ? payCcy.toString() : "INR",
-                        fxRate != null ? new BigDecimal(fxRate.toString()) : BigDecimal.ONE);
+                        fxRate != null ? new BigDecimal(fxRate.toString()) : BigDecimal.ONE,
+                        customerId != null ? Long.valueOf(customerId.toString()) : null,
+                        bingeId != null ? Long.valueOf(bingeId.toString()) : null,
+                        bingeCountry != null ? bingeCountry.toString() : null);
                 }
             }
             return null;
@@ -80,11 +88,21 @@ public class BookingAmountClient {
     }
 
     /**
+     * Authoritative booking snapshot (SEC-011): amounts PLUS the booking's
+     * owner and binge, so every payment write binds to the real aggregate.
+     *
      * @param remainingBalance   payable balance in the BASE currency (INR)
+     * @param totalAmount        the booking's full price in the base currency
      * @param status             booking status
      * @param paymentCurrencyCode currency the booking is to be paid in ("INR" if domestic)
      * @param fxRate             locked rate = foreign units per 1 INR (1 for INR bookings)
+     * @param customerId         the booking owner's user id (null on legacy rows)
+     * @param bingeId            the booking's tenant (null on legacy rows)
+     * @param bingeCountry       ISO-3166 alpha-2 country of the VENUE, which decides the
+     *                           payment methods offered (never the customer's country).
+     *                           Null on legacy venues → card-only international default.
      */
-    public record BookingSnapshot(BigDecimal remainingBalance, String status,
-                                  String paymentCurrencyCode, BigDecimal fxRate) {}
+    public record BookingSnapshot(BigDecimal remainingBalance, BigDecimal totalAmount, String status,
+                                  String paymentCurrencyCode, BigDecimal fxRate,
+                                  Long customerId, Long bingeId, String bingeCountry) {}
 }

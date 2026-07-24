@@ -32,7 +32,10 @@ public class AvailabilityController {
             @RequestHeader(value = "X-User-Role", required = false) String role) {
         String uri = request.getRequestURI();
         if (uri.contains("/admin/")) {
-            scopeService.requireManagedBinge(adminId, role, "managing availability");
+            var binge = scopeService.requireManagedBinge(adminId, role, "managing availability");
+            // V71 module matrix: everything admin-facing here IS the
+            // Blocked Dates module.
+            scopeService.requireModuleAllowed(binge, role, "BLOCKED_DATES");
             return;
         }
         scopeService.requireSelectedBinge("checking availability");
@@ -92,6 +95,23 @@ public class AvailabilityController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
         service.unblockDate(date);
         return ResponseEntity.ok(ApiResponse.ok("Date unblocked", null));
+    }
+
+    /**
+     * Id-based unblock — required now that room-scoped rows share the same
+     * (date) / (date,start) keys as venue-wide ones. Preferred by the UI;
+     * the legacy date/start endpoints above remain for older clients.
+     */
+    @DeleteMapping("/admin/blocked-dates/{id}")
+    public ResponseEntity<ApiResponse<Void>> unblockDateById(@PathVariable Long id) {
+        service.unblockDateById(id);
+        return ResponseEntity.ok(ApiResponse.ok("Date unblocked", null));
+    }
+
+    @DeleteMapping("/admin/blocked-slots/{id}")
+    public ResponseEntity<ApiResponse<Void>> unblockSlotById(@PathVariable Long id) {
+        service.unblockSlotById(id);
+        return ResponseEntity.ok(ApiResponse.ok("Slot unblocked", null));
     }
 
     @PostMapping("/admin/block-slot")

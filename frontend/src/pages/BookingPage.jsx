@@ -28,10 +28,12 @@ export default function BookingPage() {
       navigate(firstRef ? `/booking/${firstRef}` : '/my-bookings');
     } else {
       const res = await bookingService.createBooking(payload);
-      const ref = res.data.data.bookingRef;
-      trackBookingCompleted(ref, payload.totalAmount);
+      const created = res.data.data;
+      // The request payload carries no amount — the server computes pricing.
+      // Track the authoritative charged total from the response.
+      trackBookingCompleted(created.bookingRef, created.totalAmount);
       toast.success('Booking created!');
-      navigate(`/booking/${ref}`);
+      navigate(`/booking/${created.bookingRef}`);
     }
   };
 

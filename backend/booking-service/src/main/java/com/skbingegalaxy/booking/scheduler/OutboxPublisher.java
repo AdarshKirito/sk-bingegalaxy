@@ -5,6 +5,7 @@ import com.skbingegalaxy.booking.entity.OutboxEvent;
 import com.skbingegalaxy.booking.repository.OutboxEventRepository;
 import com.skbingegalaxy.common.constants.KafkaTopics;
 import com.skbingegalaxy.common.event.BookingEvent;
+import com.skbingegalaxy.common.event.NotificationEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -58,8 +59,25 @@ public class OutboxPublisher {
         for (OutboxEvent event : pending) {
             try {
                 Object payload = toKafkaPayload(event);
-                kafkaTemplate.send(event.getTopic(), event.getAggregateKey(), payload)
-                    .get(KAFKA_SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                // booking-service disables JsonSerializer type headers globally
+                // (add.type.headers=false) so JsonNode payloads don't emit an untrusted
+                // ObjectNode header. But consumers that resolve the target type FROM the
+                // header (notification-service) then can't deserialize typed events. Stamp
+                // the correct __TypeId__ explicitly for the typed topics those consumers
+                // read, so the record is self-describing without changing global behaviour.
+                String typeId = typeIdHeaderFor(event.getTopic());
+                java.util.concurrent.Future<?> sendFuture;
+                if (typeId != null) {
+                    org.apache.kafka.clients.producer.ProducerRecord<String, Object> record =
+                        new org.apache.kafka.clients.producer.ProducerRecord<>(
+                            event.getTopic(), null, event.getAggregateKey(), payload);
+                    record.headers().add(new org.apache.kafka.common.header.internals.RecordHeader(
+                        "__TypeId__", typeId.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+                    sendFuture = kafkaTemplate.send(record);
+                } else {
+                    sendFuture = kafkaTemplate.send(event.getTopic(), event.getAggregateKey(), payload);
+                }
+                sendFuture.get(KAFKA_SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 event.setSent(true);
                 event.setSentAt(LocalDateTime.now(ZoneOffset.UTC));
                 event.setLastError(null);
@@ -82,17 +100,21 @@ public class OutboxPublisher {
                 event.setAttempts(event.getAttempts() + 1);
                 event.setLastAttemptAt(LocalDateTime.now(ZoneOffset.UTC));
                 event.setLastError(truncate(e.getMessage()));
-                if (isCodeBug(e)) {
-                    // Serializer / class-convert failures are code/config bugs, not
-                    // bad data. Retrying after a hotfix+redeploy WILL succeed, so we
-                    // must NOT escalate to failedPermanent (that would silently drop
-                    // the event). Log loudly for on-call and keep retrying.
-                    log.error("Outbox: event {} to {} hit RECOVERABLE code-bug on attempt {} (will keep retrying): {}",
-                        event.getId(), event.getTopic(), event.getAttempts(), event.getLastError());
-                } else if (event.getAttempts() >= MAX_ATTEMPTS) {
+                boolean codeBug = isCodeBug(e);
+                // EVERY failure class caps at MAX_ATTEMPTS — a serializer/class-cast
+                // "code bug" used to retry forever, churning the drain loop on a
+                // poison event indefinitely. Parking is NOT data loss: after the
+                // fix ships, ops replays via POST /admin/ops/outbox/retry-failed.
+                if (event.getAttempts() >= MAX_ATTEMPTS) {
                     event.setFailedPermanent(true);
-                    log.error("Outbox: event {} to {} marked failedPermanent after {} attempts: {}",
-                        event.getId(), event.getTopic(), event.getAttempts(), event.getLastError());
+                    log.error("Outbox: event {} to {} PARKED (failedPermanent) after {} attempts{}: {} — "
+                        + "replay after fix via POST /api/v1/bookings/admin/ops/outbox/retry-failed",
+                        event.getId(), event.getTopic(), event.getAttempts(),
+                        codeBug ? " [serializer/class-cast code bug]" : "", event.getLastError());
+                } else if (codeBug) {
+                    log.error("Outbox: event {} to {} hit serializer/class-cast bug on attempt {}/{}: {}",
+                        event.getId(), event.getTopic(), event.getAttempts(), MAX_ATTEMPTS,
+                        event.getLastError());
                 } else {
                     log.warn("Outbox: event {} to {} failed attempt {}/{}: {}",
                         event.getId(), event.getTopic(), event.getAttempts(), MAX_ATTEMPTS,
@@ -114,10 +136,11 @@ public class OutboxPublisher {
 
     /**
      * A code / configuration bug (e.g. value-serializer misconfigured so Kafka
-     * cannot convert a domain event to bytes). These WILL succeed after a fix
-     * is deployed, so we must not mark them failedPermanent — doing that would
-     * silently drop business events. Ops gets paged via the ERROR log + the
-     * {@code kafka_outbox_code_bug} metric.
+     * cannot convert a domain event to bytes). Distinguished only for log
+     * severity — these still cap at {@link #MAX_ATTEMPTS} and park like any
+     * other failure (unbounded retries once let one poison event churn the
+     * drain loop forever). Parked events are replayed after the fix via the
+     * admin ops endpoint.
      */
     private boolean isCodeBug(Throwable e) {
         Throwable cur = e;
@@ -135,6 +158,27 @@ public class OutboxPublisher {
         return false;
     }
 
+    /**
+     * The {@code __TypeId__} header value a header-driven consumer needs to deserialize
+     * the record, or {@code null} for topics whose consumers don't require it. Only the
+     * typed topics the notification-service reads are mapped — everything else keeps the
+     * pre-existing header-less behaviour.
+     */
+    private String typeIdHeaderFor(String topic) {
+        if (KafkaTopics.BOOKING_CREATED.equals(topic)
+                || KafkaTopics.BOOKING_CONFIRMED.equals(topic)
+                || KafkaTopics.BOOKING_CANCELLED.equals(topic)
+                || KafkaTopics.BOOKING_CHECKED_IN.equals(topic)
+                || KafkaTopics.BOOKING_COMPLETED.equals(topic)) {
+            return BookingEvent.class.getName();
+        }
+        if (KafkaTopics.NOTIFICATION_SEND.equals(topic)
+                || KafkaTopics.WAITLIST_PROMOTED.equals(topic)) {
+            return NotificationEvent.class.getName();
+        }
+        return null;
+    }
+
     private Object toKafkaPayload(OutboxEvent event) throws Exception {
         // Booking-shaped topics are typed back to BookingEvent so the producer
         // serializer writes a proper JSON object (not a JSON-quoted String).
@@ -146,10 +190,17 @@ public class OutboxPublisher {
                 || KafkaTopics.BOOKING_COMPLETED.equals(event.getTopic())) {
             return objectMapper.readValue(event.getPayload(), BookingEvent.class);
         }
+        // Topics carrying a NotificationEvent must be typed back to the concrete class
+        // so the JsonSerializer stamps __TypeId__ = com.skbingegalaxy.common.event.NotificationEvent
+        // (a trusted package on the consumer). Sending a generic JsonNode instead makes the
+        // header ObjectNode, which the notification-service does NOT trust — the record then
+        // fails to deserialize and (without an ErrorHandlingDeserializer) blocks the partition.
+        if (KafkaTopics.NOTIFICATION_SEND.equals(event.getTopic())
+                || KafkaTopics.WAITLIST_PROMOTED.equals(event.getTopic())) {
+            return objectMapper.readValue(event.getPayload(), NotificationEvent.class);
+        }
         // For every other topic, parse the JSON payload to a generic tree so
-        // JsonSerializer emits an object, not a quoted String. This was a
-        // pre-existing latent issue for NOTIFICATION_SEND etc. — fixing it
-        // here keeps consumers happy without per-topic class wiring.
+        // JsonSerializer emits an object, not a quoted String.
         if (event.getPayload() != null && !event.getPayload().isBlank()) {
             return objectMapper.readTree(event.getPayload());
         }

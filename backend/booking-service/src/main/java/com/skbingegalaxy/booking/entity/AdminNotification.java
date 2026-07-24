@@ -32,11 +32,37 @@ public class AdminNotification {
     @Column(name = "recipient_user_id")
     private Long recipientUserId;
 
-    /** Snapshot of the recipient's role at delivery time (ADMIN / SUPER_ADMIN). */
+    /** Snapshot of the recipient's role at delivery time (ADMIN / SUPER_ADMIN / CUSTOMER). */
     @Column(name = "recipient_role", nullable = false, length = 32)
     private String recipientRole;
 
-    /** Machine-readable category, e.g. {@code BINGE_GRACE_WARNING}. */
+    /** Display name of the recipient (denormalized for the inbox/thread views). */
+    @Column(name = "recipient_name", length = 150)
+    private String recipientName;
+
+    // ── Messaging (two-way) ──────────────────────────────────────────────────
+    /** Author of a user message; {@code null} for a system notification. */
+    @Column(name = "sender_user_id")
+    private Long senderUserId;
+
+    /** SYSTEM for platform notifications, else the sender's role (ADMIN/SUPER_ADMIN/CUSTOMER). */
+    @Column(name = "sender_role", nullable = false, length = 32)
+    @Builder.Default
+    private String senderRole = "SYSTEM";
+
+    /** Display name of the sender (denormalized). */
+    @Column(name = "sender_name", length = 150)
+    private String senderName;
+
+    /** Root message id of the conversation; equals this row's id for a thread starter. */
+    @Column(name = "thread_id")
+    private Long threadId;
+
+    /** The message this one replies to; {@code null} for a thread starter or system notice. */
+    @Column(name = "parent_id")
+    private Long parentId;
+
+    /** Machine-readable category, e.g. {@code BINGE_GRACE_WARNING} or {@code MESSAGE}. */
     @Column(nullable = false, length = 64)
     private String type;
 
@@ -58,6 +84,18 @@ public class AdminNotification {
     /** Optional path the UI should navigate to when the user clicks. */
     @Column(name = "action_url", length = 500)
     private String actionUrl;
+
+    /** Optional media attachment URL (served by MediaController's public /media/{file}). */
+    @Column(name = "attachment_url", length = 500)
+    private String attachmentUrl;
+
+    /** Attachment kind: {@code image} or {@code video} — drives client rendering. */
+    @Column(name = "attachment_type", length = 20)
+    private String attachmentType;
+
+    /** Original filename of the attachment (for the download label). */
+    @Column(name = "attachment_name", length = 255)
+    private String attachmentName;
 
     /** Null while unread; set to delivery time when the user marks it read. */
     @Column(name = "read_at")

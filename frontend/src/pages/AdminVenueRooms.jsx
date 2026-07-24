@@ -3,13 +3,16 @@ import { adminService, toArray } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import { FiEdit2, FiPlus, FiToggleLeft, FiToggleRight, FiTrash2, FiX, FiCheck, FiSlash, FiClock } from 'react-icons/fi';
 import useAuthStore from '../stores/authStore';
+import { useConfirm } from '../components/ui/ConfirmProvider';
 import './AdminPages.css';
+import { venueMoney, venueSymbol } from '../utils/venueLocale';
 
-const ROOM_TYPES = ['MAIN_HALL', 'PRIVATE_ROOM', 'VIP_LOUNGE', 'OUTDOOR', 'MEETING_ROOM'];
+// Suggestions only — room type is a free-text field (admins can name any space).
+const ROOM_TYPE_SUGGESTIONS = ['Main Hall', 'Private Room', 'VIP Lounge', 'Outdoor', 'Meeting Room', 'Rooftop', 'Screening Room', 'Suite'];
 
 const emptyForm = {
   name: '',
-  roomType: 'MAIN_HALL',
+  roomType: '',
   capacity: 10,
   description: '',
   sortOrder: 0,
@@ -26,6 +29,7 @@ const STATUS_BADGES = {
 
 export default function AdminVenueRooms() {
   const isSuperAdmin = useAuthStore(s => s.isSuperAdmin);
+  const confirm = useConfirm();
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -34,6 +38,34 @@ export default function AdminVenueRooms() {
   const [saving, setSaving] = useState(false);
   // newline-separated URL editor — keeps the form simple and resilient
   const [imageUrlsText, setImageUrlsText] = useState('');
+  const [uploading, setUploading] = useState(false);
+
+  // Upload one or more images from the admin's device; the stored URL is appended to the
+  // photo list. Reuses the existing hardened media endpoint (type/size validated server-side).
+  const handleUploadPhotos = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setUploading(true);
+    try {
+      const uploaded = [];
+      for (const file of files) {
+        const fd = new FormData();
+        fd.append('file', file);
+        const res = await adminService.uploadMedia(fd);
+        const url = res.data?.data?.url;
+        if (url) uploaded.push(url);
+      }
+      if (uploaded.length) {
+        setImageUrlsText((prev) => [prev.trim(), ...uploaded].filter(Boolean).join('\n'));
+        toast.success(`${uploaded.length} photo${uploaded.length > 1 ? 's' : ''} uploaded`);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Upload failed (max 5 MB, JP/PNG/WebP/GIF)');
+    } finally {
+      setUploading(false);
+      e.target.value = ''; // allow re-selecting the same file
+    }
+  };
 
   // V57: maintenance / hold windows modal
   const [blocksRoom, setBlocksRoom] = useState(null);   // room currently being managed
@@ -90,7 +122,13 @@ export default function AdminVenueRooms() {
   };
 
   const removeBlock = async (block) => {
-    if (!confirm(`Remove this block (${block.startAt} → ${block.endAt})?`)) return;
+    const ok = await confirm({
+      title: 'Remove block?',
+      message: `Remove this block (${block.startAt} → ${block.endAt})?`,
+      confirmLabel: 'Remove',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
       await adminService.deleteRoomBlock(block.id);
       toast.success('Block removed');
@@ -125,7 +163,7 @@ export default function AdminVenueRooms() {
     const imgs = Array.isArray(room.imageUrls) ? room.imageUrls : [];
     setForm({
       name: room.name,
-      roomType: room.roomType || 'MAIN_HALL',
+      roomType: room.roomType || '',
       capacity: room.capacity || 10,
       description: room.description || '',
       sortOrder: room.sortOrder || 0,
@@ -182,7 +220,13 @@ export default function AdminVenueRooms() {
 
   const handleDelete = async (room) => {
     if (room.active) { toast.error('Deactivate the room before deleting'); return; }
-    if (!confirm(`Delete room "${room.name}" permanently?`)) return;
+    const ok = await confirm({
+      title: 'Delete room?',
+      message: `Delete room "${room.name}" permanently? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
       await adminService.deleteVenueRoom(room.id);
       toast.success('Room deleted');
@@ -193,7 +237,13 @@ export default function AdminVenueRooms() {
   };
 
   const handleApprove = async (room) => {
-    if (!confirm(`Approve room "${room.name}"? It will become bookable immediately.`)) return;
+    const ok = await confirm({
+      title: 'Approve room?',
+      message: `Approve room "${room.name}"? It will become bookable immediately.`,
+      confirmLabel: 'Approve',
+      variant: 'primary',
+    });
+    if (!ok) return;
     try {
       await adminService.approveVenueRoom(room.id);
       toast.success('Room approved');
@@ -204,11 +254,18 @@ export default function AdminVenueRooms() {
   };
 
   const handleReject = async (room) => {
-    const reason = prompt(`Reject "${room.name}". Provide a reason (visible to admins):`);
-    if (reason === null) return;
-    if (!reason.trim()) { toast.error('Rejection reason is required'); return; }
+    const result = await confirm({
+      title: 'Reject room?',
+      message: `Reject "${room.name}". Provide a reason (visible to admins).`,
+      confirmLabel: 'Reject',
+      variant: 'danger',
+      withReason: true,
+      reasonLabel: 'Rejection reason',
+      reasonRequired: true,
+    });
+    if (!result) return;
     try {
-      await adminService.rejectVenueRoom(room.id, reason.trim());
+      await adminService.rejectVenueRoom(room.id, result.reason);
       toast.success('Room rejected');
       fetchRooms();
     } catch (err) {
@@ -244,16 +301,20 @@ export default function AdminVenueRooms() {
               </div>
               <div className="input-group">
                 <label>Room Type</label>
-                <select value={form.roomType} onChange={(e) => setForm({ ...form, roomType: e.target.value })}>
-                  {ROOM_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
-                </select>
+                <input list="room-type-suggestions" value={form.roomType}
+                  onChange={(e) => setForm({ ...form, roomType: e.target.value })}
+                  placeholder="e.g., Rooftop Cabana, Screening Room, Private Suite" />
+                <datalist id="room-type-suggestions">
+                  {ROOM_TYPE_SUGGESTIONS.map(t => <option key={t} value={t} />)}
+                </datalist>
+                <small style={{ color: 'var(--text-muted)' }}>Type any label, or pick a suggestion.</small>
               </div>
               <div className="input-group">
                 <label>Capacity (max guests)</label>
                 <input type="number" min="1" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: Number(e.target.value) })} />
               </div>
               <div className="input-group">
-                <label>Price Addition (₹)</label>
+                <label>Price Addition ({venueSymbol()})</label>
                 <input type="number" min="0" step="0.01" value={form.priceAddition}
                   onChange={(e) => setForm({ ...form, priceAddition: Number(e.target.value) })}
                   placeholder="0.00" />
@@ -274,10 +335,18 @@ export default function AdminVenueRooms() {
                 <textarea rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Optional description visible to customers" />
               </div>
               <div className="input-group" style={{ gridColumn: '1 / -1' }}>
-                <label>Photos (one URL per line)</label>
+                <label>Photos</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                  <label className="btn btn-secondary btn-sm" style={{ cursor: uploading ? 'wait' : 'pointer', margin: 0 }}>
+                    {uploading ? 'Uploading…' : '⬆ Upload from device'}
+                    <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple
+                      onChange={handleUploadPhotos} disabled={uploading} style={{ display: 'none' }} />
+                  </label>
+                  <small style={{ color: 'var(--text-muted)' }}>JPEG/PNG/WebP/GIF, up to 5 MB each. Or paste image URLs below.</small>
+                </div>
                 <textarea rows={3} value={imageUrlsText}
                   onChange={(e) => setImageUrlsText(e.target.value)}
-                  placeholder={'https://cdn.example.com/room1.jpg\nhttps://cdn.example.com/room2.jpg'} />
+                  placeholder={'Uploaded photos appear here as URLs.\nYou can also paste external links, one per line.'} />
                 {imageUrlsText.trim() && (
                   <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
                     {imageUrlsText.split(/\r?\n/).map(s => s.trim()).filter(Boolean).slice(0, 8).map((u, i) => (
@@ -309,7 +378,7 @@ export default function AdminVenueRooms() {
                 <th>Room</th>
                 <th>Type</th>
                 <th>Capacity</th>
-                <th>+₹ Price</th>
+                <th>+{venueSymbol()} Price</th>
                 <th>Approval</th>
                 <th>Status</th>
                 <th>Actions</th>
@@ -336,7 +405,7 @@ export default function AdminVenueRooms() {
                     </td>
                     <td>{(room.roomType || '').replace(/_/g, ' ')}</td>
                     <td>{room.capacity}</td>
-                    <td>{Number(room.priceAddition || 0) > 0 ? `+₹${Number(room.priceAddition).toLocaleString()}` : '—'}</td>
+                    <td>{Number(room.priceAddition || 0) > 0 ? `+${venueMoney(Number(room.priceAddition))}` : '—'}</td>
                     <td>
                       <span className={`badge ${badge.cls}`}>{badge.label}</span>
                       {status === 'REJECTED' && room.approvalRejectionReason && (

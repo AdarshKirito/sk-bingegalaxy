@@ -44,6 +44,18 @@ public class Payment {
 
     private String gatewayPaymentId;
 
+    /**
+     * Which gateway actually handled this charge ("razorpay", "stripe"), or null
+     * for offline/simulated payments.
+     *
+     * <p>The {@code provider_name} column has existed since V9 but was never mapped
+     * or written, so refunds had no way to know where the money went and always
+     * went to Razorpay. Refunding through the wrong gateway either fails outright
+     * or draws from the wrong account, so this is authoritative for refund routing.
+     */
+    @Column(name = "provider_name", length = 40)
+    private String providerName;
+
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal amount;
 

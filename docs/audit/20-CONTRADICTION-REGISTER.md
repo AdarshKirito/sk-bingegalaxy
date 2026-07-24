@@ -1,0 +1,21 @@
+# 20 — Documentation ↔ Code Contradiction Register
+
+Where project-owned documentation disagrees with the actual code/schema/runtime. Source docs were read at commit `e3edbc1`; replaceable ones were archived to `docs/_previous/2026-07-11T19-01-30Z/` before this audit rewrote them.
+
+| # | Document claim | Reality | Evidence | Disposition |
+|---|---|---|---|---|
+| C-1 | `docs/codebase/06b-booking-services.md:101-102` + `SlotHold.java:14-17` describe `consumeHold` converting a hold into a booking, and holds "guaranteed against concurrent bookings". | `consumeHold`/`releaseQuietly` are never called; `CreateBookingRequest` has no `holdToken`; `createBooking` never consults holds. The guarantee does not hold. | specialist-03 §2; BOOK-001/DOC-003 | Rebuild docs; fix or remove feature. |
+| C-2 | `ARCHITECTURE.md` + `docs/codebase/*` (dated 2026-06-06/20) describe the pre-July system. | The working tree contains a large uncommitted overhaul (sessions/tax/surge/FX/loyalty, migrations V72–V74, Web Push, per-day opening hours) not reflected in those docs. | Census; git status (336 entries) | Docs archived + rebuilt by this audit (DOC-001). |
+| C-3 | `k8s/monitoring.yml:673-683` Prometheus alert assumes `@Profile("!production")` mocks are ABSENT in production (i.e. `production` is active). | No deployment activates `production`; the mocks are always present. The alert's premise is silently false. | specialist-01 F1; SEC-003 | Fix deployment profile; the alert then becomes meaningful. |
+| C-4 | `Notification.java:56-62` comment states MongoDB "will automatically delete" notifications after 90 days (TTL). | With `auto-index-creation` unset (Spring Boot 3 default false) the `@Indexed(expireAfter)` index is never created → no TTL → PII retained indefinitely. | specialist-04 §9; DATA-003 | Enable index creation; comment becomes true. |
+| C-5 | `BookingTransferController.java` comment asserts the public preview exposes "no PII beyond names." | The endpoint returns `fromCustomerEmail` and `toEmail`. | specialist-01 F3; SEC-006 | Mask emails or fix comment. |
+| C-6 | Entity `@Table(indexes=...)` annotations imply the entity owns those indexes (e.g. `Booking.java:25` `idx_booking_binge_date_status`). | `ddl-auto=validate` makes `@Index` inert; real indexes come from migrations with different names (`idx_bookings_binge_date_status`). Annotations are misleading, not authoritative. | specialist-04 §1 | Cosmetic; note in docs. |
+| C-7 | `CrossBingeIsolationTest.java:44-47` asserts "the repository layer is the authoritative isolation boundary… a controller that queries a repository directly bypasses this boundary." | `AdminRecoveryQueueController` and `InvoiceController.listInvoicesForBinge` do exactly that. The test documents an invariant the code violates. | specialist-02 §3-4; SEC-001/002 | Fix endpoints; add tests (TEST-001). |
+| C-8 | `.env.example` enumerates the intended configuration surface. | `PAYMENT_SIMULATION_ENABLED` (present in `.env`) is absent from the example; 11 example vars (SMS/WhatsApp/ingress/TLS) are absent from `.env`. | docs-infra census; DEVOPS-004 | Reconcile; document the simulation flag prominently given SEC-003. |
+| C-9 | `loyalty_program.allow_negative_balance` toggle (`V21:58`) implies negative wallet balances are permitted when enabled. | A hard `ck_balance_non_negative` CHECK on the wallet (`V21:345`) would still reject them. The toggle is contradicted by the constraint. | specialist-04 contradictions | Clarify intended behavior. |
+| C-10 | `docs/codebase/00-INDEX.md` scopes the codebase-doc set; production-proof/ + runbooks/ are separate trees. | Consistent — no contradiction, noted for completeness. Every file the index claims exists does exist. | docs-infra census | No action. |
+
+## Notes
+
+- The `docs/runbooks/*`, `production-proof/*`, and `STRESS-TEST-REPORT-26APR2026.md` are **historical records** and were intentionally preserved untouched. They describe a point-in-time state (May–June 2026) and should be read as evidence-of-testing, not as current architecture. Their claims were not re-verified except where they overlap a live finding.
+- The rebuilt `README.md`, `ARCHITECTURE.md`, and `docs/codebase/*` (this audit) supersede the archived copies; the archive under `docs/_previous/` preserves the originals for provenance.

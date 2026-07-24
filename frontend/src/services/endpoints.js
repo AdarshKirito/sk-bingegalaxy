@@ -38,12 +38,22 @@ export const authService = {
   changePassword: (data) => api.put('/auth/change-password', data),
   updateProfile: (data) => api.put('/auth/profile', data),
   changeEmail: (data) => api.put('/auth/change-email', data),
+  // Verified email change: password re-auth → 6-digit code lands in the NEW inbox →
+  // confirm applies the switch (already verified). Preferred over changeEmail above.
+  requestEmailChange: (newEmail, currentPassword) =>
+    api.post('/auth/change-email/request', { newEmail, currentPassword }),
+  confirmEmailChange: (otp) => api.post('/auth/change-email/confirm', { otp }),
+  // Verified phone change — requires the current password.
+  changePhone: (phone, phoneCountryCode, currentPassword) =>
+    api.put('/auth/change-phone', { phone, phoneCountryCode, currentPassword }),
   forgotPassword: (data) => api.post('/auth/forgot-password', data),
   resetPassword: (data) => api.post('/auth/reset-password', data),
   verifyOtp: (data) => api.post('/auth/verify-otp', data),
   searchCustomers: (q) => api.get('/auth/admin/search-customers', { params: { q } }),
+  searchStaff: (q = '') => api.get('/auth/admin/search-staff', { params: { q } }),
   getAllCustomers: () => api.get('/auth/admin/customers'),
   adminCreateCustomer: (data) => api.post('/auth/admin/create-customer', data),
+  regenerateTempPassword: (id) => api.post(`/auth/admin/customer/${id}/temp-password`),
   getCustomerById: (id) => api.get(`/auth/admin/customer/${id}`),
   adminUpdateCustomer: (id, data) => api.put(`/auth/admin/customer/${id}`, data),
   getAllAdmins: () => api.get('/auth/admin/admins'),
@@ -156,10 +166,15 @@ export const bookingService = {
   // Venue rooms (public)
   getVenueRooms: () => api.get('/bookings/venue-rooms'),
   getAvailableRooms: (date, startMinute, durationMinutes) => api.get('/bookings/venue-rooms/available', { params: { date, startMinute, durationMinutes } }),
+  // Public room rating + reviews (customer room detail modal).
+  getRoomReviewSummary: (roomId) => api.get(`/bookings/venue-rooms/${roomId}/reviews/summary`),
+  getRoomReviews: (roomId, page = 0, size = 10) => api.get(`/bookings/venue-rooms/${roomId}/reviews`, { params: { page, size } }),
   // Loyalty (customer)
   getMyLoyalty: async () => asApiResponse(await loyaltyV2.getMyLegacyAccount()),
   // Surge rules (public)
   getActiveSurgeRules: () => api.get('/bookings/surge-rules'),
+  // Server-resolved surge for one slot — what createBooking will actually apply.
+  quoteSurge: (date, startMinute) => api.get('/bookings/surge/quote', { params: { date, startMinute } }),
   // Customer freezes (booking-flow lock self-view)
   getMyFreezes: () => api.get('/bookings/freezes/me'),
   getMyFreezeForBinge: (bingeId) => api.get(`/bookings/freezes/me/binge/${bingeId}`),
@@ -170,12 +185,13 @@ export const bookingService = {
     api.put(`/bookings/admin/binges/${bingeId}/site-content/${slug}`, { contentJson }),
   // Tax preview (public) — used by checkout to show breakdown before commit.
   previewTaxes: (params = {}) => api.get('/bookings/taxes/preview', { params }),
-  // Active currencies (public) — used by CurrencyContext on app boot.
+  // Active currencies (public) — FX metadata for admin/reference surfaces.
   getActiveCurrencies: () => api.get('/bookings/currencies'),
 };
 
 // ── Slot holds (customer + admin) ─────────────────────────
-// Pre-booking holds (60s TTL) so customers don't lose a slot mid-checkout.
+// Pre-payment holds (TTL from app.slot-hold.ttl-minutes, default 7 min) so
+// customers don't lose a slot mid-checkout; consumed via createBooking's holdToken.
 export const slotHoldService = {
   create: (data) => api.post('/bookings/slot-holds', data),
   getByToken: (token) => api.get(`/bookings/slot-holds/${token}`),
@@ -210,17 +226,13 @@ export const currencyService = {
   upsert: (data) => api.post('/bookings/admin/currencies', data),
   toggle: (code) => api.post(`/bookings/admin/currencies/${code}/toggle`),
   remove: (code) => api.delete(`/bookings/admin/currencies/${code}`),
+  // Pull fresh FX rates now (same path as the 6-hourly scheduler).
+  refreshRates: () => api.post('/bookings/admin/currencies/refresh'),
 };
 
-// ── Checkout (multi-currency quote + FX rate lock) ─────────
-// Used only when the customer chooses to pay in a foreign currency the super-admin
-// has enabled (CurrencyRate.supportsPayment). lockFx fixes the INR→currency rate for a
-// short window; the returned token is passed to createBooking, which records the locked
-// currency + rate so the payment is charged at exactly that rate.
-export const checkoutService = {
-  preview: (data) => api.post('/bookings/checkout/preview', data),
-  lockFx: (data) => api.post('/bookings/checkout/lock-fx', data),
-};
+// Pricing is native per-binge currency (no server-side FX conversion): the
+// customer's own bank/card converts at charge time. The former FX-lock /
+// checkout-preview client was removed as dead code — see docs/audit PRICE-002.
 
 // ── Notifications (customer + admin) ───────────────────────
 // Customer-facing endpoints rely on the X-User-Email header injected by the
@@ -232,6 +244,11 @@ export const notificationService = {
   // Preferences (per recipient email)
   getPreferences: () => api.get('/notifications/preferences'),
   updatePreferences: (data) => api.put('/notifications/preferences', data),
+  // Browser Web Push (VAPID) subscription lifecycle
+  getPushPublicKey: () => api.get('/notifications/push/public-key'),
+  subscribePush: (subscription) => api.post('/notifications/push/subscribe', subscription),
+  unsubscribePush: (endpoint) => api.post('/notifications/push/unsubscribe', { endpoint }),
+  sendTestPush: () => api.post('/notifications/push/test'),
   // Admin
   retryFailed: () => api.post('/notifications/admin/retry-failed'),
   // Email/SMS templates (versioned, channel-scoped)
@@ -252,11 +269,46 @@ export const availabilityService = {
   getSlots: (date) => api.get('/availability/slots', { params: { date } }),
 };
 
+// Upload a message attachment (image/video). Shared by admin + customer messaging;
+// returns { data: { data: { url, type, name } } }. Under /notifications/** so any
+// authenticated user can attach (customers on replies too).
+export const uploadMessageAttachment = (file) => {
+  const fd = new FormData();
+  fd.append('file', file);
+  return api.post('/bookings/notifications/attachment', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+};
+
+// Self-scoped in-app messaging for the CURRENT user (customer side). Backed by
+// booking-service /bookings/notifications/** — distinct from the email/SMS
+// notificationService above. Every call is filtered to the caller's own mail server-side.
+export const messageService = {
+  listMyMessages: (page = 0, size = 20) =>
+    api.get('/bookings/notifications', { params: { page, size } }),
+  getMyUnreadCount: () => api.get('/bookings/notifications/unread-count'),
+  listMySent: (page = 0, size = 20) =>
+    api.get('/bookings/notifications/sent', { params: { page, size } }),
+  getMyThread: (threadId) => api.get(`/bookings/notifications/thread/${threadId}`),
+  markMyRead: (id) => api.post(`/bookings/notifications/${id}/read`),
+  markAllMyRead: () => api.post('/bookings/notifications/read-all'),
+  replyMyMessage: (id, payload) => api.post(`/bookings/notifications/${id}/reply`, payload),
+  contactSupport: (payload) => api.post('/bookings/notifications/contact-support', payload),
+  deleteMyMessage: (id) => api.delete(`/bookings/notifications/${id}`),
+};
+
 export const paymentService = {
   initiate: (data) => api.post('/payments/initiate', data),
+  // Payment rails offered for this booking, derived from the VENUE's country —
+  // a customer abroad pays on the venue's local rails, not their own country's.
+  // Never render a hardcoded method list; the server re-enforces this on initiate.
+  getPaymentMethods: (ref) => api.get(`/payments/methods/${ref}`),
   callback: (data) => api.post('/payments/callback', data),
   getByBooking: (ref) => api.get(`/payments/booking/${ref}`),
-  getMyPayments: () => api.get('/payments/my'),
+  // FE-001: server pages at 20 by default — pass page/size and consume the
+  // Page metadata; never derive lifetime totals from a single page.
+  getMyPayments: (params = {}) => api.get('/payments/my', { params }),
+  getMyPaymentsSummary: () => api.get('/payments/my/summary'),
   cancelPayment: (txnId) => api.post(`/payments/cancel/${txnId}`),
   getByTransactionId: (txnId) => api.get(`/payments/transaction/${txnId}`),
 };
@@ -282,7 +334,13 @@ export const adminService = {
   updateBooking: (ref, data) => api.patch(`/bookings/admin/${ref}`, data),
   cancelBooking: (ref, reason) => api.post(`/bookings/admin/${ref}/cancel`, { reason: reason || '' }),
   confirmBooking: (ref) => api.post(`/bookings/admin/${ref}/confirm`),
-  checkIn: (ref) => api.post(`/bookings/admin/${ref}/check-in`, null, { params: { clientDate: clientDate() } }),
+  checkIn: (ref, venueRoomId) => api.post(`/bookings/admin/${ref}/check-in`, null, { params: { clientDate: clientDate(), ...(venueRoomId ? { venueRoomId } : {}) } }),
+  // Rooms an admin may pick for a booking at check-in / room-change (free for its window + current).
+  getBookingAvailableRooms: (ref) => api.get(`/bookings/admin/${ref}/available-rooms`),
+  // Assign / change a booking's physical room; reflected on the customer's view.
+  // remarks: mandatory (server-enforced) when CHANGING an already-assigned room.
+  assignBookingRoom: (ref, venueRoomId, remarks) =>
+    api.patch(`/bookings/admin/${ref}/room`, { venueRoomId, ...(remarks ? { remarks } : {}) }),
   checkout: (ref) => api.post(`/bookings/admin/${ref}/checkout`, null, { params: { clientDate: clientDate(), clientTime: clientTime() } }),
   undoCheckIn: (ref, reason) => api.post(`/bookings/admin/${ref}/undo-check-in`, { reason: reason || '' }, { params: { clientDate: clientDate() } }),
   // ── QR / OTP check-in ──
@@ -298,6 +356,17 @@ export const adminService = {
   unblockDate: (date) => api.delete('/availability/admin/unblock-date', { params: { date } }),
   blockSlot: (data) => api.post('/availability/admin/block-slot', data),
   unblockSlot: (date, startMinute) => api.delete('/availability/admin/unblock-slot', { params: { date, startMinute } }),
+  // Id-based unblocks — precise removals for the Blocked Dates calendar.
+  unblockDateById: (id) => api.delete(`/availability/admin/blocked-dates/${id}`),
+  unblockSlotById: (id) => api.delete(`/availability/admin/blocked-slots/${id}`),
+  // ── Stripe Connect: venue payment onboarding ───────────────
+  // Returns a single-use hosted KYC link; redirect the owner to `url`. The
+  // venue's country is taken server-side from the binge snapshot because it
+  // permanently fixes the connected account's settlement currency and rails.
+  startStripeOnboarding: () => api.post('/payments/admin/connect/onboard'),
+  // chargesEnabled is the flag that matters: an account can exist but still be
+  // mid-KYC and unable to take money.
+  getStripeConnectStatus: () => api.get('/payments/admin/connect/status'),
   initiateRefund: (data) => api.post('/payments/admin/refund', data),
   getRefundsForPayment: (paymentId) => api.get(`/payments/admin/refunds/${paymentId}`),
   getPaymentStats: () => api.get('/payments/admin/stats'),
@@ -305,7 +374,11 @@ export const adminService = {
   recordCashPayment: (data) => api.post('/payments/admin/record-cash', data),
   addPayment: (data) => api.post('/payments/admin/add-payment', data),
   // Event type management
-  getAllEventTypes: () => api.get('/bookings/admin/event-types'),
+  // Accepts an optional explicit binge scope ({ bingeId }) for callers that
+  // operate on a binge OTHER than the globally selected one (e.g. the Binges
+  // page editors) — the backend BingeContextFilter reads the ?bingeId param
+  // ahead of the X-Binge-Id header.
+  getAllEventTypes: (params) => api.get('/bookings/admin/event-types', { params }),
   createEventType: (data) => api.post('/bookings/admin/event-types', data),
   updateEventType: (id, data) => api.put(`/bookings/admin/event-types/${id}`, data),
   toggleEventType: (id) => api.patch(`/bookings/admin/event-types/${id}/toggle-active`),
@@ -443,6 +516,27 @@ export const adminService = {
   getBingesByAdmin: (adminId) => api.get(`/bookings/admin/binges/by-admin/${adminId}`),
   createBinge: (data) => api.post(`/bookings/admin/binges?clientDate=${clientDate()}`, data),
   updateBinge: (id, data) => api.put(`/bookings/admin/binges/${id}`, data),
+  // Admin requests a super-admin move this binge to a different country (re-derives currency).
+  requestBingeCountryChange: (id, country, reason) =>
+    api.post(`/bookings/admin/binges/${id}/country-request`, { country, reason }),
+  // Admin reports the auto-detected timezone is wrong (reason mandatory, suggested zone optional).
+  requestBingeTimezoneChange: (id, timezone, reason) =>
+    api.post(`/bookings/admin/binges/${id}/timezone-request`, { timezone: timezone || '', reason }),
+  // Binge change requests (country-change state machine with audit trail).
+  // Super-admin sees all (optionally ?status=PENDING); admin sees their own.
+  listBingeChangeRequests: (status) =>
+    api.get('/bookings/admin/binges/change-requests', { params: status ? { status } : {} }),
+  // `timezone` is only used to resolve a TIMEZONE_CHANGE review (the zone to apply).
+  approveBingeChangeRequest: (requestId, note, timezone) =>
+    api.post(`/bookings/admin/binges/change-requests/${requestId}/approve`,
+      { note: note || '', ...(timezone ? { timezone } : {}) }),
+  rejectBingeChangeRequest: (requestId, note) =>
+    api.post(`/bookings/admin/binges/change-requests/${requestId}/reject`, { note: note || '' }),
+  cancelBingeChangeRequest: (requestId) =>
+    api.post(`/bookings/admin/binges/change-requests/${requestId}/cancel`),
+  // Super-admin: assign one IANA timezone to many venues at once (venue-timezones console).
+  bulkAssignBingeTimezone: (bingeIds, timezone) =>
+    api.post('/bookings/admin/binges/bulk-timezone', { bingeIds, timezone }),
   getBingeDashboardExperience: (id) => api.get(`/bookings/admin/binges/${id}/customer-dashboard`),
   updateBingeDashboardExperience: (id, data) => api.put(`/bookings/admin/binges/${id}/customer-dashboard`, data),
   getBingeAboutExperience: (id) => api.get(`/bookings/admin/binges/${id}/customer-about`),
@@ -451,8 +545,25 @@ export const adminService = {
   deleteBinge: (id) => api.delete(`/bookings/admin/binges/${id}`),
   // Binge approval workflow (super-admin)
   getPendingBinges: () => api.get('/bookings/admin/binges/pending'),
-  approveBinge: (id) => api.post(`/bookings/admin/binges/${id}/approve`),
+  // Optional body: { taxesEnabled, disabledModules: [], accessRemarks } — the
+  // approval-time tax decision + which binge-operation modules the owning
+  // admin starts with (V71 permission matrix).
+  approveBinge: (id, body) => api.post(`/bookings/admin/binges/${id}/approve`, body || {}),
+  // ── Per-binge module permissions (V71) + About page ──
+  // My denied modules for the SELECTED binge (menu hiding; backend 403s regardless).
+  getMyModulePermissions: () => api.get('/bookings/admin/my-permissions'),
+  getBingeAbout: (id) => api.get(`/bookings/admin/binges/${id}/about`),
+  getBingeAccess: (id) => api.get(`/bookings/admin/binges/${id}/access`),
+  // body: { enabled, locked, remarks, targetUserId? } — super-admin only.
+  setBingeModulePermission: (id, moduleKey, body) =>
+    api.put(`/bookings/admin/binges/${id}/access/${moduleKey}`, body),
+  setBingeAccessRemarks: (id, remarks) =>
+    api.patch(`/bookings/admin/binges/${id}/access-remarks`, { remarks }),
+  // Super-admin: master tax switch for a venue.
+  setBingeTaxesEnabled: (id, enabled) =>
+    api.patch(`/bookings/admin/binges/${id}/taxes-enabled`, { enabled }),
   rejectBinge: (id, reason) => api.post(`/bookings/admin/binges/${id}/reject`, { reason: reason || '' }),
+  resubmitBinge: (id) => api.post(`/bookings/admin/binges/${id}/resubmit`),
   // In-app admin notifications inbox (used by the bell + entrance panel)
   listAdminNotifications: (page = 0, size = 20) =>
     api.get('/bookings/admin/notifications', { params: { page, size } }),
@@ -462,6 +573,21 @@ export const adminService = {
     api.post(`/bookings/admin/notifications/${id}/read`),
   markAllAdminNotificationsRead: () =>
     api.post('/bookings/admin/notifications/read-all'),
+  // ── Messaging (two-way inbox) ──
+  listSentMessages: (page = 0, size = 20) =>
+    api.get('/bookings/admin/notifications/sent', { params: { page, size } }),
+  getMessageThread: (threadId) =>
+    api.get(`/bookings/admin/notifications/thread/${threadId}`),
+  sendMessage: (payload) =>
+    api.post('/bookings/admin/notifications/send', payload),
+  sendBulkMessage: (payload) =>
+    api.post('/bookings/admin/notifications/send-bulk', payload),
+  replyMessage: (id, payload) =>
+    api.post(`/bookings/admin/notifications/${id}/reply`, payload),
+  deleteAdminNotification: (id) =>
+    api.delete(`/bookings/admin/notifications/${id}`),
+  clearReadAdminNotifications: () =>
+    api.post('/bookings/admin/notifications/clear-read'),
   // Cancellation tiers
   getCancellationTiers: (bingeId) => api.get(`/bookings/admin/binges/${bingeId}/cancellation-tiers`),
   saveCancellationTiers: (bingeId, data) => api.put(`/bookings/admin/binges/${bingeId}/cancellation-tiers`, data),
@@ -502,6 +628,8 @@ export const adminService = {
   rejectVenueRoom: (id, reason) => api.post(`/bookings/admin/venue-rooms/${id}/reject`, { reason }),
   // V57: maintenance / hold windows on a specific room
   listRoomBlocks: (roomId) => api.get(`/bookings/admin/venue-rooms/${roomId}/blocks`),
+  // Every room block across the selected binge (Blocked Dates calendar).
+  listAllRoomBlocks: () => api.get('/bookings/admin/venue-rooms/blocks'),
   createRoomBlock: (roomId, data) => api.post(`/bookings/admin/venue-rooms/${roomId}/blocks`, data),
   deleteRoomBlock: (blockId) => api.delete(`/bookings/admin/venue-rooms/blocks/${blockId}`),
   // Surge pricing rules (admin)
@@ -522,6 +650,8 @@ export const adminService = {
 export const adminSupportService = {
   // Booking lookup (single ref, any date — unlike searchBookings which is today-only)
   getByRef: (ref) => api.get(`/bookings/admin/support/${ref}`),
+  // Work queue: bookings with an active (non-NONE) escalation for this binge.
+  listEscalations: () => api.get('/bookings/admin/support/escalations'),
   // Threaded notes
   listNotes: (ref) => api.get(`/bookings/admin/support/${ref}/notes`),
   addNote: (ref, payload) => api.post(`/bookings/admin/support/${ref}/notes`, payload),

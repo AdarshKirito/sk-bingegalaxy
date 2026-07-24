@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { FiCheckCircle, FiChevronDown, FiInfo, FiMapPin, FiMessageCircle, FiShield, FiStar } from 'react-icons/fi';
 import { bookingService } from '../services/endpoints';
+import { parseServerDate } from '../services/timeFormat';
 import { normalizeAboutExperience } from '../services/aboutExperience';
 import useBingeStore from '../stores/bingeStore';
 import DOMPurify from 'dompurify';
@@ -98,11 +99,19 @@ export default function AboutBinge() {
         href: `tel:${selectedBinge.supportPhone.replace(/\s+/g, '')}`,
       });
     }
-    if (selectedBinge?.supportWhatsapp) {
+    // Dedicated WhatsApp number wins; otherwise the public support phone is
+    // reused when the venue flagged it as WhatsApp-reachable (V78). No flag,
+    // no number → no WhatsApp channel offered at all.
+    const waNumber = selectedBinge?.supportWhatsapp
+      || (selectedBinge?.supportPhoneIsWhatsapp ? selectedBinge?.supportPhone : null);
+    if (waNumber) {
+      const waDigits = `${selectedBinge?.supportWhatsapp
+        ? (selectedBinge.supportWhatsappCountryCode || '')
+        : (selectedBinge.supportPhoneCountryCode || '')}${waNumber}`.replace(/\D+/g, '');
       items.push({
         label: 'WhatsApp',
-        value: selectedBinge.supportWhatsapp,
-        href: `https://wa.me/${selectedBinge.supportWhatsapp.replace(/\D+/g, '')}`,
+        value: waNumber,
+        href: `https://wa.me/${waDigits}`,
       });
     }
     return items;
@@ -231,7 +240,7 @@ export default function AboutBinge() {
                     <div className="about-review-meta">
                       <span className="about-review-name">{r.customerName || 'Customer'}</span>
                       <span className="about-review-date">
-                        {r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) : ''}
+                        {r.createdAt ? (parseServerDate(r.createdAt)?.toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' }) || '') : ''}
                       </span>
                     </div>
                     <StarRating rating={r.rating} size="0.9rem" />

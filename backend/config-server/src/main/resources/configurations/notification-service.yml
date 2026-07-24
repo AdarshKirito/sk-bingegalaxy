@@ -18,14 +18,25 @@ spring:
   data:
     mongodb:
       uri: ${SPRING_DATA_MONGODB_URI:mongodb://localhost:27017/notification_db}
+      # Spring Boot 3 defaults this to false, which silently disabled every
+      # @Indexed/@CompoundIndex — including the 90-day PII TTL on notifications
+      # and the unique reminder-dedup index. MongoIndexBootstrap additionally
+      # ensures the indexes deterministically at startup.
+      auto-index-creation: true
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
       group-id: notification-group
       auto-offset-reset: earliest
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      # Wrap the JSON deserializers in ErrorHandlingDeserializer so a single poison/
+      # unparseable record can NEVER block a partition forever (it is logged + skipped
+      # as a null value instead of the container looping on the same offset). The real
+      # deserializers are delegated below.
+      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       properties:
+        spring.deserializer.key.delegate.class: org.apache.kafka.common.serialization.StringDeserializer
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
         spring.json.trusted.packages: com.skbingegalaxy.*
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
@@ -70,6 +81,11 @@ app:
     # traffic; Kafka consumer threads back off when exceeded (30s wait then drop).
     # Raise via EMAIL_RATE_PER_MINUTE env if SMTP provider allows higher throughput.
     email-rate-limit-per-minute: ${EMAIL_RATE_PER_MINUTE:100}
+    # Shared secret for the provider delivery webhook (/api/v1/notifications/webhooks/delivery).
+    # The sender signs the raw request body with HMAC-SHA256 and puts the lowercase hex digest
+    # in X-Webhook-Signature. REQUIRED for delivery callbacks to work: the endpoint is publicly
+    # routed through the gateway and fail-closed rejects everything when this is unset.
+    webhook-secret: ${NOTIFICATION_WEBHOOK_SECRET:}
   sms:
     provider: ${SMS_PROVIDER:disabled}
     api-key: ${SMS_API_KEY:}
@@ -77,6 +93,18 @@ app:
     provider: ${WHATSAPP_PROVIDER:disabled}
     phone-id: ${WHATSAPP_PHONE_ID:}
     token: ${WHATSAPP_TOKEN:}
+  # ── Browser Web Push (VAPID / RFC-8291) ──────────────────────────────
+  # The PUBLIC key is served to browsers as their applicationServerKey and must stay
+  # STABLE for the life of a deployment — rotating it invalidates every existing
+  # subscription. The PRIVATE key is a secret and deliberately has NO default:
+  # boot fails if WEBPUSH_PRIVATE_KEY is unset, the same fail-fast contract as
+  # JWT_SECRET (a committed fallback key would silently sign production pushes).
+  # Generate a pair once with `npx web-push generate-vapid-keys` and set both
+  # vars in the environment (.env for compose, secret sync for k8s).
+  webpush:
+    public-key: ${WEBPUSH_PUBLIC_KEY}
+    private-key: ${WEBPUSH_PRIVATE_KEY}
+    subject: ${WEBPUSH_SUBJECT:mailto:noreply@skbingegalaxy.com}
 
 logging:
   level:

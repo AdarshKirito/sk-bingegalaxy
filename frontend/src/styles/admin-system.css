@@ -1,0 +1,217 @@
+/* admin-system.css — shared styling for the `.admin-*` component vocabulary.
+ *
+ * A large set of admin pages (Currencies, Venue Timezones, All Users, Disputes, Failed
+ * Refunds, Event Types, Approvals, Recovery Queues, Taxes, Users Config, …) markup with
+ * `.admin-page`, `.admin-table`, `.modal-content`, `.form-row`, `.row-actions`,
+ * `.icon-btn`, etc. — but these classes had NO definitions anywhere, so those pages
+ * rendered as bare, misaligned browser tables/forms. This file defines that vocabulary
+ * ONCE, matching the tokens used by `.adm-table` in AdminPages.css, and is imported
+ * globally (main.jsx) so every page gets consistent styling regardless of which route's
+ * CSS chunk happens to be loaded. It only ADDS previously-missing styling, so it cannot
+ * override/break existing working styles. Page-specific files layer extra rules on top.
+ */
+
+/* ── Page header ─────────────────────────────────────────── */
+.admin-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.admin-page-header h1 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+}
+.admin-page-header .page-subtitle {
+  color: var(--text-muted, #6b7280);
+  margin: 6px 0 0;
+  max-width: 64ch;
+}
+
+/* ── Table ───────────────────────────────────────────────── */
+.admin-table-wrap {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: var(--radius-lg, 16px);
+  background: var(--bg-card, #fff);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.04));
+  overflow-x: auto; /* wide tables scroll inside the card, never the page body */
+}
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.admin-table thead tr {
+  border-bottom: 2px solid var(--border, #e5e7eb);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb, 99 102 241), 0.05), transparent);
+}
+.admin-table th {
+  text-align: left;
+  padding: 0.8rem 1rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary, #6b7280);
+  white-space: nowrap;
+}
+.admin-table th:last-child { text-align: right; }
+.admin-table td {
+  padding: 0.75rem 1rem;
+  vertical-align: middle; /* rows mix single-line + stacked cells; middle keeps them level */
+  color: var(--text, #1f2937);
+  border-bottom: 1px solid var(--border, #e5e7eb);
+}
+.admin-table tbody tr:last-child td { border-bottom: none; }
+.admin-table tbody tr { transition: background 0.15s ease; }
+.admin-table tbody tr:hover {
+  background: linear-gradient(90deg, rgba(var(--primary-rgb, 99 102 241), 0.035), transparent);
+}
+
+/* Row action cluster — keep icon buttons on one line, right-aligned. */
+.admin-table td.row-actions,
+.row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+/* ── Icon button ─────────────────────────────────────────── */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid var(--border, #e5e7eb);
+  background: var(--bg-card, #fff);
+  color: var(--text-secondary, #6b7280);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  flex: 0 0 auto;
+}
+.icon-btn:hover:not(:disabled) {
+  background: var(--primary-bg, rgba(99, 102, 241, 0.1));
+  color: var(--primary, #6366f1);
+  border-color: var(--primary, #6366f1);
+}
+.icon-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.icon-btn-danger:hover:not(:disabled) {
+  background: var(--danger-bg, rgba(239, 68, 68, 0.1));
+  color: var(--danger, #ef4444);
+  border-color: var(--danger, #ef4444);
+}
+
+/* ── Badge variant used by these pages but missing globally ── */
+.badge-muted {
+  background: var(--bg-card-hover, #f1f5f9);
+  color: var(--text-muted, #6b7280);
+}
+
+/* ── Modal ───────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+.modal-content {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--bg-card, #fff);
+  color: var(--text, #1f2937);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  padding: 1.25rem 1.4rem 1.4rem;
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 1rem;
+}
+.modal-header h2 { margin: 0; font-size: 1.15rem; }
+
+/* ── Modal form ──────────────────────────────────────────── */
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.modal-form > label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary, #374151);
+}
+.modal-form input,
+.modal-form select,
+.modal-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-weight: 400;
+}
+/* Two-up field pairs collapse to one column on narrow screens. */
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.85rem;
+  align-items: end;
+}
+.form-row > label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary, #374151);
+  min-width: 0;
+}
+/* Checkboxes sit inline with their text and don't stretch like a field. */
+.form-row .checkbox-label,
+.checkbox-label {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+  color: var(--text, #1f2937);
+  white-space: nowrap;
+}
+.checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  margin: 0;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border, #e5e7eb);
+}
+
+@media (max-width: 640px) {
+  .modal-actions { flex-direction: column-reverse; }
+  .modal-actions .btn { width: 100%; }
+}

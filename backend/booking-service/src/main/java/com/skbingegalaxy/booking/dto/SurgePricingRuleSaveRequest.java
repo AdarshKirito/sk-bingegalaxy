@@ -27,13 +27,34 @@ public class SurgePricingRuleSaveRequest {
     @Max(value = 1440, message = "End minute must be <= 1440")
     private int endMinute;
 
+    /** Below 1.0 = early-bird/off-peak discount; above 1.0 = surge premium. */
     @NotNull(message = "Multiplier is required")
-    @DecimalMin(value = "1.0", message = "Multiplier must be at least 1.0")
+    @DecimalMin(value = "0.1", message = "Multiplier must be at least 0.1")
     @DecimalMax(value = "5.0", message = "Multiplier must not exceed 5.0")
     private BigDecimal multiplier;
 
     @Size(max = 100)
     private String label;
+
+    /** Seasonal/event window (inclusive). Null = no date restriction. */
+    private java.time.LocalDate dateFrom;
+    private java.time.LocalDate dateTo;
+
+    /** Last-minute premium: applies when the booking starts within X hours. */
+    @Min(0) @Max(8760)
+    private Integer leadTimeMaxHours;
+
+    /** Early-bird: applies when booked at least X hours ahead. */
+    @Min(0) @Max(8760)
+    private Integer leadTimeMinHours;
+
+    /** Demand trigger: applies once the date is ≥ X% booked. */
+    @Min(1) @Max(100)
+    private Integer occupancyThresholdPct;
+
+    /** Winner among overlapping rules: lowest number wins. */
+    @Min(1) @Max(1000)
+    private Integer priority;
 
     private boolean active;
 }

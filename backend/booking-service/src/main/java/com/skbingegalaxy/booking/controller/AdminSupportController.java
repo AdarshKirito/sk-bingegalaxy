@@ -3,6 +3,7 @@ package com.skbingegalaxy.booking.controller;
 import com.skbingegalaxy.booking.dto.BookingDto;
 import com.skbingegalaxy.booking.dto.BookingNoteDto;
 import com.skbingegalaxy.booking.entity.BookingNote.Visibility;
+import com.skbingegalaxy.booking.service.AdminBingeScopeService;
 import com.skbingegalaxy.booking.service.BookingNoteService;
 import com.skbingegalaxy.booking.service.BookingService;
 import com.skbingegalaxy.common.dto.ApiResponse;
@@ -21,6 +22,14 @@ import java.util.Map;
  * {@link AdminBookingController} stays focused on lifecycle, while
  * this controller owns the operator-care surface (notes, escalation,
  * goodwill, resend confirmation).
+ *
+ * <p>Tenant isolation: {@code X-Binge-Id} is client-controlled, so every
+ * handler first proves the caller OWNS the selected binge
+ * ({@code requireManagedBinge}) before the presence-scoped service lookups
+ * run. Without this an admin of binge A could read or mutate binge B's
+ * bookings (escalations, goodwill credit) just by switching the header.
+ * The note endpoints additionally re-verify ownership against the note's
+ * own binge inside {@link BookingNoteService}.</p>
  */
 @RestController
 @RequestMapping("/api/v1/bookings/admin/support")
@@ -29,6 +38,20 @@ public class AdminSupportController {
 
     private final BookingService bookingService;
     private final BookingNoteService noteService;
+    private final AdminBingeScopeService adminBingeScopeService;
+
+    /**
+     * Active escalations for the selected binge — the console's work queue.
+     * Declared BEFORE the {@code /{bookingRef}} matcher lexically for clarity;
+     * Spring picks the literal path over the variable either way.
+     */
+    @GetMapping("/escalations")
+    public ResponseEntity<ApiResponse<List<BookingDto>>> listEscalations(
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        adminBingeScopeService.requireManagedBinge(adminId, role, "viewing escalations");
+        return ResponseEntity.ok(ApiResponse.ok(bookingService.listActiveEscalations()));
+    }
 
     /**
      * Single-booking lookup so the support console can search by ref without
@@ -37,7 +60,10 @@ public class AdminSupportController {
      */
     @GetMapping("/{bookingRef}")
     public ResponseEntity<ApiResponse<BookingDto>> getByRef(
-            @PathVariable String bookingRef) {
+            @PathVariable String bookingRef,
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        adminBingeScopeService.requireManagedBinge(adminId, role, "looking up a booking");
         return ResponseEntity.ok(ApiResponse.ok(bookingService.getByRef(bookingRef)));
     }
 
@@ -102,7 +128,9 @@ public class AdminSupportController {
     @PostMapping("/{bookingRef}/resend-confirmation")
     public ResponseEntity<ApiResponse<BookingDto>> resendConfirmation(
             @PathVariable String bookingRef,
-            @RequestHeader("X-User-Id") Long adminId) {
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        adminBingeScopeService.requireManagedBinge(adminId, role, "resending a confirmation");
         return ResponseEntity.ok(ApiResponse.ok("Confirmation re-sent",
             bookingService.resendConfirmation(bookingRef, adminId)));
     }
@@ -113,7 +141,9 @@ public class AdminSupportController {
     public ResponseEntity<ApiResponse<BookingDto>> escalate(
             @PathVariable String bookingRef,
             @RequestBody Map<String, String> body,
-            @RequestHeader("X-User-Id") Long adminId) {
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        adminBingeScopeService.requireManagedBinge(adminId, role, "updating an escalation");
         if (body == null || body.get("level") == null) {
             throw new BusinessException("level is required (NONE | L1 | L2 | L3)");
         }
@@ -127,7 +157,9 @@ public class AdminSupportController {
     public ResponseEntity<ApiResponse<BookingDto>> goodwill(
             @PathVariable String bookingRef,
             @RequestBody Map<String, Object> body,
-            @RequestHeader("X-User-Id") Long adminId) {
+            @RequestHeader("X-User-Id") Long adminId,
+            @RequestHeader("X-User-Role") String role) {
+        adminBingeScopeService.requireManagedBinge(adminId, role, "issuing goodwill credit");
         if (body == null || body.get("amount") == null) {
             throw new BusinessException("amount is required");
         }

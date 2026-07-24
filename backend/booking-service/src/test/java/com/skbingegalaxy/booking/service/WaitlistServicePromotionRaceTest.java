@@ -65,6 +65,7 @@ class WaitlistServicePromotionRaceTest {
     @Mock private ObjectMapper objectMapper;
     @Mock private BookingEventPublisher bookingEventPublisher;
     @Mock private AvailabilityClient availabilityClient;
+    @Mock private SlotHoldService slotHoldService;
 
     @InjectMocks
     private WaitlistService waitlistService;
@@ -133,6 +134,10 @@ class WaitlistServicePromotionRaceTest {
 
         // Exactly one save (the first entry flipped to OFFERED).
         verify(waitlistRepository, times(1)).save(any(WaitlistEntry.class));
+        // BOOK-002: the offer must reserve the slot with a real hold so a
+        // direct booking cannot take it from the offered customer.
+        verify(slotHoldService, times(1)).createOfferHold(
+            eq(BINGE_ID), anyLong(), any(), any(), any(), eq(DATE), any(), anyInt(), anyInt(), any());
     }
 
     @Test

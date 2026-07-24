@@ -163,6 +163,51 @@ public class EarnEngine {
                 qcEvent != null ? qcEvent.getId() : null);
     }
 
+    // ── Earn quote (preview only — no state change) ──────────────────────
+
+    /**
+     * Booking-time estimate of what a member WILL earn: shown on the review step
+     * and payment pages ("You'll earn ~X points"), the way airline/hotel checkouts
+     * surface it. Uses the exact same rule-resolution + math as
+     * {@link #earnForBooking}, but writes nothing. {@code eligible=false} carries
+     * the skip reason so UIs can silently hide the line instead of showing 0.
+     */
+    public record EarnQuote(boolean eligible, long points, long qualifyingCredits,
+                            String tierCode, String reason) {
+        public static EarnQuote no(String reason) { return new EarnQuote(false, 0, 0, null, reason); }
+    }
+
+    @Transactional(readOnly = true)
+    public EarnQuote quote(Long membershipId, Long bingeId, BigDecimal bookingAmount, LocalDateTime at) {
+        if (membershipId == null || bingeId == null
+            || bookingAmount == null || bookingAmount.signum() <= 0) {
+            return EarnQuote.no("INVALID_INPUT");
+        }
+        LoyaltyMembership membership = membershipRepository.findById(membershipId).orElse(null);
+        if (membership == null) return EarnQuote.no("NO_MEMBERSHIP");
+
+        LoyaltyProgram program = configService.requireDefaultProgram();
+        Optional<LoyaltyBingeBinding> bindingOpt = configService.findActiveBinding(program.getId(), bingeId);
+        if (bindingOpt.isEmpty()) return EarnQuote.no("NO_BINDING");
+        LoyaltyBingeBinding binding = bindingOpt.get();
+        if (binding.isLegacyFrozen()) return EarnQuote.no("LEGACY_FROZEN");
+
+        Optional<LoyaltyBingeEarningRule> ruleOpt = configService.resolveEarningRule(
+                binding.getId(), membership.getCurrentTierCode(), at);
+        if (ruleOpt.isEmpty()) return EarnQuote.no("NO_EARN_RULE");
+        LoyaltyBingeEarningRule rule = ruleOpt.get();
+        if (rule.getMinBookingAmount() != null
+                && bookingAmount.compareTo(rule.getMinBookingAmount()) < 0) {
+            return EarnQuote.no("BELOW_MIN_AMOUNT");
+        }
+
+        long rawPoints = computePoints(rule, bookingAmount);
+        long points = applyCap(applyTierMultiplier(rawPoints, rule.getTierMultiplier()), rule.getCapPerBooking());
+        long qc = applyTierMultiplier(rawPoints, rule.getQcMultiplier());
+        if (points <= 0 && qc <= 0) return EarnQuote.no("ZERO_POINTS");
+        return new EarnQuote(true, points, qc, membership.getCurrentTierCode(), null);
+    }
+
     // ── Computation helpers ──────────────────────────────────────────────
 
     /** Raw (pre-multiplier) points from rule. {@code floor(amount * num / den)}. */

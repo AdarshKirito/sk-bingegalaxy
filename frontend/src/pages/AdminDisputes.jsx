@@ -196,7 +196,7 @@ export default function AdminDisputes() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap' }}>
                   <div style={{ flex: 1, minWidth: 280 }}>
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.4rem', flexWrap: 'wrap' }}>
-                      <strong style={{ color: 'var(--primary)' }}>{d.gatewayDisputeId || `#${d.id}`}</strong>
+                      <strong style={{ color: 'var(--primary-text)' }}>{d.gatewayDisputeId || `#${d.id}`}</strong>
                       <StatusPill s={d.status} />
                       {!terminal && <DeadlineBadge minutes={d.minutesUntilDeadline} />}
                     </div>
@@ -207,7 +207,7 @@ export default function AdminDisputes() {
                       {d.bookingRef && (
                         <div>
                           <strong>Booking:</strong>{' '}
-                          <Link to={`/admin/bookings?ref=${encodeURIComponent(d.bookingRef)}`} style={{ color: 'var(--primary)' }}>
+                          <Link to={`/admin/bookings?ref=${encodeURIComponent(d.bookingRef)}`} style={{ color: 'var(--primary-text)' }}>
                             {d.bookingRef} <FiExternalLink style={{ verticalAlign: '-2px' }} />
                           </Link>
                         </div>

@@ -2,9 +2,29 @@
 node_modules/
 frontend/dist/
 frontend/.tmp/
+frontend/.vite-tmp/
+frontend/.npm-cache/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+### Test artifacts ###
+frontend/playwright-report/
+frontend/test-results/
+frontend/.vitest-dashboard-results.json
+.vite/
+/k6-*.json
+/k6-*.log
+/stress-*.txt
+/stress-worstcase-results.json
+test_all.txt
+test_errs.txt
+logs_tail.txt
+
+### Local secrets / scratch credentials ###
+admin_token.txt
+*_token.txt
+stress-tokens.txt
 
 ### Java / Maven ###
 **/target/
@@ -44,3 +64,14 @@ spike.out
 smoke.out
 *.out
 k6_bin/
+k6.zip
+
+### Build/test scratch artifacts (DEVOPS-002 residue) ###
+backend/*.txt
+backend/*/test_results.txt
+backend/*/test_output.txt
+backend/*/lifecycle-test.txt
+extracted_test_code.txt
+# JVM crash dumps
+hs_err_pid*.log
+replay_pid*.log

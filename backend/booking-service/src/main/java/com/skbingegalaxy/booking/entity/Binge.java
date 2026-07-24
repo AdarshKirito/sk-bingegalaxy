@@ -39,9 +39,26 @@ public class Binge {
     @Column(length = 100)
     private String state;
 
-    /** ISO-3166-1 alpha-2 country code, e.g. "IN", "US". */
-    @Column(length = 2)
+    /**
+     * ISO-3166-1 alpha-2 country code, e.g. "IN", "US". REQUIRED (V79).
+     *
+     * <p>Load-bearing rather than descriptive: {@link #currency} is derived from
+     * it, the timezone is seeded from it, tax rules are selected by it, and the
+     * payment methods offered at checkout resolve from it. Legacy NULL rows were
+     * backfilled from currency by {@code V79__binge_country_required}.
+     */
+    @Column(length = 2, nullable = false)
     private String country;
+
+    /**
+     * ISO-4217 currency code for this binge, DERIVED from {@link #country}
+     * (see {@code CountryCurrency}). Every price, tax and payment for this binge is
+     * denominated in this currency — the customer never chooses one. Only a SUPER_ADMIN
+     * can change it (by changing the country); a regular admin must request the change.
+     */
+    @Column(length = 3, nullable = false)
+    @Builder.Default
+    private String currency = "INR";
 
     @Column(name = "postal_code", length = 20)
     private String postalCode;
@@ -111,6 +128,36 @@ public class Binge {
     @Column(name = "support_whatsapp_country_code", length = 8)
     private String supportWhatsappCountryCode;
 
+    /**
+     * V78: the PUBLIC support phone doubles as the venue's WhatsApp contact.
+     * When true and {@link #supportWhatsapp} is blank, customer surfaces use
+     * {@link #supportPhone} for the WhatsApp channel.
+     */
+    @Column(name = "support_phone_is_whatsapp", nullable = false)
+    @Builder.Default
+    private boolean supportPhoneIsWhatsapp = false;
+
+    // ── V78: PERSONAL / owner contact — INTERNAL ONLY ────────────────────
+    // How the platform (super-admins) reaches the venue's admin. Never exposed
+    // through public DTOs; customers only ever see the support_* channel.
+
+    /** Owner/admin personal email for platform-to-admin contact. */
+    @Column(name = "owner_email", length = 150)
+    private String ownerEmail;
+
+    /** Owner/admin personal phone for platform-to-admin contact. */
+    @Column(name = "owner_phone", length = 20)
+    private String ownerPhone;
+
+    /** E.164 dial prefix for {@link #ownerPhone}, e.g. "+91". */
+    @Column(name = "owner_phone_country_code", length = 8)
+    private String ownerPhoneCountryCode;
+
+    /** Whether {@link #ownerPhone} is also reachable on WhatsApp. */
+    @Column(name = "owner_phone_is_whatsapp", nullable = false)
+    @Builder.Default
+    private boolean ownerPhoneIsWhatsapp = false;
+
     @Column(nullable = false)
     @Builder.Default
     private boolean customerCancellationEnabled = true;
@@ -150,6 +197,27 @@ public class Binge {
     @Builder.Default
     private int maxNoShowsBeforeFreeze = 3;
 
+    /**
+     * How many concurrent unpaid (PENDING) bookings a customer may hold at this venue
+     * before new bookings are stopped with a "complete or cancel them first" message.
+     * Admin-configurable per binge (industry pattern: a merchant knob, not a hardcode);
+     * takes precedence over the global {@code app.booking.max-pending-per-customer}.
+     * Clamped to [1, 50] at write time.
+     */
+    @Column(name = "max_unpaid_bookings_per_customer", nullable = false)
+    @Builder.Default
+    private int maxUnpaidBookingsPerCustomer = 2;
+
+    /**
+     * Master switch for the tax engine at this venue — SUPER-ADMIN controlled.
+     * When false, every tax entry point (customer preview, checkout, booking
+     * creation by any role, update, reschedule, recurring) computes zero tax.
+     * Gated centrally in {@link com.skbingegalaxy.booking.service.TaxService}.
+     */
+    @Column(name = "taxes_enabled", nullable = false)
+    @Builder.Default
+    private boolean taxesEnabled = true;
+
     // ── Cancellation refund applicability ────────────────────────────────
     /** When TRUE, the configured tiered refund applies to bookings cancelled after a SUCCESSFUL payment. */
     @Column(name = "refund_on_successful_payment_cancel", nullable = false)
@@ -180,6 +248,17 @@ public class Binge {
      */
     @Column(name = "close_time")
     private LocalTime closeTime;
+
+    /**
+     * Optional per-day operating hours as a JSON array (see V66). Each element:
+     * {@code {"dayOfWeek":1-7,"closed":bool,"openTime":"HH:mm","closeTime":"HH:mm"}}
+     * with {@code dayOfWeek} following {@link java.time.DayOfWeek} (1=Mon..7=Sun).
+     * When present it OVERRIDES {@link #openTime}/{@link #closeTime} for the matching
+     * day; when null/blank the single open/close pair (then the global default)
+     * applies. Parsed via {@code OpeningHoursCodec}.
+     */
+    @Column(name = "opening_hours_json", columnDefinition = "TEXT")
+    private String openingHoursJson;
 
     /**
      * Super-admin approval state. Regular ADMIN-created binges start as
@@ -227,6 +306,13 @@ public class Binge {
      */
     @Column(name = "auto_deactivated_at")
     private LocalDateTime autoDeactivatedAt;
+
+    /**
+     * Free-text access/ops remarks shown on the binge About page. Edited by
+     * SUPER_ADMIN alongside the module permission matrix (V71).
+     */
+    @Column(name = "access_remarks", length = 1000)
+    private String accessRemarks;
 
     @CreationTimestamp
     @Column(updatable = false)

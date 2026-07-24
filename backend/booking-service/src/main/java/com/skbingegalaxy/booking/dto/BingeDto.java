@@ -19,6 +19,8 @@ public class BingeDto {
     private String city;
     private String state;
     private String country;
+    /** ISO-4217 currency derived from {@link #country}; the binge's sole pricing currency. */
+    private String currency;
     private String postalCode;
     /** WGS-84 latitude in decimal degrees; null when the venue is not geocoded. */
     private Double latitude;
@@ -39,11 +41,21 @@ public class BingeDto {
     private String supportPhoneCountryCode;
     private String supportWhatsapp;
     private String supportWhatsappCountryCode;
+    /** V78: public support phone doubles as the WhatsApp contact. */
+    private boolean supportPhoneIsWhatsapp;
+    // V78: personal/owner contact — ADMIN-surface only (this DTO is never
+    // served to customers; they receive PublicBingeDto).
+    private String ownerEmail;
+    private String ownerPhone;
+    private String ownerPhoneCountryCode;
+    private boolean ownerPhoneIsWhatsapp;
     private boolean customerCancellationEnabled;
     private int customerCancellationCutoffMinutes;
     private Integer maxConcurrentBookings;
     private LocalTime openTime;
     private LocalTime closeTime;
+    /** Optional per-day operating hours (overrides open/close for the matching day). */
+    private java.util.List<BingeDayHours> openingHours;
     private LocalDateTime createdAt;
 
     /** V56: when true, the customer must pick a venue room during booking. */
@@ -56,6 +68,8 @@ public class BingeDto {
     private int maxPendingPaymentTimeoutsBeforeFreeze;
     private boolean refundOnSuccessfulPaymentCancel;
     private boolean refundOnPendingPaymentCancel;
+    /** Master tax switch for this venue (super-admin controlled). */
+    private boolean taxesEnabled;
 
     /** Approval status: PENDING_APPROVAL, APPROVED, or REJECTED. */
     private String status;

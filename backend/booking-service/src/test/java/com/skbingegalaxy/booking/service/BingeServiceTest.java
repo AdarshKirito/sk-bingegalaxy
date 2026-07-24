@@ -33,6 +33,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doThrow;
@@ -210,6 +211,110 @@ class BingeServiceTest {
         assertThat(binge.getTimezone()).isEqualTo("Asia/Kolkata");
         verify(bingeRepository, never()).save(any(Binge.class));
         verify(venueClock, never()).evict(anyLong());
+    }
+
+    // ── Bulk timezone assignment (super-admin venue-timezones console) ───────
+
+    @Test
+    void bulkAssignTimezone_appliesToAllSelectedBinges() {
+        Binge a = Binge.builder().id(7L).adminId(11L).name("Downtown").active(true).timezone("Asia/Kolkata").build();
+        Binge b = Binge.builder().id(8L).adminId(12L).name("Uptown").active(true).timezone("Europe/London").build();
+        when(bingeRepository.findById(7L)).thenReturn(Optional.of(a));
+        when(bingeRepository.findById(8L)).thenReturn(Optional.of(b));
+        when(bingeRepository.save(any(Binge.class))).thenAnswer(i -> i.getArgument(0));
+
+        com.skbingegalaxy.booking.dto.BulkBingeTimezoneAssignRequest req =
+            com.skbingegalaxy.booking.dto.BulkBingeTimezoneAssignRequest.builder()
+                .bingeIds(List.of(7L, 8L))
+                .timezone("America/New_York")
+                .build();
+
+        com.skbingegalaxy.booking.dto.BulkBingeTimezoneAssignResult result =
+            bingeService.bulkAssignTimezone(req, "SUPER_ADMIN", false);
+
+        assertThat(result.getUpdatedCount()).isEqualTo(2);
+        assertThat(result.getUpdatedBingeIds()).containsExactlyInAnyOrder(7L, 8L);
+        assertThat(result.getNotFoundBingeIds()).isEmpty();
+        assertThat(a.getTimezone()).isEqualTo("America/New_York");
+        assertThat(b.getTimezone()).isEqualTo("America/New_York");
+        verify(venueClock).evict(7L);
+        verify(venueClock).evict(8L);
+    }
+
+    @Test
+    void bulkAssignTimezone_skipsGuardForBingeAlreadyOnTargetZone() {
+        // 7L is already on the target zone (e.g. re-running the console after a partial
+        // apply) — that one must not require the grant; 8L differs and must.
+        Binge a = Binge.builder().id(7L).adminId(11L).name("Downtown").active(true).timezone("America/New_York").build();
+        Binge b = Binge.builder().id(8L).adminId(12L).name("Uptown").active(true).timezone("Europe/London").build();
+        when(bingeRepository.findById(7L)).thenReturn(Optional.of(a));
+        when(bingeRepository.findById(8L)).thenReturn(Optional.of(b));
+        when(bingeRepository.save(any(Binge.class))).thenAnswer(i -> i.getArgument(0));
+
+        com.skbingegalaxy.booking.dto.BulkBingeTimezoneAssignRequest req =
+            com.skbingegalaxy.booking.dto.BulkBingeTimezoneAssignRequest.builder()
+                .bingeIds(List.of(7L, 8L))
+                .timezone("America/New_York")
+                .build();
+
+        bingeService.bulkAssignTimezone(req, "SUPER_ADMIN", false);
+
+        verify(authorityLockGuard, never()).requireTimezoneChangePermitted(any(), anyBoolean(), org.mockito.ArgumentMatchers.eq(7L));
+        verify(venueClock, never()).evict(7L);
+        verify(authorityLockGuard).requireTimezoneChangePermitted("SUPER_ADMIN", false, 8L);
+        verify(venueClock).evict(8L);
+    }
+
+    @Test
+    void bulkAssignTimezone_missingBinge_reportedNotFound_othersStillApplied() {
+        Binge a = Binge.builder().id(7L).adminId(11L).name("Downtown").active(true).timezone("Asia/Kolkata").build();
+        when(bingeRepository.findById(7L)).thenReturn(Optional.of(a));
+        when(bingeRepository.findById(999L)).thenReturn(Optional.empty());
+        when(bingeRepository.save(any(Binge.class))).thenAnswer(i -> i.getArgument(0));
+
+        com.skbingegalaxy.booking.dto.BulkBingeTimezoneAssignRequest req =
+            com.skbingegalaxy.booking.dto.BulkBingeTimezoneAssignRequest.builder()
+                .bingeIds(List.of(7L, 999L))
+                .timezone("America/New_York")
+                .build();
+
+        com.skbingegalaxy.booking.dto.BulkBingeTimezoneAssignResult result =
+            bingeService.bulkAssignTimezone(req, "SUPER_ADMIN", false);
+
+        assertThat(result.getUpdatedCount()).isEqualTo(1);
+        assertThat(result.getUpdatedBingeIds()).containsExactly(7L);
+        assertThat(result.getNotFoundBingeIds()).containsExactly(999L);
+    }
+
+    @Test
+    void bulkAssignTimezone_invalidTimezone_throwsBusinessException() {
+        // No repository stub needed: the zone is validated up-front, before any lookup.
+        com.skbingegalaxy.booking.dto.BulkBingeTimezoneAssignRequest req =
+            com.skbingegalaxy.booking.dto.BulkBingeTimezoneAssignRequest.builder()
+                .bingeIds(List.of(7L))
+                .timezone("Not/AZone")
+                .build();
+
+        assertThatThrownBy(() -> bingeService.bulkAssignTimezone(req, "SUPER_ADMIN", false))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Invalid timezone");
+        verify(bingeRepository, never()).save(any(Binge.class));
+    }
+
+    @Test
+    void bulkAssignTimezone_invalidTimezone_stillThrowsWhenAllIdsMissing() {
+        // Regression (review finding): an all-deleted-ids batch must NOT accept an invalid
+        // zone as success — validation is up-front and deterministic, not per-resolved-binge.
+        com.skbingegalaxy.booking.dto.BulkBingeTimezoneAssignRequest req =
+            com.skbingegalaxy.booking.dto.BulkBingeTimezoneAssignRequest.builder()
+                .bingeIds(List.of(999L))
+                .timezone("Not/AZone")
+                .build();
+
+        assertThatThrownBy(() -> bingeService.bulkAssignTimezone(req, "SUPER_ADMIN", false))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Invalid timezone");
+        verify(bingeRepository, never()).save(any(Binge.class));
     }
 
     // ── Proximity discovery ("venues near me") ──────────────────────────────

@@ -51,6 +51,14 @@ public interface WaitlistRepository extends JpaRepository<WaitlistEntry, Long> {
     /** Customer's entry by id (for cancel). */
     Optional<WaitlistEntry> findByIdAndCustomerId(Long id, Long customerId);
 
+    /**
+     * Outstanding OFFERED entry matching a just-created booking's customer +
+     * slot — used to close the OFFERED → BOOKED conversion loop (BOOK-002).
+     */
+    Optional<WaitlistEntry> findFirstByCustomerIdAndBingeIdAndPreferredDateAndPreferredStartTimeAndStatus(
+            Long customerId, Long bingeId, LocalDate preferredDate,
+            java.time.LocalTime preferredStartTime, WaitlistStatus status);
+
     /** All entries for a customer at a binge. */
     List<WaitlistEntry> findByBingeIdAndCustomerIdOrderByCreatedAtDesc(Long bingeId, Long customerId);
 

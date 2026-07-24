@@ -16,6 +16,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -59,8 +60,17 @@ public class AdminApprovalService {
     /**
      * Create a new approval request. Returns the persisted row so callers can
      * surface its id in their HTTP error response.
+     *
+     * <p><b>Why {@link Propagation#REQUIRES_NEW}:</b> the maker-checker callers
+     * (e.g. {@code PaymentService.retryFailedRefund}) create the request and then
+     * <em>throw</em> a {@code 202 ACCEPTED} {@link BusinessException} to short-circuit
+     * the action and route the caller to a second approver. That throw rolls back the
+     * caller's transaction — so if this method merely joined it (default REQUIRED), the
+     * approval row (and its audit log) would be rolled back too, leaving the caller with
+     * an "approval id: X" message pointing at a row that never persisted. Committing in a
+     * separate transaction makes the approval durable regardless of the caller's outcome.
      */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public AdminApprovalRequest createRequest(String actionType,
                                               String resourceType,
                                               String resourceId,
@@ -205,12 +215,26 @@ public class AdminApprovalService {
         return repository.save(req);
     }
 
+    /**
+     * Tenant-scoped listing (SEC-010). {@code bingeId == null} is the
+     * SUPER_ADMIN platform-wide view; the controller is responsible for only
+     * ever passing {@code null} for that role. Binge admins always come
+     * through with the binge they were just proven to own.
+     */
     @Transactional(readOnly = true)
-    public Page<AdminApprovalRequestDto> list(Status status, String actionType, int page, int size) {
+    public Page<AdminApprovalRequestDto> list(Status status, String actionType, int page, int size, Long bingeId) {
         Pageable pageable = PageRequest.of(Math.max(0, page), Math.min(Math.max(1, size), 200));
-        Page<AdminApprovalRequest> rows = (actionType == null || actionType.isBlank())
-            ? repository.findByStatusOrderByRequestedAtDesc(status, pageable)
-            : repository.findByActionTypeAndStatusOrderByRequestedAtDesc(actionType, status, pageable);
+        boolean noAction = actionType == null || actionType.isBlank();
+        Page<AdminApprovalRequest> rows;
+        if (bingeId == null) {
+            rows = noAction
+                ? repository.findByStatusOrderByRequestedAtDesc(status, pageable)
+                : repository.findByActionTypeAndStatusOrderByRequestedAtDesc(actionType, status, pageable);
+        } else {
+            rows = noAction
+                ? repository.findByBingeIdAndStatusOrderByRequestedAtDesc(bingeId, status, pageable)
+                : repository.findByBingeIdAndActionTypeAndStatusOrderByRequestedAtDesc(bingeId, actionType, status, pageable);
+        }
         return rows.map(this::toDto);
     }
 

@@ -54,6 +54,10 @@ class PaymentServiceTest {
     @Mock private AuditLogService auditLogService;
     @Mock private PaymentMetrics metrics;
     @Mock private AdminApprovalService approvalService;
+    @Mock private com.skbingegalaxy.payment.provider.PaymentProviderRegistry providerRegistry;
+    @Mock private com.skbingegalaxy.payment.method.PaymentMethodResolver paymentMethodResolver;
+    @Mock private ConnectedAccountService connectedAccountService;
+    @Mock private com.skbingegalaxy.payment.client.StripeGatewayClient stripeGatewayClient;
 
     @InjectMocks private PaymentService paymentService;
 
@@ -118,7 +122,7 @@ class PaymentServiceTest {
                 "SKBG25123456", PaymentStatus.INITIATED))
                 .thenReturn(Optional.empty());
         when(bookingAmountClient.fetchSnapshot("SKBG25123456"))
-                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), "PENDING", "INR", BigDecimal.ONE));
+                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), BigDecimal.valueOf(5000), "PENDING", "INR", BigDecimal.ONE, 1L, null, null));
         when(paymentRepository.save(any(Payment.class))).thenReturn(testPayment);
         stubNoRefunds(1L);
 
@@ -143,7 +147,7 @@ class PaymentServiceTest {
                 "SKBG25123456", PaymentStatus.INITIATED))
                 .thenReturn(Optional.of(testPayment));
         when(bookingAmountClient.fetchSnapshot("SKBG25123456"))
-                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), "PENDING", "INR", BigDecimal.ONE));
+                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), BigDecimal.valueOf(5000), "PENDING", "INR", BigDecimal.ONE, 1L, null, null));
         stubNoRefunds(1L);
 
         PaymentDto result = paymentService.initiatePayment(request, 1L, "test@example.com", "Test User");
@@ -164,7 +168,7 @@ class PaymentServiceTest {
         testPayment.setStatus(PaymentStatus.SUCCESS);
         when(paymentRepository.findByBookingRefAndStatus("SKBG25123456", PaymentStatus.SUCCESS)).thenReturn(List.of(testPayment));
         when(bookingAmountClient.fetchSnapshot("SKBG25123456"))
-                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), "PENDING", "INR", BigDecimal.ONE));
+                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), BigDecimal.valueOf(5000), "PENDING", "INR", BigDecimal.ONE, 1L, null, null));
 
         assertThatThrownBy(() -> paymentService.initiatePayment(request, 1L, "test@example.com", "Test User"))
                 .isInstanceOf(BusinessException.class)
@@ -189,7 +193,7 @@ class PaymentServiceTest {
                 "SKBG25123456", PaymentStatus.INITIATED))
                 .thenReturn(Optional.empty());
         when(bookingAmountClient.fetchSnapshot("SKBG25123456"))
-                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), "PENDING", "INR", BigDecimal.ONE));
+                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), BigDecimal.valueOf(5000), "PENDING", "INR", BigDecimal.ONE, 1L, null, null));
 
         assertThatThrownBy(() -> paymentService.initiatePayment(request, 1L, "test@example.com", "Test User"))
                 .isInstanceOf(BusinessException.class)
@@ -216,7 +220,7 @@ class PaymentServiceTest {
                 "SKBG25123456", PaymentStatus.INITIATED))
                 .thenReturn(Optional.empty());
         when(bookingAmountClient.fetchSnapshot("SKBG25123456"))
-                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), "PENDING", "USD", new BigDecimal("0.012")));
+                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), BigDecimal.valueOf(5000), "PENDING", "USD", new BigDecimal("0.012"), 1L, null, null));
         when(paymentRepository.save(any(Payment.class))).thenReturn(testPayment);
         stubNoRefunds(1L);
 
@@ -244,7 +248,7 @@ class PaymentServiceTest {
                 "SKBG25123456", PaymentStatus.INITIATED))
                 .thenReturn(Optional.empty());
         when(bookingAmountClient.fetchSnapshot("SKBG25123456"))
-                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), "PENDING", "USD", new BigDecimal("0.012")));
+                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), BigDecimal.valueOf(5000), "PENDING", "USD", new BigDecimal("0.012"), 1L, null, null));
 
         assertThatThrownBy(() -> paymentService.initiatePayment(request, 1L, "test@example.com", "Test User"))
                 .isInstanceOf(BusinessException.class)
@@ -283,7 +287,7 @@ class PaymentServiceTest {
                 "SKBG25123456", PaymentStatus.INITIATED, 11L))
                 .thenReturn(Optional.empty());
         when(bookingAmountClient.fetchSnapshot("SKBG25123456"))
-                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), "PENDING", "INR", BigDecimal.ONE));
+                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(5000), BigDecimal.valueOf(5000), "PENDING", "INR", BigDecimal.ONE, 1L, null, null));
         when(paymentRepository.save(any(Payment.class))).thenReturn(savedPayment);
         stubNoRefunds(1L);
 
@@ -468,6 +472,11 @@ class PaymentServiceTest {
 
     // â”€â”€ Initiate refund â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+    /**
+     * PAY-006 flow under test: reserve durable intent (INITIATED + receipt) →
+     * provider leg (offline here — the test payment's order id is not
+     * gateway-backed, so the refund settles locally) → finalize SUCCEEDED.
+     */
     @Test
     void initiateRefund_success() {
         testPayment.setStatus(PaymentStatus.SUCCESS);
@@ -477,27 +486,33 @@ class PaymentServiceTest {
                 .reason("Customer request")
                 .build();
 
-        Refund savedRefund = Refund.builder()
-                .id(1L).payment(testPayment)
-                .amount(BigDecimal.valueOf(2000))
-                .reason("Customer request")
-                .gatewayRefundId("RFD-XYZ12345")
-                .status(PaymentStatus.REFUNDED)
-                .initiatedBy("admin")
-                .refundedAt(LocalDateTime.now())
-                .createdAt(LocalDateTime.now())
-                .build();
-
         when(paymentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(testPayment));
-        when(refundRepository.sumCompletedRefundsByPaymentId(eq(1L), anyList()))
+        // Over-refund guard counts in-flight + settled attempts (refundStatus-based).
+        when(refundRepository.sumByPaymentIdAndRefundStatusIn(eq(1L), anyList()))
                 .thenReturn(BigDecimal.ZERO);
-        when(refundRepository.save(any(Refund.class))).thenReturn(savedRefund);
+        // Settled-status recompute after the refund lands.
+        when(refundRepository.sumCompletedRefundsByPaymentId(eq(1L), anyList()))
+                .thenReturn(BigDecimal.valueOf(2000));
+        // Stateful save: assign an id to the intent row and hand the same
+        // instance back so reserve → process → finalize see coherent state.
+        final Refund[] intentRow = new Refund[1];
+        when(refundRepository.save(any(Refund.class))).thenAnswer(inv -> {
+            Refund r = inv.getArgument(0);
+            if (r.getId() == null) r.setId(1L);
+            intentRow[0] = r;
+            return r;
+        });
+        when(refundRepository.findWithPaymentById(1L)).thenAnswer(inv -> Optional.of(intentRow[0]));
 
         RefundDto result = paymentService.initiateRefund(request, "admin");
 
         assertThat(result.getAmount()).isEqualByComparingTo(BigDecimal.valueOf(2000));
-        assertThat(result.getGatewayRefundId()).isEqualTo("RFD-XYZ12345");
-        verify(refundRepository).save(any(Refund.class));
+        assertThat(result.getRefundStatus())
+                .isEqualTo(com.skbingegalaxy.payment.entity.RefundStatus.SUCCEEDED);
+        // Offline (non-gateway-backed) settle mints a local refund id.
+        assertThat(result.getGatewayRefundId()).startsWith("RFD-LOCAL-");
+        // Durable intent then settle — at least two saves.
+        verify(refundRepository, atLeast(2)).save(any(Refund.class));
         verify(eventPublisher).publishEvent(any(PaymentKafkaEvent.class));
     }
 
@@ -510,24 +525,25 @@ class PaymentServiceTest {
                 .reason("Further refund")
                 .build();
 
-        Refund savedRefund = Refund.builder()
-                .id(2L).payment(testPayment)
-                .amount(BigDecimal.valueOf(1000))
-                .gatewayRefundId("RFD-PARTIAL")
-                .status(PaymentStatus.REFUNDED)
-                .initiatedBy("admin")
-                .refundedAt(LocalDateTime.now())
-                .createdAt(LocalDateTime.now())
-                .build();
-
         when(paymentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(testPayment));
+        when(refundRepository.sumByPaymentIdAndRefundStatusIn(eq(1L), anyList()))
+                .thenReturn(BigDecimal.valueOf(2000)); // 2000 already claimed of 5000
         when(refundRepository.sumCompletedRefundsByPaymentId(eq(1L), anyList()))
-                .thenReturn(BigDecimal.valueOf(2000)); // 2000 already refunded of 5000
-        when(refundRepository.save(any(Refund.class))).thenReturn(savedRefund);
+                .thenReturn(BigDecimal.valueOf(3000));
+        final Refund[] intentRow = new Refund[1];
+        when(refundRepository.save(any(Refund.class))).thenAnswer(inv -> {
+            Refund r = inv.getArgument(0);
+            if (r.getId() == null) r.setId(2L);
+            intentRow[0] = r;
+            return r;
+        });
+        when(refundRepository.findWithPaymentById(2L)).thenAnswer(inv -> Optional.of(intentRow[0]));
 
         RefundDto result = paymentService.initiateRefund(request, "admin");
 
         assertThat(result.getAmount()).isEqualByComparingTo(BigDecimal.valueOf(1000));
+        assertThat(result.getRefundStatus())
+                .isEqualTo(com.skbingegalaxy.payment.entity.RefundStatus.SUCCEEDED);
     }
 
     @Test
@@ -553,7 +569,7 @@ class PaymentServiceTest {
                 .build();
 
         when(paymentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(testPayment));
-        when(refundRepository.sumCompletedRefundsByPaymentId(eq(1L), anyList()))
+        when(refundRepository.sumByPaymentIdAndRefundStatusIn(eq(1L), anyList()))
                 .thenReturn(BigDecimal.ZERO);
 
         assertThatThrownBy(() -> paymentService.initiateRefund(request, "admin"))
@@ -570,8 +586,8 @@ class PaymentServiceTest {
                 .build();
 
         when(paymentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(testPayment));
-        when(refundRepository.sumCompletedRefundsByPaymentId(eq(1L), anyList()))
-                .thenReturn(BigDecimal.valueOf(5000)); // already fully refunded
+        when(refundRepository.sumByPaymentIdAndRefundStatusIn(eq(1L), anyList()))
+                .thenReturn(BigDecimal.valueOf(5000)); // already fully claimed
 
         assertThatThrownBy(() -> paymentService.initiateRefund(request, "admin"))
                 .isInstanceOf(BusinessException.class)
@@ -586,13 +602,12 @@ class PaymentServiceTest {
                 .amount(BigDecimal.valueOf(0.50)) // below ?1 minimum
                 .build();
 
-        when(paymentRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(testPayment));
-        // Note: sumCompletedRefundsByPaymentId is not stubbed because the amount check
-        // fires immediately after status validation, before the sum query is reached.
-
+        // PAY-006: the ₹1-minimum check now fires BEFORE any repository access
+        // (fail fast, no lock taken for an obviously invalid request).
         assertThatThrownBy(() -> paymentService.initiateRefund(request, "admin"))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("at least ₹1.00");
+        verify(paymentRepository, never()).findByIdForUpdate(any());
     }
 
     // â”€â”€ Query methods â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -707,6 +722,10 @@ class PaymentServiceTest {
                 .build();
 
         when(paymentRepository.findByBookingRefAndStatus("SKBG25999999", PaymentStatus.SUCCESS)).thenReturn(List.of());
+        // SEC-011: manual writes bind to the authoritative booking snapshot.
+        when(bookingAmountClient.fetchSnapshot("SKBG25999999"))
+                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(8000), BigDecimal.valueOf(8000),
+                        "CONFIRMED", "INR", BigDecimal.ONE, 2L, null, null));
 
         Payment cashPayment = Payment.builder()
                 .id(10L)
@@ -762,6 +781,13 @@ class PaymentServiceTest {
                 .notes("Split payment")
                 .build();
 
+        // SEC-011: ceiling and identity come from the authoritative snapshot.
+        when(bookingAmountClient.fetchSnapshot("SKBG25123456"))
+                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(3000), BigDecimal.valueOf(8000),
+                        "CONFIRMED", "INR", BigDecimal.ONE, 1L, null, null));
+        when(paymentRepository.sumSuccessfulPaymentsByBookingRef("SKBG25123456"))
+                .thenReturn(BigDecimal.valueOf(5000));
+
         Payment additionalPayment = Payment.builder()
                 .id(20L)
                 .bookingRef("SKBG25123456")
@@ -793,6 +819,13 @@ class PaymentServiceTest {
                 .customerId(null)
                 .paymentMethod(PaymentMethod.CASH)
                 .build();
+
+        // Snapshot without an owner (legacy booking): the 0L fallback applies.
+        when(bookingAmountClient.fetchSnapshot("SKBG25123456"))
+                .thenReturn(new BookingSnapshot(BigDecimal.valueOf(1000), BigDecimal.valueOf(8000),
+                        "CONFIRMED", "INR", BigDecimal.ONE, null, null, null));
+        when(paymentRepository.sumSuccessfulPaymentsByBookingRef("SKBG25123456"))
+                .thenReturn(BigDecimal.valueOf(5000));
 
         Payment saved = Payment.builder()
                 .id(21L)
@@ -852,7 +885,9 @@ class PaymentServiceTest {
 
     @Test
     void getPaymentStats_returnsAllFields() {
-        when(paymentRepository.getTotalSuccessfulPayments()).thenReturn(BigDecimal.valueOf(50000));
+        // PAY-010: gross = captured-ever (status IN captured set), immutable
+        // across refund presentation states; refunds subtracted exactly once.
+        when(paymentRepository.sumAmountByStatusIn(anyList())).thenReturn(BigDecimal.valueOf(50000));
         when(refundRepository.sumAllCompletedRefunds(anyList())).thenReturn(BigDecimal.valueOf(5000));
         when(paymentRepository.countByStatus(PaymentStatus.SUCCESS)).thenReturn(10L);
         when(paymentRepository.countByStatus(PaymentStatus.FAILED)).thenReturn(2L);
@@ -876,7 +911,7 @@ class PaymentServiceTest {
         void getPaymentStats_selectedBingeUsesScopedAggregates() {
                 BingeContext.setBingeId(11L);
 
-                when(paymentRepository.getTotalSuccessfulPaymentsByBingeId(11L)).thenReturn(BigDecimal.valueOf(12000));
+                when(paymentRepository.sumAmountByStatusInAndBingeId(anyList(), eq(11L))).thenReturn(BigDecimal.valueOf(12000));
                 when(refundRepository.sumAllCompletedRefundsByBingeId(anyList(), eq(11L))).thenReturn(BigDecimal.valueOf(2000));
                 when(paymentRepository.countByStatusAndBingeId(PaymentStatus.SUCCESS, 11L)).thenReturn(4L);
                 when(paymentRepository.countByStatusAndBingeId(PaymentStatus.FAILED, 11L)).thenReturn(1L);
@@ -890,7 +925,7 @@ class PaymentServiceTest {
                 assertThat(stats.get("totalRefunded")).isEqualTo(BigDecimal.valueOf(2000));
                 assertThat(stats.get("netRevenue")).isEqualTo(BigDecimal.valueOf(10000));
                 assertThat(stats.get("successCount")).isEqualTo(4L);
-                verify(paymentRepository).getTotalSuccessfulPaymentsByBingeId(11L);
+                verify(paymentRepository).sumAmountByStatusInAndBingeId(anyList(), eq(11L));
                 verify(refundRepository).sumAllCompletedRefundsByBingeId(anyList(), eq(11L));
         }
 

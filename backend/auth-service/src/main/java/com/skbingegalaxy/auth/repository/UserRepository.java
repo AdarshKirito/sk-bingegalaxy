@@ -38,8 +38,24 @@ public interface UserRepository extends JpaRepository<User, Long> {
            "LOWER(u.firstName) LIKE LOWER(CONCAT('%', :q, '%')) OR " +
            "LOWER(u.lastName) LIKE LOWER(CONCAT('%', :q, '%')) OR " +
            "LOWER(u.email) LIKE LOWER(CONCAT('%', :q, '%')) OR " +
-           "u.phone LIKE CONCAT('%', :q, '%'))")
+           "u.phone LIKE CONCAT('%', :q, '%') OR " +
+           // Operators can paste a customer id (e.g. from a booking row) directly.
+           "CAST(u.id AS string) = :q)")
     Page<User> searchCustomers(@Param("q") String query, Pageable pageable);
+
+    /**
+     * Staff directory search — ADMIN and SUPER_ADMIN accounts matching a name/email
+     * fragment. Backs the messaging compose "pick specific admins/super-admins" picker.
+     * A blank query returns all staff (ordered) so the picker can show the full list.
+     */
+    @Query("SELECT u FROM User u WHERE u.role IN (com.skbingegalaxy.common.enums.UserRole.ADMIN, " +
+           "com.skbingegalaxy.common.enums.UserRole.SUPER_ADMIN) AND (" +
+           ":q = '' OR " +
+           "LOWER(u.firstName) LIKE LOWER(CONCAT('%', :q, '%')) OR " +
+           "LOWER(u.lastName) LIKE LOWER(CONCAT('%', :q, '%')) OR " +
+           "LOWER(u.email) LIKE LOWER(CONCAT('%', :q, '%'))) " +
+           "ORDER BY u.role DESC, u.firstName, u.lastName")
+    Page<User> searchStaff(@Param("q") String query, Pageable pageable);
 
     @Query("SELECT u FROM User u WHERE u.role = 'CUSTOMER' ORDER BY u.firstName, u.lastName")
     Page<User> findAllCustomers(Pageable pageable);

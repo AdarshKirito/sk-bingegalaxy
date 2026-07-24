@@ -124,33 +124,39 @@ class BookingCheckoutAndRevenueTest {
         @Test
         @DisplayName("Normal checkout (past scheduled end) resets checkedIn to false")
         void normalCheckout_setsCheckedInFalse() {
-            // Scheduled: 10:00 - 13:00, checking out at 14:00 (after end)
-            LocalDateTime checkoutTime = LocalDateTime.of(LocalDate.now(), LocalTime.of(14, 0));
+            // NEW time contract: the server clock is the only time authority —
+            // the clientNow argument is ignored. Force the "past scheduled end"
+            // branch deterministically by scheduling the booking yesterday.
+            checkedInBooking.setBookingDate(LocalDate.now(ZoneOffset.UTC).minusDays(1));
 
             when(bookingRepository.findByBookingRefAndBingeId("SKBG25123456", 11L))
                     .thenReturn(Optional.of(checkedInBooking));
             when(bookingRepository.save(any(Booking.class)))
                     .thenAnswer(i -> i.getArgument(0));
 
-            bookingService.earlyCheckout("SKBG25123456", checkoutTime);
+            bookingService.earlyCheckout("SKBG25123456", LocalDateTime.now(ZoneOffset.UTC));
 
             assertThat(checkedInBooking.isCheckedIn()).isFalse();
             assertThat(checkedInBooking.getStatus()).isEqualTo(BookingStatus.COMPLETED);
-            assertThat(checkedInBooking.getActualCheckoutTime()).isEqualTo(checkoutTime);
+            // Stored checkout instant = server "now" in UTC (never the client clock).
+            assertThat(checkedInBooking.getActualCheckoutTime())
+                    .isCloseTo(LocalDateTime.now(ZoneOffset.UTC),
+                            org.assertj.core.api.Assertions.within(2, java.time.temporal.ChronoUnit.MINUTES));
         }
 
         @Test
         @DisplayName("Early checkout (before scheduled end) resets checkedIn to false")
         void earlyCheckout_setsCheckedInFalse() {
-            // Scheduled: 10:00 - 13:00, checking out at 11:30 (early)
-            LocalDateTime checkoutTime = LocalDateTime.of(LocalDate.now(), LocalTime.of(11, 30));
+            // Force the "early" branch deterministically: schedule the booking
+            // tomorrow so the real now is always before the scheduled end.
+            checkedInBooking.setBookingDate(LocalDate.now(ZoneOffset.UTC).plusDays(1));
 
             when(bookingRepository.findByBookingRefAndBingeId("SKBG25123456", 11L))
                     .thenReturn(Optional.of(checkedInBooking));
             when(bookingRepository.save(any(Booking.class)))
                     .thenAnswer(i -> i.getArgument(0));
 
-            bookingService.earlyCheckout("SKBG25123456", checkoutTime);
+            bookingService.earlyCheckout("SKBG25123456", LocalDateTime.now(ZoneOffset.UTC));
 
             assertThat(checkedInBooking.isCheckedIn()).isFalse();
             assertThat(checkedInBooking.getStatus()).isEqualTo(BookingStatus.COMPLETED);
@@ -196,7 +202,9 @@ class BookingCheckoutAndRevenueTest {
         @Test
         @DisplayName("After checkout, saved booking has checkedIn=false and status=COMPLETED")
         void checkout_verifyPersistedState() {
-            LocalDateTime checkoutTime = LocalDateTime.of(LocalDate.now(), LocalTime.of(14, 0));
+            // Yesterday → deterministic "past scheduled end" branch (clientNow is ignored).
+            checkedInBooking.setBookingDate(LocalDate.now(ZoneOffset.UTC).minusDays(1));
+            LocalDateTime checkoutTime = LocalDateTime.now(ZoneOffset.UTC);
 
             when(bookingRepository.findByBookingRefAndBingeId("SKBG25123456", 11L))
                     .thenReturn(Optional.of(checkedInBooking));

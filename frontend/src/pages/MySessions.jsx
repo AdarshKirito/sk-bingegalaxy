@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { authService } from '../services/endpoints';
+import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-toastify';
 import { FiMonitor, FiRefreshCw, FiShield, FiAlertTriangle, FiLogOut, FiSearch } from 'react-icons/fi';
 import SEO from '../components/SEO';
+import { formatServerDateTime, formatRelativeTime } from '../services/timeFormat';
 import './AdminSecurity.css';
 
 /**
@@ -15,6 +18,8 @@ export default function MySessions() {
   const [loading, setLoading] = useState(true);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [search, setSearch] = useState('');
+  const navigate = useNavigate();
+  const { logout } = useAuth();
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -35,6 +40,16 @@ export default function MySessions() {
     if (!current && !window.confirm('Sign out this device?')) return;
     try {
       await authService.revokeMySession(id);
+      if (current) {
+        // This browser's own session is now dead server-side (refresh token
+        // revoked + access token denylisted at the gateway). Finish the job
+        // client-side: clear local auth state and return to the login screen —
+        // otherwise the app lingers half-signed-in until the next 401.
+        toast.success('Signed out of this device');
+        try { await logout(); } catch { /* local state already cleared */ }
+        navigate('/login', { replace: true });
+        return;
+      }
       toast.success('Session revoked');
       refresh();
     } catch (err) {
@@ -173,8 +188,8 @@ export default function MySessions() {
                         </div>
                       </td>
                       <td>{s.ipAddress || '—'}</td>
-                      <td>{fmt(s.createdAt)}</td>
-                      <td>{fmt(s.lastSeenAt)}</td>
+                      <td>{formatServerDateTime(s.createdAt)}</td>
+                      <td title={formatServerDateTime(s.lastSeenAt)}>{formatRelativeTime(s.lastSeenAt) || '—'}</td>
                       <td>
                         <button
                           className="sec-btn sec-btn-danger"
@@ -202,7 +217,3 @@ export default function MySessions() {
   );
 }
 
-function fmt(iso) {
-  if (!iso) return '—';
-  try { return new Date(iso).toLocaleString(); } catch { return iso; }
-}

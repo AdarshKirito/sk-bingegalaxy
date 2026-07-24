@@ -22,12 +22,24 @@ public class BingeSaveRequest {
     @Size(max = 500)
     private String address;
 
-    // ── Structured address (optional but recommended) ──
+    // ── Structured address (street/city optional but recommended; country is not) ──
     @Size(max = 200) private String addressLine1;
     @Size(max = 200) private String addressLine2;
     @Size(max = 100) private String city;
     @Size(max = 100) private String state;
-    @Pattern(regexp = "^$|^[A-Z]{2}$", message = "Country must be an ISO-3166-1 alpha-2 code (e.g. IN, US)")
+
+    /**
+     * REQUIRED. The venue's country is load-bearing rather than descriptive: it
+     * derives the venue's {@code currency}, seeds its timezone, selects its tax
+     * rules, and decides which payment methods customers are offered at checkout.
+     * A venue without one silently inherits platform defaults (INR / Asia-Kolkata /
+     * card-only), which is wrong for every venue outside India.
+     *
+     * <p>Legacy rows predating this rule are backfilled from their currency by
+     * migration {@code V79__binge_country_required}.
+     */
+    @NotBlank(message = "Venue country is required — it sets the venue's currency, timezone, taxes and payment methods")
+    @Pattern(regexp = "^[A-Z]{2}$", message = "Country must be an ISO-3166-1 alpha-2 code (e.g. IN, US)")
     private String country;
     @Pattern(regexp = "^$|^[A-Za-z0-9 \\-]{3,20}$", message = "Postal code must be 3-20 alphanumeric characters")
     private String postalCode;
@@ -71,6 +83,24 @@ public class BingeSaveRequest {
     @Pattern(regexp = "^$|^\\+\\d{1,4}$", message = "WhatsApp country code must look like '+91'")
     private String supportWhatsappCountryCode;
 
+    /** V78: the public support phone doubles as the WhatsApp contact. */
+    private Boolean supportPhoneIsWhatsapp;
+
+    // ── V78: personal/owner contact (super-admin → venue-admin channel; never public) ──
+    @jakarta.validation.constraints.Email(message = "Owner email must be a valid email address")
+    @Size(max = 150)
+    private String ownerEmail;
+
+    @Size(max = 20)
+    @Pattern(regexp = "^$|^[+0-9][0-9\\s-]{6,19}$", message = "Owner phone must be a valid phone number")
+    private String ownerPhone;
+
+    @Pattern(regexp = "^$|^\\+\\d{1,4}$", message = "Owner phone country code must look like '+91'")
+    private String ownerPhoneCountryCode;
+
+    /** Whether the owner phone is also reachable on WhatsApp. */
+    private Boolean ownerPhoneIsWhatsapp;
+
     private Boolean customerCancellationEnabled;
 
     @PositiveOrZero(message = "Cancellation cutoff must be zero or more minutes")
@@ -88,6 +118,15 @@ public class BingeSaveRequest {
 
     /** Per-binge closing time (local). Null behaves the same as {@link #openTime}. */
     private LocalTime closeTime;
+
+    /**
+     * Optional per-day operating hours (overrides {@link #openTime}/{@link #closeTime}
+     * for the matching day). When null, the schedule is left unchanged on update /
+     * absent on create. An explicit empty list clears any existing per-day schedule.
+     * {@code dayOfWeek} is 1=Mon..7=Sun; each open day must have close &gt; open.
+     */
+    @jakarta.validation.Valid
+    private java.util.List<BingeDayHours> openingHours;
 
     /**
      * V56: when {@code true}, customers must select a venue room during booking.

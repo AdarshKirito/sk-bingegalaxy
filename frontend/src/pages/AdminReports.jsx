@@ -5,6 +5,7 @@ import { FiBarChart2, FiCalendar, FiCheckCircle, FiClock, FiAlertTriangle, FiDow
 import { exportReportCSV, exportReportPDF } from '../services/exportUtils';
 import { useAuth } from '../context/AuthContext';
 import './AdminPages.css';
+import { venueMoney } from '../utils/venueLocale';
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
@@ -200,11 +201,11 @@ export default function AdminReports() {
               <div className="adm-stat-label">Total Bookings</div>
             </div>
             <div className="adm-stat" style={{ '--stat-accent': 'var(--success)' }}>
-              <div className="adm-stat-value">₹{Number(report.totalRevenue ?? 0).toLocaleString()}</div>
+              <div className="adm-stat-value">{venueMoney(Number(report.totalRevenue ?? 0))}</div>
               <div className="adm-stat-label">Actual Revenue (Collected)</div>
             </div>
             <div className="adm-stat" style={{ '--stat-accent': 'var(--warning, #f59e0b)' }}>
-              <div className="adm-stat-value">₹{Number(report.estimatedRevenue ?? 0).toLocaleString()}</div>
+              <div className="adm-stat-value">{venueMoney(Number(report.estimatedRevenue ?? 0))}</div>
               <div className="adm-stat-label">Estimated Revenue (All Bookings)</div>
             </div>
           </div>
@@ -224,8 +225,8 @@ export default function AdminReports() {
                 <tr><td>From</td><td>{report.fromDate}</td></tr>
                 <tr><td>To</td><td>{report.toDate}</td></tr>
                 <tr><td>Total Bookings</td><td className="highlight">{report.totalBookings}</td></tr>
-                <tr><td>Actual Revenue (Collected)</td><td className="highlight success">₹{Number(report.totalRevenue ?? 0).toLocaleString()}</td></tr>
-                <tr><td>Estimated Revenue (All Bookings)</td><td className="highlight warning">₹{Number(report.estimatedRevenue ?? 0).toLocaleString()}</td></tr>
+                <tr><td>Actual Revenue (Collected)</td><td className="highlight success">{venueMoney(Number(report.totalRevenue ?? 0))}</td></tr>
+                <tr><td>Estimated Revenue (All Bookings)</td><td className="highlight warning">{venueMoney(Number(report.estimatedRevenue ?? 0))}</td></tr>
               </tbody>
             </table>
           </div>
@@ -262,7 +263,7 @@ export default function AdminReports() {
             <div>
               <span className="adm-op-label">Audit: </span>
               {opInfo.auditAvailable ? (
-                <span style={{ color: 'var(--success)', fontWeight: 700 }}><FiCheckCircle style={{ verticalAlign: -2, marginRight: 3 }} />Available now</span>
+                <span style={{ color: 'var(--success-text)', fontWeight: 700 }}><FiCheckCircle style={{ verticalAlign: -2, marginRight: 3 }} />Available now</span>
               ) : (
                 <span style={{ color: 'var(--warning, #f59e0b)', fontWeight: 600 }}>
                   <FiClock style={{ verticalAlign: -2, marginRight: 3 }} />{opInfo.auditUnavailableReason}
@@ -354,10 +355,10 @@ export default function AdminReports() {
             <h4>Audit Results — {auditResult.auditDate}</h4>
             <div className="adm-audit-stats">
               <div><strong>{auditResult.totalProcessed}</strong> bookings processed</div>
-              <div style={{ color: 'var(--danger)' }}><strong>{auditResult.markedNoShow}</strong> marked No-Show</div>
-              <div style={{ color: 'var(--success)' }}><strong>{auditResult.markedCompleted}</strong> marked Completed</div>
+              <div style={{ color: 'var(--danger-text)' }}><strong>{auditResult.markedNoShow}</strong> marked No-Show</div>
+              <div style={{ color: 'var(--success-text)' }}><strong>{auditResult.markedCompleted}</strong> marked Completed</div>
               {auditResult.newOperationalDate && (
-                <div style={{ color: 'var(--primary)' }}>
+                <div style={{ color: 'var(--primary-text)' }}>
                   Operational date advanced to <strong>{auditResult.newOperationalDate}</strong>
                 </div>
               )}

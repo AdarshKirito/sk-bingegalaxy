@@ -10,6 +10,7 @@ import com.skbingegalaxy.common.enums.BookingStatus;
 import com.skbingegalaxy.common.enums.PaymentStatus;
 import com.skbingegalaxy.common.exception.BusinessException;
 import com.skbingegalaxy.common.exception.ResourceNotFoundException;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -113,6 +114,9 @@ class BookingServiceTest {
                 .thenReturn(TaxComputationResult.builder()
                         .subtotal(BigDecimal.ZERO).totalTax(BigDecimal.ZERO)
                         .totalInclusiveTax(BigDecimal.ZERO).lines(List.of()).build());
+        lenient().when(taxService.venueContext(any())).thenAnswer(inv ->
+                com.skbingegalaxy.booking.tax.provider.TaxContext.builder()
+                        .bingeId(inv.getArgument(0)).customerType("B2C").productType("BOOKING"));
         lenient().when(loyaltyMemberService.redeemForBooking(anyLong(), anyLong(), anyString(), anyLong(), any(BigDecimal.class)))
                         .thenReturn(new com.skbingegalaxy.booking.loyalty.v2.service.LoyaltyMemberService.RedemptionResult(0L, BigDecimal.ZERO));
         lenient().when(bingeRepository.findById(anyLong())).thenAnswer(inv ->
@@ -228,6 +232,53 @@ class BookingServiceTest {
         assertThatThrownBy(() -> bookingService.createBooking(
                 request, 1L, "John", "john@example.com", "9876543210"))
                 .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void createBooking_pastDate_throwsException() {
+        BingeContext.setBingeId(11L);
+        // venueClock.zoneOf(...) is stubbed to ZoneOffset.UTC in setUp, so "venue-local"
+        // here is real UTC now.
+        CreateBookingRequest request = CreateBookingRequest.builder()
+                .eventTypeId(1L)
+                .bookingDate(LocalDate.now(ZoneOffset.UTC).minusDays(1))
+                .startTime(LocalTime.of(14, 0))
+                .durationHours(3)
+                .build();
+
+        when(eventTypeRepository.findByIdAndBingeId(1L, 11L)).thenReturn(Optional.of(eventType));
+
+        assertThatThrownBy(() -> bookingService.createBooking(
+                request, 1L, "John", "john@example.com", "9876543210"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("Booking date cannot be in the past");
+    }
+
+    @Test
+    void createBooking_sameDayPastTime_throwsException() {
+        // Regression test: booking a slot on today's date whose start time has already
+        // elapsed (venue-local) must be rejected here even if the availability-service
+        // check is bypassed or serves a stale cached "available" result — see
+        // AvailabilityService's equivalent fix for the primary guard.
+        BingeContext.setBingeId(11L);
+        LocalDateTime nowUtc = LocalDateTime.now(ZoneOffset.UTC);
+        // Guard the narrow midnight window where "1 hour ago" would wrap to a later
+        // clock reading on the same LocalTime instead of an earlier one.
+        Assumptions.assumeTrue(nowUtc.getHour() >= 1, "Skipping near UTC midnight to avoid time-wrap flakiness");
+
+        CreateBookingRequest request = CreateBookingRequest.builder()
+                .eventTypeId(1L)
+                .bookingDate(nowUtc.toLocalDate())
+                .startTime(nowUtc.toLocalTime().minusHours(1))
+                .durationHours(3)
+                .build();
+
+        when(eventTypeRepository.findByIdAndBingeId(1L, 11L)).thenReturn(Optional.of(eventType));
+
+        assertThatThrownBy(() -> bookingService.createBooking(
+                request, 1L, "John", "john@example.com", "9876543210"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("already passed for today");
     }
 
     // ── Get booking by ref ───────────────────────────────

@@ -38,10 +38,15 @@ public interface SlotHoldRepository extends JpaRepository<SlotHold, Long> {
      * Recovery queue: ACTIVE holds whose TTL elapsed before the expiry
      * scheduler caught them. The scheduler should always reach 0; if rows
      * accumulate here the scheduler is dead or slow and on-call should page.
+     *
+     * <p>bingeId=null is the SUPER_ADMIN platform-wide view; binge admins must
+     * always pass an owned bingeId (enforced in AdminRecoveryQueueController).</p>
      */
-    @Query("SELECT h FROM SlotHold h WHERE h.status = 'ACTIVE' " +
+    @Query("SELECT h FROM SlotHold h WHERE (:bingeId IS NULL OR h.bingeId = :bingeId) " +
+           "AND h.status = 'ACTIVE' " +
            "AND h.expiresAt <= :cutoff ORDER BY h.expiresAt ASC")
     org.springframework.data.domain.Page<SlotHold> findExpiredNotReleased(
+            @Param("bingeId") Long bingeId,
             @Param("cutoff") LocalDateTime cutoff,
             org.springframework.data.domain.Pageable pageable);
 

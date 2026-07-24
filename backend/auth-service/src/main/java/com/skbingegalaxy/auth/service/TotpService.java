@@ -46,9 +46,14 @@ public class TotpService {
     private static final char[] BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".toCharArray();
 
     private final UserRepository userRepository;
+    private final com.skbingegalaxy.auth.security.SecretCipher secretCipher;
+    private final MfaThrottleService mfaThrottleService;
 
     @Value("${app.totp.issuer:SK Binge Galaxy}")
     private String totpIssuer;
+
+    // Throttle thresholds (app.totp.max-failed-attempts / lock-minutes) live in
+    // MfaThrottleService, which owns the counter writes.
 
     private final SecureRandom secureRandom = new SecureRandom();
 
@@ -71,13 +76,20 @@ public class TotpService {
             throw new BusinessException("MFA is already enabled. Disable it before re-enrolling.", HttpStatus.BAD_REQUEST);
         }
         String secret = generateBase32Secret();
-        user.setMfaSecret(secret);
-        user.setMfaEnabled(false);  // stays disabled until confirmEnrollment succeeds
-        user.setMfaRecoveryCodesHash(null);
-        userRepository.save(user);
-
         List<String> recoveryPlain = generateRecoveryCodes(10);
-        // recovery codes returned once; they are stored hashed on confirmEnrollment.
+
+        // Encrypted at rest: the DB alone must not be enough to mint valid codes.
+        user.setMfaSecret(secretCipher.encrypt(secret));
+        user.setMfaEnabled(false);  // stays disabled until confirmEnrollment succeeds
+        // Recovery codes are hashed and stored HERE, server-side, rather than being
+        // echoed back by the client at confirmation. Trusting the client's echo let
+        // whatever it sent become the stored codes — an XSS or MITM could plant its
+        // own set and keep permanent recovery access to the account.
+        user.setMfaRecoveryCodesHash(hashRecoveryCodes(recoveryPlain));
+        // A fresh enrolment clears any prior throttle state.
+        user.setMfaFailedAttempts(0);
+        user.setMfaLockedUntil(null);
+        userRepository.save(user);
 
         String otpauth = buildOtpauthUri(user.getEmail(), secret);
         return new EnrollmentPayload(secret, otpauth, recoveryPlain);
@@ -88,18 +100,23 @@ public class TotpService {
      * then persist the hashed recovery codes and mark MFA enabled.
      */
     @Transactional
-    public void confirmEnrollment(Long userId, String code, List<String> recoveryCodesPlain) {
+    public void confirmEnrollment(Long userId, String code) {
         User user = userRepository.findById(userId)
             .orElseThrow(() -> new BusinessException("User not found", HttpStatus.NOT_FOUND));
         if (user.getMfaSecret() == null) {
             throw new BusinessException("Start MFA enrolment first", HttpStatus.BAD_REQUEST);
         }
-        if (!verifyCode(user.getMfaSecret(), code)) {
+        requireNotThrottled(user);
+        if (!verifyCode(decryptSecret(user), code)) {
+            registerFailure(user);
             throw new BusinessException("Invalid verification code", HttpStatus.BAD_REQUEST);
         }
+        // Recovery codes were already hashed and stored at beginEnrollment — the
+        // client is not trusted to supply them.
         user.setMfaEnabled(true);
         user.setMfaEnrolledAt(LocalDateTime.now(ZoneOffset.UTC));
-        user.setMfaRecoveryCodesHash(hashRecoveryCodes(recoveryCodesPlain));
+        user.setMfaFailedAttempts(0);
+        user.setMfaLockedUntil(null);
         userRepository.save(user);
     }
 
@@ -116,6 +133,8 @@ public class TotpService {
         user.setMfaSecret(null);
         user.setMfaEnrolledAt(null);
         user.setMfaRecoveryCodesHash(null);
+        user.setMfaFailedAttempts(0);
+        user.setMfaLockedUntil(null);
         userRepository.save(user);
     }
 
@@ -127,22 +146,81 @@ public class TotpService {
     @Transactional
     public boolean verifyCodeOrRecovery(User user, String code) {
         if (code == null || code.isBlank()) return false;
+        // Throttle BEFORE doing any comparison, so a locked account leaks nothing
+        // about whether a guess was close.
+        requireNotThrottled(user);
+
         String normalised = code.replace("-", "").replace(" ", "").trim();
-        if (verifyCode(user.getMfaSecret(), normalised)) {
+        if (verifyCode(decryptSecret(user), normalised)) {
+            clearFailures(user);
             return true;
         }
         // Try recovery code
         String hash = sha256Hex(normalised.toUpperCase());
         String existing = user.getMfaRecoveryCodesHash();
-        if (existing == null || existing.isBlank()) return false;
+        if (existing == null || existing.isBlank()) {
+            registerFailure(user);
+            return false;
+        }
         List<String> hashes = new ArrayList<>(Arrays.asList(existing.split(",")));
         if (hashes.remove(hash)) {
             user.setMfaRecoveryCodesHash(String.join(",", hashes));
+            user.setMfaFailedAttempts(0);
+            user.setMfaLockedUntil(null);
             userRepository.save(user);
             log.info("MFA recovery code used for userId={}; {} codes remaining", user.getId(), hashes.size());
             return true;
         }
+        registerFailure(user);
         return false;
+    }
+
+    // ── brute-force throttle ─────────────────────────────────
+    // Counter writes are delegated to MfaThrottleService so they commit in their
+    // OWN transaction: a failed attempt ends with the caller throwing, which would
+    // otherwise roll the increment back and leave the throttle permanently at zero.
+
+    /** Refuse verification outright while the account is in an MFA lockout window. */
+    private void requireNotThrottled(User user) {
+        if (mfaThrottleService.isThrottled(user)) {
+            throw new BusinessException(
+                "Too many incorrect verification codes. Try again in "
+                    + mfaThrottleService.minutesRemaining(user) + " minute(s).",
+                HttpStatus.TOO_MANY_REQUESTS);
+        }
+    }
+
+    private void registerFailure(User user) {
+        mfaThrottleService.registerFailure(user.getId());
+    }
+
+    private void clearFailures(User user) {
+        mfaThrottleService.clearFailures(user.getId());
+    }
+
+    /**
+     * Decrypt a stored MFA secret, converting a key mismatch into an actionable
+     * error instead of a bare 500.
+     *
+     * <p>{@link com.skbingegalaxy.auth.security.SecretCipher#decrypt} throws when
+     * the ciphertext cannot be opened — which in practice means CRYPTO_SECRET_KEY
+     * changed (or JWT_SECRET rotated while the key was being derived from it).
+     * That is an operator misconfiguration affecting every enrolled user, so it
+     * must not masquerade as "wrong code": the user would retype codes forever
+     * while the real fix is restoring the key.
+     */
+    private String decryptSecret(User user) {
+        try {
+            return secretCipher.decrypt(user.getMfaSecret());
+        } catch (RuntimeException ex) {
+            log.error("Cannot decrypt MFA secret for userId={} — the encryption key does not match "
+                + "the stored ciphertext. Restore the previous CRYPTO_SECRET_KEY, or reset MFA for "
+                + "affected users.", user.getId());
+            throw new BusinessException(
+                "Two-factor authentication is temporarily unavailable due to a server configuration "
+                    + "problem. Please contact support.",
+                HttpStatus.SERVICE_UNAVAILABLE);
+        }
     }
 
     public boolean verifyCode(String base32Secret, String code) {
@@ -205,10 +283,24 @@ public class TotpService {
         return base32Encode(bytes);
     }
 
+    /**
+     * Generate single-use recovery codes.
+     *
+     * <p>80 bits of entropy (10 bytes), not 48. Recovery codes are stored as plain
+     * SHA-256 — deliberately fast, because verification has to try every stored
+     * code and a slow KDF there would be a DoS lever. Fast hashing is only safe if
+     * the input is unguessable, and 48 bits is not: an offline attacker with a
+     * stolen table could exhaust it on commodity GPUs in hours. At 80 bits the
+     * same search is infeasible, which buys the same protection as a slow KDF
+     * without putting one on the verification path.
+     *
+     * <p>Format {@code XXXX-XXXX-XXXX-XXXX-XXXX}. Dashes are stripped before
+     * hashing, so codes issued under the old 12-character format keep verifying.
+     */
     private List<String> generateRecoveryCodes(int count) {
         List<String> codes = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
-            byte[] b = new byte[6];
+            byte[] b = new byte[10];
             secureRandom.nextBytes(b);
             StringBuilder sb = new StringBuilder();
             for (byte x : b) {
@@ -216,7 +308,12 @@ public class TotpService {
                 sb.append(Character.forDigit((x & 0x0F), 16));
             }
             String hex = sb.toString().toUpperCase();
-            codes.add(hex.substring(0, 4) + "-" + hex.substring(4, 8) + "-" + hex.substring(8, 12));
+            StringBuilder grouped = new StringBuilder(hex.length() + 4);
+            for (int g = 0; g < hex.length(); g += 4) {
+                if (g > 0) grouped.append('-');
+                grouped.append(hex, g, Math.min(g + 4, hex.length()));
+            }
+            codes.add(grouped.toString());
         }
         return codes;
     }

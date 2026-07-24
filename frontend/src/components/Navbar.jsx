@@ -32,12 +32,15 @@ import {
   FiAlertOctagon,
   FiMessageSquare,
   FiDollarSign,
+  FiGlobe,
+  FiMail,
 } from 'react-icons/fi';
 import ThemeToggle from './ThemeToggle';
-import CurrencySwitcher from './CurrencySwitcher';
+import { useModuleAccess } from '../hooks/useModuleAccess';
 
 import NavDropdownGroup from './NavDropdownGroup';
 import NotificationsBell from './NotificationsBell';
+import CustomerMessagesBell from './CustomerMessagesBell';
 import './Navbar.css';
 
 export default function Navbar() {
@@ -63,6 +66,9 @@ export default function Navbar() {
   const isAdminShell = effectiveIsAuthenticated && effectiveIsAdmin;
   const isAdminPlatformShell = isAdminShell && !effectiveSelectedBinge;
   const isAdminBingeShell = isAdminShell && !!effectiveSelectedBinge;
+  // V71 module matrix: hides menu items the super-admin disabled/locked for
+  // this admin. can() is always true for SUPER_ADMIN; backend 403s regardless.
+  const { can } = useModuleAccess();
 
   // Close menu on route change
   useEffect(() => { setMenuOpen(false); }, [location.pathname]);
@@ -103,6 +109,7 @@ export default function Navbar() {
     { to: '/dashboard', icon: <FiHome />, label: t('nav.dashboard') },
     { to: '/book', icon: <FiCalendar />, label: t('nav.book') },
     { to: '/my-bookings', icon: <FiCompass />, label: t('nav.my_bookings') },
+    { to: '/messages', icon: <FiMail />, label: t('nav.messages', 'Messages') },
     { to: '/payments', icon: <FiCreditCard />, label: t('nav.payments') },
     { to: '/membership', icon: <FiAward />, label: t('nav.membership', 'Membership') },
     { to: '/about', icon: <FiInfo />, label: t('nav.about') },
@@ -114,24 +121,26 @@ export default function Navbar() {
     { to: '/admin/dashboard', icon: <FiHome />, label: t('nav.dashboard') },
     { to: '/admin/bookings', icon: <FiCalendar />, label: t('nav.bookings') },
     { to: '/admin/book', icon: <FiPlusCircle />, label: t('common.create') },
-    { to: '/admin/blocked-dates', icon: <FiClock />, label: t('nav.blocked_dates') },
-    { to: '/admin/event-types', icon: <FiSettings />, label: t('nav.event_types') },
-    { to: '/admin/rate-codes', icon: <FiSettings />, label: t('nav.rate_codes') },
-    { to: '/admin/venue-rooms', icon: <FiGrid />, label: t('nav.venue_rooms', 'Rooms') },
-    { to: '/admin/surge-rules', icon: <FiZap />, label: t('nav.surge_rules', 'Surge Rules') },
-    { to: '/admin/waitlist', icon: <FiList />, label: t('nav.waitlist', 'Waitlist') },
-    { to: '/admin/customer-freezes', icon: <FiLock />, label: t('nav.customer_freezes', 'Customer Freezes') },
-    { to: '/admin/risk-flags', icon: <FiAlertTriangle />, label: t('nav.risk_flags', 'Risk Flags') },
-    { to: '/admin/support', icon: <FiMessageSquare />, label: t('nav.support_console', 'Support Console') },
-    { to: '/admin/slot-holds', icon: <FiClock />, label: t('nav.slot_holds', 'Slot Holds') },
-    { to: '/admin/taxes', icon: <FiCreditCard />, label: t('nav.taxes', 'Taxes') },
+    { to: '/admin/blocked-dates', icon: <FiClock />, label: t('nav.blocked_dates'), module: 'BLOCKED_DATES' },
+    { to: '/admin/event-types', icon: <FiSettings />, label: t('nav.event_types'), module: 'EVENT_TYPES' },
+    { to: '/admin/rate-codes', icon: <FiSettings />, label: t('nav.rate_codes'), module: 'RATE_CODES' },
+    { to: '/admin/venue-rooms', icon: <FiGrid />, label: t('nav.venue_rooms', 'Rooms'), module: 'ROOMS' },
+    { to: '/admin/surge-rules', icon: <FiZap />, label: t('nav.surge_rules', 'Surge Rules'), module: 'SURGE_RULES' },
+    { to: '/admin/waitlist', icon: <FiList />, label: t('nav.waitlist', 'Waitlist'), module: 'WAITLIST' },
+    { to: '/admin/customer-freezes', icon: <FiLock />, label: t('nav.customer_freezes', 'Customer Freezes'), module: 'CUSTOMER_FREEZES' },
+    { to: '/admin/risk-flags', icon: <FiAlertTriangle />, label: t('nav.risk_flags', 'Risk Flags'), module: 'RISK_FLAGS' },
+    { to: '/admin/support', icon: <FiMessageSquare />, label: t('nav.support_console', 'Support Console'), module: 'SUPPORT_CONSOLE' },
+    { to: '/admin/slot-holds', icon: <FiClock />, label: t('nav.slot_holds', 'Slot Holds'), module: 'SLOT_HOLDS' },
+    // Taxes are a platform-governance concern — super-admin only.
+    ...(effectiveIsSuperAdmin ? [{ to: '/admin/taxes', icon: <FiCreditCard />, label: t('nav.taxes', 'Taxes') }] : []),
     { to: '/admin/recovery', icon: <FiShield />, label: t('nav.recovery', 'Recovery') },
     { to: '/admin/approvals', icon: <FiShield />, label: t('nav.approvals', 'Approvals') },
-    { to: '/admin/disputes', icon: <FiAlertOctagon />, label: t('nav.disputes', 'Disputes') },
-    { to: '/admin/failed-refunds', icon: <FiDollarSign />, label: t('nav.failed_refunds', 'Failed Refunds') },
-    { to: '/admin/users-config', icon: <FiUsers />, label: t('nav.users') },
-    { to: '/admin/reports', icon: <FiBarChart2 />, label: t('nav.reports', 'Reports') },
-  ];
+    { to: '/admin/disputes', icon: <FiAlertOctagon />, label: t('nav.disputes', 'Disputes'), module: 'DISPUTES' },
+    { to: '/admin/failed-refunds', icon: <FiDollarSign />, label: t('nav.failed_refunds', 'Failed Refunds'), module: 'FAILED_REFUNDS' },
+    { to: '/admin/users-config', icon: <FiUsers />, label: t('nav.users'), module: 'USERS' },
+    { to: '/admin/reports', icon: <FiBarChart2 />, label: t('nav.reports', 'Reports'), module: 'REPORTS' },
+    { to: '/admin/about-binge', icon: <FiInfo />, label: t('nav.binge_about', 'About') },
+  ].filter((l) => can(l.module));
 
   const accountLink = { to: '/account', icon: <FiUser />, label: t('nav.account') };
 
@@ -164,10 +173,12 @@ export default function Navbar() {
                 <div className="nav-admin-entry nav-mobile-only">
                   <NavLink to="/admin/platform" className={navLinkClass}><FiHome /> {t('nav.dashboard')}</NavLink>
                   <NavLink to="/admin/binges" className={navLinkClass}><FiMapPin /> {t('nav.binges')}</NavLink>
+                  <NavLink to="/admin/messages" className={navLinkClass}><FiMail /> {t('nav.messages', 'Messages')}</NavLink>
                   <NavLink to="/admin/account" className={navLinkClass}><FiUser /> {t('nav.account')}</NavLink>
                   {effectiveIsSuperAdmin && <NavLink to="/admin/all-users" className={navLinkClass}><FiUsers /> {t('nav.users')}</NavLink>}
                   {effectiveIsSuperAdmin && <NavLink to="/admin/loyalty-center" className={navLinkClass}><FiAward /> {t('nav.loyalty_center', 'Loyalty Center')}</NavLink>}
                   {effectiveIsSuperAdmin && <NavLink to="/admin/currencies" className={navLinkClass}><FiCreditCard /> {t('nav.currencies', 'Currencies')}</NavLink>}
+                  {effectiveIsSuperAdmin && <NavLink to="/admin/venue-timezones" className={navLinkClass}><FiGlobe /> {t('nav.venue_timezones', 'Venue Timezones')}</NavLink>}
                   {effectiveIsSuperAdmin && <NavLink to="/admin/account-page-editor" className={navLinkClass}><FiSettings /> {t('nav.account_page_cms', 'Account Page CMS')}</NavLink>}
                   {effectiveIsSuperAdmin && <NavLink to="/admin/notification-templates" className={navLinkClass}><FiSend /> {t('nav.notification_templates', 'Notification Templates')}</NavLink>}
                   {effectiveIsSuperAdmin && <NavLink to="/admin/ops" className={navLinkClass}><FiTool /> {t('nav.ops', 'Ops Console')}</NavLink>}
@@ -250,6 +261,9 @@ export default function Navbar() {
           {effectiveIsAuthenticated && effectiveIsAdmin && (
             <NotificationsBell />
           )}
+          {effectiveIsAuthenticated && !effectiveIsAdmin && (
+            <CustomerMessagesBell />
+          )}
           {effectiveIsAuthenticated && effectiveIsAdmin && !effectiveSelectedBinge && (
             <span className="nav-user nav-admin-user nav-desktop-only"><FiShield /> <span>{effectiveUser?.firstName}</span><small>{adminRoleLabel}</small></span>
           )}
@@ -280,7 +294,8 @@ export default function Navbar() {
             </button>
           )}
 
-          {!effectiveIsAdmin && <CurrencySwitcher compact ariaLabel="Display currency" />}
+          {/* Currency is no longer a customer choice — each binge prices/charges in its own
+              country's currency. The global display-currency switcher was removed. */}
           <ThemeToggle />
           <button
             className="lang-toggle-btn"
@@ -316,6 +331,7 @@ export default function Navbar() {
             />
 
             <NavDropdownGroup to="/payments" icon={<FiCreditCard />} label={t('nav.payments')} />
+            <NavDropdownGroup to="/messages" icon={<FiMail />}       label={t('nav.messages', 'Messages')} />
             <NavDropdownGroup to="/about"    icon={<FiInfo />}       label={t('nav.about')} />
             <NavDropdownGroup to="/account"  icon={<FiUser />}       label={t('nav.account')} />
           </nav>
@@ -334,41 +350,43 @@ export default function Navbar() {
               items={[
                 { to: '/admin/bookings',      icon: <FiCalendar />,   label: t('nav.bookings') },
                 { to: '/admin/book',          icon: <FiPlusCircle />, label: t('common.create') },
-                { to: '/admin/blocked-dates', icon: <FiClock />,      label: t('nav.blocked_dates') },
-                { to: '/admin/slot-holds',    icon: <FiClock />,      label: t('nav.slot_holds', 'Slot Holds') },
-              ]}
+                { to: '/admin/blocked-dates', icon: <FiClock />,      label: t('nav.blocked_dates'), module: 'BLOCKED_DATES' },
+                { to: '/admin/slot-holds',    icon: <FiClock />,      label: t('nav.slot_holds', 'Slot Holds'), module: 'SLOT_HOLDS' },
+              ].filter((l) => can(l.module))}
             />
 
             <NavDropdownGroup
               icon={<FiGrid />}
               label={t('nav.venue', 'Venue')}
               items={[
-                { to: '/admin/venue-rooms',  icon: <FiGrid />,        label: t('nav.venue_rooms', 'Rooms') },
-                { to: '/admin/event-types',  icon: <FiSettings />,    label: t('nav.event_types') },
-                { to: '/admin/rate-codes',   icon: <FiSettings />,    label: t('nav.rate_codes') },
-                { to: '/admin/surge-rules',  icon: <FiZap />,         label: t('nav.surge_rules', 'Surge Rules') },
-                { to: '/admin/taxes',        icon: <FiCreditCard />,  label: t('nav.taxes', 'Taxes') },
-              ]}
+                { to: '/admin/venue-rooms',  icon: <FiGrid />,        label: t('nav.venue_rooms', 'Rooms'), module: 'ROOMS' },
+                { to: '/admin/event-types',  icon: <FiSettings />,    label: t('nav.event_types'), module: 'EVENT_TYPES' },
+                { to: '/admin/rate-codes',   icon: <FiSettings />,    label: t('nav.rate_codes'), module: 'RATE_CODES' },
+                { to: '/admin/surge-rules',  icon: <FiZap />,         label: t('nav.surge_rules', 'Surge Rules'), module: 'SURGE_RULES' },
+                { to: '/admin/about-binge',  icon: <FiInfo />,        label: t('nav.binge_about', 'About') },
+                // Taxes are super-admin only.
+                ...(effectiveIsSuperAdmin ? [{ to: '/admin/taxes', icon: <FiCreditCard />, label: t('nav.taxes', 'Taxes') }] : []),
+              ].filter((l) => can(l.module))}
             />
 
             <NavDropdownGroup
               icon={<FiUsers />}
               label={t('nav.users')}
               items={[
-                { to: '/admin/users-config', icon: <FiUsers />,  label: t('nav.users') },
-                { to: '/admin/waitlist',     icon: <FiList />,   label: t('nav.waitlist', 'Waitlist') },
-                { to: '/admin/customer-freezes', icon: <FiLock />, label: t('nav.customer_freezes', 'Customer Freezes') },
-                { to: '/admin/risk-flags',   icon: <FiAlertTriangle />, label: t('nav.risk_flags', 'Risk Flags') },
-                { to: '/admin/support',      icon: <FiMessageSquare />, label: t('nav.support_console', 'Support Console') },
-                { to: '/admin/disputes',     icon: <FiAlertOctagon />, label: t('nav.disputes', 'Disputes') },
-                { to: '/admin/failed-refunds', icon: <FiDollarSign />, label: t('nav.failed_refunds', 'Failed Refunds') },
+                { to: '/admin/users-config', icon: <FiUsers />,  label: t('nav.users'), module: 'USERS' },
+                { to: '/admin/waitlist',     icon: <FiList />,   label: t('nav.waitlist', 'Waitlist'), module: 'WAITLIST' },
+                { to: '/admin/customer-freezes', icon: <FiLock />, label: t('nav.customer_freezes', 'Customer Freezes'), module: 'CUSTOMER_FREEZES' },
+                { to: '/admin/risk-flags',   icon: <FiAlertTriangle />, label: t('nav.risk_flags', 'Risk Flags'), module: 'RISK_FLAGS' },
+                { to: '/admin/support',      icon: <FiMessageSquare />, label: t('nav.support_console', 'Support Console'), module: 'SUPPORT_CONSOLE' },
+                { to: '/admin/disputes',     icon: <FiAlertOctagon />, label: t('nav.disputes', 'Disputes'), module: 'DISPUTES' },
+                { to: '/admin/failed-refunds', icon: <FiDollarSign />, label: t('nav.failed_refunds', 'Failed Refunds'), module: 'FAILED_REFUNDS' },
                 ...(effectiveIsSuperAdmin
                   ? [{ to: '/admin/register', icon: <FiShield />, label: t('nav.add_admin', 'Add Admin') }]
                   : []),
-              ]}
+              ].filter((l) => can(l.module))}
             />
 
-            <NavDropdownGroup to="/admin/reports" icon={<FiBarChart2 />} label={t('nav.reports', 'Reports')} />
+            {can('REPORTS') && <NavDropdownGroup to="/admin/reports" icon={<FiBarChart2 />} label={t('nav.reports', 'Reports')} />}
           </nav>
 
           <div className="nav-admin-status">
@@ -392,6 +410,7 @@ export default function Navbar() {
               <div className="admin-sidebar-heading">{t('nav.section_operate', 'Operate')}</div>
               <NavLink to="/admin/platform" className={navLinkClass} end><FiHome /> <span>{t('nav.dashboard')}</span></NavLink>
               <NavLink to="/admin/binges" className={navLinkClass}><FiMapPin /> <span>{t('nav.binges')}</span></NavLink>
+              <NavLink to="/admin/messages" className={navLinkClass}><FiMail /> <span>{t('nav.messages', 'Messages')}</span></NavLink>
               {effectiveIsSuperAdmin && <NavLink to="/admin/ops" className={navLinkClass}><FiTool /> <span>{t('nav.ops', 'Ops Console')}</span></NavLink>}
             </div>
 
@@ -400,6 +419,7 @@ export default function Navbar() {
                 <div className="admin-sidebar-heading">{t('nav.section_configure', 'Configure')}</div>
                 <NavLink to="/admin/loyalty-center" className={navLinkClass}><FiAward /> <span>{t('nav.loyalty_center', 'Loyalty Center')}</span></NavLink>
                 <NavLink to="/admin/currencies" className={navLinkClass}><FiCreditCard /> <span>{t('nav.currencies', 'Currencies')}</span></NavLink>
+                <NavLink to="/admin/venue-timezones" className={navLinkClass}><FiGlobe /> <span>{t('nav.venue_timezones', 'Venue Timezones')}</span></NavLink>
                 <NavLink to="/admin/account-page-editor" className={navLinkClass}><FiSettings /> <span>{t('nav.account_page_cms', 'Account Page CMS')}</span></NavLink>
                 <NavLink to="/admin/notification-templates" className={navLinkClass}><FiSend /> <span>{t('nav.notification_templates', 'Notification Templates')}</span></NavLink>
               </div>
@@ -427,29 +447,31 @@ export default function Navbar() {
               <NavLink to="/admin/dashboard" className={navLinkClass} end><FiHome /> <span>{t('nav.dashboard')}</span></NavLink>
               <NavLink to="/admin/bookings" className={navLinkClass}><FiCalendar /> <span>{t('nav.bookings')}</span></NavLink>
               <NavLink to="/admin/book" className={navLinkClass}><FiPlusCircle /> <span>{t('common.create')}</span></NavLink>
-              <NavLink to="/admin/reports" className={navLinkClass}><FiBarChart2 /> <span>{t('nav.reports', 'Reports')}</span></NavLink>
+              {can('REPORTS') && <NavLink to="/admin/reports" className={navLinkClass}><FiBarChart2 /> <span>{t('nav.reports', 'Reports')}</span></NavLink>}
+              {can('MESSAGES') && <NavLink to="/admin/messages" className={navLinkClass}><FiMail /> <span>{t('nav.messages', 'Messages')}</span></NavLink>}
             </div>
 
             <div className="admin-sidebar-section">
               <div className="admin-sidebar-heading">{t('nav.section_venue', 'Venue')}</div>
-              <NavLink to="/admin/venue-rooms" className={navLinkClass}><FiGrid /> <span>{t('nav.venue_rooms', 'Rooms')}</span></NavLink>
-              <NavLink to="/admin/event-types" className={navLinkClass}><FiSettings /> <span>{t('nav.event_types')}</span></NavLink>
-              <NavLink to="/admin/rate-codes" className={navLinkClass}><FiSettings /> <span>{t('nav.rate_codes')}</span></NavLink>
-              <NavLink to="/admin/surge-rules" className={navLinkClass}><FiZap /> <span>{t('nav.surge_rules', 'Surge Rules')}</span></NavLink>
-              <NavLink to="/admin/taxes" className={navLinkClass}><FiCreditCard /> <span>{t('nav.taxes', 'Taxes')}</span></NavLink>
-              <NavLink to="/admin/blocked-dates" className={navLinkClass}><FiClock /> <span>{t('nav.blocked_dates')}</span></NavLink>
-              <NavLink to="/admin/slot-holds" className={navLinkClass}><FiClock /> <span>{t('nav.slot_holds', 'Slot Holds')}</span></NavLink>
+              {can('ROOMS') && <NavLink to="/admin/venue-rooms" className={navLinkClass}><FiGrid /> <span>{t('nav.venue_rooms', 'Rooms')}</span></NavLink>}
+              {can('EVENT_TYPES') && <NavLink to="/admin/event-types" className={navLinkClass}><FiSettings /> <span>{t('nav.event_types')}</span></NavLink>}
+              {can('RATE_CODES') && <NavLink to="/admin/rate-codes" className={navLinkClass}><FiSettings /> <span>{t('nav.rate_codes')}</span></NavLink>}
+              {can('SURGE_RULES') && <NavLink to="/admin/surge-rules" className={navLinkClass}><FiZap /> <span>{t('nav.surge_rules', 'Surge Rules')}</span></NavLink>}
+              {effectiveIsSuperAdmin && <NavLink to="/admin/taxes" className={navLinkClass}><FiCreditCard /> <span>{t('nav.taxes', 'Taxes')}</span></NavLink>}
+              {can('BLOCKED_DATES') && <NavLink to="/admin/blocked-dates" className={navLinkClass}><FiClock /> <span>{t('nav.blocked_dates')}</span></NavLink>}
+              {can('SLOT_HOLDS') && <NavLink to="/admin/slot-holds" className={navLinkClass}><FiClock /> <span>{t('nav.slot_holds', 'Slot Holds')}</span></NavLink>}
+              <NavLink to="/admin/about-binge" className={navLinkClass}><FiInfo /> <span>{t('nav.binge_about', 'About')}</span></NavLink>
             </div>
 
             <div className="admin-sidebar-section">
               <div className="admin-sidebar-heading">{t('nav.section_people', 'People')}</div>
-              <NavLink to="/admin/users-config" className={navLinkClass}><FiUsers /> <span>{t('nav.users')}</span></NavLink>
-              <NavLink to="/admin/waitlist" className={navLinkClass}><FiList /> <span>{t('nav.waitlist', 'Waitlist')}</span></NavLink>
-              <NavLink to="/admin/customer-freezes" className={navLinkClass}><FiLock /> <span>{t('nav.customer_freezes', 'Customer Freezes')}</span></NavLink>
-              <NavLink to="/admin/risk-flags" className={navLinkClass}><FiAlertTriangle /> <span>{t('nav.risk_flags', 'Risk Flags')}</span></NavLink>
-              <NavLink to="/admin/support" className={navLinkClass}><FiMessageSquare /> <span>{t('nav.support_console', 'Support Console')}</span></NavLink>
-              <NavLink to="/admin/disputes" className={navLinkClass}><FiAlertOctagon /> <span>{t('nav.disputes', 'Disputes')}</span></NavLink>
-              <NavLink to="/admin/failed-refunds" className={navLinkClass}><FiDollarSign /> <span>{t('nav.failed_refunds', 'Failed Refunds')}</span></NavLink>
+              {can('USERS') && <NavLink to="/admin/users-config" className={navLinkClass}><FiUsers /> <span>{t('nav.users')}</span></NavLink>}
+              {can('WAITLIST') && <NavLink to="/admin/waitlist" className={navLinkClass}><FiList /> <span>{t('nav.waitlist', 'Waitlist')}</span></NavLink>}
+              {can('CUSTOMER_FREEZES') && <NavLink to="/admin/customer-freezes" className={navLinkClass}><FiLock /> <span>{t('nav.customer_freezes', 'Customer Freezes')}</span></NavLink>}
+              {can('RISK_FLAGS') && <NavLink to="/admin/risk-flags" className={navLinkClass}><FiAlertTriangle /> <span>{t('nav.risk_flags', 'Risk Flags')}</span></NavLink>}
+              {can('SUPPORT_CONSOLE') && <NavLink to="/admin/support" className={navLinkClass}><FiMessageSquare /> <span>{t('nav.support_console', 'Support Console')}</span></NavLink>}
+              {can('DISPUTES') && <NavLink to="/admin/disputes" className={navLinkClass}><FiAlertOctagon /> <span>{t('nav.disputes', 'Disputes')}</span></NavLink>}
+              {can('FAILED_REFUNDS') && <NavLink to="/admin/failed-refunds" className={navLinkClass}><FiDollarSign /> <span>{t('nav.failed_refunds', 'Failed Refunds')}</span></NavLink>}
               {effectiveIsSuperAdmin && <NavLink to="/admin/register" className={navLinkClass}><FiShield /> <span>{t('nav.add_admin', 'Add Admin')}</span></NavLink>}
             </div>
           </div>

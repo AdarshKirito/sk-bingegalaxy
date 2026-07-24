@@ -18,6 +18,8 @@ export default function Register() {
     password: '',
     confirmPassword: '',
     address: { ...EMPTY_ADDRESS },
+    consentGiven: false,
+    consentMarketing: false,
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -52,6 +54,12 @@ export default function Register() {
       toast.error(msg);
       return;
     }
+    if (!form.consentGiven) {
+      const msg = 'Please accept the Terms of Service & Privacy Policy to create your account.';
+      setError(msg);
+      toast.error(msg);
+      return;
+    }
     setError('');
     setLoading(true);
     try {
@@ -69,6 +77,8 @@ export default function Register() {
         state: form.address.state || '',
         country: form.address.country || '',
         postalCode: form.address.postalCode || '',
+        consentGiven: form.consentGiven,
+        consentMarketing: form.consentMarketing,
       };
       await register(data);
       trackSignUp('email');
@@ -123,25 +133,31 @@ export default function Register() {
             <h2>Create Account</h2>
             <p className="auth-subtitle">Join SK Binge Galaxy and move into booking with a cleaner setup.</p>
 
-            {error && <div className="error-message">{error}</div>}
+            {error && <div className="error-message" role="alert">{error}</div>}
 
             <form onSubmit={handleSubmit} noValidate>
               <div className="grid-2">
                 <div className={`input-group ${fieldErrors.firstName ? 'has-error' : ''}`}>
-                  <label>First Name</label>
-                  <input required value={form.firstName} onChange={update('firstName')} onBlur={handleBlur('firstName')} placeholder="John" autoFocus />
-                  {fieldErrors.firstName && <span className="field-error">{fieldErrors.firstName}</span>}
+                  <label htmlFor="reg-firstName">First Name</label>
+                  <input id="reg-firstName" required value={form.firstName} onChange={update('firstName')} onBlur={handleBlur('firstName')} placeholder="John" autoFocus
+                    aria-required="true" aria-invalid={!!fieldErrors.firstName}
+                    aria-describedby={fieldErrors.firstName ? 'reg-firstName-error' : undefined} />
+                  {fieldErrors.firstName && <span className="field-error" id="reg-firstName-error" role="alert">{fieldErrors.firstName}</span>}
                 </div>
                 <div className={`input-group ${fieldErrors.lastName ? 'has-error' : ''}`}>
-                  <label>Last Name</label>
-                  <input required value={form.lastName} onChange={update('lastName')} onBlur={handleBlur('lastName')} placeholder="Doe" />
-                  {fieldErrors.lastName && <span className="field-error">{fieldErrors.lastName}</span>}
+                  <label htmlFor="reg-lastName">Last Name</label>
+                  <input id="reg-lastName" required value={form.lastName} onChange={update('lastName')} onBlur={handleBlur('lastName')} placeholder="Doe"
+                    aria-required="true" aria-invalid={!!fieldErrors.lastName}
+                    aria-describedby={fieldErrors.lastName ? 'reg-lastName-error' : undefined} />
+                  {fieldErrors.lastName && <span className="field-error" id="reg-lastName-error" role="alert">{fieldErrors.lastName}</span>}
                 </div>
               </div>
               <div className={`input-group ${fieldErrors.email ? 'has-error' : ''}`}>
-                <label>Email</label>
-                <input type="email" required value={form.email} onChange={update('email')} onBlur={handleBlur('email')} placeholder="you@example.com" />
-                {fieldErrors.email && <span className="field-error">{fieldErrors.email}</span>}
+                <label htmlFor="reg-email">Email</label>
+                <input id="reg-email" type="email" required value={form.email} onChange={update('email')} onBlur={handleBlur('email')} placeholder="you@example.com"
+                  aria-required="true" aria-invalid={!!fieldErrors.email}
+                  aria-describedby={fieldErrors.email ? 'reg-email-error' : undefined} />
+                {fieldErrors.email && <span className="field-error" id="reg-email-error" role="alert">{fieldErrors.email}</span>}
               </div>
               <PhoneField
                 label="Phone"
@@ -158,25 +174,51 @@ export default function Register() {
                 onChange={(addr) => setForm({ ...form, address: addr })}
               />
               <div className={`input-group ${fieldErrors.password ? 'has-error' : ''}`}>
-                <label>Password</label>
+                <label htmlFor="reg-password">Password</label>
                 <div className="input-password-wrap">
-                  <input type={showPw ? 'text' : 'password'} required minLength={10} value={form.password} onChange={update('password')} onBlur={handleBlur('password')} placeholder="Min 10 characters" />
-                  <button type="button" className="pw-toggle" onClick={() => setShowPw(v => !v)} aria-label={showPw ? 'Hide password' : 'Show password'} tabIndex={-1}>
+                  <input id="reg-password" type={showPw ? 'text' : 'password'} required minLength={10} value={form.password} onChange={update('password')} onBlur={handleBlur('password')} placeholder="Min 10 characters"
+                    aria-required="true" aria-invalid={!!fieldErrors.password}
+                    aria-describedby={fieldErrors.password ? 'reg-password-error' : undefined} />
+                  <button type="button" className="pw-toggle" onClick={() => setShowPw(v => !v)} aria-label={showPw ? 'Hide password' : 'Show password'}>
                     {showPw ? <FiEyeOff /> : <FiEye />}
                   </button>
                 </div>
-                {fieldErrors.password && <span className="field-error">{fieldErrors.password}</span>}
+                {fieldErrors.password && <span className="field-error" id="reg-password-error" role="alert">{fieldErrors.password}</span>}
               </div>
               <div className={`input-group ${fieldErrors.confirmPassword ? 'has-error' : ''}`}>
-                <label>Confirm Password</label>
+                <label htmlFor="reg-confirmPassword">Confirm Password</label>
                 <div className="input-password-wrap">
-                  <input type={showCpw ? 'text' : 'password'} required value={form.confirmPassword} onChange={update('confirmPassword')} onBlur={handleBlur('confirmPassword')} placeholder="••••••••" />
-                  <button type="button" className="pw-toggle" onClick={() => setShowCpw(v => !v)} aria-label={showCpw ? 'Hide password' : 'Show password'} tabIndex={-1}>
+                  <input id="reg-confirmPassword" type={showCpw ? 'text' : 'password'} required value={form.confirmPassword} onChange={update('confirmPassword')} onBlur={handleBlur('confirmPassword')} placeholder="••••••••"
+                    aria-required="true" aria-invalid={!!fieldErrors.confirmPassword}
+                    aria-describedby={fieldErrors.confirmPassword ? 'reg-confirmPassword-error' : undefined} />
+                  <button type="button" className="pw-toggle" onClick={() => setShowCpw(v => !v)} aria-label={showCpw ? 'Hide password' : 'Show password'}>
                     {showCpw ? <FiEyeOff /> : <FiEye />}
                   </button>
                 </div>
-                {fieldErrors.confirmPassword && <span className="field-error">{fieldErrors.confirmPassword}</span>}
+                {fieldErrors.confirmPassword && <span className="field-error" id="reg-confirmPassword-error" role="alert">{fieldErrors.confirmPassword}</span>}
               </div>
+
+              <div className="input-group" style={{ marginTop: '0.25rem' }}>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.55rem', fontWeight: 400, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={form.consentGiven}
+                    onChange={(e) => setForm({ ...form, consentGiven: e.target.checked })}
+                    style={{ marginTop: '0.2rem', width: 'auto' }} required />
+                  <span style={{ fontSize: '0.85rem', lineHeight: 1.4 }}>
+                    I agree to the{' '}
+                    <Link to="/terms" target="_blank" rel="noreferrer">Terms of Service &amp; Privacy Policy</Link>
+                    {' '}and consent to my data being processed to operate my bookings.
+                  </span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.55rem', fontWeight: 400, cursor: 'pointer', marginTop: '0.5rem' }}>
+                  <input type="checkbox" checked={form.consentMarketing}
+                    onChange={(e) => setForm({ ...form, consentMarketing: e.target.checked })}
+                    style={{ marginTop: '0.2rem', width: 'auto' }} />
+                  <span style={{ fontSize: '0.85rem', lineHeight: 1.4, color: 'var(--text-secondary)' }}>
+                    Send me offers, event ideas and reminders (optional).
+                  </span>
+                </label>
+              </div>
+
               <button type="submit" className="btn btn-primary auth-btn" disabled={loading}>
                 {loading ? <><span className="btn-spinner" /> Creating...</> : 'Create Account'}
               </button>
