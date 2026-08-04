@@ -27,3 +27,10 @@
 DROP INDEX IF EXISTS idx_booking_date;
 DROP INDEX IF EXISTS idx_booking_customer;
 DROP INDEX IF EXISTS idx_booking_binge_date;
+
+-- ── Migration-safety review ───────────────────────────────────────────────
+-- allow:destructive
+-- Reviewed: dropping indexes IS the purpose of this migration — each one is a strict
+-- prefix of a composite index that remains, so no query loses its access path. Indexes
+-- hold no data and are rebuildable from the table, which makes this the cheapest class
+-- of destructive change to reverse.

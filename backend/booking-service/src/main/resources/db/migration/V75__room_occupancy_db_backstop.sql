@@ -147,3 +147,9 @@ CREATE TRIGGER trg_booking_occupancy_backstop
     ON bookings
     FOR EACH ROW
     EXECUTE FUNCTION booking_occupancy_backstop();
+
+-- ── Migration-safety review ───────────────────────────────────────────────
+-- allow:destructive
+-- Reviewed: the only match is `DROP TRIGGER IF EXISTS trg_booking_occupancy_backstop`,
+-- immediately followed by CREATE TRIGGER in the same migration. It replaces a trigger
+-- so the migration is re-runnable; no rows are touched.

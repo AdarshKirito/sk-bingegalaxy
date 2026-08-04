@@ -26,3 +26,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_refunds_gateway_refund_id
 
 -- The old non-unique index is fully covered by the unique one.
 DROP INDEX IF EXISTS idx_refund_gateway_refund_id;
+
+-- ── Migration-safety review ───────────────────────────────────────────────
+-- allow:destructive
+-- Reviewed: `DROP INDEX IF EXISTS idx_refund_gateway_refund_id` replaces a non-unique
+-- index with a UNIQUE one covering the same column — the point of the migration, since
+-- the non-unique index allowed the duplicate-refund case this constraint closes.

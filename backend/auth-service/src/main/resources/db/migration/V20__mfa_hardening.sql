@@ -32,3 +32,11 @@ COMMENT ON COLUMN users.mfa_failed_attempts IS
     'Consecutive failed TOTP/recovery-code attempts; reset on success.';
 COMMENT ON COLUMN users.mfa_locked_until IS
     'When set and in the future, MFA verification is refused (brute-force throttle).';
+
+-- ── Migration-safety review ───────────────────────────────────────────────
+-- allow:lock
+-- Reviewed: ALTER COLUMN mfa_secret TYPE VARCHAR(255) rewrites the table and takes
+-- ACCESS EXCLUSIVE. Accepted because `users.mfa_secret` is only populated for enrolled
+-- super-admins (single-digit rows here), so the rewrite is effectively instant. Revisit
+-- if MFA is ever rolled out to the full user base — at that size this needs the
+-- add-new-column / backfill / swap pattern instead.

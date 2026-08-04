@@ -53,3 +53,12 @@ ALTER TABLE binges ALTER COLUMN country SET NOT NULL;
 ALTER TABLE binges DROP CONSTRAINT IF EXISTS chk_binges_country_iso2;
 ALTER TABLE binges ADD CONSTRAINT chk_binges_country_iso2
     CHECK (country ~ '^[A-Z]{2}$');
+
+-- ── Migration-safety review ───────────────────────────────────────────────
+-- allow:destructive
+-- allow:lock
+-- Reviewed (destructive): `DROP CONSTRAINT IF EXISTS chk_binges_country_iso2` is
+-- immediately followed by ADD CONSTRAINT — an idempotent replace, no data touched.
+-- Reviewed (lock): `ALTER COLUMN country SET NOT NULL` takes a full scan under
+-- ACCESS EXCLUSIVE. Accepted: the migration backfills every NULL first, and `binges`
+-- is a small dimension table (venues, not bookings) where the scan is milliseconds.

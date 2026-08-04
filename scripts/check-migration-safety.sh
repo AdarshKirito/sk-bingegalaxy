@@ -93,6 +93,17 @@ LOCKING_PATTERNS=(
     'ALTER[[:space:]]+TABLE.*ALTER[[:space:]]+COLUMN.*TYPE[[:space:]]'
 )
 
+# The first locking pattern above needs one refinement the comment already states but
+# the regex could not express: since PostgreSQL 11, ADD COLUMN ... NOT NULL DEFAULT
+# <constant> is a CATALOG-ONLY change — no table rewrite, no long lock. This stack pins
+# postgres:16 everywhere (docker-compose.yml, Testcontainers, k8s), so that form is
+# safe and blocking it is a false positive. Four migrations here were blocked by it,
+# every one of them using the safe constant-default form.
+#
+# Held as a separate variable rather than folded into the regex because ERE has no
+# negative lookahead; the scan filters matched LINES that also contain DEFAULT.
+LOCK_ADD_COLUMN_PATTERN='ALTER[[:space:]]+TABLE.*ADD[[:space:]]+COLUMN.*NOT[[:space:]]+NULL'
+
 ROLLBACK_PATTERNS=(
     '^[[:space:]]*ROLLBACK[[:space:]]*;'
 )
@@ -122,13 +133,31 @@ while IFS= read -r -d '' file; do
     fi
 
     content=$(cat "$file")
+
+    # Match patterns against SQL ONLY, with `--` comments blanked out.
+    #
+    # The gate used to grep the raw file, so a migration was blocked for DESCRIBING a
+    # destructive operation in prose. Two of the migrations in this repo are blocked
+    # purely by explanatory comments ("would silently truncate...", "DROP INDEX takes a
+    # brief lock..."), and the only way to satisfy the gate was to reword the comment.
+    # A linter that is appeased by rewording prose teaches people to distrust it, and a
+    # gate everyone distrusts gets switched off.
+    #
+    # sed blanks from `--` to end of line and KEEPS the line, so reported line numbers
+    # still point at the real statement. A `--` inside a string literal would also be
+    # stripped; that can only cause a false NEGATIVE on text that is not executable DDL
+    # anyway, which is the safe direction to be wrong in.
+    #
+    # Override tags are deliberately matched against the RAW content below, since
+    # `-- allow:destructive` lives in a comment by design.
+    sql_only=$(sed 's/--.*$//' "$file")
     file_failed=0
 
     # ── Guard 1: Destructive DDL/DML ──────────────────────────────────────────
     if ! echo "$content" | grep -qiE "$OVERRIDE_DESTRUCTIVE"; then
         for pattern in "${DESTRUCTIVE_PATTERNS[@]}"; do
-            if echo "$content" | grep -qiE "$pattern"; then
-                matching=$(echo "$content" | grep -inE "$pattern" | head -3)
+            if echo "$sql_only" | grep -qiE "$pattern"; then
+                matching=$(echo "$sql_only" | grep -inE "$pattern" | head -3)
                 echo "  [BLOCKED:destructive]  $file"
                 echo "             Pattern: $(echo "$pattern" | tr -d '\\')"
                 echo "             Lines:   $matching"
@@ -146,8 +175,13 @@ while IFS= read -r -d '' file; do
     # ── Guard 2: Locking ALTER TABLE ──────────────────────────────────────────
     if ! echo "$content" | grep -qiE "$OVERRIDE_LOCK"; then
         for pattern in "${LOCKING_PATTERNS[@]}"; do
-            if echo "$content" | grep -qiE "$pattern"; then
-                matching=$(echo "$content" | grep -inE "$pattern" | head -3)
+            lock_hits=$(echo "$sql_only" | grep -inE "$pattern" || true)
+            # PG11+ : a constant DEFAULT makes ADD COLUMN ... NOT NULL metadata-only.
+            if [ "$pattern" = "$LOCK_ADD_COLUMN_PATTERN" ] && [ -n "$lock_hits" ]; then
+                lock_hits=$(echo "$lock_hits" | grep -ivE 'DEFAULT' || true)
+            fi
+            if [ -n "$lock_hits" ]; then
+                matching=$(echo "$lock_hits" | head -3)
                 echo "  [BLOCKED:lock]  $file"
                 echo "             Pattern: $(echo "$pattern" | tr -d '\\')"
                 echo "             Lines:   $matching"
@@ -174,8 +208,8 @@ while IFS= read -r -d '' file; do
     # ── Guard 3: ROLLBACK statements (confusing, non-functional in Flyway) ────
     if ! echo "$content" | grep -qiE "$OVERRIDE_ROLLBACK"; then
         for pattern in "${ROLLBACK_PATTERNS[@]}"; do
-            if echo "$content" | grep -qiE "$pattern"; then
-                matching=$(echo "$content" | grep -inE "$pattern" | head -3)
+            if echo "$sql_only" | grep -qiE "$pattern"; then
+                matching=$(echo "$sql_only" | grep -inE "$pattern" | head -3)
                 echo "  [BLOCKED:rollback]  $file"
                 echo "             Pattern: ROLLBACK statement"
                 echo "             Lines:   $matching"
