@@ -1,5 +1,6 @@
 import api from './api';
 import loyaltyV2 from './loyaltyV2';
+import { attributionPayload } from '../utils/attribution';
 
 /**
  * Safely coerce an API response value to an array.
@@ -119,7 +120,11 @@ export const bookingService = {
   // V55 — category taxonomy (globals ∪ binge-scoped, active only)
   getEventCategories: () => api.get('/bookings/event-categories'),
   getAddOnCategories: () => api.get('/bookings/addon-categories'),
-  createBooking: (data) => api.post('/bookings', data),
+  // Attribution (distribution G-B) is merged HERE rather than at each call site, so a
+  // new booking entry point cannot silently drop it — which is how the Google channel
+  // would quietly become unmeasurable again. Spreads to {} when there is nothing to
+  // report. Explicit values already on `data` win, so a caller can still override.
+  createBooking: (data) => api.post('/bookings', { ...attributionPayload(), ...data }),
   getByRef: (ref) => api.get(`/bookings/${ref}`),
   getMyBookings: () => api.get('/bookings/my'),
   getCurrentBookings: () => api.get('/bookings/my/current', { params: { clientDate: clientDate() } }),

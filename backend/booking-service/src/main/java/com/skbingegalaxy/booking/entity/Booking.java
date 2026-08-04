@@ -70,6 +70,39 @@ public class Booking {
     @Column(name = "external_ref", length = 128)
     private String externalRef;
 
+    /**
+     * Marketing source that produced this <b>DIRECT</b> booking, e.g.
+     * {@code google_things_to_do}. Lowercased and trimmed; a DB CHECK rejects anything
+     * else rather than papering over it at read time.
+     *
+     * <p><b>Not {@link #externalSource}.</b> That means the reservation <em>arrived
+     * from</em> a channel and carries {@code origin = CHANNEL}. This means a customer
+     * booked on SK Binge after <em>following a link</em>, and the booking stays
+     * {@code origin = DIRECT}. Google Things to Do is exactly this shape: a feed plus a
+     * deep link, where Google never takes the booking. Collapsing the two would let a
+     * referral skip the customer funnel guards and be counted as channel-collected
+     * revenue nobody is going to remit.
+     *
+     * <p><b>Reporting dimension only.</b> Nothing in pricing, availability or
+     * eligibility reads this. If attribution ever needs to change what a customer pays,
+     * that is a campaign feature with its own design, not a reinterpretation of this
+     * field.
+     */
+    @Column(name = "attribution_source", length = 64)
+    private String attributionSource;
+
+    /** Opaque click or campaign id from the referring link. Stored verbatim, never parsed. */
+    @Column(name = "attribution_ref", length = 128)
+    private String attributionRef;
+
+    /**
+     * When the referral was captured on the client, not when the booking was made — the
+     * gap between them is what makes a 30-day attribution window measurable after the
+     * fact rather than assumed.
+     */
+    @Column(name = "attribution_captured_at")
+    private java.time.LocalDateTime attributionCapturedAt;
+
     private Long bingeId;
 
     @Column(nullable = false)

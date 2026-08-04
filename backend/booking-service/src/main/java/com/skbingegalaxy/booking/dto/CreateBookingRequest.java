@@ -61,4 +61,27 @@ public class CreateBookingRequest {
     @Size(max = 64, message = "Hold token too long")
     private String holdToken;
 
+    /**
+     * Marketing source captured on the landing page, e.g. {@code google_things_to_do}
+     * (distribution design G-B). Carried by the client through the wizard.
+     *
+     * <p><b>Reporting only.</b> These three fields reach the persisted booking and
+     * nothing else — no price, no availability, no eligibility decision reads them.
+     * The bound is important on its own: this is customer-supplied data on a public
+     * endpoint, and the columns are VARCHAR(64)/VARCHAR(128), so an unbounded value
+     * would be a write-amplification vector rather than merely a bad label.
+     */
+    @Size(max = 64, message = "Attribution source too long")
+    private String attributionSource;
+
+    @Size(max = 128, message = "Attribution reference too long")
+    private String attributionRef;
+
+    /**
+     * When the referral was captured in the browser. Untrusted — it is the client's own
+     * clock — so the server treats a future value as expired rather than as valid
+     * forever. See {@code BookingAttribution}.
+     */
+    private java.time.LocalDateTime attributionCapturedAt;
+
 }

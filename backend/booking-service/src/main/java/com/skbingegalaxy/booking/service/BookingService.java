@@ -486,6 +486,22 @@ public class BookingService {
         String paymentCurrencyCode = bingeCurrency;
         BigDecimal lockedFxRate = BigDecimal.ONE;
 
+        // G-B attribution, resolved HERE — after pricing, tax and every eligibility
+        // check, immediately before persistence. Placement is the safety property: a
+        // value that only comes into existence after every decision is made cannot have
+        // influenced one. `of` returns null for absent, malformed or out-of-window input
+        // and never throws, because a bad marketing parameter must not fail a booking.
+        // Attribution applies to DIRECT bookings; a CHANNEL reservation already records
+        // where it came from in external_source and must not be double-counted.
+        com.skbingegalaxy.booking.domain.BookingAttribution attribution =
+            (origin == com.skbingegalaxy.booking.domain.BookingOrigin.CHANNEL)
+                ? null
+                : com.skbingegalaxy.booking.domain.BookingAttribution.of(
+                    request.getAttributionSource(),
+                    request.getAttributionRef(),
+                    request.getAttributionCapturedAt(),
+                    LocalDateTime.now(ZoneOffset.UTC));
+
         Booking booking = Booking.builder()
             .bookingRef(bookingRef)
             .bingeId(bingeId)
@@ -504,6 +520,14 @@ public class BookingService {
             .origin(origin)
             .externalSource(externalSource)
             .externalRef(externalRef)
+            // G-B attribution. Resolved LAST, after every price, tax and eligibility
+            // decision above is already final, so it is structurally incapable of
+            // influencing any of them. That ordering is the guarantee: attribution
+            // arrives as query parameters on a public URL, so if it could reach the
+            // pricing path a customer could choose their own discount.
+            .attributionSource(attribution == null ? null : attribution.source())
+            .attributionRef(attribution == null ? null : attribution.ref())
+            .attributionCapturedAt(attribution == null ? null : attribution.capturedAt())
             .setupMinutes(buffers.setupMinutes())
             .cleanupMinutes(buffers.cleanupMinutes())
             .numberOfGuests(guests)

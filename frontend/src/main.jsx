@@ -5,6 +5,7 @@ import * as Sentry from '@sentry/react';
 import App from './App';
 import './services/i18n';
 import { initAnalytics } from './services/analytics';
+import { captureAttribution } from './utils/attribution';
 import './index.css';
 // Shared styling for the .admin-*/.modal-*/.form-row/.row-actions/.icon-btn vocabulary used
 // across admin pages (imported after index.css so it can build on the base tokens/resets).
@@ -32,6 +33,14 @@ if (import.meta.env.VITE_SENTRY_DSN) {
 
 // ── Analytics ────────────────────────────────────────
 initAnalytics();
+
+// Marketing attribution (distribution design G-B). Must run BEFORE the router mounts:
+// a Google Things to Do deep link carries its parameters only on the landing URL, and
+// the first client-side navigation replaces them. Capturing here is the difference
+// between the Google channel being measurable and being unprovable.
+// Session-scoped and first-party, so no consent banner is required; it never affects
+// price, availability or eligibility.
+captureAttribution();
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

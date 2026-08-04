@@ -529,7 +529,7 @@ G-A moved to the front: everything renders from the schema and the capability ro
 | # | Slice | Why here |
 |---|---|---|
 | **1** | **Schema + provider capability model** + seeded provider catalogue — **DONE** | Every screen and every connector reads it |
-| 2 | Attribution capture (G-B) | Independent of connectors; makes Google measurable **before** any connector exists, so the channel can be justified on data |
+| **2** | **Attribution capture (G-B)** — **DONE** | Independent of connectors; makes Google measurable **before** any connector exists, so the channel can be justified on data |
 | 3 | Connections + connector-specific auth | Nothing is reachable without one |
 | 4 | Listings + per-destination readiness | Surfaces `Blocked` to whoever can fix it |
 | 5 | Reservation inbox + ordering (G-C) | Trust screen; must precede the first real reservation |
@@ -562,3 +562,44 @@ The five wiring gaps found while landing this — including one regression I int
 
 **Not built, deliberately:** no controllers, no gateway route, no k8s manifests. An
 API with no caller is a guess about the caller. Slice 2 defines the first real one.
+
+### Slice 2 — what actually shipped
+
+Attribution now flows end to end, and deliberately lands in **booking-service**, not the
+distribution context: a Google conversion is an ordinary DIRECT booking, so the
+attribution belongs on the booking row next to the origin it qualifies.
+
+| Piece | Where |
+|---|---|
+| Columns + two CHECKs + partial reporting index | `V88__booking_attribution.sql` |
+| Domain rules (canonical form, 30-day window, never-throws) | `domain/BookingAttribution.java` (13 tests) |
+| Capture, storage, last-non-direct-touch | `frontend/src/utils/attribution.js` (12 tests) |
+| Wiring | `main.jsx` before the router mounts; merged centrally in `endpoints.createBooking` |
+
+**`attribution_*` is not `external_source`.** The latter means the reservation *arrived
+from* a channel and carries `origin = CHANNEL`. Attribution means a customer booked
+here after *following a link*, and the booking stays `origin = DIRECT`. Collapsing them
+would let a referral inherit CHANNEL's guards, skip the customer-funnel checks, and be
+counted as channel-collected revenue nobody is going to remit. A CHANNEL booking
+records no attribution at all, so nothing is double-counted.
+
+**Reporting dimension only, enforced structurally.** Attribution is resolved *after*
+every price, tax and eligibility decision is final and immediately before persistence —
+a value that only exists after the decisions are made cannot have influenced one. This
+matters because attribution arrives as query parameters on a public URL: if it could
+reach the pricing path, a customer could choose their own discount.
+
+Three smaller decisions worth keeping:
+
+* **An unrecognised source is recorded verbatim.** Discarding sources we have no name
+  for yet would throw away the first data about a new channel — exactly the data needed
+  to decide whether to build it.
+* **Malformed input returns null, never throws.** The customer is trying to buy
+  something; losing an analytics dimension is acceptable, losing the sale is not.
+* **A capture timestamp in the future is treated as expired**, not as valid forever. The
+  clock belongs to the visitor's browser, so failing closed costs one reporting row
+  while trusting it would hold attribution open indefinitely.
+
+Verified: constraints proven to fail closed on the live database (mixed-case source and
+a ref-without-source are both rejected), `booking_db` at **V88**, full reactor green,
+374/374 frontend tests.
