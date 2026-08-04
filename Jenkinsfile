@@ -38,7 +38,25 @@
         stage('Test Backend') {
             steps {
                 dir('backend') {
-                    sh 'mvn test'
+                    // `verify`, not `test` — deliberately.
+                    //
+                    // jacoco:check is bound to the verify phase. This stage used to run
+                    // `mvn test`, which never reaches it, so the coverage gate had never
+                    // executed in CI: it was configured at 0.60/0.50 while four modules
+                    // sat at roughly half that, and nothing reported it. A gate nothing
+                    // runs is not a gate.
+                    //
+                    // Thresholds are now a per-module RATCHET at each module's measured
+                    // baseline (see backend/pom.xml). The build therefore fails on a
+                    // coverage REGRESSION — the failure that actually matters — while the
+                    // 0.60/0.50 target is raised module by module as tests are added.
+                    //
+                    // -Dtestcontainers.enabled=true turns ON the database-level tests
+                    // (OccupancyBackstopIT, OccupancyContentionIT). They are gated OFF by
+                    // default so a contributor without Docker still gets a green build;
+                    // CI has Docker, so CI opts in — otherwise the occupancy trigger and
+                    // the Flyway chain would have no automated coverage (TEST-01).
+                    sh 'mvn verify -Dtestcontainers.enabled=true'
                 }
             }
             post {
@@ -214,7 +232,14 @@
                     sh '''
                         set -euo pipefail
                         echo "Verifying Flyway migration checksums..."
-                        for svc in auth-service availability-service booking-service payment-service; do
+                        # distribution-service is validated here but deliberately absent
+                        # from the image build / push / scan / deploy stages below: it
+                        # exposes no API yet, so shipping it to production would deploy an
+                        # empty service and its k8s manifests do not exist. Its migration
+                        # is real, though, and must be protected from checksum drift from
+                        # the moment it lands. Add it to the other loops in the same
+                        # change that adds k8s/services.yml coverage — not before.
+                        for svc in auth-service availability-service booking-service payment-service distribution-service; do
                             echo "Checking ${svc} migrations..."
                             mvn -pl ${svc} flyway:validate -Dflyway.validateMigrationNaming=true -DskipTests || {
                                 echo "ERROR: Flyway validation failed for ${svc}"

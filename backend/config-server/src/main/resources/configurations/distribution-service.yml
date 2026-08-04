@@ -1,0 +1,178 @@
+server:
+  port: 8086
+  shutdown: graceful
+  # ── DoS / resource-exhaustion hardening ──────────────────────────────
+  # Tighter than the other services on purpose. This is the only context that will
+  # eventually accept traffic from systems SK Binge does not operate, so an inbound
+  # payload budget is a security control here rather than a tuning knob.
+  max-http-request-header-size: 16KB
+  tomcat:
+    max-http-form-post-size: 256KB
+    max-swallow-size: 2MB
+    connection-timeout: ${TOMCAT_CONNECTION_TIMEOUT:5000}
+    keep-alive-timeout: ${TOMCAT_KEEP_ALIVE_TIMEOUT:20000}
+
+internal:
+  api:
+    secret: ${INTERNAL_API_SECRET}
+
+spring:
+  application:
+    name: distribution-service
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/distribution_db}
+    username: ${SPRING_DATASOURCE_USERNAME:distribution_svc}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      # Smaller pool than booking-service: this context does bookkeeping, not the
+      # checkout hot path, and it must never be able to starve the shared database
+      # of connections that direct booking depends on.
+      maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:6}
+      minimum-idle: ${SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE:2}
+      idle-timeout: ${SPRING_DATASOURCE_HIKARI_IDLE_TIMEOUT:300000}
+      max-lifetime: ${SPRING_DATASOURCE_HIKARI_MAX_LIFETIME:1800000}
+      connection-timeout: ${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT:5000}
+      validation-timeout: ${SPRING_DATASOURCE_HIKARI_VALIDATION_TIMEOUT:3000}
+      leak-detection-threshold: ${SPRING_DATASOURCE_HIKARI_LEAK_DETECTION_THRESHOLD:60000}
+  flyway:
+    enabled: ${SPRING_FLYWAY_ENABLED:true}
+    baseline-on-migrate: ${SPRING_FLYWAY_BASELINE_ON_MIGRATE:true}
+    baseline-version: ${SPRING_FLYWAY_BASELINE_VERSION:0}
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Flyway owns the schema; `validate` makes entity/migration drift a startup
+      # failure instead of a runtime surprise. This is the integrity gate that stops
+      # a migration and its entity from being shipped separately.
+      ddl-auto: ${SPRING_JPA_HIBERNATE_DDL_AUTO:validate}
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        jakarta.persistence.query.timeout: ${JPA_QUERY_TIMEOUT_MS:10000}
+        jdbc.time_zone: UTC
+        jdbc.batch_size: ${HIBERNATE_JDBC_BATCH_SIZE:50}
+        jdbc.batch_versioned_data: true
+        jdbc.fetch_size: ${HIBERNATE_JDBC_FETCH_SIZE:100}
+        order_inserts: true
+        order_updates: true
+        query.in_clause_parameter_padding: true
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: distribution-group
+      auto-offset-reset: earliest
+      # ErrorHandlingDeserializer wrap — a poison record must never block a partition
+      # forever (see booking-service.yml for the full rationale).
+      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.key.delegate.class: org.apache.kafka.common.serialization.StringDeserializer
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.trusted.packages: com.skbingegalaxy.*
+    listener:
+      observation-enabled: true
+      concurrency: ${KAFKA_LISTENER_CONCURRENCY:2}
+
+distribution:
+  feed:
+    # Google Things to Do removes products whose feed is older than 30 days. Alarm at
+    # 21 so an operator has room to act; an alarm that fires after the delisting is
+    # not an alarm.
+    staleness-warning-days: ${DISTRIBUTION_FEED_STALENESS_WARNING_DAYS:21}
+  credentials:
+    # Warn this far ahead of a credential expiring. Google Actions Center rotates
+    # basic-auth every six months, and a channel that stops silently looks exactly
+    # like a channel with no demand.
+    expiry-warning-days: ${DISTRIBUTION_CREDENTIAL_EXPIRY_WARNING_DAYS:30}
+  inbox:
+    # Ceiling on a single stored provider payload. The inbox keeps every message
+    # verbatim for audit, so without a bound one hostile caller could fill the disk.
+    max-payload-bytes: ${DISTRIBUTION_INBOX_MAX_PAYLOAD_BYTES:262144}
+
+springdoc:
+  api-docs:
+    enabled: ${SPRINGDOC_ENABLED:true}
+  swagger-ui:
+    enabled: ${SPRINGDOC_ENABLED:true}
+
+logging:
+  level:
+    root: INFO
+    com.skbingegalaxy.distribution: INFO
+
+# ── Resilience4j ─────────────────────────────────────────
+# A provider outage must never degrade direct booking. Every outbound call from this
+# service is therefore circuit-broken, and the fallbacks report a channel as DEGRADED
+# rather than pretending inventory is unavailable.
+spring.cloud.openfeign.circuitbreaker.enabled: true
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        slow-call-duration-threshold: 3s
+        slow-call-rate-threshold: 80
+        register-health-indicator: true
+    instances:
+      booking-service:
+        base-config: default
+      availability-service:
+        base-config: default
+  retry:
+    configs:
+      default:
+        max-attempts: 3
+        wait-duration: 500ms
+        retry-exceptions:
+          - java.io.IOException
+          - java.net.SocketTimeoutException
+          - feign.RetryableException
+    instances:
+      booking-service:
+        base-config: default
+      availability-service:
+        base-config: default
+  timelimiter:
+    configs:
+      default:
+        timeout-duration: 5s
+
+eureka:
+  instance:
+    prefer-ip-address: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Deliberately NOT `env` or `configprops`: those would dump resolved
+        # configuration including INTERNAL_API_SECRET and the datasource password.
+        include: health,info,prometheus,metrics,circuitbreakers
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  health:
+    circuitbreakers:
+      enabled: true
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING:0.10}
+    propagation:
+      type: b3
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_URL:http://zipkin:9411/api/v2/spans}

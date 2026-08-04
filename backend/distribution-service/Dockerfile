@@ -1,0 +1,19 @@
+# ── Build ────────────────────────────────────────────────────────────────────
+FROM maven:3.9-eclipse-temurin-17-alpine AS build
+WORKDIR /build
+COPY . .
+ARG MAVEN_EXTRA_ARGS=""
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -B package -pl distribution-service -am -DskipTests ${MAVEN_EXTRA_ARGS}
+
+# ── Runtime ──────────────────────────────────────────────────────────────────
+FROM eclipse-temurin:17-jre-alpine
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+WORKDIR /app
+COPY --from=build /build/distribution-service/target/*.jar app.jar
+RUN chown appuser:appgroup app.jar
+USER appuser
+EXPOSE 8086
+HEALTHCHECK --interval=15s --timeout=5s --start-period=120s --retries=5 \
+  CMD wget --spider -q http://127.0.0.1:8086/actuator/health || exit 1
+ENTRYPOINT ["java", "-jar", "app.jar"]

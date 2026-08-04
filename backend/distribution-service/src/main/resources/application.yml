@@ -1,0 +1,65 @@
+server:
+  port: ${SERVER_PORT:8086}
+  shutdown: graceful
+
+spring:
+  application:
+    name: distribution-service
+  profiles:
+    group:
+      kubernetes: production
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  config:
+    import: optional:configserver:${SPRING_CLOUD_CONFIG_URI:http://localhost:8888}
+
+  # ── Fallback: critical settings if Config Server is unreachable ──
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/distribution_db}
+    username: ${SPRING_DATASOURCE_USERNAME:distribution_svc}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Flyway owns the schema. `validate` makes entity/migration drift a startup
+      # failure rather than a silent runtime surprise — the same integrity gate the
+      # other services use, and the reason migrations and entities must land together.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: ${SPRING_FLYWAY_ENABLED:true}
+    baseline-on-migrate: ${SPRING_FLYWAY_BASELINE_ON_MIGRATE:true}
+    baseline-version: ${SPRING_FLYWAY_BASELINE_VERSION:0}
+
+internal:
+  api:
+    secret: ${INTERNAL_API_SECRET}
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE:http://localhost:8761/eureka/}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Deliberately NOT `env` or `configprops`: those would dump resolved
+        # configuration including the internal API secret and datasource password.
+        include: health,info,prometheus,metrics,circuitbreakers
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+distribution:
+  # Google Things to Do removes products whose feed is older than 30 days. Alarm
+  # comfortably before that deadline rather than at it, so an operator has room to act.
+  feed:
+    staleness-warning-days: ${DISTRIBUTION_FEED_STALENESS_WARNING_DAYS:21}

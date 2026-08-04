@@ -1,5 +1,11 @@
 -- Initial database creation for all microservices (PostgreSQL)
 -- This script runs automatically when the postgres container starts for the first time.
+--
+-- NOT THE COMPLETE LIST. `distribution_db` is bootstrapped by
+-- infra/init-02-distribution.sql, which runs on EVERY `up` via the `postgres-init`
+-- one-shot rather than only on first volume creation — otherwise every existing
+-- postgres-data volume would silently lack it. New databases added after this file
+-- first shipped should follow that pattern, not this one.
 
 CREATE DATABASE auth_db;
 CREATE DATABASE availability_db;

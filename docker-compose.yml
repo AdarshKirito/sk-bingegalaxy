@@ -134,6 +134,31 @@ services:
           memory: 1G
           cpus: "1.00"
 
+  # Databases added AFTER the initial volume was created cannot rely on
+  # /docker-entrypoint-initdb.d, which runs only once per volume. This one-shot runs
+  # on every `up` and its script is idempotent, so a fresh volume and a two-year-old
+  # one converge on the same state. Services that need those databases depend on it
+  # with `service_completed_successfully`, exactly as they do on kafka-init.
+  postgres-init:
+    image: postgres:16-alpine
+    container_name: skbg-postgres-init
+    logging: *default_logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./infra/init-02-distribution.sql:/init/02-distribution.sql:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        psql -v ON_ERROR_STOP=1 -h postgres -U skbg_admin -d postgres \
+             -f /init/02-distribution.sql
+        echo "postgres-init: bootstrap complete."
+    restart: "no"
+
   mongodb:
     image: mongo:7
     container_name: skbg-mongodb
@@ -625,6 +650,54 @@ services:
       WEBPUSH_PRIVATE_KEY: "${WEBPUSH_PRIVATE_KEY}"
       NOTIFICATION_UNSUBSCRIBE_URL: "${NOTIFICATION_UNSUBSCRIBE_URL:-http://localhost:3000/account/notifications}"
       REMINDER_CHECK_INTERVAL_MS: "${REMINDER_CHECK_INTERVAL_MS:-60000}"
+      JAVA_TOOL_OPTIONS: *jvm_opts
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+          cpus: "1.00"
+
+  # Distribution bounded context. Owns connections, sales destinations, listing
+  # mappings, the reservation inbox and settlements — and deliberately owns NO
+  # availability, booking or pricing truth.
+  #
+  # Nothing else in the stack depends on it: an outage here must degrade third-party
+  # distribution only, never direct booking. That is also why it is a separate
+  # service rather than a package inside booking-service.
+  distribution-service:
+    build:
+      context: ./backend
+      dockerfile: distribution-service/Dockerfile
+    container_name: skbg-distribution
+    restart: unless-stopped
+    logging: *default_logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
+      config-server:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      <<: [*hikari_env, *tomcat_env, *kafka_env]
+      # Overrides the shared preset of 20. Bookkeeping work must not be able to
+      # starve the connection budget that the direct-booking path depends on.
+      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "8"
+      SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: "2"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/distribution_db
+      SPRING_DATASOURCE_USERNAME: distribution_svc
+      SPRING_DATASOURCE_PASSWORD: ${DISTRIBUTION_SVC_PASSWORD:-distribution_svc_dev}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: validate
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:${EUREKA_PASSWORD}@discovery-server:8761/eureka/
+      SPRING_CLOUD_CONFIG_URI: http://config-server:8888
+      SPRING_CLOUD_CONFIG_USERNAME: ${CONFIG_SERVER_USER:-configuser}
+      SPRING_CLOUD_CONFIG_PASSWORD: ${CONFIG_SERVER_PASSWORD}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
       JAVA_TOOL_OPTIONS: *jvm_opts
     deploy:
       resources:

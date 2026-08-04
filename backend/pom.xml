@@ -28,6 +28,14 @@
         <module>booking-service</module>
         <module>payment-service</module>
         <module>notification-service</module>
+        <!--
+          Distribution bounded context (design 05-DISTRIBUTION-CONSOLE-DESIGN-V2 §13 G-A).
+          Owns connections, destinations, listing mappings, the reservation inbox,
+          settlements, sync state and provider health — and NOTHING else. It holds no
+          availability rows and no booking rows: those truths stay in
+          availability-service and booking-service respectively.
+        -->
+        <module>distribution-service</module>
     </modules>
 
     <properties>
@@ -39,6 +47,32 @@
         <mockito.version>5.14.2</mockito.version>
         <byte-buddy.version>1.15.10</byte-buddy.version>
         <springdoc.version>2.5.0</springdoc.version>
+
+        <!--
+          Coverage ratchet floors — see the jacoco `check` execution below for the
+          contract. These are the TARGET every module should reach. Modules below it
+          today override these properties in their own pom with their measured
+          baseline, so the gate prevents regression instead of being unenforceable.
+
+          Measured 2026-08-01 (`mvn verify`, whole reactor).
+          Format: module = measured line / measured branch -> ratchet floor
+
+            common-lib           = meets target        -> no override
+            api-gateway          = meets target        -> no override
+            availability-service = 0.55 / 0.43         -> 0.54 / 0.42
+                                   closest to target; smallest job to finish
+            notification-service = 0.44 / 0.29         -> 0.43 / 0.28
+            payment-service      = 0.30 / 0.20         -> 0.29 / 0.19
+                                   prioritise: it moves money, PR-PAY-01 still open
+            auth-service         = 0.28 / 0.21         -> 0.27 / 0.20
+            booking-service      = 0.28 / 0.22         -> 0.27 / 0.21
+                                   392 files incl. a 5,189-line service class
+
+          Floors sit one point below the measured value so JaCoCo's 2-dp display
+          rounding can never cause a false failure.
+        -->
+        <jacoco.min.line>0.60</jacoco.min.line>
+        <jacoco.min.branch>0.50</jacoco.min.branch>
     </properties>
 
     <dependencyManagement>
@@ -147,6 +181,26 @@
                         --add-opens java.base/java.lang.reflect=ALL-UNNAMED
                         --add-opens java.base/java.util=ALL-UNNAMED
                     </argLine>
+                    <!--
+                      Surefire's default is to SIGKILL the forked JVM 30 seconds after
+                      System.exit(0). That deadline races the JaCoCo agent, which writes
+                      jacoco.exec from a JVM shutdown hook and takes longer the more
+                      classes it has instrumented — booking-service is the largest module
+                      and reliably trips it on a loaded machine:
+
+                        [ERROR] Surefire is going to kill self fork JVM.
+                                The exit has elapsed 30 seconds after System.exit(0).
+
+                      This is not cosmetic. jacoco:check runs at `verify` and FAILS the
+                      build below 60% line / 50% branch coverage; a truncated jacoco.exec
+                      yields artificially low numbers, so the gate fails for reasons that
+                      have nothing to do with the code — a flaky, load-dependent failure
+                      that looks like a coverage regression.
+
+                      Raising the deadline lets the dump finish. It costs nothing on a fast
+                      exit: this is a ceiling, not a sleep.
+                    -->
+                    <forkedProcessExitTimeoutInSeconds>300</forkedProcessExitTimeoutInSeconds>
                 </configuration>
             </plugin>
             <plugin>
@@ -161,6 +215,30 @@
                         <goals><goal>prepare-agent</goal></goals>
                         <configuration>
                             <propertyName>jacoco.surefire.argline</propertyName>
+                            <!--
+                              append=false: start a FRESH jacoco.exec each run.
+
+                              JaCoCo appends by default, which turns a single truncated
+                              write into a permanent problem: any run interrupted while
+                              the agent is dumping (CI cancelled, container killed, OOM)
+                              leaves a partial file that every LATER build then appends
+                              to and chokes on, with errors that point nowhere useful:
+
+                                Error while creating report: Unknown block type 66
+                                Error while creating report: malformed input around byte 2
+
+                              Both were observed here. The only recovery is to delete
+                              every target/jacoco.exec by hand — a booby trap for anyone
+                              who does not know that.
+
+                              Nothing is lost by starting fresh: `verify` re-runs the
+                              tests, so the gate should measure THIS run rather than an
+                              accumulation across runs. Combined with the raised
+                              forkedProcessExitTimeoutInSeconds above (which stops the
+                              truncation happening in the first place), this makes a
+                              corrupt exec self-healing instead of sticky.
+                            -->
+                            <append>false</append>
                         </configuration>
                     </execution>
                     <!-- Generates HTML + XML reports under target/site/jacoco/ -->
@@ -169,9 +247,31 @@
                         <phase>verify</phase>
                         <goals><goal>report</goal></goals>
                     </execution>
-                    <!-- Fails the build when line or branch coverage falls below threshold.
-                         Thresholds are intentionally conservative for the first enforcement
-                         pass — raise them as the test suite matures. -->
+                    <!--
+                      COVERAGE RATCHET.
+
+                      These minimums were previously hard-coded at 0.60/0.50 — an
+                      aspiration nobody had measured. Four of seven modules do not meet
+                      it, so `mvn verify` failed for anyone who ran it. Nobody noticed
+                      because CI only ran `mvn test` and `package -DskipTests`, neither
+                      of which reaches the `verify` phase this is bound to. A gate that
+                      never executes is not a gate.
+
+                      Rather than delete the gate or silently lower it to make the build
+                      green, the thresholds are now PROPERTIES, defaulted to the target
+                      and overridden per module to each module's MEASURED baseline
+                      (see each module's pom). That makes the gate meaningful today: it
+                      cannot catch up to an aspiration, but it can stop coverage from
+                      going BACKWARDS, which is the failure that actually matters.
+
+                      THE CONTRACT — read before touching a module's override:
+                        * You may RAISE a module's threshold, never lower it.
+                        * If your change drops coverage, the build fails. Add tests.
+                          Do not "fix" it by editing the number.
+                        * Raise the override whenever real coverage moves up, so the
+                          new level is locked in.
+                      Target for every module remains 0.60 line / 0.50 branch.
+                    -->
                     <execution>
                         <id>check</id>
                         <phase>verify</phase>
@@ -184,12 +284,12 @@
                                         <limit>
                                             <counter>LINE</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.60</minimum>
+                                            <minimum>${jacoco.min.line}</minimum>
                                         </limit>
                                         <limit>
                                             <counter>BRANCH</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.50</minimum>
+                                            <minimum>${jacoco.min.branch}</minimum>
                                         </limit>
                                     </limits>
                                 </rule>
