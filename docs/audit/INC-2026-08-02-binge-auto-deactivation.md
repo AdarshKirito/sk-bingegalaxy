@@ -137,3 +137,76 @@ Blanket-tagging would have been the same "make the build green" move the coverag
 work explicitly rejected.
 
 **Gate now exits 0** with 11 reviewed overrides.
+
+---
+
+## 6. Two failures caused by the fix itself, found at deploy
+
+Both surfaced only when the stack was actually rebuilt and restarted. Neither was
+reachable by any test, which is the point worth keeping.
+
+### 6.1 Editing an APPLIED migration took three services down
+
+Tagging the legacy migrations with `-- allow:destructive` changed files Flyway had
+already recorded a checksum for. On the next boot:
+
+```
+Migration checksum mismatch for version 75
+Either revert the changes to the migration, or run repair
+```
+
+booking-service, auth-service and payment-service entered a restart loop — **19, 15 and
+21 restarts** — and exactly those three, because they were the three whose *applied*
+migrations had been edited. `availability-service` and `distribution-service`, untouched,
+stayed healthy the whole time.
+
+**An applied migration is immutable.** A comment is not a safe edit; Flyway hashes the
+file, not the SQL. `flyway repair` would have papered over it, but it forces every
+environment to run repair and normalises editing history.
+
+**Fix:** reverted all five applied migrations to byte-identical (`git diff` against the
+pre-edit commit is empty, so the checksums match again) and moved their approval into a
+**service-scoped `EXEMPT_APPLIED` registry inside the checker**. Approval for an applied
+migration now lives in the gate, never in the file. The registry is service-scoped on
+purpose — the pre-existing `APPROVED_VERSIONS` is version-only, so clearing
+payment-service V14 would also have cleared booking-service V14.
+
+Migrations not yet applied anywhere (V81–V86) keep their inline tags, which is correct:
+inline is better when the file has never been hashed.
+
+### 6.2 Hand-applying the repair SQL poisoned the real migration
+
+Applying V87's statements manually as `skbg_admin` created
+`trg_stamp_binge_first_event()` **owned by the superuser**. Flyway then runs as
+`booking_svc`, and `CREATE OR REPLACE FUNCTION` on another role's function is denied:
+
+```
+SQL State : 42501
+ERROR: must be owner of function trg_stamp_binge_first_event
+```
+
+So the convenient hand-repair blocked the migration it was standing in for. V81–V86
+applied; V87 failed and booking-service crash-looped until the ownership was corrected
+with `ALTER FUNCTION ... OWNER TO booking_svc` — the same pattern
+`infra/init-databases.sql` already uses for the `shedlock` table.
+
+**Rule:** if you must hand-apply migration SQL, run it as the **service role**, not the
+superuser. Otherwise object ownership diverges from what Flyway can later modify.
+
+### Deploy verification
+
+| Check | Result |
+|---|---|
+| Migrations applied | ✅ booking_db at **V87** |
+| Data preserved (no `-v`) | ✅ bookings 25, binges 6, event_types 78 — unchanged |
+| All containers | ✅ healthy, booking/auth/payment at **0 restarts** |
+| **Fix live, on deployed code** | ✅ injected the exact bug state (approved 48h ago, NULL flag, 13 events); the real scheduler logged *"flag healed, grace period not enforced"* and left the venue **active** |
+| Customer-facing API | ✅ `GET /api/v1/bookings/binges` → 200, **6 venues** |
+
+The negative direction — a genuinely empty venue must still be paused — is covered by
+`BingeGracePeriodTest`, not re-run live, because proving it would mean creating and then
+deleting a real binge. Without that assertion the "fix" could be a disabled guard.
+
+*Note:* verifying the fix required mutating `binges.approval_decided_at` on venue 3
+(set to 48h ago) and clearing its flag. The sweep then healed the flag; the
+`approval_decided_at` value is audit-only and was not restored to its original.

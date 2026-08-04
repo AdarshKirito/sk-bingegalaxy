@@ -112,6 +112,28 @@ class GlobalExceptionHandlerTest {
         assertThat(resp.getBody().getMessage()).contains("unexpected error");
     }
 
+    /**
+     * A path variable that will not coerce — {@code GET /binges/active} hitting
+     * {@code /binges/{id}} where id is a Long. This used to fall through to the
+     * catch-all and return 500, which makes a client typo indistinguishable from a
+     * real server fault in alerting, and tells the caller to "try again later" for
+     * something retrying can never fix.
+     */
+    @Test
+    void handleTypeMismatch_returns400_namingTheParameterButNotTheValue() {
+        org.springframework.web.method.annotation.MethodArgumentTypeMismatchException ex =
+                new org.springframework.web.method.annotation.MethodArgumentTypeMismatchException(
+                        "active", Long.class, "id", null, new IllegalArgumentException("nope"));
+
+        ResponseEntity<ApiResponse<Void>> resp = handler.handleTypeMismatch(ex);
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(resp.getBody().getMessage()).contains("id").contains("Long");
+        // The rejected value is attacker-controlled; echoing it would reflect input
+        // straight back into the response body.
+        assertThat(resp.getBody().getMessage()).doesNotContain("active");
+    }
+
     // Dummy method to create MethodParameter for tests
     @SuppressWarnings("unused")
     void stubMethod(String param) {}

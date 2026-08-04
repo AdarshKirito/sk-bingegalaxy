@@ -16,6 +16,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.ServletRequestBindingException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.HashMap;
@@ -132,6 +133,29 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleRequestBinding(ServletRequestBindingException ex) {
         return ResponseEntity.badRequest()
             .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    /**
+     * A path variable or query parameter that cannot be coerced to its declared type —
+     * {@code GET /binges/active} landing on {@code /binges/{id}} where id is a Long.
+     *
+     * <p>Without this, such a request fell through to the catch-all below and returned
+     * <b>500</b>. That is wrong in three ways: the client sent bad input, so it is a 4xx;
+     * a real server fault becomes indistinguishable from a typo'd URL in error
+     * dashboards and alerting; and the caller gets "try again later" for something
+     * retrying will never fix.
+     *
+     * <p>The message names the parameter and the expected type but deliberately does
+     * <b>not</b> echo the offending value, which is attacker-controlled and would be
+     * reflected straight back into the response body.
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiResponse<Void>> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        Class<?> required = ex.getRequiredType();
+        String expected = required == null ? "the expected type" : required.getSimpleName();
+        return ResponseEntity.badRequest()
+            .body(ApiResponse.error(
+                "Invalid value for '" + ex.getName() + "': expected " + expected + "."));
     }
 
     @ExceptionHandler(Exception.class)

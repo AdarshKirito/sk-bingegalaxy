@@ -66,6 +66,58 @@ FAILED=0
 # destructive patterns, so the exemption is harmless either way).
 APPROVED_VERSIONS="V2|V3|V6|V7|V8|V11|V12|V16|V17|V18|V25|V28|V29|V38|V39|V51|V52|V53|V58|V59|V60"
 
+# ── Exemptions for migrations that are ALREADY APPLIED ────────────────────────
+#
+# AN APPLIED MIGRATION IS IMMUTABLE. Flyway stores a checksum per migration and
+# refuses to start when a file no longer matches it:
+#
+#     Migration checksum mismatch for version 75
+#     Either revert the changes to the migration, or run repair
+#
+# Adding an inline `-- allow:destructive` tag to an applied migration therefore
+# takes the service DOWN on next boot -- in every environment, not just the one
+# you were looking at. That is not hypothetical: doing exactly this put
+# booking-service, auth-service and payment-service into a restart loop here
+# (19-21 restarts each) because the tag changed files already recorded in
+# flyway_schema_history. `flyway repair` can paper over it, but it forces every
+# environment to run repair and normalises editing history.
+#
+# So approval for an applied migration lives HERE, not in the file. Entries are
+# SERVICE-SCOPED -- unlike APPROVED_VERSIONS above, whose version-only matching
+# would exempt booking-service V14 just because payment-service V14 was cleared.
+#
+# Format: <service-dir>:<Vnnn>:<guard>   guard = destructive | lock
+EXEMPT_APPLIED=(
+    # auth V20 -- ALTER COLUMN mfa_secret TYPE VARCHAR(255) rewrites the table.
+    # Accepted: mfa_secret is populated only for enrolled super-admins, so the
+    # rewrite is effectively instant. Revisit if MFA reaches the full user base.
+    "auth-service:V20:lock"
+    # payment V14 -- replaces a non-unique index on refunds(gateway_refund_id)
+    # with a UNIQUE one. The non-unique index is what allowed the duplicate-refund
+    # case this migration closes.
+    "payment-service:V14:destructive"
+    # booking V75 -- DROP TRIGGER IF EXISTS immediately followed by CREATE TRIGGER.
+    # Replaces the occupancy backstop; touches no rows.
+    "booking-service:V75:destructive"
+    # booking V77 -- dropping redundant indexes IS the migration. Each is a strict
+    # prefix of a composite index that remains, so no query loses its access path.
+    "booking-service:V77:destructive"
+    # booking V79 -- DROP CONSTRAINT IF EXISTS + ADD CONSTRAINT (idempotent
+    # replace), and ALTER COLUMN country SET NOT NULL after backfilling every NULL.
+    # `binges` is a small dimension table, so the scan is milliseconds.
+    "booking-service:V79:destructive"
+    "booking-service:V79:lock"
+)
+
+# Returns 0 when <service>:<version>:<guard> is exempt.
+is_exempt_applied() {
+    local svc="$1" ver="$2" guard="$3" entry
+    for entry in "${EXEMPT_APPLIED[@]}"; do
+        [ "$entry" = "${svc}:${ver}:${guard}" ] && return 0
+    done
+    return 1
+}
+
 # ── Pattern groups ─────────────────────────────────────────────────────────────
 
 DESTRUCTIVE_PATTERNS=(
@@ -125,6 +177,9 @@ echo ""
 while IFS= read -r -d '' file; do
     # Extract the version prefix (e.g. "V6" from "V6__some_name.sql")
     migration_version=$(basename "$file" | grep -oE '^V[0-9]+')
+    # backend/<service>/src/main/resources/db/migration/Vnn__x.sql -> <service>
+    # awk rather than sed so it works whether the path is relative or absolute.
+    service_dir=$(echo "$file" | awk -F/ '{for (i=1; i<=NF; i++) if ($i == "backend") { print $(i+1); exit }}')
 
     # Skip migrations that were applied to production before this gate existed.
     # They are permanently exempt — do not add newly-written migrations here.
@@ -154,7 +209,7 @@ while IFS= read -r -d '' file; do
     file_failed=0
 
     # ── Guard 1: Destructive DDL/DML ──────────────────────────────────────────
-    if ! echo "$content" | grep -qiE "$OVERRIDE_DESTRUCTIVE"; then
+    if ! echo "$content" | grep -qiE "$OVERRIDE_DESTRUCTIVE" && ! is_exempt_applied "$service_dir" "$migration_version" destructive; then
         for pattern in "${DESTRUCTIVE_PATTERNS[@]}"; do
             if echo "$sql_only" | grep -qiE "$pattern"; then
                 matching=$(echo "$sql_only" | grep -inE "$pattern" | head -3)
@@ -173,7 +228,7 @@ while IFS= read -r -d '' file; do
     fi
 
     # ── Guard 2: Locking ALTER TABLE ──────────────────────────────────────────
-    if ! echo "$content" | grep -qiE "$OVERRIDE_LOCK"; then
+    if ! echo "$content" | grep -qiE "$OVERRIDE_LOCK" && ! is_exempt_applied "$service_dir" "$migration_version" lock; then
         for pattern in "${LOCKING_PATTERNS[@]}"; do
             lock_hits=$(echo "$sql_only" | grep -inE "$pattern" || true)
             # PG11+ : a constant DEFAULT makes ADD COLUMN ... NOT NULL metadata-only.
