@@ -2,6 +2,7 @@ package com.skbingegalaxy.booking.service;
 
 import com.skbingegalaxy.booking.client.AvailabilityClient;
 import com.skbingegalaxy.booking.client.AvailabilityClientFallback;
+import com.skbingegalaxy.booking.domain.OccupancyWindow;
 import com.skbingegalaxy.booking.dto.*;
 import com.skbingegalaxy.booking.entity.*;
 import com.skbingegalaxy.booking.repository.*;
@@ -84,6 +85,13 @@ public class BookingService {
     private final BookingStateMachine stateMachine;                         // Centralized status-transition engine
     private final TaxService taxService;                                    // Tax computation at booking creation time
     private final VenueClockService venueClock;                             // Venue-aware timezone resolution
+    private final TurnoverPolicy turnoverPolicy;                            // V81 — setup/cleanup buffers → occupancy windows
+    private final BookingWindowPolicy bookingWindowPolicy;                  // V84 — min notice, max advance, permitted durations
+    // Owns the Binge aggregate. Needed only for the "first event created" stamp, which
+    // must live with the entity it mutates rather than be re-implemented here — the
+    // duplicate that used to sit in createEventType is what let the seeder path diverge.
+    // No cycle: BingeService does not depend on BookingService.
+    private final BingeService bingeService;
 
     @Value("${internal.api.secret}")
     private String internalApiSecret;
@@ -152,6 +160,30 @@ public class BookingService {
                                     Long customerId, String customerName,
                                     String customerEmail, String customerPhone,
                                     String customerPhoneCountryCode) {
+        return createBooking(request, customerId, customerName, customerEmail,
+            customerPhone, customerPhoneCountryCode,
+            com.skbingegalaxy.booking.domain.BookingOrigin.DIRECT, null, null);
+    }
+
+    /**
+     * Core reservation creation, shared by the customer funnel and by external
+     * ingestion (V85).
+     *
+     * <p>{@code origin} selects which anti-abuse guards apply — see
+     * {@link #applyCustomerFunnelGuards}. Every guard that protects the venue's
+     * physical reality runs regardless.
+     *
+     * @param externalSource provider-neutral channel slug; required when origin is
+     *        CHANNEL, must be null otherwise (a DB CHECK enforces the pairing)
+     * @param externalRef    the channel's own booking reference, same rule
+     */
+    @Transactional(timeout = 15)
+    public BookingDto createBooking(CreateBookingRequest request,
+                                    Long customerId, String customerName,
+                                    String customerEmail, String customerPhone,
+                                    String customerPhoneCountryCode,
+                                    com.skbingegalaxy.booking.domain.BookingOrigin origin,
+                                    String externalSource, String externalRef) {
 
         Long bingeId = BingeContext.requireBingeId();
 
@@ -161,30 +193,11 @@ public class BookingService {
         // guessed bingeId in the X-Binge-Id header would otherwise slip through.
         assertBingeBookable(bingeId);
 
-        // Anti-abuse: limit concurrent PENDING bookings per customer **per binge**.
-        // Per-binge scope prevents a customer with pending payments at venue A from
-        // being blocked at venue B (each binge runs its own tenancy of pending limits).
-        // The threshold is the venue admin's decision (binge.maxUnpaidBookingsPerCustomer),
-        // falling back to the platform default only if the binge row is unavailable.
-        long pendingCount = bookingRepository.countPendingByCustomerIdAndBingeId(customerId, bingeId);
+        // V85/G3: the customer-funnel anti-abuse guards. They exist to stop a CUSTOMER
+        // misusing the self-service funnel, so they only apply to an origin that has
+        // one. See BookingOrigin#customerFunnelGuardsApply.
         int unpaidLimit = effectiveUnpaidLimit(bingeId);
-        if (pendingCount >= unpaidLimit) {
-            throw new BusinessException(
-                "You already have " + pendingCount + " unpaid booking(s) at this venue. "
-                + "Open My Bookings to complete payment or cancel them (unpaid bookings can "
-                + "always be cancelled free of charge), then try again.");
-        }
-
-        // Anti-abuse: cooldown after auto-cancelled (timed-out) bookings — also per binge.
-        LocalDateTime cooldownSince = LocalDateTime.now(ZoneOffset.UTC).minusMinutes(cooldownMinutesAfterTimeout);
-        long recentTimeouts = bookingRepository.countRecentTimeoutCancellationsByBinge(customerId, bingeId, cooldownSince);
-        if (recentTimeouts >= 2) {
-            throw new BusinessException(
-                "Too many unpaid bookings were auto-cancelled at this venue recently. Please wait a few minutes before trying again.");
-        }
-
-        // Anti-abuse: per-binge customer freeze (raises 423 LOCKED if active)
-        customerFreezeService.assertNotFrozen(customerId, bingeId);
+        applyCustomerFunnelGuards(origin, customerId, bingeId, unpaidLimit);
         EventType eventType = findBookableEventType(request.getEventTypeId());
 
         // Reject bookings in the past — use the venue's configured timezone so the
@@ -205,22 +218,28 @@ public class BookingService {
             && !request.getStartTime().isAfter(bizNow.toLocalTime())) {
             throw new BusinessException("This time slot has already passed for today. Please choose a later time.");
         }
-        // Reject bookings absurdly far in the future. Production rule: customers may only
-        // book within the published rolling window (default 365 days). Prevents "slot
-        // squatting", schedule poisoning and pricing-rule drift on far-future dates.
-        LocalDate maxBookingDate = LocalDate.now(bizZone).plusDays(maxBookingHorizonDays);
-        if (request.getBookingDate().isAfter(maxBookingDate)) {
-            throw new BusinessException(
-                "Bookings can only be made up to " + maxBookingHorizonDays + " days in advance.");
-        }
+        // V84 (G5): per-venue booking window — minimum notice and maximum advance.
+        // Supersedes the previous global-only horizon check; a venue that sets neither
+        // still gets the platform default, so behaviour is unchanged until configured.
+        // Prevents "slot squatting", schedule poisoning and pricing-rule drift on
+        // far-future dates, and stops a channel selling at 23:58 for 00:30.
+        bookingWindowPolicy.assertWithinBookingWindow(
+            bingeRepository.findById(bingeId).orElse(null),
+            request.getBookingDate(), request.getStartTime(), maxBookingHorizonDays);
 
         // Content-based dedupe (defence-in-depth alongside Idempotency-Key + rate limiter):
         // refuse to create a second PENDING booking for the same customer + event + slot.
         // Catches accidental double-submits that arrive milliseconds apart on different
         // gateway instances and any client that doesn't send Idempotency-Key.
-        if (bookingRepository.existsPendingDuplicate(
-                customerId, request.getEventTypeId(),
-                request.getBookingDate(), request.getStartTime())) {
+        //
+        // V85/G3: customer-funnel scoped. Channel reservations share one synthetic
+        // customer per channel, so this would misfire on unrelated guests. Their
+        // duplicate protection is stronger anyway — the V85 unique index on
+        // (external_source, external_ref) makes a redelivered reservation impossible.
+        if (origin.customerFunnelGuardsApply()
+                && bookingRepository.existsPendingDuplicate(
+                    customerId, request.getEventTypeId(),
+                    request.getBookingDate(), request.getStartTime())) {
             throw new BusinessException(
                 "You already have a pending booking for this event and time slot. Please check My Bookings.");
         }
@@ -233,6 +252,10 @@ public class BookingService {
         if (durMin % 30 != 0) {
             throw new BusinessException("Duration must be in 30-minute increments");
         }
+        // V84 (B5): honour the venue's published duration allow-list, when it has one.
+        // Placed after the generic bounds so the customer sees the specific, actionable
+        // message ("offered in 2 hours, 3 hours") rather than a generic range error.
+        bookingWindowPolicy.assertDurationPermitted(eventType, durMin);
 
         // Operating-hours guard: reject bookings outside this binge's published
         // open/close window. Defence in depth against any client that bypasses
@@ -265,18 +288,24 @@ public class BookingService {
         // pass them and be assigned different rooms. Re-check now that this
         // transaction owns the slot lock — a competing creation for the same
         // (binge, date) has either committed (visible here) or not started.
-        if (bookingRepository.existsPendingDuplicate(
-                customerId, request.getEventTypeId(),
-                request.getBookingDate(), request.getStartTime())) {
-            throw new BusinessException(
-                "You already have a pending booking for this event and time slot. Please check My Bookings.");
-        }
-        long pendingCountLocked = bookingRepository.countPendingByCustomerIdAndBingeId(customerId, bingeId);
-        if (pendingCountLocked >= unpaidLimit) {
-            throw new BusinessException(
-                "You already have " + pendingCountLocked + " unpaid booking(s) at this venue. "
-                + "Open My Bookings to complete payment or cancel them (unpaid bookings can "
-                + "always be cancelled free of charge), then try again.");
+        // V85/G3: same origin scoping as the pre-lock pass. A channel reservation
+        // shares a synthetic customer identity with every other reservation from that
+        // channel, so an unpaid-limit or pending-duplicate re-check here would start
+        // rejecting them once two happened to land on the same slot shape.
+        if (origin.customerFunnelGuardsApply()) {
+            if (bookingRepository.existsPendingDuplicate(
+                    customerId, request.getEventTypeId(),
+                    request.getBookingDate(), request.getStartTime())) {
+                throw new BusinessException(
+                    "You already have a pending booking for this event and time slot. Please check My Bookings.");
+            }
+            long pendingCountLocked = bookingRepository.countPendingByCustomerIdAndBingeId(customerId, bingeId);
+            if (pendingCountLocked >= unpaidLimit) {
+                throw new BusinessException(
+                    "You already have " + pendingCountLocked + " unpaid booking(s) at this venue. "
+                    + "Open My Bookings to complete payment or cancel them (unpaid bookings can "
+                    + "always be cancelled free of charge), then try again.");
+            }
         }
 
         // A venue WITH rooms is not a single space: two parties CAN share a time in
@@ -289,8 +318,18 @@ public class BookingService {
                 && (r.getStatus() == null || r.getStatus() == com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED))
             .toList();
         boolean venueHasBookableRooms = !bookableRooms.isEmpty();
-        if (!venueHasBookableRooms && hasTimeConflict(request.getBookingDate(), startMinute, durMin)) {
-            throw new BusinessException("Selected time slot conflicts with an existing booking");
+
+        // V81: resolve this reservation's turnover buffers ONCE, then use the same
+        // occupancy window for every guard below and snapshot it onto the booking.
+        // Resolving per-guard would risk two guards disagreeing if the event type
+        // were edited mid-transaction.
+        TurnoverPolicy.Buffers buffers = turnoverPolicy.resolve(bingeId, eventType);
+        OccupancyWindow candidateWindow = buffers.windowFor(startMinute, durMin);
+
+        if (!venueHasBookableRooms && hasTimeConflict(request.getBookingDate(), candidateWindow)) {
+            throw new BusinessException(buffers.isZero()
+                ? "Selected time slot conflicts with an existing booking"
+                : "Selected time slot conflicts with an existing booking or its setup/cleanup time");
         }
 
         // A live hold from ANOTHER customer is a real reservation: it must block a
@@ -301,7 +340,7 @@ public class BookingService {
         String holdToken = request.getHoldToken() != null && !request.getHoldToken().isBlank()
             ? request.getHoldToken().trim() : null;
         int foreignHoldOverlap = countForeignLiveHoldOverlap(
-            bingeId, request.getBookingDate(), startMinute, durMin, customerId, null);
+            bingeId, request.getBookingDate(), candidateWindow, customerId, null);
         if (!venueHasBookableRooms && foreignHoldOverlap > 0) {
             throw new BusinessException(
                 "This time slot is temporarily held by another customer completing checkout. "
@@ -315,7 +354,7 @@ public class BookingService {
         // adding/removing a room changes capacity without touching maxConcurrentBookings.
         Binge binge = bingeRepository.findById(bingeId).orElse(null);
         if (!venueHasBookableRooms && binge != null && binge.getMaxConcurrentBookings() != null) {
-            int overlapping = countOverlappingBookings(request.getBookingDate(), startMinute, durMin);
+            int overlapping = countOverlappingBookings(request.getBookingDate(), candidateWindow);
             if (overlapping + foreignHoldOverlap >= binge.getMaxConcurrentBookings()) {
                 throw new BusinessException("CAPACITY_FULL:This time slot has reached maximum capacity ("
                     + binge.getMaxConcurrentBookings() + " bookings). You can join the waitlist to be notified when a spot opens up.");
@@ -327,7 +366,7 @@ public class BookingService {
             // resolveRoomAssignment.
             int totalRoomCapacity = bookableRooms.stream()
                 .mapToInt(r -> Math.max(r.getCapacity(), 1)).sum();
-            int occupied = countOverlappingBookings(request.getBookingDate(), startMinute, durMin)
+            int occupied = countOverlappingBookings(request.getBookingDate(), candidateWindow)
                 + foreignHoldOverlap;
             if (occupied >= totalRoomCapacity) {
                 throw new BusinessException("CAPACITY_FULL:All rooms are booked or held for this time slot. "
@@ -390,7 +429,7 @@ public class BookingService {
 
         // ── Venue room assignment ─────────────────────────────────
         VenueRoom assignedRoom = resolveRoomAssignment(
-            bingeId, request.getVenueRoomId(), request.getBookingDate(), startMinute, durMin, customerId);
+            bingeId, request.getVenueRoomId(), request.getBookingDate(), candidateWindow, customerId);
         Long venueRoomId = assignedRoom != null ? assignedRoom.getId() : null;
         String venueRoomName = assignedRoom != null ? assignedRoom.getName() : null;
         BigDecimal venueRoomPrice = (assignedRoom != null && assignedRoom.getPriceAddition() != null)
@@ -460,6 +499,13 @@ public class BookingService {
             .startTime(request.getStartTime())
             .durationHours(durMin / 60)
             .durationMinutes(durMin)
+            // V81: snapshot the resolved buffers so occupancy stays reproducible
+            // even if the event type is re-configured later.
+            .origin(origin)
+            .externalSource(externalSource)
+            .externalRef(externalRef)
+            .setupMinutes(buffers.setupMinutes())
+            .cleanupMinutes(buffers.cleanupMinutes())
             .numberOfGuests(guests)
             .specialNotes(request.getSpecialNotes())
             .baseAmount(baseAmount)
@@ -789,12 +835,24 @@ public class BookingService {
 
         // â”€â”€ Pricing-relevant field updates â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         boolean pricingChanged = false;
+        /** V81: set when an event-type change re-resolved this booking's turnover buffers. */
+        boolean bufferChanged = false;
 
         // Event type change
         if (request.getEventTypeId() != null
                 && !request.getEventTypeId().equals(booking.getEventType().getId())) {
             EventType newEventType = findBookableEventType(request.getEventTypeId());
             booking.setEventType(newEventType);
+            // V81: the event type IS what the buffers were resolved from, so changing
+            // it must re-resolve them. This is the one edit that legitimately replaces
+            // the snapshot — a "Screening" becoming a "Birthday" genuinely needs the
+            // birthday's reset time, and the conflict re-check below then runs against
+            // the new window. Every other edit keeps the original snapshot.
+            TurnoverPolicy.Buffers rebased = turnoverPolicy.resolve(booking.getBingeId(), newEventType);
+            bufferChanged = rebased.setupMinutes() != booking.getSetupMinutes()
+                || rebased.cleanupMinutes() != booking.getCleanupMinutes();
+            booking.setSetupMinutes(rebased.setupMinutes());
+            booking.setCleanupMinutes(rebased.cleanupMinutes());
             pricingChanged = true;
             changeSummary.add("event type");
         }
@@ -802,7 +860,7 @@ public class BookingService {
         // Duration change
         if (request.getDurationMinutes() != null) {
             int newDur = request.getDurationMinutes();
-            int oldDur = resolveDurationMinutes(booking.getDurationMinutes(), booking.getDurationHours());
+            int oldDur = booking.getScheduledDurationMinutes();
             if (newDur != oldDur) {
                 if (newDur < 30 || newDur > 720) {
                     throw new BusinessException("Duration must be between 30 minutes and 12 hours");
@@ -833,11 +891,20 @@ public class BookingService {
         }
         // A duration change moves the occupied window's END even when the date
         // and start stay put — it must pass the same conflict / capacity gate.
-        if (dateTimeChanged || changeSummary.contains("duration")) {
+        //
+        // V81: so does an event-type change, because it re-resolves the buffers
+        // above. Skipping the re-check there would let a widened window through
+        // the application and straight into the database backstop, which fires
+        // as a raw exclusion_violation instead of a readable business error.
+        if (dateTimeChanged || changeSummary.contains("duration") || bufferChanged) {
             bookingRepository.acquireSlotLock(slotLockKey(booking.getBingeId(), booking.getBookingDate()));
             int startMinute = booking.getStartTime().getHour() * 60 + booking.getStartTime().getMinute();
-            int durMin = resolveDurationMinutes(booking.getDurationMinutes(), booking.getDurationHours());
-            if (hasTimeConflict(booking.getBookingDate(), startMinute, durMin, booking.getId())) {
+            int durMin = booking.getScheduledDurationMinutes();
+            // The booking's OWN snapshotted buffers — re-resolved only when the
+            // event type changed, never silently from a since-edited event type.
+            OccupancyWindow editWindow = OccupancyWindow.of(
+                startMinute, durMin, booking.getSetupMinutes(), booking.getCleanupMinutes());
+            if (hasTimeConflict(booking.getBookingDate(), editWindow, booking.getId())) {
                 throw new BusinessException("Selected time slot is no longer available");
             }
             // Validate venue room capacity at the new time slot. Live holds from
@@ -849,15 +916,15 @@ public class BookingService {
                     booking.setVenueRoomId(null);
                     booking.setVenueRoomName(null);
                 } else {
-                    int roomOcc = countRoomBookings(room.getId(), booking.getBookingDate(), startMinute, durMin, booking.getId())
+                    int roomOcc = countRoomBookings(room.getId(), booking.getBookingDate(), editWindow, booking.getId())
                         + countForeignLiveHoldOverlap(booking.getBingeId(), booking.getBookingDate(),
-                            startMinute, durMin, booking.getCustomerId(), room.getId());
+                            editWindow, booking.getCustomerId(), room.getId());
                     if (roomOcc >= room.getCapacity()) {
                         throw new BusinessException("Room '" + room.getName() + "' is fully booked or held for the new time slot");
                     }
                 }
             } else if (countForeignLiveHoldOverlap(booking.getBingeId(), booking.getBookingDate(),
-                    startMinute, durMin, booking.getCustomerId(), null) > 0) {
+                    editWindow, booking.getCustomerId(), null) > 0) {
                 throw new BusinessException(
                     "The new time slot is temporarily held by another customer completing checkout.");
             }
@@ -947,7 +1014,7 @@ public class BookingService {
                     et.getBasePrice(), et.getHourlyRate(), et.getPricePerGuest(), "DEFAULT", null);
             }
 
-            int durMin = resolveDurationMinutes(booking.getDurationMinutes(), booking.getDurationHours());
+            int durMin = booking.getScheduledDurationMinutes();
             BigDecimal baseAmount = PricingService.computeBaseAmount(eventPrice, durMin);
 
             // Recalculate add-ons
@@ -1044,7 +1111,7 @@ public class BookingService {
         // we do NOT treat a component override as "admin set the final number".
         if (pricingChanged || dateTimeChanged || directPriceOverride) {
             TaxContext taxCtxUpdate = buildBookingTaxContext(booking.getBingeId(),
-                resolveDurationMinutes(booking.getDurationMinutes(), booking.getDurationHours()));
+                booking.getScheduledDurationMinutes());
             BigDecimal preTaxTotal = booking.getTotalAmount();
             TaxComputationResult taxResultUpdate = taxService.compute(taxCtxUpdate, preTaxTotal,
                 booking.getBaseAmount() != null ? booking.getBaseAmount() : BigDecimal.ZERO,
@@ -1254,7 +1321,7 @@ public class BookingService {
         }
 
         // Resolve new duration
-        int existingDuration = resolveDurationMinutes(booking.getDurationMinutes(), booking.getDurationHours());
+        int existingDuration = booking.getScheduledDurationMinutes();
         int newDurMin = request.getNewDurationMinutes() != null ? request.getNewDurationMinutes() : existingDuration;
         if (newDurMin < 30 || newDurMin > 720) {
             throw new BusinessException("Duration must be between 30 minutes and 12 hours");
@@ -1291,20 +1358,23 @@ public class BookingService {
         // customers count as occupancy exactly as in createBooking — a reschedule must not
         // be a side door into a slot someone is holding at checkout.
         Long rescheduleRoomId = booking.getVenueRoomId();
+        // V81: a reschedule carries the booking's own snapshotted buffers to the new slot.
+        OccupancyWindow rescheduleWindow = OccupancyWindow.of(
+            startMinute, newDurMin, booking.getSetupMinutes(), booking.getCleanupMinutes());
         if (rescheduleRoomId != null) {
             VenueRoom rRoom = venueRoomRepository.findById(rescheduleRoomId).orElse(null);
             int rCap = rRoom != null ? Math.max(rRoom.getCapacity(), 1) : 1;
-            int rOccupied = countRoomBookings(rescheduleRoomId, request.getNewBookingDate(), startMinute, newDurMin, booking.getId())
-                + countForeignLiveHoldOverlap(bingeId, request.getNewBookingDate(), startMinute, newDurMin,
+            int rOccupied = countRoomBookings(rescheduleRoomId, request.getNewBookingDate(), rescheduleWindow, booking.getId())
+                + countForeignLiveHoldOverlap(bingeId, request.getNewBookingDate(), rescheduleWindow,
                     booking.getCustomerId(), rescheduleRoomId);
             if (rOccupied >= rCap) {
                 throw new BusinessException("The new time slot conflicts with an existing booking or an active hold in this room");
             }
         } else {
-            if (hasTimeConflict(request.getNewBookingDate(), startMinute, newDurMin, booking.getId())) {
+            if (hasTimeConflict(request.getNewBookingDate(), rescheduleWindow, booking.getId())) {
                 throw new BusinessException("The new time slot conflicts with an existing booking");
             }
-            if (countForeignLiveHoldOverlap(bingeId, request.getNewBookingDate(), startMinute, newDurMin,
+            if (countForeignLiveHoldOverlap(bingeId, request.getNewBookingDate(), rescheduleWindow,
                     booking.getCustomerId(), null) > 0) {
                 throw new BusinessException(
                     "The new time slot is temporarily held by another customer completing checkout. "
@@ -1369,7 +1439,7 @@ public class BookingService {
         // exactly like a fresh booking would.
         {
             TaxContext taxCtxResched = buildBookingTaxContext(booking.getBingeId(),
-                resolveDurationMinutes(booking.getDurationMinutes(), booking.getDurationHours()));
+                booking.getScheduledDurationMinutes());
             BigDecimal preTaxTotalResched = booking.getTotalAmount();
             TaxComputationResult taxResultResched = taxService.compute(taxCtxResched, preTaxTotalResched,
                 booking.getBaseAmount() != null ? booking.getBaseAmount() : BigDecimal.ZERO,
@@ -1393,7 +1463,10 @@ public class BookingService {
             } else {
                 // Check room capacity for the new time slot (exclude this booking from the count)
                 int newStartMinute = request.getNewStartTime().getHour() * 60 + request.getNewStartTime().getMinute();
-                int roomOccupancy = countRoomBookings(room.getId(), request.getNewBookingDate(), newStartMinute, newDurMin, booking.getId());
+                int roomOccupancy = countRoomBookings(room.getId(), request.getNewBookingDate(),
+                    OccupancyWindow.of(newStartMinute, newDurMin,
+                        booking.getSetupMinutes(), booking.getCleanupMinutes()),
+                    booking.getId());
                 if (roomOccupancy >= room.getCapacity()) {
                     throw new BusinessException("Selected room '" + room.getName() + "' is fully booked for the new time slot");
                 }
@@ -1541,6 +1614,9 @@ public class BookingService {
         }
 
         EventType eventType = findBookableEventType(request.getEventTypeId());
+        // V81: one buffer resolution for the whole series — every occurrence of a
+        // recurring booking must occupy an identically shaped window.
+        TurnoverPolicy.Buffers recurringBuffers = turnoverPolicy.resolve(bingeId, eventType);
         List<BookingDto> createdBookings = new ArrayList<>();
         List<RecurringBookingResult.SkippedOccurrence> skipped = new ArrayList<>();
 
@@ -1570,7 +1646,8 @@ public class BookingService {
 
                 // Acquire slot lock + conflict check
                 bookingRepository.acquireSlotLock(slotLockKey(bingeId, date));
-                if (hasTimeConflict(date, startMinute, durMin)) {
+                OccupancyWindow recurringWindow = recurringBuffers.windowFor(startMinute, durMin);
+                if (hasTimeConflict(date, recurringWindow)) {
                     skipped.add(RecurringBookingResult.SkippedOccurrence.builder()
                         .date(date).reason("Time slot conflicts with existing booking").build());
                     continue;
@@ -1579,7 +1656,7 @@ public class BookingService {
                 // Capacity check
                 Binge binge = bingeRepository.findById(bingeId).orElse(null);
                 if (binge != null && binge.getMaxConcurrentBookings() != null) {
-                    int overlapping = countOverlappingBookings(date, startMinute, durMin);
+                    int overlapping = countOverlappingBookings(date, recurringWindow);
                     if (overlapping >= binge.getMaxConcurrentBookings()) {
                         skipped.add(RecurringBookingResult.SkippedOccurrence.builder()
                             .date(date).reason("Slot at capacity").build());
@@ -1629,7 +1706,7 @@ public class BookingService {
                     VenueRoom room = venueRoomRepository.findByIdAndBingeId(request.getVenueRoomId(), bingeId).orElse(null);
                     if (room != null && room.isActive()
                             && (room.getStatus() == null || room.getStatus() == com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED)) {
-                        int roomOccupancy = countRoomBookings(room.getId(), date, startMinute, durMin);
+                        int roomOccupancy = countRoomBookings(room.getId(), date, recurringWindow);
                         if (roomOccupancy < room.getCapacity()) {
                             venueRoomId = room.getId();
                             venueRoomName = room.getName();
@@ -1665,6 +1742,9 @@ public class BookingService {
                     .startTime(request.getStartTime())
                     .durationHours(durMin / 60)
                     .durationMinutes(durMin)
+                    .origin(com.skbingegalaxy.booking.domain.BookingOrigin.DIRECT)
+                    .setupMinutes(recurringBuffers.setupMinutes())
+                    .cleanupMinutes(recurringBuffers.cleanupMinutes())
                     .numberOfGuests(guests)
                     .specialNotes(request.getSpecialNotes())
                     .baseAmount(baseAmount)
@@ -2388,11 +2468,14 @@ public class BookingService {
             .map(b -> {
                 int startMin = b.getStartTime().getHour() * 60 + b.getStartTime().getMinute();
                 int effMin = getEffectiveDurationMinutes(b);
+                OccupancyWindow occ = TurnoverPolicy.windowOf(b, effMin);
                 return BookedSlotDto.builder()
                     .startHour(b.getStartTime().getHour())
                     .durationHours(effMin / 60)
                     .startMinute(startMin)
                     .durationMinutes(effMin)
+                    .occupancyStartMinute(occ.startMinute())
+                    .occupancyEndMinute(occ.endMinute())
                     .bookingRef(b.getBookingRef())
                     .venueRoomId(b.getVenueRoomId())
                     .build();
@@ -2403,8 +2486,8 @@ public class BookingService {
 
     // â”€â”€ Check for time overlap with existing bookings (minutes-based) â”€â”€
     @Transactional(readOnly = true)
-    public boolean hasTimeConflict(LocalDate date, int startMinute, int durationMinutes) {
-        return hasTimeConflict(date, startMinute, durationMinutes, null);
+    public boolean hasTimeConflict(LocalDate date, OccupancyWindow candidate) {
+        return hasTimeConflict(date, candidate, null);
     }
 
     /**
@@ -2430,6 +2513,7 @@ public class BookingService {
     @Transactional
     public void assertSlotAvailableForHold(Long bingeId,
                                             LocalDate date,
+                                            Long eventTypeId,
                                             int startMinute,
                                             int durationMinutes,
                                             Long venueRoomId,
@@ -2450,6 +2534,12 @@ public class BookingService {
         LocalTime startTime = LocalTime.of(startMinute / 60, startMinute % 60);
         validateWithinOperatingHours(bingeId, date, startTime, durationMinutes);
 
+        // V84: a hold must see exactly the same booking-window and duration rules as
+        // the booking it becomes. Letting a hold through that the booking would reject
+        // strands the customer at the end of a countdown they were never going to win.
+        Binge windowBinge = bingeRepository.findById(bingeId).orElse(null);
+        bookingWindowPolicy.assertWithinBookingWindow(windowBinge, date, startTime, maxBookingHorizonDays);
+
         Boolean available = availabilityClient.checkSlotAvailable(
             internalApiSecret, date, bingeId, startMinute, durationMinutes);
         if (available != null) {
@@ -2462,24 +2552,32 @@ public class BookingService {
             throw new BusinessException("Selected date/time slot is not available");
         }
 
-        if (hasTimeConflict(date, startMinute, durationMinutes)) {
-            throw new BusinessException("Selected time slot conflicts with an existing booking");
+        // V81: the hold must reserve the same occupancy window the resulting
+        // booking will claim, or the customer completes a countdown only to be
+        // rejected by a turnover rule the hold never checked.
+        EventType holdEventType = eventTypeId != null
+            ? eventTypeRepository.findById(eventTypeId).orElse(null)
+            : null;
+        TurnoverPolicy.Buffers holdBuffers = turnoverPolicy.resolve(bingeId, holdEventType);
+        OccupancyWindow holdWindow = holdBuffers.windowFor(startMinute, durationMinutes);
+
+        if (hasTimeConflict(date, holdWindow)) {
+            throw new BusinessException(holdBuffers.isZero()
+                ? "Selected time slot conflicts with an existing booking"
+                : "Selected time slot conflicts with an existing booking or its setup/cleanup time");
         }
 
         Binge binge = bingeRepository.findById(bingeId).orElse(null);
         Integer maxConcurrent = binge != null ? binge.getMaxConcurrentBookings() : null;
-        int existingBookings = countOverlappingBookings(date, startMinute, durationMinutes);
+        int existingBookings = countOverlappingBookings(date, holdWindow);
 
         int liveHoldOverlap = 0;
         try {
             java.time.LocalDateTime now = java.time.LocalDateTime.now(ZoneOffset.UTC);
-            int newEnd = startMinute + durationMinutes;
             for (com.skbingegalaxy.booking.entity.SlotHold h :
                     slotHoldRepository.findLiveHoldsByBingeAndDate(bingeId, date, now)) {
                 if (excludeHoldToken != null && excludeHoldToken.equals(h.getHoldToken())) continue;
-                int hStart = h.getStartTime().getHour() * 60 + h.getStartTime().getMinute();
-                int hEnd = hStart + Math.max(h.getDurationMinutes(), 0);
-                if (startMinute < hEnd && newEnd > hStart) {
+                if (holdWindow.overlaps(TurnoverPolicy.windowOf(h))) {
                     liveHoldOverlap++;
                 }
             }
@@ -2596,20 +2694,24 @@ public class BookingService {
     }
 
     @Transactional(readOnly = true)
-    public boolean hasTimeConflict(LocalDate date, int startMinute, int durationMinutes, Long excludeBookingId) {
+    /**
+     * V81: conflict detection compares {@link OccupancyWindow}s, not billable
+     * intervals. {@code candidate} must already include the incoming
+     * reservation's own setup/cleanup buffers; each existing booking is widened
+     * by its own <em>snapshotted</em> buffers. Widening only one side would let
+     * an existing booking's turnover time be sold away.
+     */
+    public boolean hasTimeConflict(LocalDate date, OccupancyWindow candidate, Long excludeBookingId) {
         Long bid = BingeContext.getBingeId();
         List<Booking> activeBookings = bid != null
             ? bookingRepository.findActiveBookingsByBingeAndDate(bid, date)
             : bookingRepository.findActiveBookingsByDate(date);
-        int newEnd = startMinute + durationMinutes;
         for (Booking b : activeBookings) {
             if (excludeBookingId != null && excludeBookingId.equals(b.getId())) continue;
             int effectiveDuration = getEffectiveDurationMinutes(b);
             if (effectiveDuration == 0) continue; // fully freed early checkout
-            int existingStart = b.getStartTime().getHour() * 60 + b.getStartTime().getMinute();
-            int existingEnd = existingStart + effectiveDuration;
-            if (startMinute < existingEnd && newEnd > existingStart) {
-                return true; // overlap
+            if (candidate.overlaps(TurnoverPolicy.windowOf(b, effectiveDuration))) {
+                return true;
             }
         }
         return false;
@@ -2674,12 +2776,12 @@ public class BookingService {
      * </ul>
      */
     private VenueRoom resolveRoomAssignment(Long bingeId, Long requestedRoomId,
-                                            LocalDate date, int startMinute, int durMin) {
-        return resolveRoomAssignment(bingeId, requestedRoomId, date, startMinute, durMin, null);
+                                            LocalDate date, OccupancyWindow candidate) {
+        return resolveRoomAssignment(bingeId, requestedRoomId, date, candidate, null);
     }
 
     private VenueRoom resolveRoomAssignment(Long bingeId, Long requestedRoomId,
-                                            LocalDate date, int startMinute, int durMin,
+                                            LocalDate date, OccupancyWindow candidate,
                                             Long bookingCustomerId) {
         if (requestedRoomId != null) {
             VenueRoom room = venueRoomRepository.findByIdAndBingeId(requestedRoomId, bingeId)
@@ -2688,8 +2790,8 @@ public class BookingService {
             if (room.getStatus() != null && room.getStatus() != com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED) {
                 throw new BusinessException("Selected room is not yet approved for bookings");
             }
-            int roomOccupancy = countRoomBookings(room.getId(), date, startMinute, durMin)
-                + countForeignLiveHoldOverlap(bingeId, date, startMinute, durMin, bookingCustomerId, room.getId());
+            int roomOccupancy = countRoomBookings(room.getId(), date, candidate)
+                + countForeignLiveHoldOverlap(bingeId, date, candidate, bookingCustomerId, room.getId());
             if (roomOccupancy >= Math.max(room.getCapacity(), 1)) {
                 throw new BusinessException("Selected room '" + room.getName() + "' is fully booked or held for this time slot");
             }
@@ -2712,8 +2814,8 @@ public class BookingService {
         }
 
         for (VenueRoom room : rooms) {
-            int occ = countRoomBookings(room.getId(), date, startMinute, durMin)
-                + countForeignLiveHoldOverlap(bingeId, date, startMinute, durMin, bookingCustomerId, room.getId());
+            int occ = countRoomBookings(room.getId(), date, candidate)
+                + countForeignLiveHoldOverlap(bingeId, date, candidate, bookingCustomerId, room.getId());
             if (occ < Math.max(room.getCapacity(), 1)) {
                 return room; // first free room wins (deterministic by sort order)
             }
@@ -2729,9 +2831,8 @@ public class BookingService {
      * is non-null only holds pinned to that room count; when null, every overlapping
      * foreign live hold counts (pinned or not).
      */
-    private int countForeignLiveHoldOverlap(Long bingeId, LocalDate date, int startMinute,
-                                            int durationMinutes, Long bookingCustomerId, Long roomId) {
-        int newEnd = startMinute + durationMinutes;
+    private int countForeignLiveHoldOverlap(Long bingeId, LocalDate date, OccupancyWindow candidate,
+                                            Long bookingCustomerId, Long roomId) {
         int n = 0;
         try {
             java.time.LocalDateTime now = java.time.LocalDateTime.now(ZoneOffset.UTC);
@@ -2739,9 +2840,9 @@ public class BookingService {
                     slotHoldRepository.findLiveHoldsByBingeAndDate(bingeId, date, now)) {
                 if (bookingCustomerId != null && bookingCustomerId.equals(h.getCustomerId())) continue;
                 if (roomId != null && !roomId.equals(h.getVenueRoomId())) continue;
-                int hStart = h.getStartTime().getHour() * 60 + h.getStartTime().getMinute();
-                int hEnd = hStart + Math.max(h.getDurationMinutes(), 0);
-                if (startMinute < hEnd && newEnd > hStart) n++;
+                // V81: a hold reserves its buffered window too, otherwise the countdown
+                // promises a slot that a competing booking's cleanup time already owns.
+                if (candidate.overlaps(TurnoverPolicy.windowOf(h))) n++;
             }
         } catch (Exception e) {
             // Fail-open matches assertSlotAvailableForHold: a hold-lookup outage
@@ -2754,19 +2855,16 @@ public class BookingService {
 
     /** Count active bookings that overlap with a given time range (for capacity enforcement). */
     @Transactional(readOnly = true)
-    public int countOverlappingBookings(LocalDate date, int startMinute, int durationMinutes) {
+    public int countOverlappingBookings(LocalDate date, OccupancyWindow candidate) {
         Long bid = BingeContext.getBingeId();
         List<Booking> activeBookings = bid != null
             ? bookingRepository.findActiveBookingsByBingeAndDate(bid, date)
             : bookingRepository.findActiveBookingsByDate(date);
-        int newEnd = startMinute + durationMinutes;
         int count = 0;
         for (Booking b : activeBookings) {
             int effectiveDuration = getEffectiveDurationMinutes(b);
             if (effectiveDuration == 0) continue;
-            int existingStart = b.getStartTime().getHour() * 60 + b.getStartTime().getMinute();
-            int existingEnd = existingStart + effectiveDuration;
-            if (startMinute < existingEnd && newEnd > existingStart) {
+            if (candidate.overlaps(TurnoverPolicy.windowOf(b, effectiveDuration))) {
                 count++;
             }
         }
@@ -2774,26 +2872,43 @@ public class BookingService {
     }
 
     /** Count active bookings assigned to a specific venue room for a given time slot. */
-    private int countRoomBookings(Long roomId, LocalDate date, int startMinute, int durationMinutes) {
-        return countRoomBookings(roomId, date, startMinute, durationMinutes, null);
+    private int countRoomBookings(Long roomId, LocalDate date, OccupancyWindow candidate) {
+        return countRoomBookings(roomId, date, candidate, null);
     }
 
     /**
-     * V57: returns true when the slot [startMinute, startMinute+durationMinutes)
-     * on {@code date} overlaps any maintenance / hold block on {@code roomId}.
-     * Resolved at request time so newly-added blocks immediately gate availability.
+     * V57: returns true when the occupancy window on {@code date} overlaps any
+     * maintenance / hold block on {@code roomId}. Resolved at request time so
+     * newly-added blocks immediately gate availability.
+     *
+     * <p>V81: the window is the buffered one — a room being cleaned into a
+     * maintenance block is still a clash, and staff cannot reset a room during
+     * maintenance any more than they can host in it.
+     *
+     * <p>The window may extend outside the calendar day (a booking starting
+     * within its own setup buffer of midnight, or ending within its cleanup
+     * buffer of it). {@code atTime} cannot represent that, so the timestamps are
+     * built from midnight plus an offset, which handles negative and &gt;1440
+     * minute values correctly.
      */
-    private boolean isRoomBlocked(Long roomId, LocalDate date, int startMinute, int durationMinutes) {
+    private boolean isRoomBlocked(Long roomId, LocalDate date, OccupancyWindow window) {
         if (roomId == null || date == null) return false;
-        java.time.LocalDateTime windowStart = date.atTime(startMinute / 60, startMinute % 60);
-        java.time.LocalDateTime windowEnd = windowStart.plusMinutes(Math.max(durationMinutes, 1));
+        java.time.LocalDateTime dayStart = date.atStartOfDay();
+        java.time.LocalDateTime windowStart = dayStart.plusMinutes(window.startMinute());
+        java.time.LocalDateTime windowEnd = dayStart.plusMinutes(Math.max(window.endMinute(), window.startMinute() + 1));
         return !roomBlockRepository.findOverlapping(roomId, windowStart, windowEnd).isEmpty();
     }
 
-    /** Count active bookings assigned to a specific venue room, optionally excluding one booking. */
-    private int countRoomBookings(Long roomId, LocalDate date, int startMinute, int durationMinutes, Long excludeBookingId) {
+    /**
+     * Count active bookings whose occupancy window overlaps {@code candidate} in a
+     * specific venue room, optionally excluding one booking.
+     *
+     * <p>V81: both sides are buffered — {@code candidate} carries the incoming
+     * reservation's buffers, each existing row carries its own snapshot.
+     */
+    private int countRoomBookings(Long roomId, LocalDate date, OccupancyWindow candidate, Long excludeBookingId) {
         // V57: a maintenance / hold block covering this slot makes the room fully unavailable.
-        if (isRoomBlocked(roomId, date, startMinute, durationMinutes)) {
+        if (isRoomBlocked(roomId, date, candidate)) {
             VenueRoom room = venueRoomRepository.findById(roomId).orElse(null);
             return room != null ? room.getCapacity() : Integer.MAX_VALUE;
         }
@@ -2801,16 +2916,13 @@ public class BookingService {
         List<Booking> activeBookings = bid != null
             ? bookingRepository.findActiveBookingsForReadByBingeAndDate(bid, date)
             : bookingRepository.findActiveBookingsForReadByDate(date);
-        int newEnd = startMinute + durationMinutes;
         int count = 0;
         for (Booking b : activeBookings) {
             if (excludeBookingId != null && excludeBookingId.equals(b.getId())) continue;
             if (!roomId.equals(b.getVenueRoomId())) continue;
             int effectiveDuration = getEffectiveDurationMinutes(b);
             if (effectiveDuration == 0) continue;
-            int existingStart = b.getStartTime().getHour() * 60 + b.getStartTime().getMinute();
-            int existingEnd = existingStart + effectiveDuration;
-            if (startMinute < existingEnd && newEnd > existingStart) {
+            if (candidate.overlaps(TurnoverPolicy.windowOf(b, effectiveDuration))) {
                 count++;
             }
         }
@@ -2915,21 +3027,25 @@ public class BookingService {
     public java.util.Map<String, Object> getSlotCapacityForBinge(Long bingeId, LocalDate date, int startMinute, int durationMinutes) {
         Binge binge = bingeRepository.findById(bingeId).orElse(null);
         List<Booking> activeBookings = bookingRepository.findActiveBookingsByBingeAndDate(bingeId, date);
-        int newEnd = startMinute + durationMinutes;
+        // V81: the probe window carries the venue's default buffers. This is a
+        // capacity *read* with no event type in scope, so the venue default is
+        // the most accurate answer available — an event type with a larger
+        // override will be caught by the write-path guards.
+        OccupancyWindow probeWindow = OccupancyWindow.of(startMinute, durationMinutes,
+            binge != null ? binge.getDefaultSetupMinutes() : 0,
+            binge != null ? binge.getDefaultCleanupMinutes() : 0);
         int overlapping = 0;
         for (Booking b : activeBookings) {
             int effectiveDuration = getEffectiveDurationMinutes(b);
             if (effectiveDuration == 0) continue;
-            int existingStart = b.getStartTime().getHour() * 60 + b.getStartTime().getMinute();
-            int existingEnd = existingStart + effectiveDuration;
-            if (startMinute < existingEnd && newEnd > existingStart) {
+            if (probeWindow.overlaps(TurnoverPolicy.windowOf(b, effectiveDuration))) {
                 overlapping++;
             }
         }
         // Live holds ARE occupancy: a slot reserved for a customer mid-checkout
         // (or a promoted waitlist entry) must read as taken, or the waitlist
         // promoter would offer the same physical slot twice.
-        int liveHolds = countForeignLiveHoldOverlap(bingeId, date, startMinute, durationMinutes, null, null);
+        int liveHolds = countForeignLiveHoldOverlap(bingeId, date, probeWindow, null, null);
         Integer max = binge != null ? binge.getMaxConcurrentBookings() : null;
         return java.util.Map.of(
             "currentBookings", overlapping,
@@ -2951,10 +3067,170 @@ public class BookingService {
             // Round up to nearest 30 minutes
             return ((int) Math.ceil(b.getActualUsedMinutes() / 30.0)) * 30;
         }
-        return resolveDurationMinutes(b.getDurationMinutes(), b.getDurationHours());
+        return b.getScheduledDurationMinutes();
     }
 
-    /** Resolve canonical duration in minutes. durationMinutes takes precedence; falls back to durationHours * 60. */
+    /**
+     * V85/G2 — ingest a reservation delivered by an external sales channel.
+     *
+     * <p>Deliberately a thin adapter over {@link #createBooking}: the channel path
+     * must not become a second booking truth with its own subtly-different rules.
+     * Everything that protects the venue — approval status, the advisory slot lock,
+     * occupancy windows and turnover buffers, room capacity, operating hours, the
+     * booking window, the database backstop — runs exactly as it does for a customer.
+     * Only the customer-funnel anti-abuse guards are skipped, because a channel guest
+     * has no funnel (see {@link #applyCustomerFunnelGuards}).
+     *
+     * <p><b>Guest identity.</b> The guest has no SK account, so the reservation is
+     * attributed to {@code customerId = 0} — the same convention
+     * {@code adminCreateBooking} already uses for walk-ins — with the channel's guest
+     * details snapshotted onto the booking. No user account is created: a channel
+     * guest never authenticates, and minting accounts for them would silently build a
+     * PII estate nobody asked for.
+     *
+     * <p><b>Duplicate delivery.</b> Channels retry. The unique index on
+     * {@code (external_source, external_ref)} makes a redelivered reservation a
+     * conflict rather than a second booking; this method turns that into an explicit
+     * idempotent response by returning the existing booking.
+     */
+    /**
+     * Outcome of an ingestion attempt. The distinction is not cosmetic: a channel
+     * that receives 201 for a redelivery will record a second booking on its side and
+     * the two systems drift apart. {@code CREATED} vs {@code ALREADY_EXISTED} lets the
+     * controller answer 201 vs 200 truthfully.
+     */
+    public record ChannelIngestResult(BookingDto booking, boolean created) {}
+
+    /** @see #ingestChannelReservationDetailed(ChannelReservationRequest) */
+    @Transactional(timeout = 15)
+    public BookingDto ingestChannelReservation(ChannelReservationRequest request) {
+        return ingestChannelReservationDetailed(request).booking();
+    }
+
+    @Transactional(timeout = 15)
+    public ChannelIngestResult ingestChannelReservationDetailed(ChannelReservationRequest request) {
+        // Normally already canonical — the DTO setters do this on deserialization.
+        // Repeated here (idempotently) because this method is also reachable from
+        // in-process callers that construct the request with a builder, which bypasses
+        // setters. One definition of "canonical", used by every path.
+        String source = ChannelReservationRequest.canonicalSource(request.getExternalSource());
+        String ref = request.getExternalRef() == null ? null : request.getExternalRef().trim();
+
+        // Idempotent by contract: a redelivered reservation returns the original
+        // rather than erroring, so a channel's retry logic converges instead of
+        // escalating to a support ticket.
+        var existing = bookingRepository.findByExternalSourceAndExternalRef(source, ref);
+        if (existing.isPresent()) {
+            log.info("Channel reservation {}:{} already ingested as {} — returning existing",
+                source, ref, existing.get().getBookingRef());
+            return new ChannelIngestResult(toDto(existing.get()), false);
+        }
+
+        // The channel names the venue explicitly; there is no user session or
+        // X-Binge-Id header to derive it from. Setting it here keeps every
+        // downstream binge-scoped query (availability, rooms, pricing, tax) working
+        // through the same BingeContext the customer path uses.
+        Long previousBinge = BingeContext.getBingeId();
+        try {
+            BingeContext.setBingeId(request.getBingeId());
+
+            CreateBookingRequest inner = CreateBookingRequest.builder()
+                .eventTypeId(request.getEventTypeId())
+                .bookingDate(request.getBookingDate())
+                .startTime(request.getStartTime())
+                .durationMinutes(request.getDurationMinutes())
+                .durationHours(request.getDurationMinutes() / 60)
+                .numberOfGuests(Math.max(request.getNumberOfGuests(), 1))
+                .addOns(request.getAddOns())
+                .specialNotes(request.getSpecialNotes())
+                .venueRoomId(request.getVenueRoomId())
+                .build();
+
+            BookingDto created = createBooking(inner,
+                CHANNEL_GUEST_CUSTOMER_ID,
+                request.getGuestName(),
+                request.getGuestEmail() != null ? request.getGuestEmail() : "",
+                request.getGuestPhone() != null ? request.getGuestPhone() : "",
+                request.getGuestPhoneCountryCode(),
+                com.skbingegalaxy.booking.domain.BookingOrigin.CHANNEL,
+                source, ref);
+            return new ChannelIngestResult(created, true);
+        } finally {
+            // Restore rather than clear: this runs inside whatever context the caller
+            // had, and leaking a binge id across a pooled thread would be a tenancy bug.
+            if (previousBinge != null) {
+                BingeContext.setBingeId(previousBinge);
+            } else {
+                BingeContext.clear();
+            }
+        }
+    }
+
+    /**
+     * Reservations from a channel carry no SK customer account. Zero is the existing
+     * convention for "no known customer" ({@code adminCreateBooking} uses it for
+     * walk-ins), so loyalty, per-customer pricing and customer-scoped queries all
+     * already treat it as anonymous.
+     */
+    private static final long CHANNEL_GUEST_CUSTOMER_ID = 0L;
+
+    /**
+     * V85/G3 — the anti-abuse guards that only make sense against a self-service
+     * customer funnel: concurrent-unpaid limits, the auto-cancel cooldown, and the
+     * per-binge customer freeze.
+     *
+     * <p><b>Why this is origin-scoped rather than always-on.</b> Each of these
+     * protects the booking funnel from a customer misusing it. An external channel
+     * reservation arrives already paid, from a guest with no SK account, through a
+     * synthetic customer identity — there is no funnel to abuse, and applying them
+     * would reject real paid business for reasons that cannot apply. A venue would
+     * see the reservation simply never arrive.
+     *
+     * <p><b>This is not a trust bypass.</b> Everything that protects the venue's
+     * physical reality still runs for every origin, unconditionally: binge approval
+     * ({@code assertBingeBookable}), the advisory slot lock, occupancy windows and
+     * turnover buffers, room capacity, operating hours, the booking window, and the
+     * V81 database backstop. The only thing skipped is "has this customer been
+     * behaving badly in our funnel", which is meaningless without a funnel.
+     */
+    private void applyCustomerFunnelGuards(com.skbingegalaxy.booking.domain.BookingOrigin origin,
+                                           Long customerId, Long bingeId, int unpaidLimit) {
+        if (!origin.customerFunnelGuardsApply()) {
+            log.debug("Skipping customer-funnel guards for origin={} binge={}", origin, bingeId);
+            return;
+        }
+
+        // Concurrent PENDING bookings per customer **per binge**. Per-binge scope
+        // prevents a customer with pending payments at venue A from being blocked at
+        // venue B. The threshold is the venue admin's decision
+        // (binge.maxUnpaidBookingsPerCustomer), falling back to the platform default
+        // only if the binge row is unavailable.
+        long pendingCount = bookingRepository.countPendingByCustomerIdAndBingeId(customerId, bingeId);
+        if (pendingCount >= unpaidLimit) {
+            throw new BusinessException(
+                "You already have " + pendingCount + " unpaid booking(s) at this venue. "
+                + "Open My Bookings to complete payment or cancel them (unpaid bookings can "
+                + "always be cancelled free of charge), then try again.");
+        }
+
+        // Cooldown after auto-cancelled (timed-out) bookings — also per binge.
+        LocalDateTime cooldownSince = LocalDateTime.now(ZoneOffset.UTC).minusMinutes(cooldownMinutesAfterTimeout);
+        long recentTimeouts = bookingRepository.countRecentTimeoutCancellationsByBinge(customerId, bingeId, cooldownSince);
+        if (recentTimeouts >= 2) {
+            throw new BusinessException(
+                "Too many unpaid bookings were auto-cancelled at this venue recently. Please wait a few minutes before trying again.");
+        }
+
+        // Per-binge customer freeze (raises 423 LOCKED if active).
+        customerFreezeService.assertNotFrozen(customerId, bingeId);
+    }
+
+    /**
+     * Resolve a duration from an <b>inbound request DTO</b>, which may legitimately
+     * supply either field. For a persisted {@link Booking} use
+     * {@link Booking#getScheduledDurationMinutes()} instead — V82 made that the single
+     * canonical accessor, and this overload must not become a second one.
+     */
     private static int resolveDurationMinutes(Integer durationMinutes, int durationHours) {
         return (durationMinutes != null && durationMinutes > 0) ? durationMinutes : durationHours * 60;
     }
@@ -3082,7 +3358,7 @@ public class BookingService {
         java.time.Instant scheduledStartInstant = LocalDateTime
             .of(booking.getBookingDate(), booking.getStartTime())
             .atZone(venueZone).toInstant();
-        int bookedMinutes = resolveDurationMinutes(booking.getDurationMinutes(), booking.getDurationHours());
+        int bookedMinutes = booking.getScheduledDurationMinutes();
         java.time.Instant scheduledEndInstant = scheduledStartInstant.plusSeconds(bookedMinutes * 60L);
         java.time.Instant sessionStartInstant = booking.getActualCheckInTime() != null
             ? booking.getActualCheckInTime().toInstant(ZoneOffset.UTC)
@@ -3309,8 +3585,15 @@ public class BookingService {
             && venueRoomRepository.findByBingeIdOrderBySortOrderAsc(adminBingeId).stream()
                 .anyMatch(r -> r.isActive()
                     && (r.getStatus() == null || r.getStatus() == com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED));
-        if (!adminVenueHasBookableRooms && hasTimeConflict(request.getBookingDate(), startMinute, durMin)) {
-            throw new BusinessException("Selected time slot conflicts with an existing booking");
+        // V81: an admin walk-in occupies the same buffered window as any other
+        // reservation. Admins are trusted to bend policy deliberately (via the
+        // venue's buffer configuration), not to bypass it accidentally.
+        TurnoverPolicy.Buffers adminBuffers = turnoverPolicy.resolve(adminBingeId, eventType);
+        OccupancyWindow adminWindow = adminBuffers.windowFor(startMinute, durMin);
+        if (!adminVenueHasBookableRooms && hasTimeConflict(request.getBookingDate(), adminWindow)) {
+            throw new BusinessException(adminBuffers.isZero()
+                ? "Selected time slot conflicts with an existing booking"
+                : "Selected time slot conflicts with an existing booking or its setup/cleanup time");
         }
 
         // ── Venue room assignment (admin walk-in) ─────────────
@@ -3327,7 +3610,7 @@ public class BookingService {
             // availability; "any room" auto-assigns a free exclusive room (so every booking
             // at a multi-room venue has a room and the per-room check-in guard applies).
             VenueRoom adminRoom = resolveRoomAssignment(
-                adminBingeId, request.getVenueRoomId(), request.getBookingDate(), startMinute, durMin);
+                adminBingeId, request.getVenueRoomId(), request.getBookingDate(), adminWindow);
             if (adminRoom != null) {
                 adminVenueRoomId = adminRoom.getId();
                 adminVenueRoomName = adminRoom.getName();
@@ -3418,6 +3701,9 @@ public class BookingService {
                 .startTime(request.getStartTime())
                 .durationHours(durMin / 60)
                 .durationMinutes(durMin)
+                .origin(com.skbingegalaxy.booking.domain.BookingOrigin.ADMIN)
+                .setupMinutes(adminBuffers.setupMinutes())
+                .cleanupMinutes(adminBuffers.cleanupMinutes())
                 .numberOfGuests(adminGuests)
                 .specialNotes(request.getSpecialNotes())
                 .adminNotes(request.getAdminNotes())
@@ -3488,6 +3774,9 @@ public class BookingService {
             .startTime(request.getStartTime())
             .durationHours(durMin / 60)
             .durationMinutes(durMin)
+            .origin(com.skbingegalaxy.booking.domain.BookingOrigin.ADMIN)
+            .setupMinutes(adminBuffers.setupMinutes())
+            .cleanupMinutes(adminBuffers.cleanupMinutes())
             .numberOfGuests(adminGuests)
             .specialNotes(request.getSpecialNotes())
             .adminNotes(request.getAdminNotes())
@@ -3573,6 +3862,10 @@ public class BookingService {
             .pricePerGuest(req.getPricePerGuest() != null ? req.getPricePerGuest() : BigDecimal.ZERO)
             .minHours(req.getMinHours())
             .maxHours(req.getMaxHours())
+            .setupMinutes(req.getSetupMinutes())
+            .cleanupMinutes(req.getCleanupMinutes())
+            .permittedDurationsCsv(bookingWindowPolicy.normaliseDurationsForSave(
+                req.getPermittedDurations(), req.getMinHours(), req.getMaxHours()))
             .minGuests(req.getMinGuests())
             .maxGuests(req.getMaxGuests())
             .categoryId(resolveEventCategoryId(req.getCategoryId(), bid))
@@ -3581,17 +3874,14 @@ public class BookingService {
             .bingeId(bid)
             .build();
         EventTypeDto saved = toEventTypeDto(eventTypeRepository.save(et));
-        // Approval workflow hook: stamp the binge as "operational" the first
-        // time an active event lands on it. Idempotent — repeated saves never
-        // overwrite the original timestamp. Skips the grace-period auto-pause
-        // sweep on subsequent ticks of BingeGracePeriodScheduler.
-        bingeRepository.findById(bid).ifPresent(b -> {
-            if (b.getFirstEventCreatedAt() == null) {
-                b.setFirstEventCreatedAt(java.time.LocalDateTime.now(ZoneOffset.UTC));
-                bingeRepository.save(b);
-                log.info("Binge {} marked operational (first event '{}' created)", bid, et.getName());
-            }
-        });
+        // Approval workflow hook: stamp the binge as "operational" the first time an
+        // event lands on it, so BingeGracePeriodScheduler leaves it alone.
+        //
+        // This was an INLINE COPY of BingeService.recordFirstEventIfNeeded, which left
+        // that method with zero callers and the seeder implementing neither — venues
+        // ended up with a full catalogue and a NULL flag, then got auto-paused. One
+        // stamp point, called from every creation path.
+        bingeService.recordFirstEventIfNeeded(bid);
         return saved;
     }
 
@@ -3607,6 +3897,15 @@ public class BookingService {
         et.setPricePerGuest(req.getPricePerGuest() != null ? req.getPricePerGuest() : BigDecimal.ZERO);
         et.setMinHours(req.getMinHours());
         et.setMaxHours(req.getMaxHours());
+        // V81: buffers change occupancy for FUTURE reservations only. Existing
+        // bookings keep the buffers snapshotted on them, so tightening turnover
+        // never retroactively invalidates a reservation the venue already sold.
+        et.setSetupMinutes(req.getSetupMinutes());
+        et.setCleanupMinutes(req.getCleanupMinutes());
+        // V84 (B5): validated against the event type's NEW hour range, so widening the
+        // range and adding a duration in one save works as the operator expects.
+        et.setPermittedDurationsCsv(bookingWindowPolicy.normaliseDurationsForSave(
+            req.getPermittedDurations(), req.getMinHours(), req.getMaxHours()));
         et.setMinGuests(req.getMinGuests());
         et.setMaxGuests(req.getMaxGuests());
         et.setCategoryId(resolveEventCategoryId(req.getCategoryId(), et.getBingeId()));
@@ -4076,11 +4375,19 @@ public class BookingService {
     public List<VenueRoomDto> getAvailableRooms(LocalDate date, int startMinute, int durationMinutes) {
         Long bid = BingeContext.requireBingeId();
         List<VenueRoom> rooms = venueRoomRepository.findByBingeIdAndActiveTrueOrderBySortOrderAsc(bid);
+        // V81: no event type is in scope on this read, so the venue default buffers
+        // give the closest honest answer. The write path re-checks with the event
+        // type's own override, so a room shown here can still be refused — better
+        // that than showing a room the venue physically cannot turn around.
+        Binge roomsBinge = bingeRepository.findById(bid).orElse(null);
+        OccupancyWindow roomsWindow = OccupancyWindow.of(startMinute, durationMinutes,
+            roomsBinge != null ? roomsBinge.getDefaultSetupMinutes() : 0,
+            roomsBinge != null ? roomsBinge.getDefaultCleanupMinutes() : 0);
         return rooms.stream()
             // V56: only APPROVED rooms are bookable on the customer wizard.
             .filter(r -> r.getStatus() == null || r.getStatus() == com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED)
             .map(room -> {
-                int occ = countRoomBookings(room.getId(), date, startMinute, durationMinutes);
+                int occ = countRoomBookings(room.getId(), date, roomsWindow);
                 VenueRoomDto dto = toRoomDto(room);
                 dto.setCurrentOccupancy(occ);
                 dto.setAvailable(occ < room.getCapacity());
@@ -4104,7 +4411,9 @@ public class BookingService {
         return venueRoomRepository.findByBingeIdAndActiveTrueOrderBySortOrderAsc(bid).stream()
             .filter(r -> r.getStatus() == null || r.getStatus() == com.skbingegalaxy.booking.entity.RoomApprovalStatus.APPROVED)
             .map(room -> {
-                int occ = countRoomBookings(room.getId(), booking.getBookingDate(), startMinute, durMin, booking.getId());
+                int occ = countRoomBookings(room.getId(), booking.getBookingDate(),
+                    OccupancyWindow.of(startMinute, durMin, booking.getSetupMinutes(), booking.getCleanupMinutes()),
+                    booking.getId());
                 VenueRoomDto dto = toRoomDto(room);
                 dto.setCurrentOccupancy(occ);
                 // Bookable if free for this window, OR it is the room this booking already holds.
@@ -4160,7 +4469,9 @@ public class BookingService {
         if (roomChanged) {
             int startMinute = booking.getStartTime().getHour() * 60 + booking.getStartTime().getMinute();
             int durMin = getEffectiveDurationMinutes(booking);
-            int occ = countRoomBookings(room.getId(), booking.getBookingDate(), startMinute, durMin, booking.getId());
+            int occ = countRoomBookings(room.getId(), booking.getBookingDate(),
+                OccupancyWindow.of(startMinute, durMin, booking.getSetupMinutes(), booking.getCleanupMinutes()),
+                booking.getId());
             if (occ >= Math.max(room.getCapacity(), 1)) {
                 throw new BusinessException("Room '" + room.getName() + "' is already occupied for this time slot");
             }
@@ -4668,7 +4979,7 @@ public class BookingService {
             .bookingDate(b.getBookingDate())
             .startTime(b.getStartTime())
             .durationHours(b.getDurationHours())
-            .durationMinutes(resolveDurationMinutes(b.getDurationMinutes(), b.getDurationHours()))
+            .durationMinutes(b.getScheduledDurationMinutes())
             .totalAmount(b.getTotalAmount())
             .currency(b.getPaymentCurrencyCode() != null ? b.getPaymentCurrencyCode() : "INR")
             .status(b.getStatus().name())
@@ -4796,7 +5107,7 @@ public class BookingService {
             .bookingDate(b.getBookingDate())
             .startTime(b.getStartTime())
             .durationHours(b.getDurationHours())
-            .durationMinutes(resolveDurationMinutes(b.getDurationMinutes(), b.getDurationHours()))
+            .durationMinutes(b.getScheduledDurationMinutes())
             .addOns(b.getAddOns().stream().map(ba -> BookingAddOnDto.builder()
                 .addOnId(ba.getAddOn().getId())
                 .name(ba.getAddOn().getName())
@@ -4836,6 +5147,11 @@ public class BookingService {
             .transferred(b.isTransferred())
             .originalCustomerName(b.getOriginalCustomerName())
             .recurringGroupId(b.getRecurringGroupId())
+            // V85 provenance — lets admins and support distinguish a channel
+            // reservation from a direct one, and quote the provider's own reference.
+            .origin(b.getOrigin() != null ? b.getOrigin().name() : null)
+            .externalSource(b.getExternalSource())
+            .externalRef(b.getExternalRef())
             .canCustomerReschedule(canCustomerReschedule(b))
             .canCustomerTransfer(canCustomerTransfer(b))
             .venueRoomId(b.getVenueRoomId())
@@ -5057,6 +5373,10 @@ public class BookingService {
      * {@code findAllById} and pass the resolved name in.
      */
     private EventTypeDto toEventTypeDto(EventType et, String categoryName) {
+        // V81: expose both the raw override (NULL = inherit, what the admin form
+        // edits) and the resolved value (what actually governs occupancy), so the
+        // UI can show "45 min (from venue default)" without re-deriving the rule.
+        TurnoverPolicy.Buffers effective = turnoverPolicy.resolve(et.getBingeId(), et);
         return EventTypeDto.builder()
             .id(et.getId())
             .bingeId(et.getBingeId())
@@ -5067,6 +5387,11 @@ public class BookingService {
             .pricePerGuest(et.getPricePerGuest())
             .minHours(et.getMinHours())
             .maxHours(et.getMaxHours())
+            .setupMinutes(et.getSetupMinutes())
+            .cleanupMinutes(et.getCleanupMinutes())
+            .effectiveSetupMinutes(effective.setupMinutes())
+            .effectiveCleanupMinutes(effective.cleanupMinutes())
+            .permittedDurations(BookingWindowPolicy.parse(et.getPermittedDurationsCsv()))
             .minGuests(et.getMinGuests())
             .maxGuests(et.getMaxGuests())
             .categoryId(et.getCategoryId())

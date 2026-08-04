@@ -288,6 +288,8 @@ public class BingeService {
             .customerCancellationEnabled(request.getCustomerCancellationEnabled() == null || request.getCustomerCancellationEnabled())
             .customerCancellationCutoffMinutes(request.getCustomerCancellationCutoffMinutes() == null ? 180 : request.getCustomerCancellationCutoffMinutes())
             .maxConcurrentBookings(request.getMaxConcurrentBookings())
+            .defaultSetupMinutes(request.getDefaultSetupMinutes() == null ? 0 : request.getDefaultSetupMinutes())
+            .defaultCleanupMinutes(request.getDefaultCleanupMinutes() == null ? 0 : request.getDefaultCleanupMinutes())
             .openTime(openT)
             .closeTime(closeT)
             .openingHoursJson(normalizeOpeningHours(request.getOpeningHours()))
@@ -521,9 +523,20 @@ public class BingeService {
     // ── Grace-period helpers (called by scheduler + event-type creation hook) ──
 
     /**
-     * Hook: stamp {@code firstEventCreatedAt} the very first time an active
-     * event type lands on a binge. Idempotent — once set, we never overwrite,
-     * so the original "became operational" timestamp is preserved for audit.
+     * Stamp {@code firstEventCreatedAt} the very first time an event type lands on a
+     * binge. Idempotent — once set we never overwrite, so the original "became
+     * operational" timestamp survives for audit.
+     *
+     * <p><b>This is the ONE place that stamps the flag.</b> It has to be, and it was
+     * not: this method previously had <em>zero</em> call sites. {@code createEventType}
+     * had inlined its own copy and {@link com.skbingegalaxy.booking.config.DataSeeder}
+     * implemented neither, so every binge whose catalogue came from the seeder ended up
+     * with events and a NULL flag — and {@link #enforceGracePeriod()} auto-paused it 24
+     * hours after approval. Five of six venues in the local database were in that state.
+     *
+     * <p>Any new code path that creates an event type must call this. The sweep no
+     * longer depends on that happening (it corroborates against the event types
+     * themselves), but a correct flag is what keeps the warning honest.
      */
     @Transactional
     public void recordFirstEventIfNeeded(Long bingeId) {
@@ -542,8 +555,22 @@ public class BingeService {
      * Scheduler entry point. For every APPROVED binge that hasn't yet seen
      * its first event, deliver a 12-hour warning and auto-deactivate at 24h.
      * Returns the count of binges that were auto-deactivated this sweep.
+     *
+     * <p><b>The flag is a hint; the event types are the fact.</b> This method used to
+     * decide purely on {@code firstEventCreatedAt == null}, which made it only as
+     * correct as every write path's memory to stamp it — and one of them (the seeder)
+     * did not. The result was venues with a full catalogue being pulled out of customer
+     * discovery a day after approval. It now corroborates against the event types
+     * themselves and repairs a stale flag in passing, so a future path that forgets to
+     * stamp costs an audit timestamp rather than a venue's visibility.
+     *
+     * <p>{@code @CacheEvict} matters here too: this mutates {@code active}, which
+     * {@code activeBinges} is derived from. Every other mutator in this class evicts;
+     * this one did not, so even a correct auto-pause was invisible until the cache
+     * expired.
      */
     @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "activeBinges", allEntries = true)
     public int enforceGracePeriod() {
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         List<Binge> candidates = bingeRepository.findByStatusOrderByCreatedAtDesc(BingeApprovalStatus.APPROVED)
@@ -554,6 +581,15 @@ public class BingeService {
 
         int deactivated = 0;
         for (Binge b : candidates) {
+            // Corroborate before acting. A binge that HAS event types is operational no
+            // matter what the flag says; heal the flag and leave it alone.
+            if (eventTypeRepository.existsByBingeId(b.getId())) {
+                b.setFirstEventCreatedAt(now);
+                bingeRepository.save(b);
+                log.warn("Binge {} ('{}') had event types but no first_event_created_at — "
+                        + "flag healed, grace period not enforced", b.getId(), b.getName());
+                continue;
+            }
             long minutesSinceApproval = java.time.Duration
                 .between(b.getApprovalDecidedAt(), now).toMinutes();
             long warningAtMinutes = (long) (GRACE_PERIOD_HOURS - GRACE_WARNING_AT_HOURS_REMAINING) * 60;
@@ -648,6 +684,33 @@ public class BingeService {
         binge.setCustomerCancellationEnabled(request.getCustomerCancellationEnabled() == null || request.getCustomerCancellationEnabled());
         binge.setCustomerCancellationCutoffMinutes(request.getCustomerCancellationCutoffMinutes() == null ? binge.getCustomerCancellationCutoffMinutes() : request.getCustomerCancellationCutoffMinutes());
         binge.setMaxConcurrentBookings(request.getMaxConcurrentBookings());
+        // V81 turnover defaults: null means "leave unchanged", matching the
+        // operating-hours convention immediately below. Changing them affects
+        // FUTURE reservations only — existing bookings carry their own snapshot.
+        //
+        // V83: submitting either value counts as the operator making the decision,
+        // including deliberately submitting 0. That is what clears the "turnover
+        // policy not reviewed" prompt — a venue that means to have no buffer must
+        // be able to say so and be believed.
+        boolean turnoverSubmitted = request.getDefaultSetupMinutes() != null
+            || request.getDefaultCleanupMinutes() != null;
+        if (request.getDefaultSetupMinutes() != null) {
+            binge.setDefaultSetupMinutes(request.getDefaultSetupMinutes());
+        }
+        if (request.getDefaultCleanupMinutes() != null) {
+            binge.setDefaultCleanupMinutes(request.getDefaultCleanupMinutes());
+        }
+        if (turnoverSubmitted) {
+            binge.setTurnoverPolicyReviewedAt(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC));
+            binge.setTurnoverPolicyReviewedBy(adminId);
+        }
+        // V84 (G5): booking window. Null = leave unchanged, same convention as above.
+        if (request.getMinNoticeMinutes() != null) {
+            binge.setMinNoticeMinutes(request.getMinNoticeMinutes());
+        }
+        if (request.getMaxAdvanceDays() != null) {
+            binge.setMaxAdvanceDays(request.getMaxAdvanceDays());
+        }
         // Per-binge operating hours: null in the request means "leave unchanged".
         // We re-validate the resulting (open, close) pair to reject e.g. close <= open.
         if (request.getOpenTime() != null) {
@@ -1584,6 +1647,13 @@ public class BingeService {
             .customerCancellationEnabled(b.isCustomerCancellationEnabled())
             .customerCancellationCutoffMinutes(b.getCustomerCancellationCutoffMinutes())
             .maxConcurrentBookings(b.getMaxConcurrentBookings())
+            // V81 turnover defaults — admin surface only; customers never see
+            // the venue's internal reset times.
+            .defaultSetupMinutes(b.getDefaultSetupMinutes())
+            .defaultCleanupMinutes(b.getDefaultCleanupMinutes())
+            .turnoverPolicyReviewedAt(b.getTurnoverPolicyReviewedAt())
+            .minNoticeMinutes(b.getMinNoticeMinutes())
+            .maxAdvanceDays(b.getMaxAdvanceDays())
             .openTime(b.getOpenTime())
             .closeTime(b.getCloseTime())
             .openingHours(com.skbingegalaxy.booking.util.OpeningHoursCodec.parse(b.getOpeningHoursJson()))

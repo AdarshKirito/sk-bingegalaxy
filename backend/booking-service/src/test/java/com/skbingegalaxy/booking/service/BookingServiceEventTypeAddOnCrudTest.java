@@ -51,12 +51,22 @@ class BookingServiceEventTypeAddOnCrudTest {
     @Mock private com.skbingegalaxy.booking.repository.SlotHoldRepository slotHoldRepository;
     @Mock private VenueClockService venueClock;
     @Mock private TaxService taxService;
+@Mock private TurnoverPolicy turnoverPolicy;                 // V81 — occupancy buffers
+@Mock private BookingWindowPolicy bookingWindowPolicy;   // V84 — window + duration rules (void methods no-op by default)
     @Mock private com.skbingegalaxy.booking.repository.AddOnCategoryRepository addOnCategoryRepository;
+    // Owns the "binge became operational" stamp. createEventType used to inline its own
+    // copy of that logic, which is how the seeder path came to diverge and auto-pause
+    // venues that had a full catalogue. See createEventType_marksTheBingeOperational.
+    @Mock private BingeService bingeService;
 
     @InjectMocks private BookingService bookingService;
 
     @BeforeEach
     void setUp() {
+        // V81: no turnover buffers by default, so every pre-existing assertion
+        // about occupancy keeps its original billable-interval semantics. Tests
+        // that exercise buffers override this stub locally.
+        lenient().when(turnoverPolicy.resolve(any(), any())).thenReturn(TurnoverPolicy.Buffers.NONE);
         BingeContext.clear();
         ReflectionTestUtils.setField(bookingService, "availabilityClient", availabilityClient);
         ReflectionTestUtils.setField(bookingService, "internalApiSecret", "test-secret");
@@ -113,6 +123,26 @@ class BookingServiceEventTypeAddOnCrudTest {
             assertThat(captor.getValue().getBingeId()).isEqualTo(11L);
             assertThat(captor.getValue().getName()).isEqualTo("Kids Party");
             assertThat(captor.getValue().isActive()).isTrue();
+        }
+
+        @Test
+        @DisplayName("marks the binge operational so the grace-period sweep leaves it alone")
+        void createEventType_marksTheBingeOperational() {
+            BingeContext.setBingeId(11L);
+            EventTypeSaveRequest req = new EventTypeSaveRequest();
+            req.setName("Kids Party");
+            req.setBasePrice(BigDecimal.valueOf(1500));
+            req.setHourlyRate(BigDecimal.valueOf(300));
+            req.setMinHours(2);
+            req.setMaxHours(4);
+            when(eventTypeRepository.save(any(EventType.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            bookingService.createEventType(req);
+
+            // Delegation, not a re-implementation. The inline copy this replaced is why
+            // DataSeeder's path was able to diverge and leave venues with a full
+            // catalogue looking, to the sweep, like empty ones.
+            verify(bingeService).recordFirstEventIfNeeded(11L);
         }
 
         @Test
