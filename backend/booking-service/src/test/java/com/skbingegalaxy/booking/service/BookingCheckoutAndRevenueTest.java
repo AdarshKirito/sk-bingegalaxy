@@ -62,6 +62,8 @@ class BookingCheckoutAndRevenueTest {
         @Mock private com.skbingegalaxy.booking.repository.BookingTransferRepository bookingTransferRepository;
         @Mock private com.skbingegalaxy.booking.service.statemachine.BookingStateMachine stateMachineMock;
         @Mock private VenueClockService venueClock;
+@Mock private TurnoverPolicy turnoverPolicy;                 // V81 — occupancy buffers
+@Mock private BookingWindowPolicy bookingWindowPolicy;   // V84 — window + duration rules (void methods no-op by default)
 
     @InjectMocks private BookingService bookingService;
 
@@ -69,6 +71,10 @@ class BookingCheckoutAndRevenueTest {
 
     @BeforeEach
     void setUp() {
+        // V81: no turnover buffers by default, so every pre-existing assertion
+        // about occupancy keeps its original billable-interval semantics. Tests
+        // that exercise buffers override this stub locally.
+        lenient().when(turnoverPolicy.resolve(any(), any())).thenReturn(TurnoverPolicy.Buffers.NONE);
                 BingeContext.clear();
                 BingeContext.setBingeId(11L);
         ReflectionTestUtils.setField(bookingService, "refPrefix", "SKBG");

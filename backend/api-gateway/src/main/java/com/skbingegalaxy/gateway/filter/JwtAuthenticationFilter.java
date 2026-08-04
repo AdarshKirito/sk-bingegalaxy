@@ -118,6 +118,30 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         ServerHttpRequest request = exchange.getRequest();
         String path = request.getURI().getPath();
 
+        // SECURITY: service-to-service endpoints are NOT internet-reachable.
+        //
+        // Every service route here is a broad prefix (e.g. Path=/api/v1/bookings/**),
+        // which also matches that service's /internal/** surface. Those endpoints are
+        // protected downstream by InternalApiAuthFilter + hasRole('SYSTEM'), but that
+        // shared secret was designed as a credential for callers already inside the
+        // trusted network — not as an internet-facing bearer token. Leaving the path
+        // routable makes secret leakage (an env dump, a log line, a config-server
+        // slip) directly exploitable from the public internet, and internal
+        // endpoints deliberately expose data the public API strips, such as a
+        // binge's adminId.
+        //
+        // 404 rather than 403: an attacker probing for an internal surface should not
+        // be able to confirm it exists.
+        if (isInternalServicePath(path)) {
+            log.warn("gateway.internal.path.blocked path={} remote={} ua={}",
+                path,
+                request.getRemoteAddress() != null
+                    ? request.getRemoteAddress().getAddress().getHostAddress() : "unknown",
+                request.getHeaders().getFirst(HttpHeaders.USER_AGENT));
+            exchange.getResponse().setStatusCode(HttpStatus.NOT_FOUND);
+            return exchange.getResponse().setComplete();
+        }
+
         // SECURITY: Always strip X-User-* headers from incoming requests to prevent spoofing.
         // The gateway is the only source of truth for these headers.
         // Log a WARN line if any client-supplied identity header was present so that
@@ -149,6 +173,11 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
                 h.remove("X-Authority-Delegated");
                 h.remove("X-Authority-Scope");
                 h.remove("X-Authority-Native-Role");
+                // Defence in depth behind the isInternalServicePath() block above:
+                // the service-to-service credential must never arrive from a client.
+                // Only sibling services, calling each other directly inside the
+                // network, are entitled to present it.
+                h.remove("X-Internal-Secret");
             })
             .build();
         exchange = exchange.mutate().request(stripped).build();
@@ -394,6 +423,26 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
      *   /api/v2/{service}/super-admin/**
      * Uses normalized path to prevent path-traversal bypass (e.g., /../admin/).
      */
+    /**
+     * True for a service-to-service surface that must never be reachable from the
+     * internet, i.e. {@code /api/v*}/<service>/internal/**}.
+     *
+     * <p>Matched on the normalized path's segment shape, so path-traversal tricks
+     * such as {@code /api/v1/bookings/binges/../internal/binges/1} are caught: the
+     * normalizer collapses {@code ../} first, exactly as {@link #isAdminPath} relies
+     * on. Any future service that adds an {@code /internal/**} controller is covered
+     * without touching this filter.
+     *
+     * <p>Deliberately checks the segment rather than a substring: a legitimate path
+     * containing the word "internal" elsewhere (a venue named "Internal Affairs" in a
+     * slug, say) must not be blocked.
+     */
+    private boolean isInternalServicePath(String path) {
+        String[] segments = normalizePath(path).split("/");
+        // ["", "api", "v1|v2", "service", "internal", ...]
+        return segments.length >= 5 && "internal".equals(segments[4]);
+    }
+
     private boolean isAdminPath(String path) {
         String[] segments = normalizePath(path).split("/");
         // ["", "api", "v1|v2", "service", "admin|super-admin", ...]

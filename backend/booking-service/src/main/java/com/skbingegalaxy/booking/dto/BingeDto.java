@@ -54,6 +54,20 @@ public class BingeDto {
     private Integer maxConcurrentBookings;
     private LocalTime openTime;
     private LocalTime closeTime;
+    /** V81 venue-wide default prep time before every booking, in minutes. Event types may override. */
+    private Integer defaultSetupMinutes;
+    /** V81 venue-wide default turnover time after every booking, in minutes. Event types may override. */
+    private Integer defaultCleanupMinutes;
+    /**
+     * V83: when an operator explicitly confirmed the turnover buffers. NULL means never
+     * reviewed — the console prompts, and the venue should not be published to a sales
+     * channel until it is set. Deliberately choosing 0 counts as reviewed.
+     */
+    private LocalDateTime turnoverPolicyReviewedAt;
+    /** V84 (G5): minimum lead time in minutes before a booking may start. */
+    private Integer minNoticeMinutes;
+    /** V84 (G5): advance booking horizon in days. NULL = inherit the platform default. */
+    private Integer maxAdvanceDays;
     /** Optional per-day operating hours (overrides open/close for the matching day). */
     private java.util.List<BingeDayHours> openingHours;
     private LocalDateTime createdAt;

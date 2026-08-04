@@ -45,9 +45,9 @@ public class SlotHoldController {
             request, userId, name, email,
             // Re-use the booking-service slot-availability rules so holds and
             // bookings see exactly the same world (no drift between the two).
-            (bingeId, date, startMinute, durationMinutes, venueRoomId, excludeHoldToken) ->
+            (bingeId, date, eventTypeId, startMinute, durationMinutes, venueRoomId, excludeHoldToken) ->
                 bookingService.assertSlotAvailableForHold(
-                    bingeId, date, startMinute, durationMinutes, venueRoomId, excludeHoldToken));
+                    bingeId, date, eventTypeId, startMinute, durationMinutes, venueRoomId, excludeHoldToken));
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(ApiResponse.ok("Slot held — please complete payment within the timer", dto));
     }

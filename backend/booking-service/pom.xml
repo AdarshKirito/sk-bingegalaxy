@@ -9,6 +9,19 @@
   <artifactId>booking-service</artifactId>
   <name>Booking Service</name>
   <description>Booking, event types, add-ons, and pricing</description>
+
+  <properties>
+    <!-- COVERAGE RATCHET override — a measured baseline, not a target.
+         Measured 2026-08-01: 0.28 line / 0.22 branch (floors set 1 point lower so
+         display rounding cannot cause a false failure).
+         This is the largest module — 392 files including a 5,189-line service class
+         the audit names as the main source of regressions. Reaching the 0.60/0.50
+         target here is a programme of work, not a quick fix; the ratchet exists so
+         that work is protected as it lands.
+         You may RAISE these; never lower them. See backend/pom.xml. -->
+    <jacoco.min.line>0.27</jacoco.min.line>
+    <jacoco.min.branch>0.21</jacoco.min.branch>
+  </properties>
   <dependencies>
     <dependency>
       <groupId>com.skbingegalaxy</groupId>
@@ -102,6 +115,26 @@
     <dependency>
       <groupId>com.github.ben-manes.caffeine</groupId>
       <artifactId>caffeine</artifactId>
+    </dependency>
+    <!--
+      TEST-01: the occupancy backstop is a database trigger, so it cannot be
+      proven by a mocked unit test. Testcontainers runs the real Flyway chain
+      against a real PostgreSQL 16 and exercises the trigger's own semantics.
+      Versions are managed by the spring-boot-starter-parent BOM.
+
+      These tests are tagged `requires-docker` and are SKIPPED automatically
+      when no Docker daemon is reachable, so a developer without Docker still
+      gets a green `mvn test` rather than a wall of setup errors.
+    -->
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
     </dependency>
   </dependencies>
   <build>

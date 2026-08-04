@@ -1,0 +1,19 @@
+capability	docker-compose (dev)	kubernetes (prod path)	evidence
+Replicas/HA	single instance everything	HPA 2-5, PDB minAvailable=1	k8s/hpa.yml, k8s/pdb.yml
+Postgres	single, max_connections=200	postgres-ha.yml exists (not default); checklist mandates managed HA	docker-compose.yml, k8s/postgres-ha.yml
+Kafka	RF=1 ZooKeeper (kraft overlay available)	RF=3	docker-compose.kraft.yml, k8s/kafka-init.yml
+Mongo	single	RF=3	k8s manifests
+Secrets	.env (local only, never committed)	External Secrets + Vault	k8s/external-secrets.yml
+Network segmentation	docker network	NetworkPolicy default-deny + DNS egress	k8s/network-policy.yml
+Ingress/TLS	none (dev http)	ASPIRATIONAL — no Ingress manifest; cert-manager referenced in Jenkinsfile only	DEP-01
+Progressive delivery	none	Argo Rollouts canary 5→25→50→100 + AnalysisTemplate	k8s/argo-rollouts.yml
+Rollback	manual	Jenkins auto `kubectl rollout undo` on failure	Jenkinsfile:268-276
+Probes	healthchecks 100%	liveness+readiness /actuator/health	compose + k8s/infrastructure.yml
+Resource limits	JVM flags + log caps	requests/limits set	both
+Backups	none	CronJob daily 2AM, 14d retention, optional S3	k8s/backups.yml
+Restore	scripts exist	scripts exist — NEVER REHEARSED	DB-04
+Monitoring	actuator only	Prometheus ServiceMonitor + Zipkin + Loki	k8s/monitoring.yml, logging.yml
+Alerting	none	NONE — no PrometheusRule	OBS-01
+Dashboards	none	not codified	DEP-02
+Migration gate	manual	check-migration-safety.sh in Jenkins	Jenkinsfile:197
+Image provenance	local build	short-SHA tags, no digests/signing	SUP-01

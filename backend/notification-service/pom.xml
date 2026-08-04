@@ -13,6 +13,15 @@
     <artifactId>notification-service</artifactId>
     <name>Notification Service</name>
 
+    <properties>
+        <!-- COVERAGE RATCHET override — a measured baseline, not a target.
+             Measured 2026-08-01: 0.44 line / 0.29 branch (floors set 1 point lower
+             so display rounding cannot cause a false failure).
+             You may RAISE these; never lower them. See backend/pom.xml. -->
+        <jacoco.min.line>0.43</jacoco.min.line>
+        <jacoco.min.branch>0.28</jacoco.min.branch>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>com.skbingegalaxy</groupId>

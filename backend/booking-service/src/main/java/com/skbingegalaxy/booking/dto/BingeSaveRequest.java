@@ -120,6 +120,41 @@ public class BingeSaveRequest {
     private LocalTime closeTime;
 
     /**
+     * V81 venue-wide default prep time reserved BEFORE every booking, in minutes.
+     * Individual event types may override it; a NULL override there inherits this.
+     * Null here leaves the current value unchanged (0 for a new venue).
+     */
+    @jakarta.validation.constraints.Min(value = 0, message = "Default setup minutes cannot be negative")
+    @jakarta.validation.constraints.Max(value = 240, message = "Default setup minutes cannot exceed 240 (4 hours)")
+    private Integer defaultSetupMinutes;
+
+    /**
+     * V81 venue-wide default turnover time reserved AFTER every booking, in minutes.
+     * This is the knob that stops back-to-back sales the venue cannot physically
+     * reset for. See {@link #defaultSetupMinutes}.
+     */
+    @jakarta.validation.constraints.Min(value = 0, message = "Default cleanup minutes cannot be negative")
+    @jakarta.validation.constraints.Max(value = 240, message = "Default cleanup minutes cannot exceed 240 (4 hours)")
+    private Integer defaultCleanupMinutes;
+
+    /**
+     * V84 (G5): minimum lead time in minutes before a booking may start. 0 allows
+     * same-minute booking. Null leaves the current value unchanged.
+     */
+    @jakarta.validation.constraints.Min(value = 0, message = "Minimum notice cannot be negative")
+    @jakarta.validation.constraints.Max(value = 43200, message = "Minimum notice cannot exceed 30 days")
+    private Integer minNoticeMinutes;
+
+    /**
+     * V84 (G5): how far ahead this venue publishes availability, in days. Null
+     * leaves the current value unchanged; clearing it back to the platform default
+     * is a super-admin operation.
+     */
+    @jakarta.validation.constraints.Min(value = 1, message = "Advance window must be at least 1 day")
+    @jakarta.validation.constraints.Max(value = 730, message = "Advance window cannot exceed 730 days")
+    private Integer maxAdvanceDays;
+
+    /**
      * Optional per-day operating hours (overrides {@link #openTime}/{@link #closeTime}
      * for the matching day). When null, the schedule is left unchanged on update /
      * absent on create. An explicit empty list clears any existing per-day schedule.

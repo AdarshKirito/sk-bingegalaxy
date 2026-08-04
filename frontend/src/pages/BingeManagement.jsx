@@ -61,6 +61,10 @@ export default function BingeManagement() {
     customerCancellationEnabled: true,
     customerCancellationCutoffMinutes: 180,
     maxConcurrentBookings: '',
+    defaultSetupMinutes: '',
+    defaultCleanupMinutes: '',
+    minNoticeMinutes: '',
+    maxAdvanceDays: '',
     roomSelectionRequired: false,
     // Left blank on purpose: a brand-new venue has no country yet, so we must not
     // pre-stamp an India timezone. It is auto-derived once the address country/city
@@ -475,6 +479,11 @@ export default function BingeManagement() {
         customerCancellationEnabled: form.customerCancellationEnabled,
         customerCancellationCutoffMinutes: form.customerCancellationCutoffMinutes,
         maxConcurrentBookings: form.maxConcurrentBookings === '' ? null : form.maxConcurrentBookings,
+        // null = leave unchanged (server-side convention, matching openTime/closeTime)
+        defaultSetupMinutes: form.defaultSetupMinutes === '' ? null : form.defaultSetupMinutes,
+        defaultCleanupMinutes: form.defaultCleanupMinutes === '' ? null : form.defaultCleanupMinutes,
+        minNoticeMinutes: form.minNoticeMinutes === '' ? null : form.minNoticeMinutes,
+        maxAdvanceDays: form.maxAdvanceDays === '' ? null : form.maxAdvanceDays,
         roomSelectionRequired: !!form.roomSelectionRequired,
         timezone: form.timezone,
         openTime: form.openTime,
@@ -532,6 +541,10 @@ export default function BingeManagement() {
       customerCancellationEnabled: b.customerCancellationEnabled !== false,
       customerCancellationCutoffMinutes: b.customerCancellationCutoffMinutes ?? 180,
       maxConcurrentBookings: b.maxConcurrentBookings ?? '',
+      defaultSetupMinutes: b.defaultSetupMinutes ?? 0,
+      defaultCleanupMinutes: b.defaultCleanupMinutes ?? 0,
+      minNoticeMinutes: b.minNoticeMinutes ?? 0,
+      maxAdvanceDays: b.maxAdvanceDays ?? '',
       roomSelectionRequired: b.roomSelectionRequired === true,
       // No Asia/Kolkata fallback: a legacy venue with a null timezone opens with
       // the field empty so the admin must pick one (it is validated as required on
@@ -1075,6 +1088,41 @@ export default function BingeManagement() {
                 <label>Max Concurrent Bookings per Slot</label>
                 <input type="number" min="1" value={form.maxConcurrentBookings} onChange={(e) => setForm({ ...form, maxConcurrentBookings: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="Unlimited" />
                 <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Leave empty for unlimited capacity</span>
+              </div>
+              <div className="input-group">
+                <label>Default Setup Time (minutes)</label>
+                <input type="number" min="0" max="240" value={form.defaultSetupMinutes}
+                  onChange={(e) => setForm({ ...form, defaultSetupMinutes: e.target.value === '' ? '' : Number(e.target.value) })}
+                  placeholder="0" />
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Prep time reserved before every booking</span>
+              </div>
+              <div className="input-group">
+                <label>Default Cleanup Time (minutes)</label>
+                <input type="number" min="0" max="240" value={form.defaultCleanupMinutes}
+                  onChange={(e) => setForm({ ...form, defaultCleanupMinutes: e.target.value === '' ? '' : Number(e.target.value) })}
+                  placeholder="0" />
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  Reset/turnover time after every booking. This is what stops back-to-back
+                  bookings you have no time to prepare for. Individual event types can override it.
+                </span>
+              </div>
+              <div className="input-group">
+                <label>Minimum Notice (minutes)</label>
+                <input type="number" min="0" max="43200" value={form.minNoticeMinutes}
+                  onChange={(e) => setForm({ ...form, minNoticeMinutes: e.target.value === '' ? '' : Number(e.target.value) })}
+                  placeholder="0" />
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  How much warning you need before a booking starts. 0 allows last-minute bookings.
+                </span>
+              </div>
+              <div className="input-group">
+                <label>Advance Booking Window (days)</label>
+                <input type="number" min="1" max="730" value={form.maxAdvanceDays}
+                  onChange={(e) => setForm({ ...form, maxAdvanceDays: e.target.value === '' ? '' : Number(e.target.value) })}
+                  placeholder="Platform default (365)" />
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  How far ahead customers can book. Leave empty to use the platform default.
+                </span>
               </div>
               <div className="input-group">
                 <label>Room Selection</label>
@@ -1930,6 +1978,42 @@ export default function BingeManagement() {
                   </span>
                 )}
               </div>
+
+              {/* V83: turnover buffers default to 0, so a venue that has never been
+                  reviewed can be sold back-to-back slots it has no time to reset for.
+                  We ask rather than assume — silently widening occupancy could make
+                  bookings the venue has ALREADY SOLD overlap each other. Choosing
+                  zero is a valid answer; the prompt clears either way. */}
+              {isApproved && !b.turnoverPolicyReviewedAt && (
+                <div
+                  role="status"
+                  style={{
+                    display: 'flex', alignItems: 'flex-start', gap: '0.5rem',
+                    padding: '0.6rem 0.75rem', marginBottom: '0.6rem',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'rgba(245, 158, 11, 0.10)',
+                    border: '1px solid rgba(245, 158, 11, 0.35)',
+                    fontSize: '0.8rem', lineHeight: 1.45,
+                  }}
+                >
+                  <span aria-hidden="true">⚠</span>
+                  <span>
+                    <strong>Turnover time not set.</strong> Back-to-back bookings can be
+                    taken with no gap to reset the room.{' '}
+                    <button
+                      type="button"
+                      onClick={() => handleEdit(b)}
+                      style={{
+                        background: 'none', border: 'none', padding: 0,
+                        color: 'var(--primary)', textDecoration: 'underline',
+                        cursor: 'pointer', font: 'inherit',
+                      }}
+                    >
+                      Set it now
+                    </button>
+                  </span>
+                </div>
+              )}
 
               <div className="adm-venue-card-copy">
                 <h3>{b.name}</h3>

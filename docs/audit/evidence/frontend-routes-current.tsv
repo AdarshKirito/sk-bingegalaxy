@@ -1,71 +1,72 @@
-﻿path	element_guard_chain	source	line
-/	<Home />	frontend\src\App.jsx	207
-/login	<PublicOnlyRoute><Login /></PublicOnlyRoute>	frontend\src\App.jsx	208
-/register	<PublicOnlyRoute><Register /></PublicOnlyRoute>	frontend\src\App.jsx	209
-/forgot-password	<PublicOnlyRoute><ForgotPassword /></PublicOnlyRoute>	frontend\src\App.jsx	210
-/reset-password	<PublicOnlyRoute><ResetPassword /></PublicOnlyRoute>	frontend\src\App.jsx	211
-/verify-email	<VerifyEmail />	frontend\src\App.jsx	212
-/terms	<Terms />	frontend\src\App.jsx	213
-/transfers/:token	<TransferAccept />	frontend\src\App.jsx	216
-/complete-profile	<CompleteProfileRoute><CompleteProfile /></CompleteProfileRoute>	frontend\src\App.jsx	217
-/platform	<ProtectedRoute><PlatformDashboard /></ProtectedRoute>	frontend\src\App.jsx	218
-/binges	<ProtectedRoute><BingeSelector /></ProtectedRoute>	frontend\src\App.jsx	219
-/dashboard	<BingeRequired><Dashboard /></BingeRequired>	frontend\src\App.jsx	221
-/book	<BingeRequired><BookingPage /></BingeRequired>	frontend\src\App.jsx	222
-/booking/:ref	<BingeRequired><BookingConfirmation /></BingeRequired>	frontend\src\App.jsx	223
-/my-bookings	<BingeRequired><MyBookings /></BingeRequired>	frontend\src\App.jsx	224
-/membership	<ProtectedRoute><Membership /></ProtectedRoute>	frontend\src\App.jsx	225
-/payments	<BingeRequired><CustomerPayments /></BingeRequired>	frontend\src\App.jsx	226
-/about	<BingeRequired><AboutBinge /></BingeRequired>	frontend\src\App.jsx	227
-/account	<ProtectedRoute><AccountCenter /></ProtectedRoute>	frontend\src\App.jsx	228
-/account/notifications	<ProtectedRoute><CustomerNotifications /></ProtectedRoute>	frontend\src\App.jsx	229
-/messages	<ProtectedRoute><CustomerMessages /></ProtectedRoute>	frontend\src\App.jsx	230
-/account/sessions	<ProtectedRoute><MySessions /></ProtectedRoute>	frontend\src\App.jsx	231
-/settings	<ProtectedRoute><CustomerSettings /></ProtectedRoute>	frontend\src\App.jsx	232
-/account/security/mfa	<ProtectedRoute><MfaSetup /></ProtectedRoute>	frontend\src\App.jsx	233
-/payment/:ref	<BingeRequired><PaymentPage /></BingeRequired>	frontend\src\App.jsx	234
-/admin/login	<PublicOnlyRoute><AdminLogin /></PublicOnlyRoute>	frontend\src\App.jsx	236
-/admin/register	<SuperAdminRoute scope="ADMIN_REGISTER"><AdminRegister /></SuperAdminRoute>	frontend\src\App.jsx	237
-/admin/platform	<AdminRoute><AdminEntranceDashboard /></AdminRoute>	frontend\src\App.jsx	238
-/admin/messages	<AdminRoute><AdminMessages /></AdminRoute>	frontend\src\App.jsx	239
-/admin/account	<AdminRoute><AdminAccount /></AdminRoute>	frontend\src\App.jsx	240
-/admin/all-users	<SuperAdminRoute scope="ALL_USERS"><AdminAllUsers /></SuperAdminRoute>	frontend\src\App.jsx	241
-/admin/customers/:id/edit	<SuperAdminRoute scope="CUSTOMER_EDIT"><AdminCustomerEdit /></SuperAdminRoute>	frontend\src\App.jsx	242
-/admin/super	<SuperAdminRoute scope="SUPER_DASHBOARD"><SuperAdminDashboard /></SuperAdminRoute>	frontend\src\App.jsx	243
-/admin/super/authority	<SuperAdminRoute><AuthorityHandover /></SuperAdminRoute>	frontend\src\App.jsx	245
-/admin/home-editor	<SuperAdminRoute scope="HOME_CMS"><AdminHomeEditor /></SuperAdminRoute>	frontend\src\App.jsx	246
-/admin/terms-editor	<SuperAdminRoute scope="HOME_CMS"><AdminTermsEditor /></SuperAdminRoute>	frontend\src\App.jsx	247
-/admin/sessions	<AdminRoute><MySessions /></AdminRoute>	frontend\src\App.jsx	248
-/admin/security/mfa	<AdminRoute><MfaSetup /></AdminRoute>	frontend\src\App.jsx	249
-/admin/binges	<AdminRoute><BingeManagement /></AdminRoute>	frontend\src\App.jsx	250
-/admin/dashboard	<AdminBingeRequired><AdminDashboard /></AdminBingeRequired>	frontend\src\App.jsx	251
-/admin/bookings	<AdminBingeRequired><AdminBookings /></AdminBingeRequired>	frontend\src\App.jsx	252
-/admin/blocked-dates	<AdminBingeRequired><AdminBlockedDates /></AdminBingeRequired>	frontend\src\App.jsx	253
-/admin/about-binge	<AdminBingeRequired><AdminBingeAbout /></AdminBingeRequired>	frontend\src\App.jsx	254
-/admin/event-types	<AdminBingeRequired><AdminEventTypes /></AdminBingeRequired>	frontend\src\App.jsx	255
-/admin/rate-codes	<AdminBingeRequired><AdminRateCodes /></AdminBingeRequired>	frontend\src\App.jsx	256
-/admin/loyalty-center	<SuperAdminRoute scope="LOYALTY"><AdminLoyaltyCenter /></SuperAdminRoute>	frontend\src\App.jsx	257
-/admin/customer-pricing	<AdminBingeRequired><AdminCustomerPricing /></AdminBingeRequired>	frontend\src\App.jsx	258
-/admin/venue-rooms	<AdminBingeRequired><AdminVenueRooms /></AdminBingeRequired>	frontend\src\App.jsx	259
-/admin/surge-rules	<AdminBingeRequired><AdminSurgeRules /></AdminBingeRequired>	frontend\src\App.jsx	260
-/admin/waitlist	<AdminBingeRequired><AdminWaitlist /></AdminBingeRequired>	frontend\src\App.jsx	261
-/admin/customer-freezes	<AdminBingeRequired><AdminCustomerFreezes /></AdminBingeRequired>	frontend\src\App.jsx	262
-/admin/risk-flags	<AdminBingeRequired><AdminRiskFlags /></AdminBingeRequired>	frontend\src\App.jsx	263
-/admin/support	<AdminRoute><AdminSupportConsole /></AdminRoute>	frontend\src\App.jsx	264
-/admin/recovery	<AdminBingeRequired><AdminRecoveryQueues /></AdminBingeRequired>	frontend\src\App.jsx	265
-/admin/approvals	<AdminBingeRequired><AdminApprovals /></AdminBingeRequired>	frontend\src\App.jsx	266
-/admin/disputes	<AdminBingeRequired><AdminDisputes /></AdminBingeRequired>	frontend\src\App.jsx	267
-/admin/failed-refunds	<AdminBingeRequired><AdminFailedRefunds /></AdminBingeRequired>	frontend\src\App.jsx	268
-/admin/slot-holds	<AdminBingeRequired><AdminSlotHolds /></AdminBingeRequired>	frontend\src\App.jsx	269
-/admin/taxes	<SuperAdminRoute><AdminBingeRequired><AdminTaxes /></AdminBingeRequired></SuperAdminRoute>	frontend\src\App.jsx	271
-/admin/currencies	<SuperAdminRoute scope="CURRENCIES"><AdminCurrencies /></SuperAdminRoute>	frontend\src\App.jsx	272
-/admin/venue-timezones	<SuperAdminRoute><AdminVenueTimezones /></SuperAdminRoute>	frontend\src\App.jsx	274
-/admin/account-page-editor	<SuperAdminRoute scope="ACCOUNT_CMS"><AdminAccountPageEditor /></SuperAdminRoute>	frontend\src\App.jsx	275
-/admin/binges/:bingeId/account-page-editor	<AdminRoute><AdminAccountPageEditor /></AdminRoute>	frontend\src\App.jsx	276
-/admin/notification-templates	<SuperAdminRoute scope="NOTIFICATIONS"><AdminNotificationTemplates /></SuperAdminRoute>	frontend\src\App.jsx	277
-/admin/ops	<SuperAdminRoute scope="OPS"><AdminOps /></SuperAdminRoute>	frontend\src\App.jsx	278
-/admin/reports	<AdminBingeRequired><AdminReports /></AdminBingeRequired>	frontend\src\App.jsx	279
-/admin/book	<AdminBingeRequired><AdminBookingCreate /></AdminBingeRequired>	frontend\src\App.jsx	280
-/admin/users-config	<AdminBingeRequired><AdminUsersConfig /></AdminBingeRequired>	frontend\src\App.jsx	281
-/admin/users-config/:userId	<AdminBingeRequired><AdminUsersConfig /></AdminBingeRequired>	frontend\src\App.jsx	282
-*	<NotFound />	frontend\src\App.jsx	284
+﻿path	element	guard
+/	<Home />	none
+/login	<PublicOnlyRoute><Login /></PublicOnlyRoute>	none
+/register	<PublicOnlyRoute><Register /></PublicOnlyRoute>	none
+/forgot-password	<PublicOnlyRoute><ForgotPassword /></PublicOnlyRoute>	none
+/reset-password	<PublicOnlyRoute><ResetPassword /></PublicOnlyRoute>	none
+/verify-email	<VerifyEmail />	none
+/terms	<Terms />	none
+/transfers/:token	<TransferAccept />	none
+/complete-profile	<CompleteProfileRoute><CompleteProfile /></CompleteProfileRoute>	none
+/platform	<ProtectedRoute><PlatformDashboard /></ProtectedRoute>	ProtectedRoute
+/binges	<ProtectedRoute><BingeSelector /></ProtectedRoute>	ProtectedRoute
+/dashboard	<BingeRequired><Dashboard /></BingeRequired>	BingeRequired
+/book	<BingeRequired><BookingPage /></BingeRequired>	BingeRequired
+/booking/:ref	<BingeRequired><BookingConfirmation /></BingeRequired>	BingeRequired
+/my-bookings	<BingeRequired><MyBookings /></BingeRequired>	BingeRequired
+/membership	<ProtectedRoute><Membership /></ProtectedRoute>	ProtectedRoute
+/payments	<BingeRequired><CustomerPayments /></BingeRequired>	BingeRequired
+/about	<BingeRequired><AboutBinge /></BingeRequired>	BingeRequired
+/account	<ProtectedRoute><AccountCenter /></ProtectedRoute>	ProtectedRoute
+/account/notifications	<ProtectedRoute><CustomerNotifications /></ProtectedRoute>	ProtectedRoute
+/messages	<ProtectedRoute><CustomerMessages /></ProtectedRoute>	ProtectedRoute
+/account/sessions	<ProtectedRoute><MySessions /></ProtectedRoute>	ProtectedRoute
+/settings	<ProtectedRoute><CustomerSettings /></ProtectedRoute>	ProtectedRoute
+/account/security/mfa	<ProtectedRoute><MfaSetup /></ProtectedRoute>	ProtectedRoute
+/help/:topic	<ProtectedRoute><HelpCenter /></ProtectedRoute>	ProtectedRoute
+/payment/:ref	<BingeRequired><PaymentPage /></BingeRequired>	BingeRequired
+/admin/login	<PublicOnlyRoute><AdminLogin /></PublicOnlyRoute>	none
+/admin/register	<SuperAdminRoute scope="ADMIN_REGISTER"><AdminRegister /></SuperAdminRoute>	SuperAdminRoute
+/admin/platform	<AdminRoute><AdminEntranceDashboard /></AdminRoute>	AdminRoute
+/admin/messages	<AdminRoute><AdminMessages /></AdminRoute>	AdminRoute
+/admin/account	<AdminRoute><AdminAccount /></AdminRoute>	AdminRoute
+/admin/all-users	<SuperAdminRoute scope="ALL_USERS"><AdminAllUsers /></SuperAdminRoute>	SuperAdminRoute
+/admin/customers/:id/edit	<SuperAdminRoute scope="CUSTOMER_EDIT"><AdminCustomerEdit /></SuperAdminRoute>	SuperAdminRoute
+/admin/super	<SuperAdminRoute scope="SUPER_DASHBOARD"><SuperAdminDashboard /></SuperAdminRout	SuperAdminRoute
+/admin/super/authority	<SuperAdminRoute><AuthorityHandover /></SuperAdminRoute>	SuperAdminRoute
+/admin/home-editor	<SuperAdminRoute scope="HOME_CMS"><AdminHomeEditor /></SuperAdminRoute>	SuperAdminRoute
+/admin/terms-editor	<SuperAdminRoute scope="HOME_CMS"><AdminTermsEditor /></SuperAdminRoute>	SuperAdminRoute
+/admin/sessions	<AdminRoute><MySessions /></AdminRoute>	AdminRoute
+/admin/security/mfa	<AdminRoute><MfaSetup /></AdminRoute>	AdminRoute
+/admin/binges	<AdminRoute><BingeManagement /></AdminRoute>	AdminRoute
+/admin/dashboard	<AdminBingeRequired><AdminDashboard /></AdminBingeRequired>	AdminBingeRequired
+/admin/bookings	<AdminBingeRequired><AdminBookings /></AdminBingeRequired>	AdminBingeRequired
+/admin/blocked-dates	<AdminBingeRequired><AdminBlockedDates /></AdminBingeRequired>	AdminBingeRequired
+/admin/about-binge	<AdminBingeRequired><AdminBingeAbout /></AdminBingeRequired>	AdminBingeRequired
+/admin/event-types	<AdminBingeRequired><AdminEventTypes /></AdminBingeRequired>	AdminBingeRequired
+/admin/rate-codes	<AdminBingeRequired><AdminRateCodes /></AdminBingeRequired>	AdminBingeRequired
+/admin/loyalty-center	<SuperAdminRoute scope="LOYALTY"><AdminLoyaltyCenter /></SuperAdminRoute>	SuperAdminRoute
+/admin/customer-pricing	<AdminBingeRequired><AdminCustomerPricing /></AdminBingeRequired>	AdminBingeRequired
+/admin/venue-rooms	<AdminBingeRequired><AdminVenueRooms /></AdminBingeRequired>	AdminBingeRequired
+/admin/surge-rules	<AdminBingeRequired><AdminSurgeRules /></AdminBingeRequired>	AdminBingeRequired
+/admin/waitlist	<AdminBingeRequired><AdminWaitlist /></AdminBingeRequired>	AdminBingeRequired
+/admin/customer-freezes	<AdminBingeRequired><AdminCustomerFreezes /></AdminBingeRequired>	AdminBingeRequired
+/admin/risk-flags	<AdminBingeRequired><AdminRiskFlags /></AdminBingeRequired>	AdminBingeRequired
+/admin/support	<AdminRoute><AdminSupportConsole /></AdminRoute>	AdminRoute
+/admin/recovery	<AdminBingeRequired><AdminRecoveryQueues /></AdminBingeRequired>	AdminBingeRequired
+/admin/approvals	<AdminBingeRequired><AdminApprovals /></AdminBingeRequired>	AdminBingeRequired
+/admin/disputes	<AdminBingeRequired><AdminDisputes /></AdminBingeRequired>	AdminBingeRequired
+/admin/failed-refunds	<AdminBingeRequired><AdminFailedRefunds /></AdminBingeRequired>	AdminBingeRequired
+/admin/slot-holds	<AdminBingeRequired><AdminSlotHolds /></AdminBingeRequired>	AdminBingeRequired
+/admin/taxes	<SuperAdminRoute><AdminBingeRequired><AdminTaxes /></AdminBingeRequired></SuperA	SuperAdminRoute
+/admin/currencies	<SuperAdminRoute scope="CURRENCIES"><AdminCurrencies /></SuperAdminRoute>	SuperAdminRoute
+/admin/venue-timezones	<SuperAdminRoute><AdminVenueTimezones /></SuperAdminRoute>	SuperAdminRoute
+/admin/account-page-editor	<SuperAdminRoute scope="ACCOUNT_CMS"><AdminAccountPageEditor /></SuperAdminRoute	SuperAdminRoute
+/admin/binges/:bingeId/account-page-editor	<AdminRoute><AdminAccountPageEditor /></AdminRoute>	AdminRoute
+/admin/notification-templates	<SuperAdminRoute scope="NOTIFICATIONS"><AdminNotificationTemplates /></SuperAdmi	SuperAdminRoute
+/admin/ops	<SuperAdminRoute scope="OPS"><AdminOps /></SuperAdminRoute>	SuperAdminRoute
+/admin/reports	<AdminBingeRequired><AdminReports /></AdminBingeRequired>	AdminBingeRequired
+/admin/book	<AdminBingeRequired><AdminBookingCreate /></AdminBingeRequired>	AdminBingeRequired
+/admin/users-config	<AdminBingeRequired><AdminUsersConfig /></AdminBingeRequired>	AdminBingeRequired
+/admin/users-config/:userId	<AdminBingeRequired><AdminUsersConfig /></AdminBingeRequired>	AdminBingeRequired
+*	<NotFound />	none

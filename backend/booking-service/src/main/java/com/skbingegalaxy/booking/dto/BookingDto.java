@@ -72,6 +72,23 @@ public class BookingDto {
     private boolean transferred;
     private String originalCustomerName;
     private String recurringGroupId;
+
+    // ── V85: provenance ──────────────────────────────────────────────────
+    /**
+     * How this reservation was created — DIRECT, ADMIN or CHANNEL.
+     *
+     * <p>Exposed because without it a venue cannot tell a channel reservation from
+     * one a customer made themselves: reconciliation, commission checks and support
+     * triage ("where did this booking come from?") all become guesswork the moment
+     * ingestion is live.
+     */
+    private String origin;
+
+    /** Originating channel slug when {@link #origin} is CHANNEL; null otherwise. */
+    private String externalSource;
+
+    /** The channel's own booking reference — what support quotes back to the provider. */
+    private String externalRef;
     /** Whether the customer is allowed to reschedule this booking. */
     private Boolean canCustomerReschedule;
     /** Whether the customer is allowed to transfer this booking. */

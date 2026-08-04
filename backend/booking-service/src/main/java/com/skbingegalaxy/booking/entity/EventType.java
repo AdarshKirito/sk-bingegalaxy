@@ -44,6 +44,32 @@ public class EventType {
     @Builder.Default
     private int maxHours = 8;
 
+    // ── V81: turnover buffers (NULL = inherit the binge default) ─────────
+    /**
+     * Prep time in minutes reserved BEFORE a booking of this event type.
+     * NULL inherits {@code Binge.defaultSetupMinutes} — the same "narrower
+     * scope NULL means inherit" idiom as {@code Binge.openTime}.
+     * Range 0..240 when set, enforced by a DB CHECK.
+     */
+    @Column(name = "setup_minutes")
+    private Integer setupMinutes;
+
+    /**
+     * Turnover time in minutes reserved AFTER a booking of this event type
+     * (reset, clean, re-decorate). NULL inherits {@code Binge.defaultCleanupMinutes}.
+     */
+    @Column(name = "cleanup_minutes")
+    private Integer cleanupMinutes;
+
+    /**
+     * V84 (decision B5): up to 4 comma-separated durations in minutes that may be
+     * booked, e.g. {@code "120,180,240"}. NULL means no allow-list — any 30-minute
+     * multiple within {@link #minHours}..{@link #maxHours} is valid, the pre-V84
+     * behaviour. Read it through {@code BookingWindowPolicy}, never parse it inline.
+     */
+    @Column(name = "permitted_durations_csv", length = 64)
+    private String permittedDurationsCsv;
+
     /** Per-event-type minimum guest count. NULL = no lower bound. */
     @Column(name = "min_guests")
     private Integer minGuests;

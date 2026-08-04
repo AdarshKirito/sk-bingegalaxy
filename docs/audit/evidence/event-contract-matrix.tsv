@@ -1,0 +1,11 @@
+topic	payload_class(common-lib)	versioning	compat_rule	risk
+booking.created	BookingCreatedEvent	none (POJO JSON)	additive-only by convention	no registry — consumer breakage undetectable at build time (EVT-03)
+booking.cancelled	BookingCancelledEvent	none	additive-only	same
+payment.success	PaymentSuccessEvent	none	additive-only	money fields are minor-unit longs — stable
+payment.failed	PaymentFailedEvent	none	additive-only	same
+payment.refunded	RefundEvent	none	additive-only	carries gateway_refund_id — dedup key stable
+user.anonymized	UserAnonymizedEvent	none	additive-only	only userId — minimal, stable
+waitlist.promoted	WaitlistPromotedEvent	none	additive-only	—
+room.blocked/unblocked	RoomBlockEvent	none	additive-only	availability projection depends on it
+booking lifecycle (confirmed/rescheduled/transferred/checked-in/completed)	respective POJOs	none	additive-only	producer-only topics: contract consumers unknown (EVT-01)
+notification.send	NotificationSendCommand	none	additive-only	command-style topic (imperative)

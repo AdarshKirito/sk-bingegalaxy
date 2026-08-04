@@ -127,8 +127,12 @@ public class ExportController {
         return amount.setScale(2, RoundingMode.HALF_UP).toPlainString();
     }
 
+    /**
+     * V82: delegates to the single canonical accessor. This copy previously omitted
+     * the {@code > 0} guard the other five had, so a zero-duration row exported as
+     * 0 minutes while every other subsystem read {@code durationHours * 60}.
+     */
     private int resolveDurationMinutes(Booking b) {
-        if (b.getDurationMinutes() != null) return b.getDurationMinutes();
-        return b.getDurationHours() * 60;
+        return b.getScheduledDurationMinutes();
     }
 }

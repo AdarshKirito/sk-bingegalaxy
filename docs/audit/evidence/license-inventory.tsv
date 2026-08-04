@@ -1,0 +1,29 @@
+scope	component	license	source	notes
+repository	sk-binge-galaxy	Proprietary / All rights reserved	LICENSE + NOTICE	—
+backend	Spring Boot 3.4.5 + starters	Apache-2.0	POM	—
+backend	Spring Cloud 2024.0.1 (gateway/config/eureka)	Apache-2.0	POM	—
+backend	jjwt	Apache-2.0	POM	—
+backend	MapStruct	Apache-2.0	POM	—
+backend	PostgreSQL JDBC	BSD-2-Clause	POM	—
+backend	MongoDB driver	Apache-2.0	POM	—
+backend	Kafka clients	Apache-2.0	POM	—
+backend	ShedLock	Apache-2.0	POM	—
+backend	Razorpay Java SDK	MIT	POM	—
+backend	Stripe Java SDK	MIT	POM	—
+backend	Mockito/JUnit5	MIT/EPL-2.0	POM	test scope
+backend	Lombok	MIT	POM	compile-time
+frontend	react/react-dom 18.3	MIT	package.json	—
+frontend	vite 5 + plugins	MIT	package.json	—
+frontend	react-router	MIT	package.json	—
+frontend	zustand	MIT	package.json	—
+frontend	axios	MIT	package.json	—
+frontend	dompurify	Apache-2.0/MPL-2.0 dual	package.json	—
+frontend	vite-plugin-pwa/workbox	MIT/Apache-2.0	package.json	—
+frontend	vitest/@testing-library/playwright	MIT/Apache-2.0	package.json	dev
+infra	postgres:16 image	PostgreSQL License	compose	—
+infra	mongo:7 image	SSPL-1.0	compose	SSPL: fine for self-hosted use; NOT fine if offering Mongo itself as a service — flag for legal if managed-Mongo resale ever considered
+infra	redis image	RSALv2/SSPLv1 (7.4+) or BSD (≤7.2)	compose	same class of caution
+infra	cp-kafka/cp-zookeeper	Confluent Community License	compose	CCL: cannot offer Kafka-as-a-service; internal use fine
+infra	nginx:alpine	BSD-2-Clause	Dockerfile	—
+infra	k6	AGPL-3.0	k6.zip (tracked)	load-tool only, not linked into product — no copyleft contamination; still remove the binary (HYG-01)
+NOTE	method	static read of POMs/package.json/image docs; no license scanner executed	—	transitive deps NOT enumerated (SUP-02 SBOM would close this)

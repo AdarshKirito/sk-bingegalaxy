@@ -232,9 +232,7 @@ public class InvoicePdfService {
     }
 
     private String resolveDuration(Booking booking) {
-        int minutes = booking.getDurationMinutes() != null
-                ? booking.getDurationMinutes()
-                : booking.getDurationHours() * 60;
+        int minutes = booking.getScheduledDurationMinutes(); // V82: single canonical accessor
         if (minutes % 60 == 0) return (minutes / 60) + " hour" + (minutes / 60 != 1 ? "s" : "");
         return (minutes / 60) + "h " + (minutes % 60) + "m";
     }

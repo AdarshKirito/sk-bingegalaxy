@@ -14,6 +14,17 @@
     <name>Auth Service</name>
     <description>Authentication and user management for SK Binge Galaxy</description>
 
+    <properties>
+        <!-- COVERAGE RATCHET override — a measured baseline, not a target.
+             Measured 2026-08-01: 0.28 line / 0.21 branch (floors set 1 point lower
+             so display rounding cannot cause a false failure).
+             You may RAISE these; never lower them. If a change drops coverage the
+             build fails — add tests rather than editing the number. Parent target
+             remains 0.60 line / 0.50 branch. See backend/pom.xml. -->
+        <jacoco.min.line>0.27</jacoco.min.line>
+        <jacoco.min.branch>0.20</jacoco.min.branch>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>com.skbingegalaxy</groupId>

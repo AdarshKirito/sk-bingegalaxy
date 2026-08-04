@@ -1,14 +1,19 @@
 package com.skbingegalaxy.booking.controller;
 
+import com.skbingegalaxy.booking.dto.BookingDto;
+import com.skbingegalaxy.booking.dto.ChannelReservationRequest;
 import com.skbingegalaxy.booking.dto.InternalBingeDto;
 import com.skbingegalaxy.booking.entity.Binge;
 import com.skbingegalaxy.booking.entity.Booking;
 import com.skbingegalaxy.booking.repository.BingeRepository;
 import com.skbingegalaxy.booking.repository.BookingRepository;
+import com.skbingegalaxy.booking.service.BookingService;
 import com.skbingegalaxy.booking.util.OpeningHoursCodec;
 import com.skbingegalaxy.common.dto.ApiResponse;
 import com.skbingegalaxy.common.exception.ResourceNotFoundException;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -27,6 +32,7 @@ public class InternalBookingController {
     private final BookingRepository bookingRepository;
     private final BingeRepository bingeRepository;
     private final com.skbingegalaxy.booking.permission.BingeModulePermissionService modulePermissionService;
+    private final BookingService bookingService;
 
     /**
      * Binge ownership + operating snapshot for sibling services.
@@ -111,5 +117,44 @@ public class InternalBookingController {
                 .map(Binge::getCountry)
                 .orElse(null));
         return ResponseEntity.ok(ApiResponse.ok(body));
+    }
+
+    /**
+     * V85 (gap G2): ingest a reservation delivered by an external sales channel.
+     *
+     * <p><b>Why here rather than on the public API.</b> {@code POST /api/v1/bookings}
+     * derives the guest from the caller's JWT — a channel guest has no SK account, so
+     * there is no JWT to derive one from. Rather than inventing a new identity system,
+     * this reuses the service-principal seam the platform already has: the caller
+     * presents {@code X-Internal-Secret}, {@code InternalApiAuthFilter} grants
+     * {@code ROLE_SYSTEM}, and {@code SecurityConfig} gates
+     * {@code /api/v1/bookings/internal/**} on it.
+     *
+     * <p><b>Not reachable from the internet.</b> The gateway now 404s any
+     * {@code /api/v*}/<service>/internal/**} path and strips a client-supplied
+     * {@code X-Internal-Secret}, so this surface is callable only from inside the
+     * trusted network. See {@code InternalPathBlockingTest}.
+     *
+     * <p><b>Provider-neutral.</b> The payload carries an opaque {@code externalSource}
+     * slug. Translating a specific channel's format into it belongs to the
+     * distribution context; booking-service never learns which channel is which.
+     *
+     * <p><b>Idempotent, and honest about it.</b> A first delivery answers <b>201
+     * Created</b>; a redelivery of the same {@code (externalSource, externalRef)}
+     * answers <b>200 OK</b> with the original booking. The distinction is not
+     * cosmetic — a channel that receives 201 for a retry will record a second booking
+     * on its side, and the two systems drift apart while both believe they are correct.
+     */
+    @PostMapping("/reservations")
+    public ResponseEntity<ApiResponse<BookingDto>> ingestChannelReservation(
+            @Valid @RequestBody ChannelReservationRequest request) {
+        BookingService.ChannelIngestResult result =
+            bookingService.ingestChannelReservationDetailed(request);
+        return ResponseEntity
+            .status(result.created() ? HttpStatus.CREATED : HttpStatus.OK)
+            .body(ApiResponse.ok(
+                result.created() ? "Channel reservation accepted"
+                                 : "Channel reservation already recorded",
+                result.booking()));
     }
 }

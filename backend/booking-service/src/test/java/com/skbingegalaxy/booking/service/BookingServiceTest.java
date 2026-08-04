@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
@@ -75,6 +76,8 @@ class BookingServiceTest {
         @Mock private com.skbingegalaxy.booking.service.statemachine.BookingStateMachine stateMachineMock;
         @Mock private VenueClockService venueClock;
         @Mock private TaxService taxService;
+@Mock private TurnoverPolicy turnoverPolicy;                 // V81 — occupancy buffers
+@Mock private BookingWindowPolicy bookingWindowPolicy;   // V84 — window + duration rules (void methods no-op by default)
 
     @InjectMocks private BookingService bookingService;
 
@@ -83,6 +86,10 @@ class BookingServiceTest {
 
     @BeforeEach
     void setUp() {
+        // V81: no turnover buffers by default, so every pre-existing assertion
+        // about occupancy keeps its original billable-interval semantics. Tests
+        // that exercise buffers override this stub locally.
+        lenient().when(turnoverPolicy.resolve(any(), any())).thenReturn(TurnoverPolicy.Buffers.NONE);
         BingeContext.clear();
         // Force correct mock — @InjectMocks can't disambiguate AvailabilityClient
         // from AvailabilityClientFallback (which implements AvailabilityClient)
@@ -477,5 +484,130 @@ class BookingServiceTest {
                 assertThatThrownBy(() -> bookingService.deleteAddOn(9L))
                         .isInstanceOf(BusinessException.class)
                         .hasMessageContaining("already used in bookings");
+        }
+
+        // ── V85 (G2/G3): external channel reservation ingestion ────────────
+
+        /** Stubs the happy path shared by the ingestion tests below. */
+        private void stubChannelHappyPath(String source, String ref) {
+                when(eventTypeRepository.findByIdAndBingeId(1L, 11L)).thenReturn(Optional.of(eventType));
+                when(bookingRepository.findByExternalSourceAndExternalRef(source, ref))
+                        .thenReturn(Optional.empty());
+                when(bookingRepository.findActiveBookingsByBingeAndDate(eq(11L), any(java.time.LocalDate.class)))
+                        .thenReturn(List.of());
+                when(availabilityClient.checkSlotAvailable(anyString(), any(java.time.LocalDate.class), anyLong(), anyInt(), anyInt()))
+                        .thenReturn(Boolean.TRUE);
+                when(pricingService.resolveEventPrice(anyLong(), eq(1L)))
+                        .thenReturn(new PricingService.ResolvedEventPrice(
+                                BigDecimal.valueOf(2000), BigDecimal.valueOf(500), BigDecimal.ZERO, "DEFAULT", null));
+                when(bookingRepository.save(any(Booking.class))).thenReturn(testBooking);
+        }
+
+        private ChannelReservationRequest channelRequest(String source, String ref) {
+                return ChannelReservationRequest.builder()
+                        .externalSource(source).externalRef(ref)
+                        .bingeId(11L).eventTypeId(1L)
+                        .bookingDate(LocalDate.now().plusDays(7))
+                        .startTime(LocalTime.of(14, 0))
+                        .durationMinutes(180).numberOfGuests(4)
+                        .guestName("Channel Guest").guestEmail("guest@example.com").guestPhone("9876543210")
+                        .build();
+        }
+
+        @Test
+        void ingestChannelReservation_stampsOriginAndExternalReferences() {
+                stubChannelHappyPath("acme-channel", "ACME-1");
+
+                bookingService.ingestChannelReservation(channelRequest("acme-channel", "ACME-1"));
+
+                ArgumentCaptor<Booking> saved = ArgumentCaptor.forClass(Booking.class);
+                verify(bookingRepository).save(saved.capture());
+                assertThat(saved.getValue().getOrigin())
+                        .isEqualTo(com.skbingegalaxy.booking.domain.BookingOrigin.CHANNEL);
+                assertThat(saved.getValue().getExternalSource()).isEqualTo("acme-channel");
+                assertThat(saved.getValue().getExternalRef()).isEqualTo("ACME-1");
+                // No SK account exists for a channel guest: attributed to the same
+                // "no known customer" id that admin walk-ins already use.
+                assertThat(saved.getValue().getCustomerId()).isZero();
+                assertThat(saved.getValue().getCustomerName()).isEqualTo("Channel Guest");
+        }
+
+        @Test
+        void ingestChannelReservation_skipsCustomerFunnelGuards() {
+                // THE point of G3. Every channel reservation shares customerId = 0, so an
+                // unpaid-limit or freeze check would begin rejecting unrelated PAID
+                // reservations as soon as two were pending at once — and nothing would log
+                // an error. The venue would simply never receive the booking.
+                stubChannelHappyPath("acme-channel", "ACME-2");
+
+                bookingService.ingestChannelReservation(channelRequest("acme-channel", "ACME-2"));
+
+                verify(bookingRepository).save(any(Booking.class));
+                // Asserted as "never called" rather than stubbed-and-ignored: the guards
+                // must not merely pass, they must not be consulted at all. Every channel
+                // reservation shares customerId = 0, so even reading those counters would
+                // couple unrelated venues' reservations to each other.
+                verify(bookingRepository, never()).countPendingByCustomerIdAndBingeId(anyLong(), anyLong());
+                verify(bookingRepository, never()).countRecentTimeoutCancellationsByBinge(anyLong(), anyLong(), any());
+                verify(customerFreezeService, never()).assertNotFrozen(anyLong(), anyLong());
+                verify(bookingRepository, never()).existsPendingDuplicate(anyLong(), anyLong(), any(), any());
+        }
+
+        @Test
+        void ingestChannelReservation_isIdempotentAcrossRedelivery() {
+                // Channels retry. A redelivered reservation must converge on the booking
+                // created the first time rather than erroring or double-booking. Source is
+                // matched case-insensitively and trimmed, so 'ACME-Channel' is the same
+                // channel as 'acme-channel' — otherwise the unique index would happily
+                // store both and the duplicate check would miss.
+                testBooking.setExternalSource("acme-channel");
+                testBooking.setExternalRef("ACME-3");
+                when(bookingRepository.findByExternalSourceAndExternalRef("acme-channel", "ACME-3"))
+                        .thenReturn(Optional.of(testBooking));
+
+                BookingDto result = bookingService.ingestChannelReservation(
+                        channelRequest("  ACME-Channel  ", "  ACME-3  "));
+
+                assertThat(result.getBookingRef()).isEqualTo(testBooking.getBookingRef());
+                verify(bookingRepository, never()).save(any(Booking.class));
+        }
+
+        @Test
+        void ingestChannelReservation_restoresCallerBingeContext() {
+                // Ingestion sets BingeContext so binge-scoped queries resolve. On a pooled
+                // request thread, leaking that id into the next request is a tenancy bug.
+                BingeContext.setBingeId(777L);
+                testBooking.setExternalSource("acme-channel");
+                testBooking.setExternalRef("ACME-4");
+                when(bookingRepository.findByExternalSourceAndExternalRef(anyString(), anyString()))
+                        .thenReturn(Optional.of(testBooking));
+
+                bookingService.ingestChannelReservation(channelRequest("acme-channel", "ACME-4"));
+
+                assertThat(BingeContext.getBingeId())
+                        .as("the caller's binge context must survive ingestion")
+                        .isEqualTo(777L);
+        }
+
+        @Test
+        void createBooking_directOrigin_stillAppliesCustomerFunnelGuards() {
+                // The other half of G3: scoping the guards must not weaken them for the
+                // path they were written for.
+                BingeContext.setBingeId(11L);
+                // No event-type stub on purpose: the funnel guard must reject BEFORE the
+                // event type is even resolved, so stubbing it would be dead setup.
+                when(bookingRepository.countPendingByCustomerIdAndBingeId(anyLong(), anyLong())).thenReturn(99L);
+
+                CreateBookingRequest request = CreateBookingRequest.builder()
+                        .eventTypeId(1L)
+                        .bookingDate(LocalDate.now().plusDays(7))
+                        .startTime(LocalTime.of(14, 0))
+                        .durationHours(3)
+                        .build();
+
+                assertThatThrownBy(() -> bookingService.createBooking(
+                                request, 1L, "John Doe", "john@example.com", "9876543210"))
+                        .isInstanceOf(BusinessException.class)
+                        .hasMessageContaining("unpaid booking");
         }
 }

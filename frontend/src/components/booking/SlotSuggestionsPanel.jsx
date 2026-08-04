@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { format } from 'date-fns';
 import { availabilityService, bookingService, adminService } from '../../services/endpoints';
+import { occupiedHalfHours } from '../../utils/occupancy';
 
 /**
  * Smart slot-suggestions panel. Surfaces alternatives when the user's
@@ -100,10 +101,9 @@ export default function SlotSuggestionsPanel({
     const bookedHalfHours = new Set();
     bookedSlots.forEach(bs => {
       if (editBookingRef && bs.bookingRef === editBookingRef) return;
-      const start = bs.startMinute != null ? bs.startMinute : 0;
-      const d = bs.durationMinutes != null ? bs.durationMinutes : ((bs.durationHours || 0) * 60);
-      if (!d) return;
-      for (let m = start; m < start + d; m += 30) bookedHalfHours.add(Math.floor(m / 30));
+      // V81: suggestions must respect turnover buffers, or we'd recommend the
+      // very slots the server is about to refuse.
+      occupiedHalfHours(bs).forEach(idx => bookedHalfHours.add(idx));
     });
     const today = format(new Date(), 'yyyy-MM-dd');
     const isToday = date === today;

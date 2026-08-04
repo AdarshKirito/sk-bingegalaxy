@@ -14,6 +14,18 @@
     <name>Payment Service</name>
     <description>Payment processing and refund management</description>
 
+    <properties>
+        <!-- COVERAGE RATCHET override — a measured baseline, not a target.
+             Measured 2026-08-01: 0.30 line / 0.20 branch (floors set 1 point lower
+             so display rounding cannot cause a false failure).
+             Worth prioritising above other modules: this one moves money, and
+             PR-PAY-01 (no provider-sandbox proof for payment/refund/webhook/dispute)
+             is still an open P0 launch gate.
+             You may RAISE these; never lower them. See backend/pom.xml. -->
+        <jacoco.min.line>0.29</jacoco.min.line>
+        <jacoco.min.branch>0.19</jacoco.min.branch>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>com.skbingegalaxy</groupId>

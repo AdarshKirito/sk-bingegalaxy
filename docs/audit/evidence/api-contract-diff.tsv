@@ -1,0 +1,9 @@
+check	method	result	notes
+FE literal call → BE endpoint exists	normalized join of frontend-api-pairs-current.tsv (372) vs endpoint-inventory-current.tsv (429)	0 orphaned FE calls	template-literal dynamic paths excluded (API-01 residual)
+BE endpoint uncalled by FE	reverse join	~120 uncalled	expected classes: internal-secret APIs, webhooks, actuators, batch/admin exports, loyalty internal — none suspicious
+Verb mismatch on shared path	join on path compare verbs	0	—
+Base path drift	prefix scan	0	/api/v1 + /api/v2/loyalty only
+Duplicate endpoint definitions	dup scan on (verb,path)	0	—
+Gateway route coverage	route config vs service base paths	complete	all 5 services + loyalty v2 routed
+CSRF exemptions	gateway config scan	webhooks only	provider-signed instead
+Auth-optional endpoints	permitAll scan	register/login/password-reset/verify/health/webhooks	expected set

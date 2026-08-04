@@ -14,6 +14,16 @@
     <name>Availability Service</name>
     <description>Date and time-slot availability management</description>
 
+    <properties>
+        <!-- COVERAGE RATCHET override — a measured baseline, not a target.
+             Measured 2026-08-01: 0.55 line / 0.43 branch (floors set 1 point lower
+             so display rounding cannot cause a false failure). This module is the
+             CLOSEST to the 0.60/0.50 target — finishing it is a small, high-value job.
+             You may RAISE these; never lower them. See backend/pom.xml. -->
+        <jacoco.min.line>0.54</jacoco.min.line>
+        <jacoco.min.branch>0.42</jacoco.min.branch>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>com.skbingegalaxy</groupId>

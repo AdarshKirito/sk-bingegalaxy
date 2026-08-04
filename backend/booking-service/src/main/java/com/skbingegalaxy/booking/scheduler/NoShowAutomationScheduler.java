@@ -116,10 +116,8 @@ public class NoShowAutomationScheduler {
         return LocalDateTime.of(b.getBookingDate(), b.getStartTime()).plusMinutes(offset);
     }
 
+    /** V82: delegates to the single canonical accessor. */
     private static int effectiveDurationMinutes(Booking b) {
-        if (b.getDurationMinutes() != null && b.getDurationMinutes() > 0) {
-            return b.getDurationMinutes();
-        }
-        return Math.max(b.getDurationHours(), 0) * 60;
+        return b.getScheduledDurationMinutes();
     }
 }

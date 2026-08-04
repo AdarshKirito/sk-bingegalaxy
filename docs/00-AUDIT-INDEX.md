@@ -1,5 +1,7 @@
 # SK Binge Galaxy — Deep Audit (fresh cut)
 
+> **⚠️ Superseded (2026-07-25):** this set audited a **detached HEAD with ~599 uncommitted files** — that tree has since been committed (`3d65090`, merged as `6440f58` on `main`, clean). Its P0-1 and P0-3 are **FIXED**; P0-2 (tokens in git) remains open. The canonical current audit is [audit/00-AUDIT-INDEX.md](audit/00-AUDIT-INDEX.md) with the sole authoritative register at [audit/ISSUE-REGISTER-CURRENT.md](audit/ISSUE-REGISTER-CURRENT.md). This set is retained as historical reference.
+
 **Audit date:** 2026-07-23
 **Repository root (real git root):** `D:\sk-binge-galaxy\sk-binge-galaxy` (note: nested one level under the workspace)
 **Working state audited:** detached `HEAD` at `e3edbc1` **plus ~599 uncommitted files** — the audit reflects the *working tree*, which is what actually runs, not the last commit.

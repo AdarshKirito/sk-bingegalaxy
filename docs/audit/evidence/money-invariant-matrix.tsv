@@ -1,0 +1,16 @@
+invariant	enforcement	evidence	status
+All amounts are minor-unit longs (no floats/BigDecimal drift)	MoneyUtils + entity column types	common-lib MoneyUtils; sampled entities	VERIFIED-STATIC
+Rounding: single documented rule	MONEY_SCALE_AND_ROUNDING_CONTRACT.md	docs + MoneyUtils spot-match	VERIFIED-STATIC
+Price frozen at booking	BookingPriceSnapshot written in create txn	booking create path	VERIFIED-STATIC
+Refund computed from snapshot, never live price	CancellationTier math reads snapshot	cancellation saga	VERIFIED-STATIC
+Refund amount ≤ captured amount	saga validation	refund intent math	VERIFIED-STATIC (no test)
+No double refund per gateway refund id	V14 partial UNIQUE index	payment V14 migration	VERIFIED-STATIC
+FX applied via stored CurrencyRate	pricing engine order: base→rate→profile→surge→FX→tax	pricing services	VERIFIED-STATIC
+Tax computed after FX in venue currency	TaxRule engine	pricing order	VERIFIED-STATIC
+Ledger entry per financial movement	LedgerEntry writes in booking+payment	both services	VERIFIED-STATIC (completeness untested)
+Goodwill credits bounded	support console validation	BookingNote/goodwill path	VERIFIED-STATIC
+Loyalty points minor-unit + lot expiry	PointsWallet lots	loyalty v2 engines	VERIFIED-STATIC
+Payment intent durable before provider call	insert precedes gateway call	PaymentService initiate	VERIFIED-STATIC
+Receipt-first state flips on reconciliation	provider query before local flip	PaymentReconciliationScheduler L158-208	VERIFIED-STATIC
+Idempotent payment callbacks	ProcessedEvent dedup	webhook handlers	VERIFIED-STATIC
+E2E money conservation (booking→payment→refund sums)	NOT ENFORCED by any automated check	—	NOT-VERIFIED (needs integration test + sandbox run)

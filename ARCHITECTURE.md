@@ -1,5 +1,7 @@
 # SK Binge Galaxy — Architecture
 
+> **⚠️ Status banner (2026-07-25, audit AUD-2026-07-25-01 at commit `6440f58`):** the synopsis below dates from 2026-07-16; Flyway heads are now V20/V2/V80/V16. The current architecture document is [docs/audit/04-ARCHITECTURE-AND-DEPENDENCIES.md](docs/audit/04-ARCHITECTURE-AND-DEPENDENCIES.md); dependency map: [docs/audit/05-SERVICE-DEPENDENCY-MAP.md](docs/audit/05-SERVICE-DEPENDENCY-MAP.md). Original preserved below.
+
 > Current synopsis: 2026-07-16 working tree. The canonical architecture is [`docs/02-ARCHITECTURE-AND-DEPENDENCIES.md`](docs/02-ARCHITECTURE-AND-DEPENDENCIES.md); data/domain, security, service deep-dives, frontend and the issue register are the adjacent `docs/00`–`docs/08` deep-audit set.
 
 ## Runtime shape

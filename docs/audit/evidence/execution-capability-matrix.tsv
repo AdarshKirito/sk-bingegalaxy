@@ -1,0 +1,18 @@
+capability	required_tool	detected	recovery_attempted	alternative_attempted	final_status	evidence
+backend_compilation	Java 17 + Maven	absent on host	containerized maven:3.9-eclipse-temurin-17 (local image)	n/a — container succeeded	PASS	evidence/commands-and-results.md §exec; %TEMP%\skbg-audit\backend-mvn-test.log
+backend_unit_tests	Java 17 + Maven	absent on host	same container, isolated skbg-audit-m2 volume	first run aborted at module 9/10 (resource); rerun -pl payment,notification with -m 3g	PASS (all 10 modules)	CURRENT-BUILD-AND-TEST-RESULTS.md
+backend_integration_tests	Testcontainers	no Testcontainers in codebase	n/a	BookingFlowIntegrationTest exists but @Disabled (6 skipped)	NOT-APPLICABLE (none exist — TEST-01)	backend-mvn-test.log
+frontend_installation	Node 20 + npm	absent on host	containerized node:20 (local image), npm ci in skbg-audit-fe volume	n/a	PASS (366 pkgs, lockfile untouched)	CURRENT-BUILD-AND-TEST-RESULTS.md
+frontend_tests	vitest	absent on host	same container	n/a	PASS 362/362 in 42 files	CURRENT-BUILD-AND-TEST-RESULTS.md
+frontend_typecheck	tsc	absent on host	same container	n/a	PASS (exit 0)	CURRENT-BUILD-AND-TEST-RESULTS.md
+frontend_production_build	vite	absent on host	same container	n/a	PASS (11.0s, PWA 129 entries)	CURRENT-BUILD-AND-TEST-RESULTS.md
+container_startup	Docker	CLI present; daemon RUNNING (was down in static pass)	n/a — daemon self-recovered via Docker Desktop	n/a	PASS (15/15 containers healthy)	CURRENT-RUNTIME-VERIFICATION.md
+postgres_migrations	Docker/native Postgres	skbg-postgres (postgres:16-alpine) healthy	live flyway_schema_history queried	stale-image gap found (auth V19<V20, payment V15<V16) → rebuild + re-migrate	PASS after rebuild	CURRENT-MIGRATION-VERIFICATION.md
+mongo_index_verification	Docker/native Mongo	skbg-mongodb (mongo:7) healthy, auth-required	in-container mongosh with env-var creds (values never printed)	n/a	PASS (TTL 90d, unique reminder idx verified live)	CURRENT-MIGRATION-VERIFICATION.md
+redis_behavior	Docker/native Redis	skbg-redis healthy	exercised indirectly via gateway rate-limit/session flows	dedicated fault-injection not run	PARTIAL	CURRENT-RUNTIME-VERIFICATION.md
+kafka_integration	Docker/native Kafka	skbg-kafka healthy	20 topics + DLTs listed live; consumer groups checked	outage/replay chaos not run this round	PARTIAL	CURRENT-RUNTIME-VERIFICATION.md
+browser_tests	Playwright + chromium	not installed (host or image)	playwright image pull failed twice (registry EOF); alternative: chromium installed into node:20 container	e2e ran vs live stack via E2E_BASE_URL	PARTIAL (57 passed / 5 failed / 1 flaky — failures mostly missing seed fixtures, see TEST-EX-03)	CURRENT-RUNTIME-VERIFICATION.md §8
+accessibility_tests	axe/browser	not configured in repo	n/a	static a11y review done in 13-FRONTEND doc	NOT-APPLICABLE (no axe config exists)	13-FRONTEND-UI-UX-AND-ACCESSIBILITY.md
+load_tests	k6	repo-shipped k6.exe v0.54.0 verified	n/a	smoke scenario vs rebuilt stack; helper register drift (TEST-EX-04) worked around via AUTH_TOKEN env	PASS (336/336 checks, 0% failed, p95 21.69ms)	CURRENT-RUNTIME-VERIFICATION.md §7
+security_scanners	scanners	none installed	manual security review + runtime boundary probes	401/403 boundary probes executed live	PARTIAL (manual)	08-SECURITY-RBAC-AND-PRIVACY.md
+provider_sandbox	Stripe/Razorpay test keys	no test credentials present in env	checked container env names only	local mocked-contract tests pass (payment module 100%)	BLOCKED-EXTERNAL (credentials are user-owned)	CURRENT-PROVIDER-VERIFICATION.md

@@ -1131,7 +1131,7 @@ public class PricingService {
                 .eventTypeName(b.getEventType() != null ? b.getEventType().getName() : "—")
                 .bookingDate(b.getBookingDate())
                 .startTime(b.getStartTime())
-                .durationMinutes(b.getDurationMinutes() != null ? b.getDurationMinutes() : b.getDurationHours() * 60)
+                .durationMinutes(b.getScheduledDurationMinutes()) // V82: single canonical accessor
                 .status(b.getStatus().name())
                 .paymentStatus(b.getPaymentStatus().name())
                 .totalAmount(b.getTotalAmount())

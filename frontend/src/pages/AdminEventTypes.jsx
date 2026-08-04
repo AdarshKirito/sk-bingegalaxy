@@ -5,7 +5,7 @@ import { FiPackage, FiPlus, FiEdit2, FiToggleLeft, FiToggleRight, FiTrash2, FiX,
 import './AdminPages.css';
 import { venueMoney, venueSymbol } from '../utils/venueLocale';
 
-const emptyEventType = { name: '', description: '', basePrice: '', hourlyRate: '', pricePerGuest: '', minHours: 1, maxHours: 8, minGuests: '', maxGuests: '', categoryId: '', imageUrls: [''] };
+const emptyEventType = { name: '', description: '', basePrice: '', hourlyRate: '', pricePerGuest: '', minHours: 1, maxHours: 8, minGuests: '', maxGuests: '', setupMinutes: '', cleanupMinutes: '', permittedDurations: [], categoryId: '', imageUrls: [''] };
 const emptyAddOn = { name: '', description: '', price: '', categoryId: '', stockPerDay: '', advanceNoticeMinutes: '', imageUrls: [''] };
 const emptyCategory = { name: '', description: '', imageUrl: '', sortOrder: 0 };
 
@@ -22,6 +22,28 @@ export default function AdminEventTypes() {
   // Modal state
   const [modal, setModal] = useState({ open: false, mode: 'create', item: null });
   const [form, setForm] = useState(emptyEventType);
+
+  // The venue-level turnover defaults, inferred from any event type that has no
+  // override: for those, the server's effective value IS the venue default. Saves
+  // a second fetch just to render a placeholder.
+  const venueDefaultBuffer = (field) => {
+    const inheriting = eventTypes.find(et => et[field] == null && et[`effective${field[0].toUpperCase()}${field.slice(1)}`] != null);
+    return inheriting ? inheriting[`effective${field[0].toUpperCase()}${field.slice(1)}`] : null;
+  };
+  const venueSetup = venueDefaultBuffer('setupMinutes');
+  const venueCleanup = venueDefaultBuffer('cleanupMinutes');
+  const venueSetupPlaceholder = venueSetup != null ? `venue default (${venueSetup})` : 'venue default';
+  const venueCleanupPlaceholder = venueCleanup != null ? `venue default (${venueCleanup})` : 'venue default';
+
+  // B5: every 30-minute step inside the event type's own hour range. Offering
+  // choices outside that range would only produce a server-side rejection.
+  const durationChoices = (() => {
+    const min = Math.max(Number(form.minHours) || 1, 1) * 60;
+    const max = Math.min(Math.max(Number(form.maxHours) || 8, 1) * 60, 720);
+    const out = [];
+    for (let m = min; m <= max; m += 30) out.push(m);
+    return out;
+  })();
   const [addonForm, setAddonForm] = useState(emptyAddOn);
   const [categoryForm, setCategoryForm] = useState(emptyCategory);
   const [saving, setSaving] = useState(false);
@@ -64,6 +86,10 @@ export default function AdminEventTypes() {
       maxHours: et.maxHours,
       minGuests: et.minGuests ?? '',
       maxGuests: et.maxGuests ?? '',
+      // '' means "inherit the venue default" — distinct from an explicit 0.
+      setupMinutes: et.setupMinutes ?? '',
+      cleanupMinutes: et.cleanupMinutes ?? '',
+      permittedDurations: Array.isArray(et.permittedDurations) ? [...et.permittedDurations] : [],
       categoryId: et.categoryId ?? '',
       imageUrls: et.imageUrls?.length ? [...et.imageUrls] : [''],
     });
@@ -81,6 +107,11 @@ export default function AdminEventTypes() {
     }
     if (form.minGuests !== '' && Number(form.minGuests) < 0) { toast.error('Min guests cannot be negative.'); return; }
     if (form.maxGuests !== '' && Number(form.maxGuests) < 0) { toast.error('Max guests cannot be negative.'); return; }
+    for (const [field, label] of [['setupMinutes', 'Setup time'], ['cleanupMinutes', 'Cleanup time']]) {
+      if (form[field] === '') continue;
+      const v = Number(form[field]);
+      if (isNaN(v) || v < 0 || v > 240) { toast.error(`${label} must be between 0 and 240 minutes.`); return; }
+    }
     setSaving(true);
     try {
       const payload = {
@@ -92,6 +123,11 @@ export default function AdminEventTypes() {
         maxHours: Number(form.maxHours),
         minGuests: form.minGuests === '' ? null : Number(form.minGuests),
         maxGuests: form.maxGuests === '' ? null : Number(form.maxGuests),
+        // null = inherit the venue default; 0 = explicitly no buffer.
+        setupMinutes: form.setupMinutes === '' ? null : Number(form.setupMinutes),
+        cleanupMinutes: form.cleanupMinutes === '' ? null : Number(form.cleanupMinutes),
+        // empty array = no allow-list, restoring free choice
+        permittedDurations: form.permittedDurations.length ? form.permittedDurations : null,
         categoryId: form.categoryId === '' ? null : Number(form.categoryId),
         imageUrls: form.imageUrls.filter(u => u.trim()),
       };
@@ -355,6 +391,16 @@ export default function AdminEventTypes() {
                     <span>Hourly: <strong>{venueMoney(Number(et.hourlyRate))}/hr</strong></span>
                     {Number(et.pricePerGuest) > 0 && <span>Per Guest: <strong>{venueMoney(Number(et.pricePerGuest))}</strong></span>}
                     <span>Duration: <strong>{et.minHours}–{et.maxHours} hrs</strong></span>
+                    {(et.effectiveSetupMinutes > 0 || et.effectiveCleanupMinutes > 0) && (
+                      <span title="Time blocked around each booking so the room can be prepared and reset. Not billed to the customer.">
+                        Turnover: <strong>
+                          {et.effectiveSetupMinutes > 0 && `${et.effectiveSetupMinutes}m before`}
+                          {et.effectiveSetupMinutes > 0 && et.effectiveCleanupMinutes > 0 && ' · '}
+                          {et.effectiveCleanupMinutes > 0 && `${et.effectiveCleanupMinutes}m after`}
+                        </strong>
+                        {et.setupMinutes == null && et.cleanupMinutes == null && ' (venue default)'}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="adm-item-footer">
@@ -553,6 +599,59 @@ export default function AdminEventTypes() {
                     <input type="number" min="1" max="24" value={form.maxHours}
                       onChange={e => setForm({ ...form, maxHours: e.target.value })} />
                   </div>
+                </div>
+                <div className="grid-2">
+                  <div className="input-group">
+                    <label>Setup Time (min)</label>
+                    <input type="number" min="0" max="240" value={form.setupMinutes}
+                      onChange={e => setForm({ ...form, setupMinutes: e.target.value })}
+                      placeholder={venueSetupPlaceholder} />
+                    <span className="adm-hint">Prep time reserved before each booking. Blank = use the venue default.</span>
+                  </div>
+                  <div className="input-group">
+                    <label>Cleanup Time (min)</label>
+                    <input type="number" min="0" max="240" value={form.cleanupMinutes}
+                      onChange={e => setForm({ ...form, cleanupMinutes: e.target.value })}
+                      placeholder={venueCleanupPlaceholder} />
+                    <span className="adm-hint">Reset/turnover time after each booking. Blank = use the venue default.</span>
+                  </div>
+                </div>
+                <p className="adm-hint" style={{ marginTop: '-0.25rem' }}>
+                  These block the calendar around every booking of this type, so the next
+                  party can&apos;t be sold a slot you have no time to turn the room around for.
+                </p>
+                <div className="input-group">
+                  <label>Offered Durations</label>
+                  <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.35rem' }}>
+                    {durationChoices.map(mins => {
+                      const on = form.permittedDurations.includes(mins);
+                      const atCap = !on && form.permittedDurations.length >= 4;
+                      return (
+                        <button
+                          key={mins}
+                          type="button"
+                          aria-pressed={on}
+                          disabled={atCap}
+                          title={atCap ? 'At most 4 durations — channels show each as a separate option' : undefined}
+                          onClick={() => setForm({
+                            ...form,
+                            permittedDurations: on
+                              ? form.permittedDurations.filter(d => d !== mins)
+                              : [...form.permittedDurations, mins].sort((a, b) => a - b),
+                          })}
+                          className={`adm-badge ${on ? 'adm-badge-active' : 'adm-badge-inactive'}`}
+                          style={{ cursor: atCap ? 'not-allowed' : 'pointer', opacity: atCap ? 0.45 : 1, border: 'none' }}
+                        >
+                          {mins % 60 === 0 ? `${mins / 60}h` : `${Math.floor(mins / 60)}h ${mins % 60}m`}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <span className="adm-hint">
+                    {form.permittedDurations.length === 0
+                      ? 'None selected — customers may pick any length between Min and Max Hours.'
+                      : `Customers pick from these ${form.permittedDurations.length} option(s) only. Max 4 — sales channels list each one separately.`}
+                  </span>
                 </div>
                 <div className="grid-2">
                   <div className="input-group">

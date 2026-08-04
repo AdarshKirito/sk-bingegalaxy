@@ -70,6 +70,20 @@ public class SlotHold {
     @Column(name = "duration_minutes", nullable = false)
     private int durationMinutes;
 
+    /**
+     * V81 snapshot of the resolved setup buffer. A hold must reserve the same
+     * occupancy window the resulting booking will, otherwise the countdown
+     * promises a slot that a competing booking's cleanup buffer already owns.
+     */
+    @Column(name = "setup_minutes", nullable = false)
+    @Builder.Default
+    private int setupMinutes = 0;
+
+    /** V81 snapshot of the resolved cleanup buffer. See {@link #setupMinutes}. */
+    @Column(name = "cleanup_minutes", nullable = false)
+    @Builder.Default
+    private int cleanupMinutes = 0;
+
     @Column(name = "number_of_guests", nullable = false)
     @Builder.Default
     private int numberOfGuests = 1;

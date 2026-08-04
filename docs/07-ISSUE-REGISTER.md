@@ -1,5 +1,7 @@
 # 07 — Issue Register (the problem list)
 
+> **⚠️ Superseded (2026-07-25, commit `6440f58`):** P0-1 (uncommitted tree) and P0-3 (stale deploy vs source) are **FIXED** — the tree was committed and `main` = `origin/main`, clean. P0-2 (tokens in git) is **still open**, tracked as SEC-HYG-01. The sole authoritative register is now [audit/ISSUE-REGISTER-CURRENT.md](audit/ISSUE-REGISTER-CURRENT.md); disposition of every item here: [audit/HISTORICAL-AND-SUPERSEDED-FINDINGS.md](audit/HISTORICAL-AND-SUPERSEDED-FINDINGS.md). Text below preserved as written.
+
 Prioritized. Each item: **what**, **evidence**, **impact / what it breaks later**, **the correct way**. Severity: **P0** = blocks production / data-or-money-loss / security. **P1** = serious, fix before scale. **P2** = correctness/maintainability debt. **P3** = polish.
 
 Legend for confidence: *verified* = read the code/artifact directly; *structural* = inferred from structure + prior audit; *needs-check* = call out to confirm at runtime.

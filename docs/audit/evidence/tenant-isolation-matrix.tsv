@@ -1,0 +1,17 @@
+resource	controller	tenant_guard	regression_test	status
+Recovery queues	AdminRecoveryQueueController	resolveRecoveryScope→requireManagedBinge	AdminRecoveryQueueScopeTest	FIXED (was SEC-001)
+Bookings (admin)	BookingController admin endpoints	requireManagedBinge	booking controller tests	OK
+Rate codes	RateCodeController	requireManagedBinge + module RATE_CODES (dual sign-off)	module interceptor tests	OK
+Surge rules	SurgeRuleController	requireManagedBinge + module SURGE_RULES (dual)	—	OK-static
+Customer freezes	CustomerFreezeController	requireManagedBinge + module CUSTOMER_FREEZES (dual)	—	OK-static
+Risk flags	RiskFlagController	requireManagedBinge + module RISK_FLAGS (dual)	—	OK-static
+Waitlist	WaitlistController admin	requireManagedBinge + module WAITLIST	—	OK-static
+Slot holds	SlotHoldController admin	requireManagedBinge + module SLOT_HOLDS	—	OK-static
+Support console	BookingNoteController	requireManagedBinge + module SUPPORT_CONSOLE	—	OK-static
+Disputes (payment)	payment admin controllers	binge binding on payment admin reads	—	OK-static (July-16 tenant-binding fix present)
+Failed refunds	FailedRefundController	requireManagedBinge + module FAILED_REFUNDS (dual)	—	OK-static
+Reports	ReportController	requireManagedBinge + module REPORTS	—	OK-static
+Binge CMS	BingeSiteContentController	requireManagedBinge + module VENUE	—	OK-static
+Loyalty config	LoyaltyV2SuperAdminController	@PreAuthorize SUPER_ADMIN (platform-scope, not binge)	—	FIXED (26-Apr bug)
+Customer bookings (self)	BookingController customer	owner-scoped queries (customerId from trusted header)	—	OK
+Customer payments (self)	PaymentController customer	owner-scoped	—	OK (July-16 fix present)

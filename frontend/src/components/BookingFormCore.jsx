@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { bookingService, availabilityService, adminService } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import { format, addDays } from 'date-fns';
+import { occupiedHalfHours } from '../utils/occupancy';
 
 /**
  * Shared booking form core used by:
@@ -61,11 +62,8 @@ export default function BookingFormCore({ form, setForm, isAdmin = false }) {
     const isToday = form.bookingDate === format(new Date(), 'yyyy-MM-dd');
     const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
     const bookedHalfHours = new Set();
-    bookedSlots.forEach(bs => {
-      const start = bs.startMinute != null ? bs.startMinute : 0;
-      const dur = bs.durationMinutes != null ? bs.durationMinutes : (bs.durationHours || 0) * 60;
-      for (let m = start; m < start + dur; m += 30) bookedHalfHours.add(Math.floor(m / 30));
-    });
+    // V81: buffers included — see utils/occupancy.
+    bookedSlots.forEach(bs => occupiedHalfHours(bs).forEach(idx => bookedHalfHours.add(idx)));
     const slots = [];
     for (let startMin = 0; startMin + durMin <= 24 * 60; startMin += 30) {
       if (isToday && startMin < nowMinutes + 30) continue;

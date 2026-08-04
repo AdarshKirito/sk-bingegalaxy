@@ -41,6 +41,35 @@ public class Booking {
     @Column(nullable = false, unique = true, length = 20)
     private String bookingRef;
 
+    // ── V85: provenance (gap G8) ─────────────────────────────────────────
+    /**
+     * How this reservation was created. Decides which anti-abuse guards apply —
+     * see {@link com.skbingegalaxy.booking.domain.BookingOrigin}. Defaults to
+     * DIRECT so every existing row and every unmodified code path keeps the full
+     * guard set.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "origin", nullable = false, length = 16)
+    @Builder.Default
+    private com.skbingegalaxy.booking.domain.BookingOrigin origin =
+        com.skbingegalaxy.booking.domain.BookingOrigin.DIRECT;
+
+    /**
+     * Provider-neutral slug for the channel that delivered this booking. NULL unless
+     * {@link #origin} is CHANNEL — paired by a DB CHECK. Booking-service never
+     * interprets the value; knowing what a given slug means belongs to the
+     * distribution context.
+     */
+    @Column(name = "external_source", length = 64)
+    private String externalSource;
+
+    /**
+     * The channel's own booking reference, unique per source. Required to reconcile
+     * against the channel and to match an inbound cancellation back to this row.
+     */
+    @Column(name = "external_ref", length = 128)
+    private String externalRef;
+
     private Long bingeId;
 
     @Column(nullable = false)
@@ -72,8 +101,64 @@ public class Booking {
     @Column(nullable = false)
     private int durationHours;
 
-    /** Canonical duration in minutes (30-min granularity). Falls back to durationHours*60 when null. */
+    /**
+     * Canonical scheduled duration in minutes, 30-minute granularity.
+     *
+     * <p>NOT NULL since V82 — read it through {@link #getScheduledDurationMinutes()}
+     * rather than directly, so the one legacy fallback lives in one place.
+     */
+    @Column(nullable = false)
     private Integer durationMinutes;
+
+    /**
+     * The scheduled length of this reservation in minutes — <b>the single canonical
+     * accessor</b>. Every subsystem that needs "how long is this booking" must call
+     * this rather than reading the fields.
+     *
+     * <p>Before V82 this rule was reimplemented in six places (booking, check-in,
+     * no-show sweep, invoice PDF, pricing, CSV export) and they had already drifted:
+     * five guarded {@code durationMinutes > 0}, the export did not, so a zero row
+     * exported as 0 minutes while everything else read {@code durationHours * 60}.
+     *
+     * <p>{@link #durationHours} is a <b>lossy legacy field</b> — it is written as an
+     * integer-truncated {@code durationMinutes / 60}, so a 90-minute booking stores
+     * {@code 1}. It is retained only for the {@code BookingEvent} wire contract that
+     * notification-service still reads. Never compute from it.
+     *
+     * <p>Note this is the <em>scheduled</em> length. Early-checkout and COMPLETED
+     * rounding are a separate concern owned by {@code BookingService}, and occupancy
+     * additionally includes turnover buffers — see {@code TurnoverPolicy}.
+     */
+    @Transient
+    public int getScheduledDurationMinutes() {
+        if (durationMinutes != null && durationMinutes > 0) {
+            return durationMinutes;
+        }
+        return Math.max(durationHours, 0) * 60;
+    }
+
+    // ── V81: turnover buffer snapshot ────────────────────────────────────
+    /**
+     * Snapshot of the resolved setup buffer (minutes) at booking time. Together
+     * with {@link #cleanupMinutes} it defines this booking's <em>occupancy
+     * window</em> — what the room is actually unavailable for:
+     *
+     * <pre>[ startTime - setupMinutes , startTime + duration + cleanupMinutes )</pre>
+     *
+     * <p>Snapshotted rather than resolved live, for the same reason
+     * {@link #venueRoomPrice} and {@link #rateCodeName} are: editing the event
+     * type later must not retroactively change what a past booking occupied,
+     * and the V81 database backstop reads these columns — app and trigger have
+     * to agree on every historical row, not just new ones.
+     */
+    @Column(name = "setup_minutes", nullable = false)
+    @Builder.Default
+    private int setupMinutes = 0;
+
+    /** Snapshot of the resolved cleanup/turnover buffer (minutes) at booking time. See {@link #setupMinutes}. */
+    @Column(name = "cleanup_minutes", nullable = false)
+    @Builder.Default
+    private int cleanupMinutes = 0;
 
     @OneToMany(mappedBy = "booking", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
@@ -341,6 +426,13 @@ public class Booking {
      */
     @PrePersist
     void prePersistFinanceDefaults() {
+        // V82: duration_minutes is NOT NULL. Every creation path sets it, but this
+        // guard means the constraint hardens the schema instead of turning a
+        // forgotten field into an insert failure at runtime. Same belt-and-braces
+        // rationale as the finance defaults below.
+        if (this.durationMinutes == null || this.durationMinutes <= 0) {
+            this.durationMinutes = Math.max(this.durationHours, 1) * 60;
+        }
         if (this.subtotalAmount == null) {
             this.subtotalAmount = this.totalAmount;
         }

@@ -57,6 +57,7 @@ public class SlotHoldService {
     private final com.skbingegalaxy.booking.repository.BookingRepository bookingRepository;
     private final BookingFunnelMetrics funnelMetrics;
     private final VenueClockService venueClock;
+    private final TurnoverPolicy turnoverPolicy;                            // V81 — setup/cleanup buffer resolution
 
     @Value("${app.slot-hold.ttl-minutes:7}")
     private int holdTtlMinutes;
@@ -108,8 +109,14 @@ public class SlotHoldService {
         // Defer to BookingService for the actual conflict / capacity rules. This
         // keeps a single source of truth and guarantees holds and bookings see
         // exactly the same world.
-        conflictChecker.assertSlotAvailable(bingeId, req.getBookingDate(), startMinute,
+        conflictChecker.assertSlotAvailable(bingeId, req.getBookingDate(), eventType.getId(), startMinute,
             req.getDurationMinutes(), req.getVenueRoomId(), null /* excludeToken */);
+
+        // V81: snapshot the same buffers the resulting booking will carry, so the
+        // hold reserves the identical occupancy window. Resolved here rather than
+        // read back from the conflict checker to keep the hold self-describing —
+        // countForeignLiveHoldOverlap reads these columns directly.
+        TurnoverPolicy.Buffers holdBuffers = turnoverPolicy.resolve(bingeId, eventType);
 
         SlotHold hold = SlotHold.builder()
             .holdToken(generateToken())
@@ -121,6 +128,8 @@ public class SlotHoldService {
             .bookingDate(req.getBookingDate())
             .startTime(req.getStartTime())
             .durationMinutes(req.getDurationMinutes())
+            .setupMinutes(holdBuffers.setupMinutes())
+            .cleanupMinutes(holdBuffers.cleanupMinutes())
             .numberOfGuests(Math.max(1, req.getNumberOfGuests()))
             .venueRoomId(req.getVenueRoomId())
             .status(SlotHoldStatus.ACTIVE)
@@ -266,6 +275,7 @@ public class SlotHoldService {
                                   LocalDate bookingDate, java.time.LocalTime startTime,
                                   int durationMinutes, int numberOfGuests,
                                   LocalDateTime offerExpiresAt) {
+        TurnoverPolicy.Buffers offerBuffers = turnoverPolicy.resolve(bingeId, eventType);
         SlotHold hold = SlotHold.builder()
             .holdToken(generateToken())
             .bingeId(bingeId)
@@ -276,6 +286,11 @@ public class SlotHoldService {
             .bookingDate(bookingDate)
             .startTime(startTime)
             .durationMinutes(durationMinutes)
+            // V81: a waitlist offer hold occupies the same buffered window a real
+            // booking would — otherwise the promoted customer's booking could be
+            // rejected by turnover rules the offer never accounted for.
+            .setupMinutes(offerBuffers.setupMinutes())
+            .cleanupMinutes(offerBuffers.cleanupMinutes())
             .numberOfGuests(Math.max(1, numberOfGuests))
             .status(SlotHoldStatus.ACTIVE)
             .expiresAt(offerExpiresAt)
@@ -388,7 +403,15 @@ public class SlotHoldService {
      */
     @FunctionalInterface
     public interface ConflictChecker {
-        void assertSlotAvailable(Long bingeId, LocalDate date, int startMinute,
+        /**
+         * @param eventTypeId the event type being held — V81 resolves its
+         *        setup/cleanup buffers so a hold reserves the same occupancy
+         *        window the resulting booking will. Without it, a hold could be
+         *        granted inside another booking's turnover time and the booking
+         *        that follows would then be rejected, stranding the customer at
+         *        the end of a countdown.
+         */
+        void assertSlotAvailable(Long bingeId, LocalDate date, Long eventTypeId, int startMinute,
                                  int durationMinutes, Long venueRoomId, String excludeHoldToken);
     }
 }

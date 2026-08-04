@@ -29,6 +29,14 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
 
        Optional<Booking> findByBookingRef(String bookingRef);
 
+       /**
+        * V85: look up a reservation by the originating channel's own reference.
+        * Backed by the partial unique index {@code uk_booking_external_ref}, so this
+        * is both the idempotency check for a redelivered reservation and the lookup
+        * a channel cancellation arrives keyed by.
+        */
+       Optional<Booking> findByExternalSourceAndExternalRef(String externalSource, String externalRef);
+
        Optional<Booking> findByBookingRefAndBingeId(String bookingRef, Long bingeId);
 
     @EntityGraph(attributePaths = {"eventType"})

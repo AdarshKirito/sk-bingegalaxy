@@ -232,6 +232,77 @@ public class Binge {
     /** Maximum concurrent bookings per time slot. Null = unlimited. */
     @Column
     private Integer maxConcurrentBookings;
+
+    // ── V81: turnover buffers ────────────────────────────────────────────
+    /**
+     * Venue-wide default prep time (minutes) reserved BEFORE every booking.
+     * An {@link EventType} may override it; a NULL override there inherits
+     * this value. Together with {@link #defaultCleanupMinutes} it widens a
+     * booking's <em>occupancy window</em> beyond its billable interval:
+     *
+     * <pre>[ start - setup , start + duration + cleanup )</pre>
+     *
+     * Conflict detection compares occupancy windows, so a venue that sets a
+     * 45-minute cleanup can never have two parties sold back-to-back in the
+     * same room. Range 0..240, enforced by a DB CHECK.
+     */
+    @Column(name = "default_setup_minutes", nullable = false)
+    @Builder.Default
+    private int defaultSetupMinutes = 0;
+
+    /**
+     * Venue-wide default reset/turnover time (minutes) reserved AFTER every booking.
+     * See {@link #defaultSetupMinutes}.
+     *
+     * <p>V83 sets the <em>column</em> default to 30 for newly created venues. Venues
+     * that predate V83 keep whatever they had (0 unless configured) — backfilling
+     * them would retroactively widen the occupancy of bookings they have already
+     * sold and could make those overlap each other.
+     */
+    @Column(name = "default_cleanup_minutes", nullable = false)
+    @Builder.Default
+    private int defaultCleanupMinutes = DEFAULT_CLEANUP_MINUTES_FOR_NEW_VENUES;
+
+    /**
+     * The protective turnover default applied to venues created from V83 onward.
+     * A celebration space realistically cannot be reset in under half an hour, and
+     * a venue that genuinely needs none can set 0 explicitly.
+     */
+    public static final int DEFAULT_CLEANUP_MINUTES_FOR_NEW_VENUES = 30;
+
+    /**
+     * When an operator explicitly confirmed this venue's turnover buffers.
+     *
+     * <p>NULL means nobody has decided yet — the admin console prompts, and a venue
+     * should not be published to a sales channel until it is set. <b>Choosing zero
+     * is a valid answer;</b> what this records is that the choice was made, not that
+     * it was non-zero. Distinguishing "deliberately zero" from "never looked at"
+     * is the whole point — without it, a 0 buffer is indistinguishable from an
+     * unconfigured venue.
+     */
+    @Column(name = "turnover_policy_reviewed_at")
+    private LocalDateTime turnoverPolicyReviewedAt;
+
+    /** Admin/super-admin user id who confirmed the turnover policy (audit). */
+    @Column(name = "turnover_policy_reviewed_by")
+    private Long turnoverPolicyReviewedBy;
+
+    // ── V84: booking window (gap G5) ─────────────────────────────────────
+    /**
+     * Minimum lead time in minutes before a booking may start. 0 allows
+     * same-minute booking (the pre-V84 behaviour). Evaluated against the venue's
+     * own clock, so "2 hours' notice" means the same thing in every country.
+     */
+    @Column(name = "min_notice_minutes", nullable = false)
+    @Builder.Default
+    private int minNoticeMinutes = 0;
+
+    /**
+     * How far ahead this venue publishes availability, in days. NULL inherits the
+     * platform-wide {@code app.booking.max-booking-horizon-days} (default 365).
+     */
+    @Column(name = "max_advance_days")
+    private Integer maxAdvanceDays;
 /**
      * Per-binge opening time (local, theater timezone). When null the global
      * {@code app.theater.opening-hour} fallback applies. Booking-service rejects

@@ -1,0 +1,21 @@
+topic	producer(service:file)	consumers(service:listener)	dlt	notes
+booking.created	booking:OutboxEvent relay	payment:BookingEventListener; notification:template listener; booking:EarnEngine(loyalty)	yes	outbox-published
+booking.confirmed	booking:outbox	NONE-IN-REPO	yes	producer-only; notification templates may bind at runtime — verify
+booking.cancelled	booking:outbox	payment:refund saga; notification; booking:WaitlistPromotionListener	yes	outbox-published
+booking.rescheduled	booking:outbox	NONE-IN-REPO	yes	producer-only
+booking.transferred	booking:outbox	NONE-IN-REPO	yes	producer-only
+booking.checked-in	booking:outbox	NONE-IN-REPO	yes	producer-only
+booking.completed	booking:outbox	NONE-IN-REPO	yes	producer-only
+booking.cash-payment	booking:outbox	payment	yes	admin cash-settlement flow
+waitlist.promoted	booking:outbox	notification	yes	invite delivery
+payment.success	payment:outbox	booking:PaymentEventListener(state machine); notification	yes	outbox-published
+payment.failed	payment:outbox	booking; notification	yes	outbox-published
+payment.refunded	payment:outbox	booking; notification	yes	refund confirmation fan-out
+notification.send	various:direct	notification:send listener	yes	generic send channel
+user.registered	auth:direct-publish	NONE-IN-REPO	yes	producer-only; no outbox in auth (EVT-02)
+password.reset	auth:direct-publish	NONE-IN-REPO	yes	producer-only; notification may template at runtime
+user.anonymized	auth:UserAnonymizationService.java:159 (direct)	booking:UserAnonymizedEventListener:31; payment:UserAnonymizedEventListener:26; notification:UserAnonymizedEventListener:39	yes	GDPR fan-out; no outbox in auth (EVT-02)
+room.approved	booking:outbox	NONE-IN-REPO	yes	producer-only
+room.rejected	booking:outbox	NONE-IN-REPO	yes	producer-only
+room.blocked	booking:outbox	availability	yes	block propagation
+room.unblocked	booking:outbox	availability	yes	block propagation

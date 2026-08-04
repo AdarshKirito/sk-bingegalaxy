@@ -14,6 +14,7 @@ import StepEvent from './StepEvent';
 import StepDateTime from './StepDateTime';
 import StepAddOns from './StepAddOns';
 import StepReview from './StepReview';
+import { occupiedHalfHours } from '../../utils/occupancy';
 import '../../pages/BookingPage.css';
 
 export { default as ImagePopup } from './ImagePopup';
@@ -483,14 +484,12 @@ export default function BookingWizard({ isAdmin = false, reinstateData = null, e
     const roomBookedHalfHours = new Set();    // half-hours already taken by the specific selected room
     bookedSlots.forEach(bs => {
       if (editRef && bs.bookingRef === editRef) return;
-      const start = bs.startMinute != null ? bs.startMinute : 0;
-      const dur = bs.durationMinutes != null ? bs.durationMinutes : ((bs.durationHours || 0) * 60);
-      if (!dur) return;
-      for (let m = start; m < start + dur; m += 30) {
-        const idx = Math.floor(m / 30);
+      // V81: block the OCCUPANCY window (setup + billable + cleanup), not just
+      // the billable interval — otherwise the grid offers slots the server rejects.
+      occupiedHalfHours(bs).forEach(idx => {
         overlapCountByHalfHour.set(idx, (overlapCountByHalfHour.get(idx) || 0) + 1);
         if (roomSel && bs.venueRoomId === Number(roomSel)) roomBookedHalfHours.add(idx);
-      }
+      });
     });
     const isHalfHourTaken = (idx) => {
       if (roomSel) return roomBookedHalfHours.has(idx);

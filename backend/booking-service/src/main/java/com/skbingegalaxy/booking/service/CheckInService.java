@@ -323,12 +323,9 @@ public class CheckInService {
         return dto;
     }
 
-    /** Scheduled reservation length in minutes (durationMinutes if set, else hours*60). */
+    /** V82: delegates to the single canonical accessor. */
     private static int effectiveDurationMinutes(Booking booking) {
-        if (booking.getDurationMinutes() != null && booking.getDurationMinutes() > 0) {
-            return booking.getDurationMinutes();
-        }
-        return Math.max(booking.getDurationHours(), 0) * 60;
+        return booking.getScheduledDurationMinutes();
     }
 
     // ── Crypto helpers ───────────────────────────────────────────────────────

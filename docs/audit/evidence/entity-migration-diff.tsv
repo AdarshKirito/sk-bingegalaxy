@@ -1,0 +1,18 @@
+entity	table	service	drift_check	result
+Booking	bookings	booking	columns vs V-chain sampled (status, money minor-units, timestamps, version)	MATCH
+BookingPriceSnapshot	booking_price_snapshots	booking	snapshot fields vs migration	MATCH
+SlotHold	slot_holds	booking	@Version column present in DDL	MATCH
+Payment	payments	payment	status enum + minor-unit columns	MATCH
+Refund	refunds	payment	gateway_refund_id + V14 partial unique	MATCH
+PaymentIntent	payment_intents	payment	durability columns	MATCH
+PaymentConnectedAccount	payment_connected_accounts	payment	Stripe account fields	MATCH
+LoyaltyPointsWallet	loyalty_points_wallets	booking	balance minor-units + lots relation	MATCH
+LoyaltyBingeBinding	loyalty_binge_bindings	booking	ENABLED_LEGACY + legacy_frozen (V21/V22)	MATCH
+LoyaltyCountryEarnConfig	loyalty_country_earn_configs	booking	V80 lock constraint	MATCH
+User	users	auth	anonymization columns (V19-V20)	MATCH
+AuthorityGrant	authority_grants	auth	scope enum + TTL columns	MATCH
+CustomerBingeFreeze	customer_binge_freezes	booking	trigger_type enum	MATCH
+BookingRiskFlag	booking_risk_flags	booking	severity enum	MATCH
+OutboxEvent	outbox_events	booking+payment	relay columns	MATCH
+Notification(@Document)	notifications	notification	TTL index on createdAt declared in code	MATCH
+NOTE	—	—	16 highest-risk entities diffed by hand; remaining 77 rely on ddl-auto validation at boot (DB-02: pin validate to make continuous)	SAMPLED

@@ -81,7 +81,14 @@ public class EventListener {
             meta.put("eventType", event.getEventTypeName());
             meta.put("bookingDate", event.getBookingDate() != null ? event.getBookingDate().toString() : "");
             meta.put("startTime", event.getStartTime() != null ? event.getStartTime().toString() : "");
+            // durationHours is produced upstream as an integer-truncated durMin/60, so a
+            // 90-minute booking arrives as 1. Kept for wire compatibility with templates
+            // that already reference it; durationMinutes is the accurate value and is what
+            // new templates should use.
             meta.put("durationHours", event.getDurationHours());
+            meta.put("durationMinutes", event.getDurationMinutes() != null
+                ? event.getDurationMinutes()
+                : event.getDurationHours() * 60);
             meta.put("totalAmount", event.getTotalAmount() != null ? event.getTotalAmount().toPlainString() : "0");
             NotificationChannel channel = channelRouter.resolveChannel(
                     event.getCustomerEmail(), event.getCustomerPhone(), "BOOKING_CREATED", meta);
