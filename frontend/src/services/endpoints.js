@@ -331,6 +331,9 @@ export const siteContentService = {
 
 export const adminService = {
   getDashboardStats: () => api.get('/bookings/admin/dashboard-stats', { params: { clientDate: clientDate() } }),
+  // Channel attribution (distribution G-B). Scoped to the selected venue server-side.
+  getAttributionPerformance: (from, to) =>
+    api.get('/bookings/admin/attribution', { params: { from, to } }),
   getAllBookings: (page, size) => api.get('/bookings/admin', { params: { page, size } }),
   getTodayBookings: (page, size) => api.get('/bookings/admin/today', { params: { page, size, clientDate: clientDate() } }),
   getUpcomingBookings: (page, size) => api.get('/bookings/admin/upcoming', { params: { page, size, clientDate: clientDate() } }),

@@ -34,6 +34,7 @@ import {
   FiDollarSign,
   FiGlobe,
   FiMail,
+  FiTrendingUp,
 } from 'react-icons/fi';
 import ThemeToggle from './ThemeToggle';
 import { useModuleAccess } from '../hooks/useModuleAccess';
@@ -139,6 +140,11 @@ export default function Navbar() {
     { to: '/admin/failed-refunds', icon: <FiDollarSign />, label: t('nav.failed_refunds', 'Failed Refunds'), module: 'FAILED_REFUNDS' },
     { to: '/admin/users-config', icon: <FiUsers />, label: t('nav.users'), module: 'USERS' },
     { to: '/admin/reports', icon: <FiBarChart2 />, label: t('nav.reports', 'Reports'), module: 'REPORTS' },
+    // Deliberately under the existing REPORTS module rather than a new one: attribution
+    // IS reporting, so a venue with reporting disabled must not see it either. Inventing
+    // a module would also mean seeding the V71 permission matrix, and an unseeded module
+    // fails closed — the link would silently never appear for anyone.
+    { to: '/admin/attribution', icon: <FiTrendingUp />, label: t('nav.attribution', 'Channels'), module: 'REPORTS' },
     { to: '/admin/about-binge', icon: <FiInfo />, label: t('nav.binge_about', 'About') },
   ].filter((l) => can(l.module));
 
