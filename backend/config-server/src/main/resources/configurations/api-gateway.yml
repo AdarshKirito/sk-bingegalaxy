@@ -131,6 +131,24 @@ spring:
                 name: paymentServiceCB
                 fallbackUri: forward:/fallback
 
+        # Distribution (third-party channels). Admin-authenticated only, so it is
+        # deliberately absent from BOTH gateway allow-lists: JwtAuthenticationFilter
+        # PUBLIC_PATHS (these require a token) and CsrfProtectionFilter WEBHOOK_PATHS
+        # (no inbound provider webhooks exist yet — when one does it needs an EXACT
+        # entry there, since that list does not prefix-match).
+        # /api/v1/distribution/internal/** stays unreachable: the gateway 404s any
+        # /internal/** segment and strips X-Internal-Secret before forwarding.
+        - id: distribution-service
+          uri: lb://distribution-service
+          predicates:
+            - Path=/api/v1/distribution/**
+          filters:
+            - StripPrefix=0
+            - name: CircuitBreaker
+              args:
+                name: distributionServiceCB
+                fallbackUri: forward:/fallback
+
         - id: notification-service
           uri: lb://notification-service
           predicates:

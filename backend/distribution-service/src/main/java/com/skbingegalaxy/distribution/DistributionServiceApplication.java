@@ -44,7 +44,24 @@ import org.springframework.cloud.openfeign.EnableFeignClients;
  * change that adds ShedLock and the first job — not before, so the annotation cannot
  * sit here inviting an unguarded `@Scheduled`.
  */
-@SpringBootApplication
+/*
+ * scanBasePackages, not a bare @SpringBootApplication.
+ *
+ * Spring scans only the application's own package by default, so common-lib's
+ * @RestControllerAdvice GlobalExceptionHandler was never registered here. Every
+ * BusinessException escaped to the servlet container: "This venue already has a sandbox
+ * connection" — a perfectly good 400 — came back as a bare 403 with no body, telling an
+ * operator they lacked permission when the truth was that the thing already existed.
+ *
+ * Nothing catches this in a unit test, because unit tests call the service directly and
+ * never cross the MVC boundary. Every other service in this repo carries the same list;
+ * this one was the exception.
+ */
+@SpringBootApplication(scanBasePackages = {
+    "com.skbingegalaxy.distribution",
+    "com.skbingegalaxy.common.exception",
+    "com.skbingegalaxy.common.config"
+})
 @EnableDiscoveryClient
 @EnableFeignClients
 public class DistributionServiceApplication {
