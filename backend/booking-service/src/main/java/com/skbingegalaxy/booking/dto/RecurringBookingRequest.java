@@ -50,6 +50,28 @@ public class RecurringBookingRequest {
     @Max(value = 52, message = "Maximum 52 occurrences")
     private int occurrences;
 
+    /*
+     * Attribution (distribution G-B), mirroring CreateBookingRequest.
+     *
+     * A recurring series is a SECOND write path into bookings, and it previously built
+     * its rows without these fields — so a customer arriving from a Google deep link who
+     * chose "repeat weekly" produced bookings with no attribution at all. The channel
+     * would then under-report by exactly the customers who committed hardest to it,
+     * which is the worst possible direction for a number meant to justify building it.
+     *
+     * Structurally the same mistake as the binge grace-period defect: a field that one
+     * write path sets and another silently does not.
+     *
+     * Deliberately NOT @Size-constrained, for the same reason as CreateBookingRequest —
+     * the controller bean-validates, so a bound here would reject a whole series of real
+     * bookings over a marketing parameter the customer never typed.
+     */
+    private String attributionSource;
+
+    private String attributionRef;
+
+    private java.time.LocalDateTime attributionCapturedAt;
+
     public enum RecurrencePattern {
         WEEKLY,
         BIWEEKLY,

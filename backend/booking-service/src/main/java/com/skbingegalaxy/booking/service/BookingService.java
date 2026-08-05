@@ -1753,8 +1753,21 @@ public class BookingService {
                 }
                 String taxBreakdownRec = taxResultRec.getBreakdownJson();
 
+                // Attribution, resolved here — after this occurrence's pricing and tax
+                // are final, exactly as in createBooking. Every occurrence in the series
+                // carries the same referral, because one click produced all of them.
+                com.skbingegalaxy.booking.domain.BookingAttribution recAttribution =
+                    com.skbingegalaxy.booking.domain.BookingAttribution.of(
+                        request.getAttributionSource(),
+                        request.getAttributionRef(),
+                        request.getAttributionCapturedAt(),
+                        LocalDateTime.now(ZoneOffset.UTC));
+
                 Booking booking = Booking.builder()
                     .bookingRef(generateBookingRef())
+                    .attributionSource(recAttribution == null ? null : recAttribution.source())
+                    .attributionRef(recAttribution == null ? null : recAttribution.ref())
+                    .attributionCapturedAt(recAttribution == null ? null : recAttribution.capturedAt())
                     .bingeId(bingeId)
                     .customerId(customerId)
                     .customerName(customerName)

@@ -147,7 +147,11 @@ export const bookingService = {
   // Invoice PDF download — server returns application/pdf, so we ask axios
   // for a Blob and the caller drives the file-save / preview UX.
   downloadInvoice: (ref) => api.get(`/bookings/${ref}/invoice`, { responseType: 'blob' }),
-  createRecurringBookings: (data) => api.post('/bookings/recurring', data),
+  // Attribution merged here too. A recurring series is a second write path, and one
+  // click produced every occurrence in it — omitting it here would under-report the
+  // channel by exactly the customers who committed hardest to it.
+  createRecurringBookings: (data) =>
+    api.post('/bookings/recurring', { ...attributionPayload(), ...data }),
   getRecurringGroup: (groupId) => api.get(`/bookings/recurring/${groupId}`),
   getCustomerReview: (ref) => api.get(`/bookings/${ref}/reviews/customer`),
   submitCustomerReview: (ref, data) => api.post(`/bookings/${ref}/reviews/customer`, data),

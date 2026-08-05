@@ -77,6 +77,32 @@ class CreateBookingRequestAttributionValidationTest {
         assertThat(attribution.ref()).hasSize(BookingAttribution.MAX_REF_LENGTH);
     }
 
+    /**
+     * The recurring series is the SECOND write path into bookings, and it originally
+     * carried no attribution at all — the same shape of defect as the binge
+     * grace-period bug: one path sets a field, another silently does not. It needs the
+     * identical exemption, or an over-long referral would reject an entire series of
+     * real bookings.
+     */
+    @Test
+    @DisplayName("the recurring request carries attribution and is equally unconstrained")
+    void recurringRequestMirrorsTheSameRules() {
+        RecurringBookingRequest recurring = new RecurringBookingRequest();
+        recurring.setEventTypeId(1L);
+        recurring.setStartDate(LocalDate.now().plusDays(3));
+        recurring.setStartTime(LocalTime.of(18, 0));
+        recurring.setDurationMinutes(120);
+        recurring.setNumberOfGuests(2);
+        recurring.setPattern(RecurringBookingRequest.RecurrencePattern.WEEKLY);
+        recurring.setOccurrences(4);
+        recurring.setAttributionSource("x".repeat(500));
+        recurring.setAttributionRef("y".repeat(2000));
+
+        assertThat(validator.validate(recurring))
+            .as("one click produced the whole series; a long referral must not reject it")
+            .isEmpty();
+    }
+
     @Test
     @DisplayName("constraints on the REST of the request still apply")
     void otherConstraintsAreUnaffected() {
