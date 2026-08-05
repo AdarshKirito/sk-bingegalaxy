@@ -334,6 +334,19 @@ export const adminService = {
   // Channel attribution (distribution G-B). Scoped to the selected venue server-side.
   getAttributionPerformance: (from, to) =>
     api.get('/bookings/admin/attribution', { params: { from, to } }),
+
+  // ── Distribution connections (slice 3) ────────────────────────────────────
+  // distribution-service, reached through the gateway's /api/v1/distribution route.
+  // The venue comes from the X-Binge-Id header the gateway attaches, never from here —
+  // a client-supplied venue id would let one venue pause a competitor's sales channel.
+  getDistributionProviders: () => api.get('/distribution/providers'),
+  getDistributionConnections: () => api.get('/distribution/connections'),
+  createDistributionConnection: (data) => api.post('/distribution/connections', data),
+  pauseDistributionConnection: (id, reason) =>
+    api.post(`/distribution/connections/${id}/pause`, null, { params: { reason } }),
+  resumeDistributionConnection: (id) => api.post(`/distribution/connections/${id}/resume`),
+  revokeDistributionConnection: (id, reason) =>
+    api.post(`/distribution/connections/${id}/revoke`, null, { params: { reason } }),
   getAllBookings: (page, size) => api.get('/bookings/admin', { params: { page, size } }),
   getTodayBookings: (page, size) => api.get('/bookings/admin/today', { params: { page, size, clientDate: clientDate() } }),
   getUpcomingBookings: (page, size) => api.get('/bookings/admin/upcoming', { params: { page, size, clientDate: clientDate() } }),

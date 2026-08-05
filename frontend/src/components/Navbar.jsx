@@ -35,6 +35,7 @@ import {
   FiGlobe,
   FiMail,
   FiTrendingUp,
+  FiLink,
 } from 'react-icons/fi';
 import ThemeToggle from './ThemeToggle';
 import { useModuleAccess } from '../hooks/useModuleAccess';
@@ -145,6 +146,10 @@ export default function Navbar() {
     // a module would also mean seeding the V71 permission matrix, and an unseeded module
     // fails closed — the link would silently never appear for anyone.
     { to: '/admin/attribution', icon: <FiTrendingUp />, label: t('nav.attribution', 'Channels'), module: 'REPORTS' },
+    // Distribution connections. Under REPORTS for the same reason as attribution:
+    // a new module would need V71 permission-matrix seeding and fails closed unseeded,
+    // so the link would silently never appear for anyone.
+    { to: '/admin/distribution', icon: <FiLink />, label: t('nav.distribution', 'Distribution'), module: 'REPORTS' },
     { to: '/admin/about-binge', icon: <FiInfo />, label: t('nav.binge_about', 'About') },
   ].filter((l) => can(l.module));
 
