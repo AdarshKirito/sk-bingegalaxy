@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { adminService } from '../services/endpoints';
 import { toast } from 'react-toastify';
-import { FiTrendingUp, FiAlertTriangle, FiInfo } from 'react-icons/fi';
+import { FiTrendingUp, FiAlertTriangle } from 'react-icons/fi';
 import './AdminPages.css';
 import { venueMoney } from '../utils/venueLocale';
 
@@ -12,6 +12,11 @@ import { venueMoney } from '../utils/venueLocale';
  * stored correctly, readable only by calling the API by hand. That made the Google
  * Things to Do business case exactly as unprovable as before the feature was built,
  * which is the whole reason attribution was sequenced ahead of any connector.
+ *
+ * Styling follows the `.adm-*` vocabulary used by AdminReports, its closest sibling
+ * (a date-range analytics page). This repo has TWO admin CSS systems and the other one
+ * (`.admin-card`, `.admin-header`) has no definitions for most of what a page like this
+ * needs -- using it renders a structurally correct page that looks broken.
  *
  * Two presentation rules the numbers depend on:
  *
@@ -28,6 +33,9 @@ const daysAgoISO = (n) => new Date(Date.now() - n * 86400000).toISOString().slic
 
 /** Server caps a single query at 366 days; mirror it so the UI cannot ask for a 400. */
 const MAX_RANGE_DAYS = 366;
+
+/** Above this share of attempts, a source's cancellations are worth flagging. */
+const HIGH_CANCEL_RATE = 0.3;
 
 const RANGES = [
   { label: 'Last 7 days', days: 7 },
@@ -49,26 +57,25 @@ const prettySource = (s) =>
     .join(' ');
 
 export default function AdminAttribution() {
-  const [from, setFrom] = useState(daysAgoISO(30));
-  const [to, setTo] = useState(todayISO());
+  const [fromDate, setFromDate] = useState(daysAgoISO(30));
+  const [toDate, setToDate] = useState(todayISO());
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
-  const load = useCallback(async (fromDate, toDate) => {
-    if (!fromDate || !toDate) return;
-    if (new Date(toDate) < new Date(fromDate)) {
-      toast.error('“To” cannot be earlier than “From”.');
+  const load = useCallback(async (from, to) => {
+    if (!from || !to) return;
+    if (new Date(to) < new Date(from)) {
+      toast.error('"To" cannot be earlier than "From".');
       return;
     }
-    const spanDays = (new Date(toDate) - new Date(fromDate)) / 86400000;
-    if (spanDays > MAX_RANGE_DAYS) {
+    if ((new Date(to) - new Date(from)) / 86400000 > MAX_RANGE_DAYS) {
       toast.error(`Choose a range of ${MAX_RANGE_DAYS} days or less.`);
       return;
     }
     setLoading(true);
     try {
-      const res = await adminService.getAttributionPerformance(fromDate, toDate);
+      const res = await adminService.getAttributionPerformance(from, to);
       setRows(res.data?.data || []);
       setLoaded(true);
     } catch (e) {
@@ -78,13 +85,13 @@ export default function AdminAttribution() {
     }
   }, []);
 
-  useEffect(() => { load(from, to); }, [load]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(fromDate, toDate); }, [load]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const applyRange = (days) => {
     const f = daysAgoISO(days);
     const t = todayISO();
-    setFrom(f);
-    setTo(t);
+    setFromDate(f);
+    setToDate(t);
     load(f, t);
   };
 
@@ -92,29 +99,33 @@ export default function AdminAttribution() {
   const totalCancelled = rows.reduce((s, r) => s + (r.cancelled || 0), 0);
 
   return (
-    <div className="admin-page">
-      <div className="admin-header">
-        <h1><FiTrendingUp /> Channel attribution</h1>
-        <p className="admin-subtitle">
-          Bookings that arrived through a referral link, by source.
-        </p>
+    <div className="container adm-shell">
+      <div className="adm-header">
+        <div className="adm-header-copy">
+          <span className="adm-kicker"><FiTrendingUp /> Analytics</span>
+          <h1>Channel attribution</h1>
+          <p>Bookings that arrived through a referral link, grouped by source.</p>
+        </div>
       </div>
 
-      <div className="admin-card" style={{ marginBottom: '1rem' }}>
-        <div className="form-row">
-          <label>
-            From
-            <input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
-          </label>
-          <label>
-            To
-            <input type="date" value={to} min={from} max={todayISO()} onChange={(e) => setTo(e.target.value)} />
-          </label>
-          <button className="btn btn-primary" onClick={() => load(from, to)} disabled={loading}>
+      <div className="adm-form">
+        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div className="input-group" style={{ margin: 0 }}>
+            <label htmlFor="attr-from">From</label>
+            <input id="attr-from" type="date" value={fromDate} max={toDate}
+                   onChange={(e) => setFromDate(e.target.value)} />
+          </div>
+          <div className="input-group" style={{ margin: 0 }}>
+            <label htmlFor="attr-to">To</label>
+            <input id="attr-to" type="date" value={toDate} min={fromDate} max={todayISO()}
+                   onChange={(e) => setToDate(e.target.value)} />
+          </div>
+          <button className="btn btn-primary" onClick={() => load(fromDate, toDate)}
+                  disabled={loading || !fromDate || !toDate}>
             {loading ? 'Loading…' : 'Apply'}
           </button>
         </div>
-        <div className="row-actions" style={{ marginTop: '0.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
           {RANGES.map((r) => (
             <button key={r.days} className="btn btn-secondary btn-sm" onClick={() => applyRange(r.days)}>
               {r.label}
@@ -123,29 +134,33 @@ export default function AdminAttribution() {
         </div>
       </div>
 
-      {loaded && rows.length === 0 && (
-        <div className="admin-card admin-empty">
-          <FiInfo aria-hidden="true" />
+      {loading && <div className="loading"><div className="spinner"></div></div>}
+
+      {!loading && loaded && rows.length === 0 && (
+        <div className="adm-empty">
+          <span className="adm-empty-icon"><FiTrendingUp /></span>
           <h3>No referred bookings in this period</h3>
-          {/* Said plainly, because "no data" here is ambiguous and the ambiguity
-              matters: it may mean no referrals, or that no channel is live yet. */}
+          {/* Said plainly, because "no data" here is ambiguous and the ambiguity is the
+              question the screen exists to answer: no referrals, or no channel live. */}
           <p>
-            This is expected until a referral channel is live. Direct bookings are not
-            counted here — only bookings that arrived through a tracked link.
+            Expected until a referral channel is live. Direct bookings are not counted
+            here — only bookings that arrived through a tracked link.
           </p>
         </div>
       )}
 
-      {rows.length > 0 && (
+      {!loading && rows.length > 0 && (
         <>
-          <div className="admin-card" style={{ marginBottom: '1rem' }}>
+          <div className="adm-card" style={{ padding: '0.75rem 1.15rem', marginBottom: '1rem' }}>
             <strong>{totalConversions}</strong> referred booking{totalConversions === 1 ? '' : 's'}
             {totalCancelled > 0 && (
-              <span className="muted"> · {totalCancelled} cancelled or no-show</span>
+              <span className="adm-hint" style={{ marginLeft: '0.5rem' }}>
+                · {totalCancelled} cancelled or no-show
+              </span>
             )}
           </div>
 
-          <div className="admin-card" style={{ overflowX: 'auto' }}>
+          <div className="admin-table-wrap">
             <table className="admin-table">
               <thead>
                 <tr>
@@ -158,20 +173,21 @@ export default function AdminAttribution() {
               <tbody>
                 {rows.map((r) => {
                   const attempts = (r.bookings || 0) + (r.cancelled || 0);
-                  const cancelRate = attempts ? (r.cancelled / attempts) : 0;
+                  const cancelRate = attempts ? r.cancelled / attempts : 0;
                   return (
                     <tr key={r.source}>
                       <td>
                         {prettySource(r.source)}
-                        <div className="muted" style={{ fontSize: '0.8em' }}>{r.source}</div>
+                        <div className="adm-hint" style={{ fontSize: '0.8em' }}>{r.source}</div>
                       </td>
                       <td style={{ textAlign: 'right' }}>{r.bookings}</td>
                       <td style={{ textAlign: 'right' }}>
                         {r.cancelled}
                         {/* Surfaced rather than filtered: a third of a source's bookings
                             falling over is the most useful thing this table can say. */}
-                        {cancelRate > 0.3 && (
-                          <span title="High cancellation rate for this source" style={{ marginLeft: 4 }}>
+                        {cancelRate > HIGH_CANCEL_RATE && (
+                          <span title="High cancellation rate for this source"
+                                style={{ marginLeft: 4, verticalAlign: 'middle' }}>
                             <FiAlertTriangle aria-label="High cancellation rate" />
                           </span>
                         )}
@@ -182,11 +198,12 @@ export default function AdminAttribution() {
                 })}
               </tbody>
             </table>
-            <p className="muted" style={{ marginTop: '0.75rem', fontSize: '0.85em' }}>
-              Revenue counts confirmed, checked-in and completed bookings only, in this
-              venue&apos;s currency. Pending bookings are excluded until they are paid.
-            </p>
           </div>
+
+          <p className="adm-table-note">
+            Revenue counts confirmed, checked-in and completed bookings only, in this
+            venue&apos;s currency. Pending bookings are excluded until they are paid.
+          </p>
         </>
       )}
     </div>
