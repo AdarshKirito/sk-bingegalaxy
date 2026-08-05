@@ -71,10 +71,23 @@ public class CreateBookingRequest {
      * endpoint, and the columns are VARCHAR(64)/VARCHAR(128), so an unbounded value
      * would be a write-amplification vector rather than merely a bad label.
      */
-    @Size(max = 64, message = "Attribution source too long")
+    /*
+     * DELIBERATELY NOT @Size-CONSTRAINED, unlike every other string on this request.
+     *
+     * The controller takes `@Valid @RequestBody`, so a @Size violation rejects the WHOLE
+     * booking with 400 before any service code runs. On these two fields that would mean
+     * an over-long utm_source -- data the CUSTOMER never typed and cannot fix -- killing
+     * a real sale at the final step, on the very channel this feature exists to measure.
+     * That contradicts the rule the rest of this feature is built on: losing an analytics
+     * dimension is acceptable, losing the sale is not.
+     *
+     * Bounded elsewhere, twice: BookingAttribution truncates to the column widths before
+     * persistence, and the request as a whole is already capped by Tomcat's
+     * max-http-request-header-size / max-http-form-post-size. So dropping the annotation
+     * removes a failure mode without opening an unbounded write.
+     */
     private String attributionSource;
 
-    @Size(max = 128, message = "Attribution reference too long")
     private String attributionRef;
 
     /**

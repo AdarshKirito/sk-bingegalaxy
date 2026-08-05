@@ -561,6 +561,26 @@ public class AdminBookingController {
         return ResponseEntity.ok(ApiResponse.ok("Event category deleted", null));
     }
 
+    /**
+     * Conversions per marketing source for the selected venue (distribution G-B).
+     *
+     * <p>Lives under {@code /api/v1/bookings/admin/**}, which the gateway already routes
+     * and authenticates, so this adds a read surface without widening the attack surface
+     * — no new gateway allow-list entry, and therefore no chance of the CSRF/JWT
+     * allow-list mismatch that has bitten this codebase before.
+     *
+     * <p>Any admin of the selected venue may read it; the multi-tenant boundary is the
+     * selected binge, enforced in the service. This is venue-level marketing data, not
+     * platform data, so it is deliberately NOT super-admin gated.
+     */
+    @GetMapping("/attribution")
+    public ResponseEntity<ApiResponse<java.util.List<AttributionPerformanceDto>>> attributionPerformance(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return ResponseEntity.ok(
+            ApiResponse.ok(bookingService.getAttributionPerformance(from, to)));
+    }
+
     // SUPER_ADMIN-only global event categories (visible to all binges)
     @GetMapping("/event-categories/global")
     public ResponseEntity<ApiResponse<java.util.List<CategoryDto>>> listGlobalEventCategories(

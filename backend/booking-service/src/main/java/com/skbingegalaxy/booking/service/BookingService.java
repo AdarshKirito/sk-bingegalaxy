@@ -3873,6 +3873,55 @@ public class BookingService {
         return toEventTypeDtoList(eventTypeRepository.findByBingeId(bid));
     }
 
+    /** Widest reporting range a single call may request. */
+    public static final int MAX_ATTRIBUTION_RANGE_DAYS = 366;
+
+    /**
+     * Conversions per marketing source for the selected venue (distribution G-B).
+     *
+     * <p>Without this the attribution captured at checkout is write-only, and the Google
+     * Things to Do business case stays unprovable — which is the whole reason slice 2
+     * came before any connector.
+     *
+     * <p>Scoped through {@code requireSelectedBinge}, so it inherits the same
+     * multi-tenant boundary as every other admin read. A reporting endpoint is exactly
+     * where a missing scope check goes unnoticed: it returns plausible numbers either
+     * way, and the numbers would silently be someone else's.
+     */
+    public List<com.skbingegalaxy.booking.dto.AttributionPerformanceDto> getAttributionPerformance(
+            LocalDate from, LocalDate to) {
+        Long bid = requireSelectedBinge("viewing channel attribution");
+
+        if (from == null || to == null) {
+            throw new BusinessException("Both 'from' and 'to' dates are required");
+        }
+        if (to.isBefore(from)) {
+            throw new BusinessException("'to' cannot be earlier than 'from'");
+        }
+        // Bounded because this is an aggregate over a table that only grows, and an
+        // unbounded range is a cheap way for one authenticated admin to make the
+        // database do unbounded work.
+        if (java.time.temporal.ChronoUnit.DAYS.between(from, to) > MAX_ATTRIBUTION_RANGE_DAYS) {
+            throw new BusinessException(
+                "Range too wide — request at most " + MAX_ATTRIBUTION_RANGE_DAYS + " days");
+        }
+
+        String currency = bingeRepository.findById(bid)
+            .map(Binge::getCurrency)
+            .filter(c -> c != null && !c.isBlank())
+            .orElse(com.skbingegalaxy.booking.util.CountryCurrency.BASE);
+
+        return bookingRepository.aggregateAttributionPerformance(bid, from, to).stream()
+            .map(row -> com.skbingegalaxy.booking.dto.AttributionPerformanceDto.builder()
+                .source((String) row[0])
+                .bookings(((Number) row[1]).longValue())
+                .cancelled(((Number) row[2]).longValue())
+                .revenue(row[3] == null ? BigDecimal.ZERO : (BigDecimal) row[3])
+                .currency(currency)
+                .build())
+            .toList();
+    }
+
     @Transactional
     @org.springframework.cache.annotation.CacheEvict(value = "eventTypes", allEntries = true)
     public EventTypeDto createEventType(EventTypeSaveRequest req) {

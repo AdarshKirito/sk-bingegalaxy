@@ -472,4 +472,46 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
          + "                 com.skbingegalaxy.common.enums.BookingStatus.CHECKED_IN, "
          + "                 com.skbingegalaxy.common.enums.BookingStatus.COMPLETED)")
     long sumActiveBookedMinutes(@Param("bingeId") Long bingeId, @Param("date") java.time.LocalDate date);
+
+    /**
+     * Conversions per marketing source for one venue over a date range (distribution
+     * G-B). Aggregated in the database rather than by loading bookings and grouping in
+     * Java — this is a reporting query over a table that only grows, and the partial
+     * index {@code idx_booking_attribution_source_date} exists precisely to serve it.
+     *
+     * <p>Realised conversions and cancellations are counted in the SAME pass with
+     * conditional aggregation, so the two numbers are guaranteed to describe one
+     * consistent snapshot. Two separate queries could straddle a status change and
+     * report a booking as neither, or as both.
+     *
+     * <p>PENDING is deliberately in neither bucket: it has not converted and has not
+     * failed. Counting it as a conversion would credit a channel for a booking that may
+     * never be paid for.
+     */
+    @Query("""
+           SELECT b.attributionSource,
+                  SUM(CASE WHEN b.status IN (
+                        com.skbingegalaxy.common.enums.BookingStatus.CONFIRMED,
+                        com.skbingegalaxy.common.enums.BookingStatus.CHECKED_IN,
+                        com.skbingegalaxy.common.enums.BookingStatus.COMPLETED)
+                      THEN 1L ELSE 0L END),
+                  SUM(CASE WHEN b.status IN (
+                        com.skbingegalaxy.common.enums.BookingStatus.CANCELLED,
+                        com.skbingegalaxy.common.enums.BookingStatus.NO_SHOW)
+                      THEN 1L ELSE 0L END),
+                  COALESCE(SUM(CASE WHEN b.status IN (
+                        com.skbingegalaxy.common.enums.BookingStatus.CONFIRMED,
+                        com.skbingegalaxy.common.enums.BookingStatus.CHECKED_IN,
+                        com.skbingegalaxy.common.enums.BookingStatus.COMPLETED)
+                      THEN b.totalAmount ELSE 0 END), 0)
+           FROM Booking b
+           WHERE b.bingeId = :bingeId
+             AND b.attributionSource IS NOT NULL
+             AND b.bookingDate BETWEEN :from AND :to
+           GROUP BY b.attributionSource
+           ORDER BY 2 DESC, 1 ASC
+           """)
+    List<Object[]> aggregateAttributionPerformance(@Param("bingeId") Long bingeId,
+                                                   @Param("from") java.time.LocalDate from,
+                                                   @Param("to") java.time.LocalDate to);
 }
