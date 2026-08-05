@@ -52,6 +52,17 @@ public class Destination {
     @Builder.Default
     private boolean deliversReservations = true;
 
+    /**
+     * Seeded FALSE for every real destination; only the simulator ships active.
+     *
+     * <p><b>Nothing checks this yet, and that is a latent gap, not a decision.</b> There
+     * is currently no endpoint that enables a destination on a connection, so it is
+     * unreachable — but the moment one exists it MUST refuse an inactive destination,
+     * exactly as {@code ConnectionService.create} refuses an inactive provider. Skipping
+     * it would let a venue publish to a marketplace the platform has not turned on,
+     * which is the same class of bug as publishing to a destination the venue never
+     * enabled (fixed in ListingService.publish).
+     */
     @Column(nullable = false)
     @Builder.Default
     private boolean active = true;

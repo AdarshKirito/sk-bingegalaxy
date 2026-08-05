@@ -347,6 +347,12 @@ export const adminService = {
   resumeDistributionConnection: (id) => api.post(`/distribution/connections/${id}/resume`),
   revokeDistributionConnection: (id, reason) =>
     api.post(`/distribution/connections/${id}/revoke`, null, { params: { reason } }),
+  // Listings (slice 4). Readiness is per (listing × destination), because every
+  // destination demands different content — a listing that satisfies Viator may be
+  // incomplete for GetYourGuide.
+  getDistributionListings: () => api.get('/distribution/listings'),
+  evaluateDistributionListing: (data) => api.post('/distribution/listings/evaluate', data),
+  publishDistributionListing: (id) => api.post(`/distribution/listings/${id}/publish`),
   getAllBookings: (page, size) => api.get('/bookings/admin', { params: { page, size } }),
   getTodayBookings: (page, size) => api.get('/bookings/admin/today', { params: { page, size, clientDate: clientDate() } }),
   getUpcomingBookings: (page, size) => api.get('/bookings/admin/upcoming', { params: { page, size, clientDate: clientDate() } }),

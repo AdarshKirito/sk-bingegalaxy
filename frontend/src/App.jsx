@@ -46,6 +46,7 @@ const AdminEventTypes = lazy(() => import('./pages/AdminEventTypes'));
 const AdminReports = lazy(() => import('./pages/AdminReports'));
 const AdminAttribution = lazy(() => import('./pages/AdminAttribution'));
 const AdminDistribution = lazy(() => import('./pages/AdminDistribution'));
+const AdminListings = lazy(() => import('./pages/AdminListings'));
 const AdminBookingCreate = lazy(() => import('./pages/AdminBookingCreate'));
 const AdminTermsEditor = lazy(() => import('./pages/AdminTermsEditor'));
 const Terms = lazy(() => import('./pages/Terms'));
@@ -289,6 +290,8 @@ function AppFrame() {
           {/* Distribution connections (slice 3). Venue-scoped: the server takes the
               venue from X-Binge-Id and 400s without one. */}
           <Route path="/admin/distribution" element={<AdminBingeRequired><AdminDistribution /></AdminBingeRequired>} />
+          {/* Listing readiness per destination (slice 4). Venue-scoped like the rest. */}
+          <Route path="/admin/listings" element={<AdminBingeRequired><AdminListings /></AdminBingeRequired>} />
           <Route path="/admin/book" element={<AdminBingeRequired><AdminBookingCreate /></AdminBingeRequired>} />
           <Route path="/admin/users-config" element={<AdminBingeRequired><AdminUsersConfig /></AdminBingeRequired>} />
           <Route path="/admin/users-config/:userId" element={<AdminBingeRequired><AdminUsersConfig /></AdminBingeRequired>} />

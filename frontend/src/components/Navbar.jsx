@@ -36,6 +36,7 @@ import {
   FiMail,
   FiTrendingUp,
   FiLink,
+  FiUploadCloud,
 } from 'react-icons/fi';
 import ThemeToggle from './ThemeToggle';
 import { useModuleAccess } from '../hooks/useModuleAccess';
@@ -150,6 +151,7 @@ export default function Navbar() {
     // a new module would need V71 permission-matrix seeding and fails closed unseeded,
     // so the link would silently never appear for anyone.
     { to: '/admin/distribution', icon: <FiLink />, label: t('nav.distribution', 'Distribution'), module: 'REPORTS' },
+    { to: '/admin/listings', icon: <FiUploadCloud />, label: t('nav.listings', 'Listings'), module: 'REPORTS' },
     { to: '/admin/about-binge', icon: <FiInfo />, label: t('nav.binge_about', 'About') },
   ].filter((l) => can(l.module));
 
