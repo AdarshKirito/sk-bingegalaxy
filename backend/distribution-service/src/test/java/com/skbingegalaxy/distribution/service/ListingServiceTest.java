@@ -124,7 +124,7 @@ class ListingServiceTest {
         when(listingRepository.findById(9L)).thenReturn(Optional.of(ListingMapping.builder()
             .id(9L).bingeId(1L).connectionDestinationId(3L).readinessPct(100).build()));
         when(connectionDestinationRepository.findById(3L)).thenReturn(Optional.of(
-            ConnectionDestination.builder().id(3L).connectionId(7L).destinationCode("VIATOR").build()));
+            ConnectionDestination.builder().id(3L).connectionId(7L).destinationCode("VIATOR").enabled(true).build()));
         when(connectionRepository.findById(7L)).thenReturn(Optional.of(
             Connection.builder().id(7L).bingeId(1L)
                 .status(Connection.ConnectionStatus.PAUSED).build()));
@@ -142,7 +142,7 @@ class ListingServiceTest {
             .id(9L).bingeId(1L).connectionDestinationId(3L).readinessPct(100).build()));
         when(connectionDestinationRepository.findById(3L)).thenReturn(Optional.of(
             ConnectionDestination.builder().id(3L).connectionId(7L)
-                .destinationCode("VIATOR").stopSell(true).build()));
+                .destinationCode("VIATOR").enabled(true).stopSell(true).build()));
         when(connectionRepository.findById(7L)).thenReturn(Optional.of(
             Connection.builder().id(7L).bingeId(1L)
                 .status(Connection.ConnectionStatus.ACTIVE).build()));
@@ -153,13 +153,34 @@ class ListingServiceTest {
     }
 
     @Test
+    @DisplayName("a destination the venue never enabled cannot be published to")
+    void disabledDestinationBlocksPublishing() {
+        when(listingRepository.findById(9L)).thenReturn(Optional.of(ListingMapping.builder()
+            .id(9L).bingeId(1L).connectionDestinationId(3L).readinessPct(100).build()));
+        // enabled defaults to FALSE — distribution is opt-in at every level, and this is
+        // the level the venue opts in at. Every other test in this file had to be
+        // corrected to set it, because they were publishing to a destination nobody had
+        // turned on and passing anyway.
+        when(connectionDestinationRepository.findById(3L)).thenReturn(Optional.of(
+            ConnectionDestination.builder().id(3L).connectionId(7L)
+                .destinationCode("VIATOR").build()));
+        when(connectionRepository.findById(7L)).thenReturn(Optional.of(
+            Connection.builder().id(7L).bingeId(1L)
+                .status(Connection.ConnectionStatus.ACTIVE).build()));
+
+        assertThatThrownBy(() -> service().publish(1L, 9L))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("not enabled");
+    }
+
+    @Test
     @DisplayName("a fully ready listing on an active connection publishes")
     void publishesWhenEverythingIsRight() {
         when(listingRepository.findById(9L)).thenReturn(Optional.of(ListingMapping.builder()
             .id(9L).bingeId(1L).connectionDestinationId(3L).readinessPct(100)
             .publishState(ListingMapping.PublishState.READY).build()));
         when(connectionDestinationRepository.findById(3L)).thenReturn(Optional.of(
-            ConnectionDestination.builder().id(3L).connectionId(7L).destinationCode("VIATOR").build()));
+            ConnectionDestination.builder().id(3L).connectionId(7L).destinationCode("VIATOR").enabled(true).build()));
         when(connectionRepository.findById(7L)).thenReturn(Optional.of(
             Connection.builder().id(7L).bingeId(1L)
                 .status(Connection.ConnectionStatus.ACTIVE).build()));
@@ -176,7 +197,7 @@ class ListingServiceTest {
     @DisplayName("another venue cannot evaluate or publish this venue's listings")
     void tenancyIsEnforced() {
         when(connectionDestinationRepository.findById(3L)).thenReturn(Optional.of(
-            ConnectionDestination.builder().id(3L).connectionId(7L).destinationCode("VIATOR").build()));
+            ConnectionDestination.builder().id(3L).connectionId(7L).destinationCode("VIATOR").enabled(true).build()));
         // Scoped through the OWNING connection, not by the destination id alone.
         when(connectionRepository.findByIdAndBingeId(7L, 999L)).thenReturn(Optional.empty());
 

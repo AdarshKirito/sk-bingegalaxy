@@ -126,6 +126,15 @@ public class ListingService {
             throw new BusinessException("The connection is "
                 + connection.getStatus() + " — activate it before publishing listings.");
         }
+        // `enabled` defaults to FALSE — distribution is opt-in at every level, and this
+        // is the level the VENUE opts in at. Without this check a listing could go LIVE
+        // on a destination the venue never turned on, which is the one outcome the
+        // opt-in default exists to prevent. Checked separately from stop-sell because
+        // they mean different things: never enabled, versus enabled and since halted.
+        if (!cd.isEnabled()) {
+            throw new BusinessException(
+                "This destination is not enabled for the connection — enable it before publishing.");
+        }
         if (cd.isStopSell()) {
             throw new BusinessException("Stop-sell is on for this destination.");
         }
