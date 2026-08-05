@@ -353,6 +353,10 @@ export const adminService = {
   getDistributionListings: () => api.get('/distribution/listings'),
   evaluateDistributionListing: (data) => api.post('/distribution/listings/evaluate', data),
   publishDistributionListing: (id) => api.post(`/distribution/listings/${id}/publish`),
+  // Reservation inbox (slice 5/6). Venue-scoped server-side, derived from the venue's
+  // own connections — inbox rows key on connection_id, not binge_id.
+  getDistributionInbox: (limit = 50) => api.get('/distribution/inbox', { params: { limit } }),
+  retryDistributionInboxEntry: (id) => api.post(`/distribution/inbox/${id}/retry`),
   getAllBookings: (page, size) => api.get('/bookings/admin', { params: { page, size } }),
   getTodayBookings: (page, size) => api.get('/bookings/admin/today', { params: { page, size, clientDate: clientDate() } }),
   getUpcomingBookings: (page, size) => api.get('/bookings/admin/upcoming', { params: { page, size, clientDate: clientDate() } }),

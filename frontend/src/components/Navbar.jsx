@@ -37,6 +37,7 @@ import {
   FiTrendingUp,
   FiLink,
   FiUploadCloud,
+  FiInbox,
 } from 'react-icons/fi';
 import ThemeToggle from './ThemeToggle';
 import { useModuleAccess } from '../hooks/useModuleAccess';
@@ -152,6 +153,7 @@ export default function Navbar() {
     // so the link would silently never appear for anyone.
     { to: '/admin/distribution', icon: <FiLink />, label: t('nav.distribution', 'Distribution'), module: 'REPORTS' },
     { to: '/admin/listings', icon: <FiUploadCloud />, label: t('nav.listings', 'Listings'), module: 'REPORTS' },
+    { to: '/admin/inbox', icon: <FiInbox />, label: t('nav.reservation_inbox', 'Inbox'), module: 'REPORTS' },
     { to: '/admin/about-binge', icon: <FiInfo />, label: t('nav.binge_about', 'About') },
   ].filter((l) => can(l.module));
 

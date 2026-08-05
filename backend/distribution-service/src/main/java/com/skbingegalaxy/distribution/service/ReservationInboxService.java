@@ -165,6 +165,82 @@ public class ReservationInboxService {
         return inboxRepository.save(entry);
     }
 
+    /**
+     * The venue's inbound messages, newest first.
+     *
+     * <p>Scoped through the venue's OWN connections. Inbox rows key on
+     * {@code connection_id}, not {@code binge_id}, so the tenancy boundary has to be
+     * derived rather than filtered on directly — and deriving it from the connections a
+     * venue actually owns is what makes it a boundary rather than a convention.
+     * A venue with no connections gets an empty list without a query.
+     */
+    public List<com.skbingegalaxy.distribution.dto.InboxEntryDto> listForBinge(Long bingeId,
+                                                                              int limit) {
+        List<Long> connectionIds = connectionRepository.findByBingeIdOrderByCreatedAtDesc(bingeId)
+            .stream().map(Connection::getId).toList();
+        if (connectionIds.isEmpty()) return List.of();
+
+        var destinations = destinationRepository.findAll().stream()
+            .collect(java.util.stream.Collectors.toMap(Destination::getCode, d -> d));
+
+        return inboxRepository.findByConnectionIdInOrderByReceivedAtDesc(
+                connectionIds,
+                org.springframework.data.domain.PageRequest.of(0, Math.max(1, Math.min(limit, 200))))
+            .getContent().stream()
+            .map(e -> {
+                Destination d = destinations.get(e.getDestinationCode());
+                return com.skbingegalaxy.distribution.dto.InboxEntryDto.builder()
+                    .id(e.getId())
+                    .connectionId(e.getConnectionId())
+                    .destinationCode(e.getDestinationCode())
+                    .destinationName(d == null ? e.getDestinationCode() : d.getDisplayName())
+                    .externalRef(e.getExternalRef())
+                    .messageType(e.getMessageType())
+                    .status(e.getStatus())
+                    .orderingBasis(e.getOrderingBasis())
+                    .externalSequence(e.getExternalSequence())
+                    .receivedAt(e.getReceivedAt())
+                    .processedAt(e.getProcessedAt())
+                    .bookingRef(e.getBookingRef())
+                    .rejectReason(e.getRejectReason())
+                    .build();
+            })
+            .toList();
+    }
+
+    /**
+     * Requeue a FAILED message for another attempt.
+     *
+     * <p>Only FAILED. A REJECTED message was legitimately refused — the slot was taken —
+     * and retrying it would either fail identically or, worse, succeed later against a
+     * slot someone else has since booked. A SUPERSEDED message is older than what is
+     * already applied, so retrying it is the cancel-resurrection bug by hand.
+     */
+    @Transactional
+    public ReservationInboxEntry retry(Long bingeId, Long entryId) {
+        ReservationInboxEntry entry = ownedEntry(bingeId, entryId);
+        if (entry.getStatus() != ReservationInboxEntry.Status.FAILED) {
+            throw new BusinessException(
+                "Only a FAILED message can be retried; this one is " + entry.getStatus() + ".");
+        }
+        entry.setStatus(ReservationInboxEntry.Status.RECEIVED);
+        entry.setRejectReason(null);
+        entry.setProcessedAt(null);
+        log.info("Binge {} requeued inbox entry {}", bingeId, entryId);
+        return inboxRepository.save(entry);
+    }
+
+    /** Scoped through the owning connection — never by entry id alone. */
+    private ReservationInboxEntry ownedEntry(Long bingeId, Long entryId) {
+        ReservationInboxEntry entry = inboxRepository.findById(entryId)
+            .orElseThrow(() -> new com.skbingegalaxy.common.exception.ResourceNotFoundException(
+                "InboxEntry", "id", entryId));
+        connectionRepository.findByIdAndBingeId(entry.getConnectionId(), bingeId)
+            .orElseThrow(() -> new com.skbingegalaxy.common.exception.ResourceNotFoundException(
+                "InboxEntry", "id", entryId));
+        return entry;
+    }
+
     /** The recovery queue: what still needs a human or a retry, oldest first. */
     public List<ReservationInboxEntry> outstanding() {
         return inboxRepository.findByStatusInOrderByReceivedAtAsc(List.of(

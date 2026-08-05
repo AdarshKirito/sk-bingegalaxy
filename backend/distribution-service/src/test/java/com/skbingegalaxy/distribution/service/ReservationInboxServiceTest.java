@@ -163,4 +163,64 @@ class ReservationInboxServiceTest {
         assertThat(applied.getStatus()).isEqualTo(ReservationInboxEntry.Status.APPLIED);
         assertThat(applied.getBookingRef()).isEqualTo("SKBG26ABC");
     }
+
+    @Test
+    @DisplayName("a venue with no connections gets an empty inbox without a query")
+    void noConnectionsShortCircuits() {
+        when(connectionRepository.findByBingeIdOrderByCreatedAtDesc(1L)).thenReturn(java.util.List.of());
+
+        assertThat(service.listForBinge(1L, 50)).isEmpty();
+        // Inbox rows key on connection_id, so the tenancy boundary is DERIVED from the
+        // venue's own connections. No connections means nothing to scope to.
+        verifyNoInteractions(inboxRepository);
+    }
+
+    @Test
+    @DisplayName("only a FAILED message can be retried")
+    void onlyFailedIsRetryable() {
+        when(inboxRepository.findById(4L)).thenReturn(Optional.of(
+            ReservationInboxEntry.builder().id(4L).connectionId(7L)
+                .status(ReservationInboxEntry.Status.REJECTED).build()));
+        when(connectionRepository.findByIdAndBingeId(7L, 1L)).thenReturn(Optional.of(
+            Connection.builder().id(7L).bingeId(1L).build()));
+
+        // Retrying a REJECTED message would either fail identically or succeed later
+        // against a slot someone else has since booked. Retrying a SUPERSEDED one is the
+        // cancel-resurrection bug performed by hand.
+        assertThatThrownBy(() -> service.retry(1L, 4L))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Only a FAILED");
+        verify(inboxRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("a FAILED message returns to RECEIVED and clears its error")
+    void failedRequeues() {
+        when(inboxRepository.findById(4L)).thenReturn(Optional.of(
+            ReservationInboxEntry.builder().id(4L).connectionId(7L)
+                .status(ReservationInboxEntry.Status.FAILED).rejectReason("timeout").build()));
+        when(connectionRepository.findByIdAndBingeId(7L, 1L)).thenReturn(Optional.of(
+            Connection.builder().id(7L).bingeId(1L).build()));
+        when(inboxRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        ReservationInboxEntry requeued = service.retry(1L, 4L);
+
+        assertThat(requeued.getStatus()).isEqualTo(ReservationInboxEntry.Status.RECEIVED);
+        assertThat(requeued.getRejectReason()).isNull();
+    }
+
+    @Test
+    @DisplayName("another venue's inbox entry is not found")
+    void cannotRetryAnotherVenuesEntry() {
+        when(inboxRepository.findById(4L)).thenReturn(Optional.of(
+            ReservationInboxEntry.builder().id(4L).connectionId(7L)
+                .status(ReservationInboxEntry.Status.FAILED).build()));
+        when(connectionRepository.findByIdAndBingeId(7L, 999L)).thenReturn(Optional.empty());
+
+        // Scoped through the owning connection, so another venue's entry is NOT FOUND
+        // rather than forbidden-but-confirmed-to-exist.
+        assertThatThrownBy(() -> service.retry(999L, 4L))
+            .isInstanceOf(com.skbingegalaxy.common.exception.ResourceNotFoundException.class);
+        verify(inboxRepository, never()).save(any());
+    }
 }
