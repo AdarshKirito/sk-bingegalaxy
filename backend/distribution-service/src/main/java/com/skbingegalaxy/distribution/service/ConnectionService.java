@@ -5,6 +5,7 @@ import com.skbingegalaxy.common.exception.ResourceNotFoundException;
 import com.skbingegalaxy.distribution.credential.CredentialStore;
 import com.skbingegalaxy.distribution.dto.*;
 import com.skbingegalaxy.distribution.entity.*;
+import com.skbingegalaxy.distribution.octo.ResellerKeys;
 import com.skbingegalaxy.distribution.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -184,6 +185,149 @@ public class ConnectionService {
     }
 
     /**
+     * Issue the key a reseller will present to SK Binge for this connection (V3).
+     *
+     * <p><b>Returned exactly once.</b> Only the digest is stored, so this response is the
+     * single moment the key exists in readable form. That is a deliberate trade: an
+     * operator who loses it issues a new one, which is a minor inconvenience, whereas a
+     * recoverable key means a database dump is a set of working credentials.
+     *
+     * <p>Re-issuing invalidates the previous key immediately — there is one live key per
+     * connection. Overlapping keys would be friendlier to rotate but would mean a
+     * compromised key stays valid after the operator believes they have replaced it,
+     * which is the opposite of what rotation is for.
+     */
+    @Transactional
+    public IssuedResellerKey issueResellerKey(Long bingeId, Long connectionId) {
+        Connection c = ownedConnection(bingeId, connectionId);
+        if (c.getStatus() == Connection.ConnectionStatus.REVOKED) {
+            throw new BusinessException("A revoked connection cannot be given a key.");
+        }
+
+        ResellerKeys.IssuedKey issued = ResellerKeys.issue();
+        boolean replacing = c.getResellerKeyHash() != null;
+
+        c.setResellerKeyHash(issued.hash());
+        c.setResellerKeyHint(issued.hint());
+        c.setResellerKeyIssuedAt(LocalDateTime.now(ZoneOffset.UTC));
+        connectionRepository.save(c);
+
+        // The hint is safe to log; the key and its digest are not.
+        log.info("Binge {} {} the reseller key for connection {} (hint {})",
+            bingeId, replacing ? "ROTATED" : "issued", connectionId, issued.hint());
+
+        return new IssuedResellerKey(issued.plaintext(), issued.hint(), replacing);
+    }
+
+    /**
+     * @param key the plaintext, present in this object and nowhere else, ever again
+     * @param replacedPrevious true when an older key was just invalidated, so the console
+     *                         can say so rather than letting an operator discover it
+     */
+    public record IssuedResellerKey(String key, String hint, boolean replacedPrevious) {}
+
+    /**
+     * Verify a connection and, if everything it needs is in place, put it live.
+     *
+     * <p><b>The transition that did not exist.</b> {@link #create} deliberately produces
+     * PENDING and {@link #resume} deliberately returns to PENDING, but nothing anywhere
+     * could reach ACTIVE — and ACTIVE is what {@code ResellerAuthenticator} requires to
+     * authenticate a reseller and what a listing requires to publish. A venue could
+     * therefore complete every step the console offered and still have a channel that
+     * could not sell, with no error to explain why.
+     *
+     * <p><b>Verification, not a switch.</b> Each precondition below is something whose
+     * absence makes the channel fail later, further from the cause:
+     * <ul>
+     *   <li>the provider must still be active — a super-admin may have withdrawn it
+     *       since the connection was created;</li>
+     *   <li>the credential must resolve <em>now</em>, not merely have a reference. A
+     *       secret can be rotated away between creation and activation, and "configured"
+     *       has to mean the secret is actually there;</li>
+     *   <li>the credential must not already be expired, or the first reseller call
+     *       authenticates against nothing;</li>
+     *   <li>at least one destination must be enabled, or the connection is live and
+     *       reaches nowhere.</li>
+     * </ul>
+     *
+     * <p><b>What this deliberately does NOT do.</b> It does not certify the connection
+     * with the provider. For every real provider there is a certification, a pilot or a
+     * signed agreement between "configured correctly" and "permitted to sell", and no
+     * amount of local checking can stand in for it. Those providers are seeded inactive
+     * and a super-admin turning one on is the platform's record that the external step
+     * happened. This method verifies only the half SK Binge owns.
+     */
+    @Transactional
+    public ConnectionDto activate(Long bingeId, Long connectionId) {
+        Connection c = ownedConnection(bingeId, connectionId);
+
+        if (c.getStatus() == Connection.ConnectionStatus.ACTIVE) {
+            // Idempotent: activating an active connection is what a double-clicked button
+            // does, and it is not an error worth showing an operator.
+            return toDto(c);
+        }
+        if (c.getStatus() == Connection.ConnectionStatus.REVOKED) {
+            throw new BusinessException(
+                "A revoked connection cannot be activated. Create a new one.");
+        }
+        if (c.getStatus() == Connection.ConnectionStatus.PAUSED) {
+            throw new BusinessException(
+                "Resume this connection before activating it.");
+        }
+
+        Provider provider = providerRepository.findById(c.getProviderCode())
+            .orElseThrow(() -> new ResourceNotFoundException("Provider", "code", c.getProviderCode()));
+        if (!provider.isActive()) {
+            throw new BusinessException(provider.getDisplayName()
+                + " is no longer available for connections.");
+        }
+
+        if (requiresCredential(provider)) {
+            if (c.getCredentialRef() == null) {
+                throw new BusinessException(provider.getDisplayName()
+                    + " requires a provisioned credential before it can go live.");
+            }
+            if (credentialStore.resolve(c.getCredentialRef()).isEmpty()) {
+                throw new BusinessException(
+                    "The credential for this connection is no longer provisioned. "
+                  + "Re-provision it on distribution-service, then activate.");
+            }
+            LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+            if (c.getCredentialExpiresAt() != null && c.getCredentialExpiresAt().isBefore(now)) {
+                throw new BusinessException(
+                    "This connection's credential expired on " + c.getCredentialExpiresAt().toLocalDate()
+                  + ". Rotate it before activating.");
+            }
+        }
+
+        boolean reachesSomewhere = connectionDestinationRepository.findByConnectionId(connectionId)
+            .stream().anyMatch(ConnectionDestination::isEnabled);
+        if (!reachesSomewhere) {
+            throw new BusinessException(
+                "Add at least one enabled destination before activating this connection.");
+        }
+
+        // The inbound half. OCTO is supplier-hosted, so a reseller reaches this venue by
+        // presenting a key SK Binge issued — and without one, ResellerAuthenticator can
+        // match nothing. Activating anyway would produce the exact failure this method
+        // exists to prevent: a connection the console calls live, that answers every
+        // reseller with a 401 indistinguishable from a wrong key.
+        if (c.getResellerKeyHash() == null) {
+            throw new BusinessException(
+                "Issue a reseller key before activating: without one no reseller can "
+              + "authenticate against this connection.");
+        }
+
+        c.setStatus(Connection.ConnectionStatus.ACTIVE);
+        c.setLastVerifiedAt(LocalDateTime.now(ZoneOffset.UTC));
+        c.setPausedAt(null);
+        c.setPausedReason(null);
+        log.info("Binge {} ACTIVATED connection {} to provider {}",
+            bingeId, connectionId, c.getProviderCode());
+        return toDto(connectionRepository.save(c));
+    }
+
+    /**
      * Pause stops <b>all</b> traffic on a connection. Distinct from stop-sell on a single
      * destination, which halts new sales while still honouring reservations already
      * taken — conflating them would either strand travellers or fail to stop the bleeding.
@@ -338,6 +482,9 @@ public class ConnectionService {
             .credentialConfigured(c.getCredentialRef() != null
                 && credentialStore.resolve(c.getCredentialRef()).isPresent())
             .credentialExpiresAt(c.getCredentialExpiresAt())
+            // The hint only; the key itself is unrecoverable by design (V3).
+            .resellerKeyHint(c.getResellerKeyHint())
+            .resellerKeyIssuedAt(c.getResellerKeyIssuedAt())
             .lastVerifiedAt(c.getLastVerifiedAt())
             .pausedAt(c.getPausedAt())
             .pausedReason(c.getPausedReason())

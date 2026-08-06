@@ -37,6 +37,7 @@ import java.util.Optional;
 public class ReservationInboxService {
 
     private final ReservationInboxRepository inboxRepository;
+    private final InboxWriter inboxWriter;
     private final ConnectionRepository connectionRepository;
     private final ConnectionDestinationRepository connectionDestinationRepository;
     private final DestinationRepository destinationRepository;
@@ -48,11 +49,19 @@ public class ReservationInboxService {
     /**
      * Record an inbound message and decide whether it may be applied.
      *
-     * <p>Runs in its OWN transaction. If applying the message later fails, the inbox row
-     * must survive to explain why — a rollback that erased the evidence would leave
-     * exactly the silent loss this design exists to prevent.
+     * <p><b>Deliberately not transactional itself.</b> The write and the duplicate
+     * recovery each run in their own transaction inside {@link InboxWriter}, because a
+     * unique-index violation poisons the Hibernate session it happened on: the recovery
+     * lookup used to run on that same poisoned session and blew up with
+     * {@code AssertionFailure: null id}, so the path built to make redelivery harmless
+     * answered HTTP 500 instead. Wrapping this method in a transaction again would
+     * re-create exactly that — the writer's {@code REQUIRES_NEW} would still isolate the
+     * insert, but the surrounding transaction would carry the failure onward.
+     *
+     * <p>The validations below are reads, and their correctness does not depend on
+     * sharing a transaction with the write: each is a precondition the provider either
+     * satisfies or does not.
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public ReservationInboxEntry receive(Long connectionId,
                                          String destinationCode,
                                          String externalRef,
@@ -115,8 +124,21 @@ public class ReservationInboxService {
             .rejectReason(decision.apply() ? null : decision.reason())
             .build();
 
+        // Fast path. A provider redelivering is routine under at-least-once, and letting
+        // every redelivery reach the unique index meant Hibernate logged a SQL ERROR for
+        // ordinary traffic. This does NOT replace the constraint — it cannot close the
+        // time-of-check window, and the catch below is still what makes duplicate
+        // rejection true under concurrency.
+        Optional<ReservationInboxEntry> alreadyHave =
+            inboxWriter.findCollision(connectionId, externalRef, messageType, externalSequence);
+        if (alreadyHave.isPresent()) {
+            log.debug("Redelivered {} for connection {} ref {} — returning inbox {}",
+                messageType, connectionId, externalRef, alreadyHave.get().getId());
+            return alreadyHave.get();
+        }
+
         try {
-            ReservationInboxEntry saved = inboxRepository.save(entry);
+            ReservationInboxEntry saved = inboxWriter.insert(entry);
             if (!decision.apply()) {
                 // Kept, not dropped. When a venue asks why a modification never took
                 // effect, the answer has to be a row someone can look at.
@@ -128,13 +150,13 @@ public class ReservationInboxService {
             // uk_inbox_message. Duplicate delivery is EXPECTED under at-least-once, so it
             // is a normal outcome rather than an error. Relying on the constraint instead
             // of a pre-read also removes the time-of-check race a lookup would have.
+            //
+            // The lookup runs in a NEW transaction (see InboxWriter). Running it on the
+            // session the violation happened on is what turned this "normal outcome"
+            // into a 500 for every redelivered message.
             log.debug("Duplicate inbound message for connection {} ref {} ({})",
                 connectionId, externalRef, messageType);
-            return inboxRepository
-                .findByConnectionIdAndExternalRefOrderByIdAsc(connectionId, externalRef)
-                .stream()
-                .filter(x -> x.getMessageType() == messageType)
-                .reduce((first, second) -> second)
+            return inboxWriter.findExisting(connectionId, externalRef, messageType)
                 .orElseThrow(() -> e);
         }
     }
@@ -162,12 +184,32 @@ public class ReservationInboxService {
         entry.setProcessedAt(LocalDateTime.now(ZoneOffset.UTC));
         ReservationInboxEntry saved = inboxRepository.save(entry);
 
+        // Only a SALE creates a receivable. A cancellation or a confirmation carries no
+        // price and must not produce one — the original sale's settlement is already
+        // recorded and is not affected by either.
+        if (entry.getMessageType() != ReservationInboxEntry.MessageType.CREATE) {
+            return saved;
+        }
+
+        // A sale with no price is different, and worth saying out loud. A settlement row
+        // with a null currency cannot be stored and one with a zero gross would
+        // understate what the channel owes — worse than an absent row, because it looks
+        // reconciled. Warned rather than swallowed: this is money that will not be
+        // chased unless somebody notices.
+        if (bookingRef != null && (currency == null || currency.isBlank())) {
+            log.warn("Booking {} applied from inbox {} with no channel price — "
+                + "no receivable created. Reconcile it by hand.", bookingRef, entryId);
+            return saved;
+        }
+
         // Terms come from the connection/destination pairing, never from the message —
         // a provider must not be able to declare its own commission by sending a number.
-        connectionDestinationRepository
-            .findByConnectionIdAndDestinationCode(entry.getConnectionId(), entry.getDestinationCode())
-            .ifPresent(terms -> settlementService.createForChannelBooking(
-                bingeId, entry.getConnectionId(), bookingRef, terms, currency, grossMinor));
+        if (bookingRef != null) {
+            connectionDestinationRepository
+                .findByConnectionIdAndDestinationCode(entry.getConnectionId(), entry.getDestinationCode())
+                .ifPresent(terms -> settlementService.createForChannelBooking(
+                    bingeId, entry.getConnectionId(), bookingRef, terms, currency, grossMinor));
+        }
 
         return saved;
     }
@@ -229,6 +271,31 @@ public class ReservationInboxService {
                     .build();
             })
             .toList();
+    }
+
+    /**
+     * Processing errored. Distinct from {@link #markRejected} — this one IS worth
+     * retrying, and {@link #retry} will only requeue a message in this state.
+     *
+     * <p>The reason shares {@code reject_reason} with a refusal rather than taking a
+     * column of its own: an operator needs one "why" field, and the status already
+     * carries the difference between "refused" and "errored".
+     */
+    @Transactional
+    public ReservationInboxEntry markFailed(Long entryId, String reason) {
+        ReservationInboxEntry entry = inboxRepository.findById(entryId)
+            .orElseThrow(() -> new BusinessException("Unknown inbox entry: " + entryId));
+        entry.setStatus(ReservationInboxEntry.Status.FAILED);
+        entry.setRejectReason(truncateReason(reason));
+        entry.setProcessedAt(LocalDateTime.now(ZoneOffset.UTC));
+        log.warn("Inbox {} FAILED (retryable): {}", entryId, reason);
+        return inboxRepository.save(entry);
+    }
+
+    /** {@code reject_reason} is varchar(500); a verbose provider error must not break the write. */
+    static String truncateReason(String reason) {
+        if (reason == null) return null;
+        return reason.length() <= 500 ? reason : reason.substring(0, 497) + "...";
     }
 
     /**

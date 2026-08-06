@@ -11,6 +11,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -39,6 +40,7 @@ import java.util.Optional;
 public class OctoBookingController {
 
     private final ResellerAuthenticator resellerAuthenticator;
+    private final ResellerRateLimiter rateLimiter;
     private final ReservationInboxService inboxService;
     private final ObjectMapper objectMapper;
 
@@ -53,9 +55,59 @@ public class OctoBookingController {
         private String uuid;
         private String productId;
         private String optionId;
+        /**
+         * Supplier-issued token naming the exact window being sold. Decoded by
+         * {@link AvailabilityIdCodec}; see that class for the format and for why it is
+         * self-describing rather than a database key.
+         */
         private String availabilityId;
         /** Provider-supplied ordering, when the reseller sends one. */
         private Long sequence;
+
+        /**
+         * The traveller. A channel guest has no SK account, so identity arrives in the
+         * payload — it cannot be derived from a session that does not exist.
+         */
+        private Contact contact;
+
+        /**
+         * OCTO's per-guest lines. Only the COUNT is used: whole-space private hire is
+         * priced per booking, not per unit, so the unit breakdown carries no pricing
+         * meaning here. Absent or empty means one guest.
+         */
+        private List<Map<String, Object>> unitItems;
+
+        /**
+         * What the CHANNEL charged the traveller — which is not necessarily what SK
+         * Binge would have charged, because the destination sets its own retail price.
+         * It is therefore taken from the message rather than from our pricing engine,
+         * and it is what the receivable is calculated from.
+         */
+        private Pricing pricing;
+    }
+
+    @Data
+    public static class Contact {
+        private String fullName;
+        private String firstName;
+        private String lastName;
+        private String emailAddress;
+        private String phoneNumber;
+
+        /** OCTO sends either a full name or the parts; the venue needs one string. */
+        public String resolvedName() {
+            if (fullName != null && !fullName.isBlank()) return fullName.trim();
+            String joined = ((firstName == null ? "" : firstName) + " "
+                           + (lastName == null ? "" : lastName)).trim();
+            return joined.isEmpty() ? null : joined;
+        }
+    }
+
+    @Data
+    public static class Pricing {
+        /** Retail price in MINOR units, matching how settlements store money. */
+        private Long retail;
+        private String currency;
     }
 
     /** Reservation — OCTO's ON_HOLD step. The slot is held, not sold. */
@@ -106,6 +158,16 @@ public class OctoBookingController {
         }
 
         Connection c = connection.get();
+
+        // Throttled AFTER authentication, so an unauthenticated flood cannot consume a
+        // real reseller's budget, and per connection rather than per IP — see
+        // ResellerRateLimiter. Writes are limited alongside reads because a runaway
+        // booking loop is the more expensive of the two.
+        @SuppressWarnings("unchecked")
+        ResponseEntity<Map<String, Object>> throttled =
+            (ResponseEntity<Map<String, Object>>) (ResponseEntity<?>) rateLimiter.check(c);
+        if (throttled != null) return throttled;
+
         // Destination comes from the CONNECTION, never from the request body. Letting a
         // reseller name a destination would let it claim commercial terms belonging to a
         // pairing it holds no key for.

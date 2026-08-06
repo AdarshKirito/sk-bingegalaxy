@@ -27,9 +27,23 @@ import static org.mockito.Mockito.*;
 class OctoProductControllerTest {
 
     @Mock private ResellerAuthenticator resellerAuthenticator;
+    /**
+     * A real limiter, not a mock: the default per-minute budget is far above anything a
+     * test issues, so it never interferes — and using the real one means these tests
+     * would notice if throttling were ever applied before authentication, which would
+     * let an anonymous flood spend a real reseller's budget.
+     */
+    @org.mockito.Spy private ResellerRateLimiter rateLimiter = permissiveLimiter();
     @Mock private ConnectionDestinationRepository connectionDestinationRepository;
     @Mock private ListingMappingRepository listingRepository;
     @InjectMocks private OctoProductController controller;
+
+    private static ResellerRateLimiter permissiveLimiter() {
+        ResellerRateLimiter limiter = new ResellerRateLimiter();
+        org.springframework.test.util.ReflectionTestUtils
+            .setField(limiter, "requestsPerMinute", 10_000);
+        return limiter;
+    }
 
     private void authenticated() {
         when(resellerAuthenticator.authenticate(any())).thenReturn(Optional.of(

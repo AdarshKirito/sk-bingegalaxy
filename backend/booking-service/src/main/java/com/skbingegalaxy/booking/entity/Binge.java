@@ -379,6 +379,22 @@ public class Binge {
     private LocalDateTime autoDeactivatedAt;
 
     /**
+     * When the admin was last told this venue has no ACTIVE event type (V89).
+     *
+     * <p>Distinct from {@link #graceWarningSentAt}, which is about onboarding — never
+     * having created an event type. This one is about an operational venue that has
+     * event types, all of them switched off: exempt from the grace period, shown as
+     * active in the console, and absent from customer discovery, which requires an
+     * active event type. Same silent-invisibility failure as the V87 incident, reached
+     * through a different flag.
+     *
+     * <p>Cleared once an active event type exists again, so a recurrence warns again.
+     * It never causes a pause: turning every event off is a legitimate operator choice.
+     */
+    @Column(name = "no_active_events_warned_at")
+    private LocalDateTime noActiveEventsWarnedAt;
+
+    /**
      * Free-text access/ops remarks shown on the binge About page. Edited by
      * SUPER_ADMIN alongside the module permission matrix (V71).
      */

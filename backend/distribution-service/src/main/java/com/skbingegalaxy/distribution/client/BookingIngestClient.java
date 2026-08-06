@@ -103,6 +103,61 @@ public class BookingIngestClient {
         }
     }
 
+    /**
+     * Cancel a reservation this channel previously delivered, addressed by the channel's
+     * own reference.
+     *
+     * <p><b>The other direction, which had no code.</b> Reservations could arrive and
+     * never leave: a traveller who cancelled on the OTA kept a live booking here, and the
+     * venue held a slot for someone who was not coming — invisible to both sides, because
+     * the inbox recorded the cancellation as "not yet applied automatically" and everyone
+     * downstream saw a healthy row.
+     *
+     * <p>Same classification as {@link #ingest}: 4xx is an answer, everything else is
+     * retryable. A 404 is included in the 4xx branch deliberately — a cancel for a
+     * reservation booking-service has never seen will not start existing on a retry.
+     */
+    public Result cancel(String externalSource, String externalRef, String reason) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("externalSource", externalSource);
+        body.put("externalRef", externalRef);
+        body.put("reason", reason);
+
+        try {
+            var response = restClientBuilder.build().post()
+                .uri(baseUrl + "/api/v1/bookings/internal/reservations/cancel")
+                .header("X-Internal-Secret", internalApiSecret)
+                .header("Content-Type", "application/json")
+                .body(body)
+                .retrieve()
+                .onStatus(HttpStatusCode::is4xxClientError, (req, res) -> { })
+                .toEntity(Map.class);
+
+            int status = response.getStatusCode().value();
+            Map<?, ?> payload = response.getBody();
+
+            if (status >= 400) {
+                String refusal = messageOf(payload).orElse("Refused with status " + status);
+                log.warn("Channel cancellation {} refused by booking-service: {}",
+                    externalRef, refusal);
+                return new Result.Rejected(refusal);
+            }
+
+            String bookingRef = dataField(payload, "bookingRef");
+            if (bookingRef == null) {
+                return new Result.Failed("booking-service returned no bookingRef for the cancellation");
+            }
+            // `created` is false: a cancellation never creates anything. The field is
+            // about what the ingestion did, and reporting true here would make a
+            // cancellation read as a new sale in the log.
+            return new Result.Accepted(bookingRef, false);
+
+        } catch (Exception e) {
+            log.warn("Channel cancellation {} failed: {}", externalRef, e.toString());
+            return new Result.Failed(e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
     private static Optional<String> messageOf(Map<?, ?> payload) {
         Object m = payload == null ? null : payload.get("message");
         return m == null ? Optional.empty() : Optional.of(String.valueOf(m));

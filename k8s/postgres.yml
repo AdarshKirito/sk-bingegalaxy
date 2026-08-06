@@ -111,6 +111,10 @@ data:
     SELECT 'CREATE DATABASE availability_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'availability_db')\gexec
     SELECT 'CREATE DATABASE booking_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'booking_db')\gexec
     SELECT 'CREATE DATABASE payment_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'payment_db')\gexec
+    -- distribution-service owns its own database (see postgres-ha.yml and
+    -- infra/init-02-distribution.sql). Missing here, the pod starts and Flyway
+    -- fails to connect, which reads as a broken service rather than an absent DB.
+    SELECT 'CREATE DATABASE distribution_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'distribution_db')\gexec
 
     -- Per-service users (least privilege)
     DO $$ BEGIN
@@ -126,11 +130,15 @@ data:
       IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'payment_svc') THEN
         CREATE ROLE payment_svc WITH LOGIN PASSWORD current_setting('app.payment_svc_pw', true);
       END IF;
+      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'distribution_svc') THEN
+        CREATE ROLE distribution_svc WITH LOGIN PASSWORD current_setting('app.distribution_svc_pw', true);
+      END IF;
     END $$;
 
     GRANT CONNECT ON DATABASE availability_db TO availability_svc;
     GRANT CONNECT ON DATABASE booking_db TO booking_svc;
     GRANT CONNECT ON DATABASE payment_db TO payment_svc;
+    GRANT CONNECT ON DATABASE distribution_db TO distribution_svc;
 ---
 # ── Managed PostgreSQL (production) ──────────────────────────────────────────
 # Uncomment the Service below and disable the StatefulSet above when switching

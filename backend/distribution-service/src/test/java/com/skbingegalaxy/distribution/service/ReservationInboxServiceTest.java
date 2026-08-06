@@ -26,6 +26,13 @@ class ReservationInboxServiceTest {
     @Mock private ConnectionDestinationRepository connectionDestinationRepository;
     @Mock private DestinationRepository destinationRepository;
     @Mock private SettlementService settlementService;
+    /**
+     * receive() writes through this collaborator so the insert and the duplicate
+     * recovery each get their OWN transaction. A unique-index violation poisons the
+     * Hibernate session it happened on, so a recovery lookup sharing that session is
+     * what turned every redelivered message into an HTTP 500.
+     */
+    @Mock private InboxWriter inboxWriter;
 
     @InjectMocks private ReservationInboxService service;
 
@@ -55,7 +62,7 @@ class ReservationInboxServiceTest {
     void persistsFirst() {
         givenUsableChannel(true);
         when(inboxRepository.findHighestAppliedSequence(7L, "EXT-1")).thenReturn(Optional.empty());
-        when(inboxRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(inboxWriter.insert(any())).thenAnswer(i -> i.getArgument(0));
 
         ReservationInboxEntry entry = receive(1L);
 
@@ -63,7 +70,7 @@ class ReservationInboxServiceTest {
         // rather than a venue asking why a booking never arrived.
         assertThat(entry.getStatus()).isEqualTo(ReservationInboxEntry.Status.RECEIVED);
         assertThat(entry.getPayloadJson()).isEqualTo("{}");
-        verify(inboxRepository).save(any());
+        verify(inboxWriter).insert(any());
     }
 
     @Test
@@ -73,14 +80,14 @@ class ReservationInboxServiceTest {
         // A cancel at sequence 7 was already applied; the modify it superseded arrives
         // late. Applying it would resurrect a cancelled booking.
         when(inboxRepository.findHighestAppliedSequence(7L, "EXT-1")).thenReturn(Optional.of(7L));
-        when(inboxRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(inboxWriter.insert(any())).thenAnswer(i -> i.getArgument(0));
 
         ReservationInboxEntry entry = receive(6L);
 
         assertThat(entry.getStatus()).isEqualTo(ReservationInboxEntry.Status.SUPERSEDED);
         assertThat(entry.getRejectReason()).contains("does not exceed");
         // Kept, so an operator can answer "why did my modification not take effect".
-        verify(inboxRepository).save(any());
+        verify(inboxWriter).insert(any());
     }
 
     @Test
@@ -93,7 +100,7 @@ class ReservationInboxServiceTest {
         assertThatThrownBy(() -> receive(1L))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("does not deliver reservations");
-        verify(inboxRepository, never()).save(any());
+        verify(inboxWriter, never()).insert(any());
     }
 
     @Test
@@ -112,7 +119,7 @@ class ReservationInboxServiceTest {
         when(connectionRepository.findById(7L)).thenReturn(Optional.of(
             Connection.builder().id(7L).status(Connection.ConnectionStatus.PAUSED).build()));
         when(inboxRepository.findHighestAppliedSequence(any(), any())).thenReturn(Optional.empty());
-        when(inboxRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(inboxWriter.insert(any())).thenAnswer(i -> i.getArgument(0));
 
         assertThat(receive(1L).getStatus()).isEqualTo(ReservationInboxEntry.Status.RECEIVED);
     }
@@ -129,7 +136,80 @@ class ReservationInboxServiceTest {
                 "x".repeat(ReservationInboxService.MAX_PAYLOAD_BYTES + 1)))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("exceeds");
-        verify(inboxRepository, never()).save(any());
+        verify(inboxWriter, never()).insert(any());
+    }
+
+    private static ReservationInboxEntry existingModify() {
+        return ReservationInboxEntry.builder().id(11L)
+            .connectionId(7L).externalRef("EXT-1")
+            .messageType(ReservationInboxEntry.MessageType.MODIFY)
+            .status(ReservationInboxEntry.Status.RECEIVED).build();
+    }
+
+    @Test
+    @DisplayName("a redelivery is recognised without reaching the unique index")
+    void redeliveryTakesTheFastPath() {
+        givenUsableChannel(true);
+        ReservationInboxEntry original = existingModify();
+        when(inboxWriter.findCollision(7L, "EXT-1",
+            ReservationInboxEntry.MessageType.MODIFY, 1L)).thenReturn(Optional.of(original));
+
+        assertThat(receive(1L)).isSameAs(original);
+        // The violation was always handled, but Hibernate logs every one at ERROR with a
+        // SQLState — so a provider's normal retry behaviour filled the log with what
+        // looked like a database incident.
+        verify(inboxWriter, never()).insert(any());
+    }
+
+    @Test
+    @DisplayName("a redelivery that loses the race still returns the original, not a 500")
+    void redeliveryLosingTheRaceIsStillIdempotent() {
+        givenUsableChannel(true);
+        when(inboxRepository.findHighestAppliedSequence(7L, "EXT-1")).thenReturn(Optional.empty());
+        ReservationInboxEntry original = existingModify();
+
+        // Two deliveries in flight at once: the pre-check found nothing, the index did.
+        when(inboxWriter.findCollision(any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(inboxWriter.insert(any())).thenThrow(
+            new org.springframework.dao.DataIntegrityViolationException("uk_inbox_message"));
+        when(inboxWriter.findExisting(7L, "EXT-1", ReservationInboxEntry.MessageType.MODIFY))
+            .thenReturn(Optional.of(original));
+
+        // Verified end to end before this test existed, and it answered HTTP 500: the
+        // recovery lookup ran on the session the violation had already poisoned, so the
+        // path built to make redelivery harmless was the one that broke.
+        assertThat(receive(1L)).isSameAs(original);
+    }
+
+    @Test
+    @DisplayName("a later message with a HIGHER sequence is not mistaken for a redelivery")
+    void higherSequenceIsANewMessage() {
+        givenUsableChannel(true);
+        when(inboxRepository.findHighestAppliedSequence(7L, "EXT-1")).thenReturn(Optional.empty());
+        // The collision lookup keys on the sequence too. Matching without it would treat
+        // a genuine later modification as a duplicate and silently drop it — far worse
+        // than an occasional constraint violation.
+        when(inboxWriter.findCollision(7L, "EXT-1",
+            ReservationInboxEntry.MessageType.MODIFY, 9L)).thenReturn(Optional.empty());
+        when(inboxWriter.insert(any())).thenAnswer(i -> i.getArgument(0));
+
+        assertThat(receive(9L).getStatus()).isEqualTo(ReservationInboxEntry.Status.RECEIVED);
+        verify(inboxWriter).insert(any());
+    }
+
+    @Test
+    @DisplayName("a duplicate with nothing to recover still surfaces the violation")
+    void unrecoverableDuplicateStillThrows() {
+        givenUsableChannel(true);
+        when(inboxRepository.findHighestAppliedSequence(7L, "EXT-1")).thenReturn(Optional.empty());
+        when(inboxWriter.insert(any())).thenThrow(
+            new org.springframework.dao.DataIntegrityViolationException("some other constraint"));
+        when(inboxWriter.findExisting(any(), any(), any())).thenReturn(Optional.empty());
+
+        // A violation that is NOT a redelivery must not be swallowed into a silent
+        // success — that would lose the message the inbox exists to keep.
+        assertThatThrownBy(() -> receive(1L))
+            .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
     }
 
     @Test

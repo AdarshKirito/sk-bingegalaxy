@@ -1,14 +1,11 @@
 package com.skbingegalaxy.distribution.octo;
 
-import com.skbingegalaxy.distribution.credential.CredentialStore;
 import com.skbingegalaxy.distribution.entity.Connection;
 import com.skbingegalaxy.distribution.repository.ConnectionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.Optional;
 
 /**
@@ -29,34 +26,47 @@ import java.util.Optional;
 public class ResellerAuthenticator {
 
     private final ConnectionRepository connectionRepository;
-    private final CredentialStore credentialStore;
 
     /**
      * Resolve a Bearer token to the connection it belongs to.
      *
-     * <p><b>Constant-time comparison.</b> A token is a bearer secret, so an early-exit
-     * {@code equals} leaks its prefix through response timing — slowly, but a caller who
-     * can retry indefinitely does not care how slowly. The scan is over ACTIVE
-     * connections only: a paused or revoked connection must not authenticate anything.
+     * <p><b>It checks the INBOUND key, not the outbound credential.</b> This used to
+     * resolve {@code credentialRef} — the pointer to the secret SK Binge presents
+     * <em>to</em> a provider — and compare it against what a reseller presented to
+     * <em>us</em>. Two different secrets in opposite directions. The effect was absolute
+     * for the only usable provider: SIMULATOR is PLATFORM_MANAGED, so
+     * {@code ConnectionService.create} refuses a credential reference and
+     * {@code credentialRef} is NULL by construction, and this loop skipped every
+     * connection with a null ref. No reseller could authenticate against any connection
+     * that could actually exist, and the 401 looked exactly like a wrong key.
      *
-     * <p>Returns empty rather than throwing, so the caller decides the status code. A
-     * bad token and an unknown token are deliberately indistinguishable to the caller.
+     * <p><b>One indexed read, not a scan.</b> The previous loop resolved and compared
+     * every ACTIVE connection's secret in turn, so the cost of one reseller request grew
+     * with the number of venues on the platform — and every one of those comparisons
+     * touched a live secret. Looking up by digest touches one row and no secret at all.
+     *
+     * <p>Only ACTIVE connections: a paused or revoked one must not authenticate
+     * anything. Returns empty rather than throwing, so the caller decides the status
+     * code, and a bad key and an unknown key stay indistinguishable to that caller.
      */
     public Optional<Connection> authenticate(String authorizationHeader) {
         String token = extractBearer(authorizationHeader);
         if (token == null) return Optional.empty();
 
-        for (Connection c : connectionRepository.findByStatus(Connection.ConnectionStatus.ACTIVE)) {
-            if (c.getCredentialRef() == null) continue;
-            Optional<String> expected = credentialStore.resolve(c.getCredentialRef());
-            if (expected.isPresent() && constantTimeEquals(expected.get(), token)) {
-                return Optional.of(c);
-            }
+        Optional<Connection> match = connectionRepository
+            .findByResellerKeyHash(ResellerKeys.sha256Hex(token))
+            .filter(c -> c.getStatus() == Connection.ConnectionStatus.ACTIVE)
+            // Re-verified in constant time even though the lookup already matched: the
+            // index proves the digests are equal, and this proves it without depending
+            // on the database's comparison having been the constant-time one.
+            .filter(c -> ResellerKeys.matches(token, c.getResellerKeyHash()));
+
+        if (match.isEmpty()) {
+            // Neither the key nor the digest is logged — a rejected key is still a
+            // secret, and one that appears in logs is one an operator may paste.
+            log.warn("OCTO request rejected: no ACTIVE connection matches the presented key");
         }
-        // The REF is never logged here and neither is the token — a rejected token is
-        // still a secret, and one that appears in logs is one an operator may paste.
-        log.warn("OCTO request rejected: no ACTIVE connection matches the presented token");
-        return Optional.empty();
+        return match;
     }
 
     static String extractBearer(String header) {
@@ -67,8 +77,4 @@ public class ResellerAuthenticator {
         return token.isEmpty() ? null : token;
     }
 
-    static boolean constantTimeEquals(String a, String b) {
-        return MessageDigest.isEqual(
-            a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
-    }
 }

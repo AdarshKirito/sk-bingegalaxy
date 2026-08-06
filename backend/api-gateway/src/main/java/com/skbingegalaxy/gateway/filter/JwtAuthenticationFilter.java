@@ -86,6 +86,23 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         // pattern). Recipient may not yet have an account; the token proves the
         // sender targeted that exact email address.
         "/api/v1/booking-transfers/by-token/",
+        // OCTO supplier surface. SK Binge HOSTS this endpoint and issues each reseller
+        // a key per reseller↔venue pair; the Bearer a reseller presents is that key,
+        // not an SK JWT. Parsing it as one fails signature validation, so every
+        // legitimate reseller call was answered 401 — and the 401 came from the
+        // gateway, so nothing in distribution-service's logs could explain it.
+        //
+        // "Public" here means only "not authenticated by THIS filter". Every path
+        // under the prefix is rejected by ResellerAuthenticator unless it presents a
+        // valid key belonging to an ACTIVE connection, and distribution-service leaves
+        // the namespace permitAll at the filter chain precisely so that check is the
+        // only thing that can satisfy it. CsrfProtectionFilter already exempts the
+        // same prefix for the same reason (MACHINE_TO_MACHINE_PREFIXES) — this filter
+        // was the half of the pair that never got the entry.
+        //
+        // Prefix-matched, not exact: the lifecycle paths carry the reseller's own
+        // booking uuid (/octo/bookings/{uuid}/confirm), so no fixed string covers them.
+        "/api/v1/distribution/octo/",
         "/actuator/health"
     );
 

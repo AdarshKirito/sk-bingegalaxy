@@ -342,6 +342,15 @@ export const adminService = {
   getDistributionProviders: () => api.get('/distribution/providers'),
   getDistributionConnections: () => api.get('/distribution/connections'),
   createDistributionConnection: (data) => api.post('/distribution/connections', data),
+  // Verify a connection and put it live. Every other transition existed; without this
+  // one a venue could complete the whole setup and still have a channel that cannot
+  // sell, because a reseller can only authenticate against an ACTIVE connection.
+  activateDistributionConnection: (id) => api.post(`/distribution/connections/${id}/activate`),
+  // Returns the plaintext key ONCE. Only its digest is stored, so there is no
+  // "show key" call and there never can be — show it immediately or it is lost.
+  issueResellerKey: (id) => api.post(`/distribution/connections/${id}/reseller-key`),
+  attachDistributionDestination: (id, data) =>
+    api.post(`/distribution/connections/${id}/destinations`, data),
   pauseDistributionConnection: (id, reason) =>
     api.post(`/distribution/connections/${id}/pause`, null, { params: { reason } }),
   resumeDistributionConnection: (id) => api.post(`/distribution/connections/${id}/resume`),
@@ -659,6 +668,9 @@ export const adminService = {
   retryOutbox: (id) =>
     api.post('/bookings/admin/ops/outbox/retry-failed', null, { params: id ? { id } : {} }),
   getOpsHealth: () => api.get('/bookings/admin/ops/health'),
+  // The server's replay allow-list. Fetched rather than mirrored: the console used
+  // to hard-code five topic names, none of which the server accepted.
+  getReplayableTopics: () => api.get('/bookings/admin/ops/replayable-topics'),
   // Media upload
   uploadMedia: (formData) => api.post('/bookings/admin/media/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
   // Venue rooms (admin)

@@ -116,6 +116,73 @@ class JwtAuthenticationFilterTest {
             assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         }
 
+        /**
+         * A reseller's Bearer is a key SK Binge issued for one reseller↔venue pair, not
+         * an SK JWT. Validating it as one fails the signature check, so every legitimate
+         * OCTO call was answered 401 — by the gateway, which meant nothing in
+         * distribution-service's logs could explain it.
+         *
+         * <p>The token still has to satisfy ResellerAuthenticator downstream; bypassing
+         * THIS filter is not bypassing authentication.
+         */
+        @Test
+        void octoBooking_withResellerBearer_reachesTheService() {
+            MockServerHttpRequest request = MockServerHttpRequest
+                    .post("/api/v1/distribution/octo/bookings")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer not-a-jwt-a-reseller-key")
+                    .build();
+            MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+            filter.filter(exchange, chain).block();
+
+            verify(chain).filter(any());
+            assertThat(exchange.getResponse().getStatusCode()).isNotEqualTo(HttpStatus.UNAUTHORIZED);
+        }
+
+        /** The lifecycle paths carry the reseller's own uuid, so the match is by prefix. */
+        @Test
+        void octoLifecyclePaths_bypassAuth() {
+            for (String path : new String[]{
+                    "/api/v1/distribution/octo/products",
+                    "/api/v1/distribution/octo/availability",
+                    "/api/v1/distribution/octo/availability/calendar",
+                    "/api/v1/distribution/octo/bookings/2f1c-uuid/confirm"}) {
+                GatewayFilterChain freshChain = mock(GatewayFilterChain.class);
+                when(freshChain.filter(any())).thenReturn(Mono.empty());
+                MockServerWebExchange exchange = MockServerWebExchange.from(
+                        MockServerHttpRequest.post(path)
+                                .header(HttpHeaders.AUTHORIZATION, "Bearer reseller-key")
+                                .build());
+
+                filter.filter(exchange, freshChain).block();
+
+                verify(freshChain).filter(any());
+            }
+        }
+
+        /**
+         * The exemption is the OCTO namespace, not distribution-service. The venue-facing
+         * console is an ordinary admin surface and must keep needing a JWT — a prefix
+         * that leaked one segment higher would make every connection, listing and
+         * settlement endpoint public.
+         */
+        @Test
+        void distributionConsolePaths_stillRequireAuth() {
+            for (String path : new String[]{
+                    "/api/v1/distribution/connections",
+                    "/api/v1/distribution/settlements",
+                    "/api/v1/distribution/octopus"}) {   // not the octo/ prefix
+                MockServerWebExchange exchange = MockServerWebExchange.from(
+                        MockServerHttpRequest.get(path).build());
+
+                filter.filter(exchange, chain).block();
+
+                assertThat(exchange.getResponse().getStatusCode())
+                        .as("%s must not be public", path)
+                        .isEqualTo(HttpStatus.UNAUTHORIZED);
+            }
+        }
+
         @Test
         void availabilityDates_bypassesAuth() {
             MockServerHttpRequest request = MockServerHttpRequest

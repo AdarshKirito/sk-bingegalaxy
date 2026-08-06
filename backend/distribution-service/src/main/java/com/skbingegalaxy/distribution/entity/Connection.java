@@ -66,6 +66,24 @@ public class Connection {
     @Column(name = "credential_expires_at")
     private LocalDateTime credentialExpiresAt;
 
+    /**
+     * SHA-256 of the key SK Binge issued to the RESELLER for this connection (V3).
+     *
+     * <p>The opposite direction to {@link #credentialRef}, which points at the secret we
+     * present <em>to</em> a provider. OCTO is supplier-hosted: the reseller presents a
+     * key to us, so this one is only ever verified, never replayed — which is why the
+     * digest is stored and the key itself is shown exactly once, at issue.
+     */
+    @Column(name = "reseller_key_hash", length = 64)
+    private String resellerKeyHash;
+
+    /** Masked tail, e.g. {@code ••••a1b2}. Safe to send to a browser. */
+    @Column(name = "reseller_key_hint", length = 40)
+    private String resellerKeyHint;
+
+    @Column(name = "reseller_key_issued_at")
+    private LocalDateTime resellerKeyIssuedAt;
+
     @Column(name = "last_verified_at")
     private LocalDateTime lastVerifiedAt;
 

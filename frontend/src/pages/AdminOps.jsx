@@ -33,16 +33,12 @@ const TABS = [
   { id: 'outbox',  label: 'Outbox retry', icon: <FiTool /> },
 ];
 
-// Server enforces the real allow-list. We mirror the canonical topic names
-// here so admins don\u2019t have to memorise them; unknown topics are still
-// rejected by the controller.
-const KNOWN_DLT_TOPICS = [
-  'booking.events.dlt',
-  'payment.events.dlt',
-  'notification.events.dlt',
-  'availability.events.dlt',
-  'waitlist.events.dlt',
-];
+// The allow-list is FETCHED from /admin/ops/replayable-topics, never mirrored.
+// This file used to hard-code five names (booking.events.dlt and friends) and not
+// one of them was in the server's allow-list \u2014 the dropdown's default selection,
+// and every other option in it, was rejected with a 400. Recovery was unusable by
+// default. This is the fallback shown only while that request is in flight.
+const FALLBACK_MAX_REPLAY_BATCH = 1000;
 
 export default function AdminOps() {
   const [tab, setTab] = useState('health');
@@ -153,10 +149,22 @@ function HealthPanel() {
     return () => clearInterval(timerRef.current);
   }, [auto, load]);
 
+  // Field names are the server's (/admin/ops/health), not guesses. `outboxStuck`
+  // and `stuckCount` were never sent, so the count silently fell back to the length
+  // of a sample array capped at 10 — under-reporting the real backlog, and reading
+  // zero whenever the sample list was empty.
   const poisonRows = toArray(snapshot?.poisonRows);
   const dltCounts  = snapshot?.dltCounts && typeof snapshot.dltCounts === 'object' ? snapshot.dltCounts : {};
-  const outboxStuck = snapshot?.outboxStuck ?? snapshot?.stuckCount ?? poisonRows.length;
-  const totalDlt = Object.values(dltCounts).reduce((a, b) => a + (Number(b) || 0), 0);
+  const outboxStuck = Number(snapshot?.outboxFailedPermanent ?? 0);
+  const totalDlt = Number(snapshot?.dltTotal ?? 0);
+  // False on a broker the server could not reach. Distinct from "measured zero" —
+  // conflating them is what let this page say "All clear" over a full DLT.
+  const dltMeasured = snapshot?.dltMeasured !== false;
+  const allClear = dltMeasured && totalDlt === 0 && outboxStuck === 0;
+  // The server reports every watched topic, including the zeroes — an operator needs
+  // to know the full set is being measured. The table only lists topics that actually
+  // hold something, so a healthy system shows nothing rather than a wall of noughts.
+  const nonEmptyDlts = Object.entries(dltCounts).filter(([, count]) => (Number(count) || 0) > 0);
 
   return (
     <>
@@ -181,18 +189,34 @@ function HealthPanel() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', marginBottom: '1.25rem' }}>
         <StatCard label="Outbox stuck rows"   value={outboxStuck} severity={outboxStuck > 0 ? 'danger' : 'ok'} icon={<FiAlertTriangle />} />
-        <StatCard label="DLT total messages"  value={totalDlt}    severity={totalDlt > 0 ? 'warning' : 'ok'}    icon={<FiZap />} />
-        <StatCard label="Topics with DLT"     value={Object.keys(dltCounts).length} severity="info" icon={<FiActivity />} />
+        <StatCard
+          label="DLT total messages"
+          value={dltMeasured ? totalDlt : '—'}
+          severity={!dltMeasured ? 'warning' : totalDlt > 0 ? 'warning' : 'ok'}
+          icon={<FiZap />}
+        />
+        <StatCard label="DLT topics watched"  value={Object.keys(dltCounts).length} severity="info" icon={<FiActivity />} />
       </div>
 
-      {Object.keys(dltCounts).length > 0 && (
+      {!dltMeasured && (
+        <div className="admin-empty-state" style={{ border: '1px solid rgba(245,158,11,0.35)', marginBottom: '1.25rem' }}>
+          <FiAlertTriangle size={36} style={{ color: 'var(--warning, #f59e0b)' }} />
+          <h3>Dead-letter depth unavailable</h3>
+          <p>
+            The server could not reach Kafka to count poisoned records. Outbox figures
+            below are still accurate; DLT depth is unknown, not zero.
+          </p>
+        </div>
+      )}
+
+      {nonEmptyDlts.length > 0 && (
         <section className="adm-card" style={{ padding: '1rem 1.1rem', marginBottom: '1.25rem' }}>
           <h3 style={{ margin: '0 0 0.6rem', fontSize: '0.95rem' }}>DLT depths by topic</h3>
           <div className="adm-table-wrap">
             <table className="adm-table">
               <thead><tr><th>Topic</th><th style={{ textAlign: 'right' }}>Messages</th></tr></thead>
               <tbody>
-                {Object.entries(dltCounts).sort(([,a],[,b]) => (Number(b)||0) - (Number(a)||0)).map(([topic, count]) => (
+                {nonEmptyDlts.sort(([,a],[,b]) => (Number(b)||0) - (Number(a)||0)).map(([topic, count]) => (
                   <tr key={topic}>
                     <td><code style={{ fontSize: '0.85rem' }}>{topic}</code></td>
                     <td style={{ textAlign: 'right', fontWeight: 600 }}>{count}</td>
@@ -206,7 +230,11 @@ function HealthPanel() {
 
       {poisonRows.length > 0 && (
         <section className="adm-card" style={{ padding: '1rem 1.1rem' }}>
-          <h3 style={{ margin: '0 0 0.6rem', fontSize: '0.95rem' }}>Stuck outbox rows (sample)</h3>
+          <h3 style={{ margin: '0 0 0.6rem', fontSize: '0.95rem' }}>
+            Stuck outbox rows{outboxStuck > poisonRows.length
+              ? ` (showing ${poisonRows.length} of ${outboxStuck})`
+              : ''}
+          </h3>
           <div className="adm-table-wrap">
             <table className="adm-table">
               <thead><tr>
@@ -231,7 +259,7 @@ function HealthPanel() {
         </section>
       )}
 
-      {!loading && totalDlt === 0 && outboxStuck === 0 && (
+      {!loading && allClear && (
         <div className="admin-empty-state">
           <FiCheckCircle size={48} style={{ color: 'var(--success, #10b981)' }} />
           <h3>All clear</h3>
@@ -296,11 +324,38 @@ function StatCard({ label, value, severity = 'info', icon }) {
 // DLT replay
 // ─────────────────────────────────────────────────────────────
 function DltPanel() {
-  const [topic, setTopic] = useState(KNOWN_DLT_TOPICS[0]);
+  const [topics, setTopics] = useState([]);
+  const [topicsLoading, setTopicsLoading] = useState(true);
+  const [maxBatch, setMaxBatch] = useState(FALLBACK_MAX_REPLAY_BATCH);
+  const [topic, setTopic] = useState('');
   const [customTopic, setCustomTopic] = useState('');
   const [max, setMax] = useState(100);
   const [busy, setBusy] = useState(false);
   const [lastResult, setLastResult] = useState(null);
+
+  // The allow-list and the batch ceiling both come from the server, so the form
+  // can only offer what the controller will actually accept.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await adminService.getReplayableTopics();
+        if (cancelled) return;
+        const list = toArray(res.data?.data?.topics);
+        setTopics(list);
+        setTopic(list[0] || '__custom__');
+        const serverMax = Number(res.data?.data?.maxReplayBatch);
+        if (Number.isFinite(serverMax) && serverMax > 0) setMaxBatch(serverMax);
+      } catch (err) {
+        if (cancelled) return;
+        setTopic('__custom__');
+        toast.error(err.response?.data?.message || 'Could not load the replay allow-list');
+      } finally {
+        if (!cancelled) setTopicsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const onReplay = async () => {
     const t = topic === '__custom__' ? customTopic.trim() : topic;
@@ -340,8 +395,13 @@ function DltPanel() {
         <div className="adm-form-grid">
           <label className="adm-form-field" style={{ gridColumn: '1 / -1' }}>
             <span>Source topic</span>
-            <select value={topic} onChange={(e) => setTopic(e.target.value)} disabled={busy}>
-              {KNOWN_DLT_TOPICS.map(t => <option key={t} value={t}>{t}</option>)}
+            <select
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              disabled={busy || topicsLoading}
+            >
+              {topicsLoading && <option value="">Loading allow-list\u2026</option>}
+              {topics.map(t => <option key={t} value={t}>{t}</option>)}
               <option value="__custom__">Custom\u2026</option>
             </select>
           </label>
@@ -360,12 +420,17 @@ function DltPanel() {
           )}
           <label className="adm-form-field">
             <span>Max messages</span>
+            {/* Clamped to the SERVER's ceiling. The field used to allow 10000 while
+                the controller rejected anything over 1000, so the form happily
+                submitted a value guaranteed to 400. */}
             <input
               type="number"
               min={1}
-              max={10000}
+              max={maxBatch}
               value={max}
-              onChange={(e) => setMax(Math.max(1, Number(e.target.value) || 1))}
+              onChange={(e) => setMax(
+                Math.min(maxBatch, Math.max(1, Number(e.target.value) || 1))
+              )}
               disabled={busy}
             />
           </label>
@@ -421,6 +486,10 @@ function OutboxPanel() {
   useEffect(() => { load(); }, [load]);
 
   const rows = toArray(snapshot?.poisonRows);
+  // The row list is a capped sample; the count is the real total. Using the sample
+  // length for both is what let "Retry all" describe itself as re-enabling 10 rows
+  // when it was about to re-enable every failed row in the table.
+  const totalStuck = Number(snapshot?.outboxFailedPermanent ?? rows.length);
 
   const onRetryOne = async (row) => {
     if (!window.confirm(`Retry outbox row ${row.id}?\nIt will become eligible for the next publisher tick.`)) return;
@@ -438,7 +507,7 @@ function OutboxPanel() {
 
   const onRetryAll = async () => {
     if (!window.confirm(
-      `Re-enable ALL ${rows.length} permanently-failed outbox rows?\n\n` +
+      `Re-enable ALL ${totalStuck} permanently-failed outbox rows?\n\n` +
       `Every row will be re-attempted on the next publisher tick. ` +
       `If the underlying error is unresolved they will fail again and be flagged.`
     )) return;
@@ -458,13 +527,18 @@ function OutboxPanel() {
     <>
       <div className="admin-toolbar">
         <div className="admin-toolbar-group">
-          <span className="admin-toolbar-label"><FiTool /> Stuck rows: <strong>{rows.length}</strong></span>
+          <span className="admin-toolbar-label">
+            <FiTool /> Stuck rows: <strong>{totalStuck}</strong>
+            {totalStuck > rows.length && (
+              <span style={{ color: 'var(--text-secondary)' }}> (showing {rows.length})</span>
+            )}
+          </span>
         </div>
         <div className="admin-toolbar-group" style={{ marginLeft: 'auto' }}>
           <button className="btn btn-secondary btn-sm" onClick={load} disabled={loading}>
             <FiRefreshCw /> Refresh
           </button>
-          <button className="btn btn-primary btn-sm" onClick={onRetryAll} disabled={busyAll || rows.length === 0}>
+          <button className="btn btn-primary btn-sm" onClick={onRetryAll} disabled={busyAll || totalStuck === 0}>
             <FiPlay /> {busyAll ? 'Retrying\u2026' : 'Retry all'}
           </button>
         </div>

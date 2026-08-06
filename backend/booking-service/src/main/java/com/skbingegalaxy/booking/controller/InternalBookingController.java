@@ -1,6 +1,7 @@
 package com.skbingegalaxy.booking.controller;
 
 import com.skbingegalaxy.booking.dto.BookingDto;
+import com.skbingegalaxy.booking.dto.ChannelCancellationRequest;
 import com.skbingegalaxy.booking.dto.ChannelReservationRequest;
 import com.skbingegalaxy.booking.dto.InternalBingeDto;
 import com.skbingegalaxy.booking.entity.Binge;
@@ -156,5 +157,31 @@ public class InternalBookingController {
                 result.created() ? "Channel reservation accepted"
                                  : "Channel reservation already recorded",
                 result.booking()));
+    }
+
+    /**
+     * Cancel a reservation a channel previously delivered, addressed by the channel's
+     * own reference.
+     *
+     * <p><b>The other half of the ingestion seam.</b> Reservations could arrive but
+     * never leave: a traveller who cancelled on the OTA kept a live booking here, and
+     * the venue held a slot for someone who was not coming. The distribution context's
+     * inbox processor calls this on a CANCEL message.
+     *
+     * <p>Idempotent by design — a redelivered cancel answers 200 with
+     * {@code cancelled: false} rather than an error, because at-least-once delivery
+     * guarantees the retry and a 4xx would trap the message in the channel's own
+     * retry loop while the booking is already cancelled.
+     */
+    @PostMapping("/reservations/cancel")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> cancelChannelReservation(
+            @Valid @RequestBody ChannelCancellationRequest request) {
+        BookingService.ChannelCancelResult result = bookingService.cancelChannelReservation(
+            request.getExternalSource(), request.getExternalRef(), request.getReason());
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("bookingRef", result.bookingRef());
+        body.put("cancelled", result.cancelled());
+        body.put("detail", result.detail());
+        return ResponseEntity.ok(ApiResponse.ok(result.detail(), body));
     }
 }

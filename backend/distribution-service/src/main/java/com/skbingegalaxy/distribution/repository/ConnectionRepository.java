@@ -9,6 +9,16 @@ import java.util.Optional;
 
 public interface ConnectionRepository extends JpaRepository<Connection, Long> {
 
+    /**
+     * The connection a presented reseller key belongs to (V3).
+     *
+     * <p>One indexed read on {@code uk_connection_reseller_key}. The authenticator used
+     * to scan every ACTIVE connection and resolve each one's secret in turn, so the cost
+     * of a single reseller request grew with the number of venues on the platform — and
+     * every comparison along the way touched a live secret.
+     */
+    Optional<Connection> findByResellerKeyHash(String resellerKeyHash);
+
     List<Connection> findByBingeIdOrderByCreatedAtDesc(Long bingeId);
 
     Optional<Connection> findByBingeIdAndProviderCodeAndEnvironment(

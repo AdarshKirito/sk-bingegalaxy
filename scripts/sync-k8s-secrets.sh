@@ -74,6 +74,12 @@ BOOKING_DB_USERNAME=${BOOKING_DB_USERNAME:-booking_svc}
 BOOKING_DB_PASSWORD=${BOOKING_DB_PASSWORD:-$(echo -n "${POSTGRES_PASSWORD}_booking" | openssl dgst -sha256 -hex | cut -c1-32)}
 PAYMENT_DB_USERNAME=${PAYMENT_DB_USERNAME:-payment_svc}
 PAYMENT_DB_PASSWORD=${PAYMENT_DB_PASSWORD:-$(echo -n "${POSTGRES_PASSWORD}_payment" | openssl dgst -sha256 -hex | cut -c1-32)}
+# distribution-service's deployment reads distribution-db-creds (k8s/services.yml).
+# Without this block the secret does not exist, and the pod CrashLoopBackOffs on a
+# missing secretKeyRef — a failure that looks like a service bug rather than a
+# missing line in the secret sync.
+DISTRIBUTION_DB_USERNAME=${DISTRIBUTION_DB_USERNAME:-distribution_svc}
+DISTRIBUTION_DB_PASSWORD=${DISTRIBUTION_DB_PASSWORD:-$(echo -n "${POSTGRES_PASSWORD}_distribution" | openssl dgst -sha256 -hex | cut -c1-32)}
 
 kubectl get namespace "$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$NAMESPACE"
 
@@ -100,6 +106,11 @@ kubectl -n "$NAMESPACE" create secret generic booking-db-creds \
 kubectl -n "$NAMESPACE" create secret generic payment-db-creds \
   --from-literal=username="$PAYMENT_DB_USERNAME" \
   --from-literal=password="$PAYMENT_DB_PASSWORD" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl -n "$NAMESPACE" create secret generic distribution-db-creds \
+  --from-literal=username="$DISTRIBUTION_DB_USERNAME" \
+  --from-literal=password="$DISTRIBUTION_DB_PASSWORD" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 kubectl -n "$NAMESPACE" create secret generic mongo-secrets \

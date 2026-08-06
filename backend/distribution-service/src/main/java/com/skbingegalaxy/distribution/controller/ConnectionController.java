@@ -73,6 +73,41 @@ public class ConnectionController {
             "Destination added", connectionService.enableDestination(requireBinge(bingeId), id, request)));
     }
 
+    /**
+     * Verify a connection and put it live.
+     *
+     * <p>The step the console had no button for: every other transition existed, but
+     * nothing could reach ACTIVE — which is what a reseller must authenticate against and
+     * what a listing requires to publish.
+     */
+    @PostMapping("/connections/{id}/activate")
+    public ResponseEntity<ApiResponse<ConnectionDto>> activate(
+            @RequestHeader(value = "X-Binge-Id", required = false) Long bingeId,
+            @PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.ok("Connection activated",
+            connectionService.activate(requireBinge(bingeId), id)));
+    }
+
+    /**
+     * Issue (or rotate) the key a reseller presents to reach this venue.
+     *
+     * <p><b>The plaintext key is in this response and nowhere else, ever again.</b> Only
+     * its digest is stored. The console must show it once and tell the operator to copy
+     * it; a "show key" screen cannot exist, by construction.
+     */
+    @PostMapping("/connections/{id}/reseller-key")
+    public ResponseEntity<ApiResponse<ConnectionService.IssuedResellerKey>> issueResellerKey(
+            @RequestHeader(value = "X-Binge-Id", required = false) Long bingeId,
+            @PathVariable Long id) {
+        ConnectionService.IssuedResellerKey issued =
+            connectionService.issueResellerKey(requireBinge(bingeId), id);
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(
+            issued.replacedPrevious()
+                ? "New key issued. The previous key stopped working immediately."
+                : "Reseller key issued. Copy it now — it cannot be shown again.",
+            issued));
+    }
+
     @PostMapping("/connections/{id}/pause")
     public ResponseEntity<ApiResponse<ConnectionDto>> pause(
             @RequestHeader(value = "X-Binge-Id", required = false) Long bingeId,

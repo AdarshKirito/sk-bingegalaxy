@@ -3204,6 +3204,54 @@ public class BookingService {
     }
 
     /**
+     * Outcome of a channel cancellation. {@code cancelled} distinguishes "this call
+     * cancelled it" from "it was already cancelled" so the caller can be idempotent
+     * without treating a redelivered cancel as an error — channels retry cancels just
+     * as they retry reservations.
+     */
+    public record ChannelCancelResult(String bookingRef, boolean cancelled, String detail) {}
+
+    /**
+     * V85/G2 — cancel a reservation a channel previously delivered.
+     *
+     * <p><b>Addressed by the CHANNEL's reference, not ours.</b> A channel knows the
+     * booking by the id it issued; it has never seen an SK {@code bookingRef}. Requiring
+     * one would mean the distribution context had to store a booking↔channel mapping of
+     * its own, which is the second booking truth the whole design refuses to create.
+     *
+     * <p><b>Idempotent.</b> An already-cancelled reservation is a successful outcome, not
+     * a 409. Under at-least-once delivery a cancel WILL arrive twice, and answering the
+     * retry with an error would strand the message in a channel's own retry loop
+     * forever while the booking is, in fact, cancelled.
+     *
+     * <p>Full refund percentage is deliberate: the traveller paid the channel, and the
+     * commercial terms for a channel cancellation live in the settlement records, not in
+     * SK Binge's own cancellation-fee ladder.
+     */
+    @Transactional(timeout = 15)
+    public ChannelCancelResult cancelChannelReservation(String externalSource,
+                                                        String externalRef,
+                                                        String reason) {
+        String source = ChannelReservationRequest.canonicalSource(externalSource);
+        String ref = externalRef == null ? null : externalRef.trim();
+
+        Booking booking = bookingRepository.findByExternalSourceAndExternalRef(source, ref)
+            .orElseThrow(() -> new com.skbingegalaxy.common.exception.ResourceNotFoundException(
+                "ChannelReservation", "externalRef", String.valueOf(ref)));
+
+        if (booking.getStatus() == BookingStatus.CANCELLED) {
+            log.info("Channel cancel {}:{} — booking {} already cancelled, no-op",
+                source, ref, booking.getBookingRef());
+            return new ChannelCancelResult(booking.getBookingRef(), false, "Already cancelled");
+        }
+
+        cancelBookingForSystem(booking.getBookingRef(),
+            reason == null || reason.isBlank() ? "Cancelled by sales channel" : reason);
+        log.info("Channel cancel {}:{} — cancelled booking {}", source, ref, booking.getBookingRef());
+        return new ChannelCancelResult(booking.getBookingRef(), true, "Cancelled");
+    }
+
+    /**
      * Reservations from a channel carry no SK customer account. Zero is the existing
      * convention for "no known customer" ({@code adminCreateBooking} uses it for
      * walk-ins), so loyalty, per-customer pricing and customer-scoped queries all

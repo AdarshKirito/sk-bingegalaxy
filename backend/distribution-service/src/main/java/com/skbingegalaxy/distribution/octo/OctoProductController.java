@@ -45,6 +45,7 @@ import java.util.Optional;
 public class OctoProductController {
 
     private final ResellerAuthenticator resellerAuthenticator;
+    private final ResellerRateLimiter rateLimiter;
     private final ConnectionDestinationRepository connectionDestinationRepository;
     private final ListingMappingRepository listingRepository;
 
@@ -60,6 +61,9 @@ public class OctoProductController {
         }
 
         Connection c = connection.get();
+        ResponseEntity<?> throttled = rateLimiter.check(c);
+        if (throttled != null) return throttled;
+
         // Scoped to the destinations THIS connection reaches. A reseller sees only what
         // its own key is for — the same boundary the console enforces, applied to a
         // caller that is another company's system rather than a person.

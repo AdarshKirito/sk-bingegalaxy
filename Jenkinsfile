@@ -10,6 +10,26 @@
         CERT_MANAGER_VERSION = 'v1.14.5'
         INGRESS_NGINX_VERSION = 'controller-v1.11.5'
         GIT_COMMIT_SHORT = ''
+
+        // Every image this pipeline ships, in one place. The build/push/scan/rollout
+        // loops below all read from these, so a new service can no longer be added to
+        // one loop and forgotten in the next four — which is exactly how
+        // distribution-service came to be built, migrated and deployed by manifest
+        // while never being built, pushed, scanned or verified.
+        BACKEND_SERVICES = 'discovery-server config-server api-gateway auth-service availability-service booking-service payment-service notification-service distribution-service'
+        ALL_IMAGES = 'discovery-server config-server api-gateway auth-service availability-service booking-service payment-service notification-service distribution-service frontend'
+        // Deployments (not statefulsets) whose rollout must be verified.
+        K8S_DEPLOYMENTS = 'config-server api-gateway auth-service availability-service booking-service payment-service notification-service distribution-service frontend'
+
+        // The k8s manifests set SPRING_PROFILES_ACTIVE=kubernetes,production (see
+        // k8s/namespace.yml), and the `kubernetes` Spring profile disables Eureka and
+        // switches every service to spring.cloud.kubernetes discovery. That support
+        // ships ONLY under the `kubernetes` MAVEN profile in backend/pom.xml. Building
+        // without it produced jars that answer "discovery: kubernetes" with no
+        // Kubernetes discovery on the classpath and Eureka switched off — no discovery
+        // at all, so the gateway could not route to anything. The Dockerfiles have
+        // always accepted MAVEN_EXTRA_ARGS; nothing ever passed it.
+        MAVEN_IMAGE_PROFILE = '-Pkubernetes'
     }
 
     tools {
@@ -109,59 +129,41 @@
 
         stage('Build Docker Images') {
             parallel {
-                stage('Discovery Server') {
+                // ── Backend images ───────────────────────────────────────────────
+                //
+                // Context is `backend/`, NOT the service directory.
+                //
+                // Every backend Dockerfile does `COPY . .` followed by
+                // `mvn package -pl <service> -am`, so it needs the aggregator pom and
+                // the common-lib module in its context. Building from
+                // `backend/<service>` gave Docker a context containing neither, and
+                // `-am` had nothing to resolve the parent from: every backend image
+                // build in this pipeline failed at the first Maven step. docker-compose
+                // has always done this correctly (context: backend, dockerfile:
+                // <service>/Dockerfile) — the pipeline simply disagreed with it.
+                //
+                // Sequential, not one parallel stage per service: every backend
+                // Dockerfile shares the BuildKit cache mount at /root/.m2, and
+                // concurrent Maven processes writing one local repository is a known
+                // way to corrupt it. The layer cache still makes the shared `COPY . .`
+                // and dependency-resolution work cheap after the first service.
+                stage('Backend Images') {
                     steps {
-                        dir('backend/discovery-server') {
-                            sh "docker build -t ${DOCKER_REGISTRY}/discovery-server:${GIT_COMMIT_SHORT} ."
-                        }
-                    }
-                }
-                stage('Config Server') {
-                    steps {
-                        dir('backend/config-server') {
-                            sh "docker build -t ${DOCKER_REGISTRY}/config-server:${GIT_COMMIT_SHORT} ."
-                        }
-                    }
-                }
-                stage('API Gateway') {
-                    steps {
-                        dir('backend/api-gateway') {
-                            sh "docker build -t ${DOCKER_REGISTRY}/api-gateway:${GIT_COMMIT_SHORT} ."
-                        }
-                    }
-                }
-                stage('Auth Service') {
-                    steps {
-                        dir('backend/auth-service') {
-                            sh "docker build -t ${DOCKER_REGISTRY}/auth-service:${GIT_COMMIT_SHORT} ."
-                        }
-                    }
-                }
-                stage('Availability Service') {
-                    steps {
-                        dir('backend/availability-service') {
-                            sh "docker build -t ${DOCKER_REGISTRY}/availability-service:${GIT_COMMIT_SHORT} ."
-                        }
-                    }
-                }
-                stage('Booking Service') {
-                    steps {
-                        dir('backend/booking-service') {
-                            sh "docker build -t ${DOCKER_REGISTRY}/booking-service:${GIT_COMMIT_SHORT} ."
-                        }
-                    }
-                }
-                stage('Payment Service') {
-                    steps {
-                        dir('backend/payment-service') {
-                            sh "docker build -t ${DOCKER_REGISTRY}/payment-service:${GIT_COMMIT_SHORT} ."
-                        }
-                    }
-                }
-                stage('Notification Service') {
-                    steps {
-                        dir('backend/notification-service') {
-                            sh "docker build -t ${DOCKER_REGISTRY}/notification-service:${GIT_COMMIT_SHORT} ."
+                        dir('backend') {
+                            sh '''
+                                # -eu, not -euo pipefail: Jenkins runs `sh` steps with
+                                # /bin/sh, which is dash on Debian agents, and dash exits
+                                # with "Illegal option -o pipefail". There is no pipe in
+                                # this block, so pipefail buys nothing anyway.
+                                set -eu
+                                for svc in ${BACKEND_SERVICES}; do
+                                    echo "Building ${svc}..."
+                                    # One line on purpose: a backslash continuation inside a
+                                    # Groovy triple-quoted string is consumed by Groovy, not
+                                    # passed to the shell.
+                                    docker build -f ${svc}/Dockerfile --build-arg MAVEN_EXTRA_ARGS="${MAVEN_IMAGE_PROFILE}" -t ${DOCKER_REGISTRY}/${svc}:${GIT_COMMIT_SHORT} .
+                                done
+                            '''
                         }
                     }
                 }
@@ -189,7 +191,8 @@
                 withCredentials([usernamePassword(credentialsId: DOCKER_CREDENTIALS_ID, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     sh "echo \$DOCKER_PASS | docker login -u \$DOCKER_USER --password-stdin"
                     sh '''
-                        for svc in discovery-server config-server api-gateway auth-service availability-service booking-service payment-service notification-service frontend; do
+                        set -eu
+                        for svc in ${ALL_IMAGES}; do
                             docker push ${DOCKER_REGISTRY}/${svc}:${GIT_COMMIT_SHORT}
                         done
                     '''
@@ -206,7 +209,7 @@
                         echo "Install trivy before running this pipeline: https://aquasecurity.github.io/trivy/"
                         exit 1
                     fi
-                    for svc in discovery-server config-server api-gateway auth-service availability-service booking-service payment-service notification-service frontend; do
+                    for svc in ${ALL_IMAGES}; do
                         echo "Scanning ${DOCKER_REGISTRY}/${svc}:${GIT_COMMIT_SHORT}..."
                         trivy image --exit-code 1 --severity HIGH,CRITICAL ${DOCKER_REGISTRY}/${svc}:${GIT_COMMIT_SHORT}
                     done
@@ -232,13 +235,13 @@
                     sh '''
                         set -euo pipefail
                         echo "Verifying Flyway migration checksums..."
-                        # distribution-service is validated here but deliberately absent
-                        # from the image build / push / scan / deploy stages below: it
-                        # exposes no API yet, so shipping it to production would deploy an
-                        # empty service and its k8s manifests do not exist. Its migration
-                        # is real, though, and must be protected from checksum drift from
-                        # the moment it lands. Add it to the other loops in the same
-                        # change that adds k8s/services.yml coverage — not before.
+                        # distribution-service now exposes a real API (the OCTO supplier
+                        # surface plus the venue console) and has k8s/services.yml
+                        # coverage, so it is built, pushed, scanned, deployed and
+                        # verified alongside everything else. The comment that used to
+                        # live here explained why it was validated but not shipped; that
+                        # is no longer the case, and leaving the exemption in place is
+                        # what kept a service with 22 endpoints out of production.
                         for svc in auth-service availability-service booking-service payment-service distribution-service; do
                             echo "Checking ${svc} migrations..."
                             mvn -pl ${svc} flyway:validate -Dflyway.validateMigrationNaming=true -DskipTests || {
@@ -312,7 +315,7 @@
                             kubectl delete job mongodb-rs-init -n sk-binge-galaxy --ignore-not-found=true
                             kubectl apply -f .rendered-k8s/mongodb.yml
                             kubectl wait --for=condition=complete job/mongodb-rs-init -n sk-binge-galaxy --timeout=300s
-                            for svc in config-server api-gateway auth-service availability-service booking-service payment-service notification-service frontend; do
+                            for svc in ${K8S_DEPLOYMENTS}; do
                                 kubectl rollout status deployment/${svc} -n sk-binge-galaxy --timeout=180s || {
                                     echo "ROLLBACK: ${svc} deployment failed, rolling back..."
                                     kubectl rollout undo deployment/${svc} -n sk-binge-galaxy

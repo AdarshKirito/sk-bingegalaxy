@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { adminService } from '../services/endpoints';
 import { toast } from 'react-toastify';
-import { FiLink, FiPause, FiPlay, FiSlash, FiAlertTriangle } from 'react-icons/fi';
+import {
+  FiLink, FiPause, FiPlay, FiSlash, FiAlertTriangle, FiCheckCircle, FiKey, FiCopy, FiX,
+} from 'react-icons/fi';
 import './AdminPages.css';
 
 /**
@@ -34,7 +36,7 @@ const STATUS_TONE = {
 
 /** Why a connection is not simply "on" — an operator needs the reason, not the enum. */
 const STATUS_HELP = {
-  PENDING: 'Created. Not yet live — the provider still has to certify or approve it.',
+  PENDING: 'Created but not selling. Attach a destination, then Activate to go live.',
   AWAITING_PROVIDER: 'Waiting on the provider: certification, a pilot, or a signed agreement.',
   ACTIVE: 'Live and exchanging data.',
   DEGRADED: 'Reachable but failing. Check provider health before relying on it.',
@@ -48,6 +50,10 @@ export default function AdminDistribution() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
   const [form, setForm] = useState({ providerCode: '', environment: 'SANDBOX', credentialRef: '' });
+  // Held in component state only. The server returns the plaintext key exactly once —
+  // only its digest is stored — so this is the single moment it is readable anywhere,
+  // and it is deliberately not persisted to storage of any kind.
+  const [issuedKey, setIssuedKey] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,6 +74,26 @@ export default function AdminDistribution() {
   useEffect(() => { load(); }, [load]);
 
   const selectedProvider = providers.find((p) => p.code === form.providerCode);
+
+  const issueKey = async (connection) => {
+    const rotating = Boolean(connection.resellerKeyHint);
+    if (rotating && !window.confirm(
+      'Issue a NEW reseller key?\n\n'
+      + 'The current key stops working the moment this completes, and any reseller '
+      + 'still using it will start getting 401s until you send them the new one.'
+    )) return;
+
+    setBusyId(connection.id);
+    try {
+      const res = await adminService.issueResellerKey(connection.id);
+      setIssuedKey({ connectionId: connection.id, ...(res.data?.data || {}) });
+      await load();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not issue a reseller key');
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -183,6 +209,48 @@ export default function AdminDistribution() {
         </div>
       )}
 
+      {/* Shown once, inline, and dismissed by the operator rather than by a timer or a
+          re-render. The key exists nowhere else after this — not in the API, not in the
+          database, not in a later response — so anything that could make it disappear
+          before it has been copied would lose it for good. */}
+      {issuedKey?.key && (
+        <section className="adm-card"
+                 style={{ padding: '1rem 1.15rem', marginBottom: '1rem',
+                          border: '1px solid var(--warning, #f59e0b)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem' }}>
+            <h3 style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+              <FiKey /> Reseller key — copy it now
+            </h3>
+            <button className="btn btn-secondary btn-sm" onClick={() => setIssuedKey(null)}
+                    aria-label="Dismiss the reseller key">
+              <FiX /> Done
+            </button>
+          </div>
+          <p className="adm-hint" style={{ margin: '0.5rem 0' }}>
+            Give this to the reseller as a <code>Bearer</code> token. SK Binge stores only a
+            one-way hash of it, so this is the only time it can be shown.
+            {issuedKey.replacedPrevious && <strong> The previous key has stopped working.</strong>}
+          </p>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <code style={{ flex: '1 1 320px', wordBreak: 'break-all', padding: '0.5rem 0.65rem',
+                           background: 'var(--surface-2, rgba(127,127,127,0.12))',
+                           borderRadius: '6px', fontSize: '0.85rem' }}>
+              {issuedKey.key}
+            </code>
+            <button className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      // clipboard is unavailable over plain HTTP on some browsers; the
+                      // key stays on screen either way, so a failure is recoverable.
+                      navigator.clipboard?.writeText(issuedKey.key)
+                        .then(() => toast.success('Key copied'))
+                        .catch(() => toast.info('Copy it manually — clipboard access was refused'));
+                    }}>
+              <FiCopy /> Copy
+            </button>
+          </div>
+        </section>
+      )}
+
       {!loading && connections.map((c) => (
         <div className="adm-card" key={c.id} style={{ marginBottom: '1rem', padding: '1rem 1.15rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
@@ -197,6 +265,12 @@ export default function AdminDistribution() {
                 {c.credentialHint && !c.credentialConfigured && (
                   <strong> · secret not resolvable</strong>
                 )}
+                {/* The INBOUND key — what a reseller presents to reach this venue.
+                    Distinct from the credential above, which is what SK Binge presents
+                    to a provider. Without it no reseller can authenticate at all. */}
+                {c.resellerKeyHint
+                  ? <> · reseller key {c.resellerKeyHint}</>
+                  : <> · <strong>no reseller key</strong></>}
               </p>
               <p className="adm-hint" style={{ margin: '0.35rem 0 0' }}>
                 {STATUS_HELP[c.status]}
@@ -212,6 +286,25 @@ export default function AdminDistribution() {
             {/* Controls follow the state machine: a revoked connection is terminal, so
                 it offers no actions at all rather than buttons that will 400. */}
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
+              {/* Go live. A reseller can only authenticate against an ACTIVE connection
+                  and a listing can only publish from one, so without this the setup
+                  dead-ended: every other button worked and the channel still could not
+                  sell. The server verifies the provider, the credential and at least one
+                  enabled destination before flipping the status. */}
+              {(c.status === 'PENDING' || c.status === 'AWAITING_PROVIDER'
+                || c.status === 'DEGRADED') && (
+                <button className="btn btn-primary btn-sm" disabled={busyId === c.id}
+                        onClick={() => act(c.id,
+                          () => adminService.activateDistributionConnection(c.id))}>
+                  <FiCheckCircle /> Activate
+                </button>
+              )}
+              {c.status !== 'REVOKED' && (
+                <button className="btn btn-secondary btn-sm" disabled={busyId === c.id}
+                        onClick={() => issueKey(c)}>
+                  <FiKey /> {c.resellerKeyHint ? 'New key' : 'Issue key'}
+                </button>
+              )}
               {c.status === 'PAUSED' && (
                 <button className="btn btn-secondary btn-sm" disabled={busyId === c.id}
                         onClick={() => act(c.id, () => adminService.resumeDistributionConnection(c.id))}>

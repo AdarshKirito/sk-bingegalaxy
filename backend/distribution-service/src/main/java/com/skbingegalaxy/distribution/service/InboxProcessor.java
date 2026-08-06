@@ -6,6 +6,7 @@ import com.skbingegalaxy.distribution.client.BookingIngestClient;
 import com.skbingegalaxy.distribution.entity.Connection;
 import com.skbingegalaxy.distribution.entity.ListingMapping;
 import com.skbingegalaxy.distribution.entity.ReservationInboxEntry;
+import com.skbingegalaxy.distribution.octo.AvailabilityIdCodec;
 import com.skbingegalaxy.distribution.repository.ConnectionRepository;
 import com.skbingegalaxy.distribution.repository.ListingMappingRepository;
 import com.skbingegalaxy.distribution.repository.ReservationInboxRepository;
@@ -31,6 +32,13 @@ import java.util.Optional;
  * REJECTED for a business refusal that retrying cannot fix, or FAILED for a transport
  * error that retrying can. Collapsing the last two — the easy mistake — either retries a
  * rejection forever or abandons a recoverable reservation.
+ *
+ * <p><b>CANCEL is applied, not refused.</b> It used to be turned away with "not yet
+ * applied automatically", which meant a traveller who cancelled on the OTA kept a live
+ * booking here and the venue held a slot for someone who was not coming — with nothing
+ * anywhere reporting a problem. It now goes to booking-service's cancellation seam,
+ * addressed by the channel's own reference, never down the ingestion path: creating a
+ * booking from a cancellation is the exact inversion the ordering rules exist to prevent.
  */
 @Service
 @RequiredArgsConstructor
@@ -56,13 +64,11 @@ public class InboxProcessor {
     }
 
     boolean process(ReservationInboxEntry entry) {
-        // CANCEL and ACKNOWLEDGE are not creations. Sending them down the ingestion path
-        // would create a booking from a cancellation — the exact inversion the ordering
-        // rules exist to prevent.
-        if (entry.getMessageType() != ReservationInboxEntry.MessageType.CREATE
-            && entry.getMessageType() != ReservationInboxEntry.MessageType.MODIFY) {
+        // An ACKNOWLEDGE carries no instruction to act on. Rejected rather than left
+        // RECEIVED so it does not sit in the queue being re-read on every sweep.
+        if (entry.getMessageType() == ReservationInboxEntry.MessageType.ACKNOWLEDGE) {
             inboxService.markRejected(entry.getId(),
-                entry.getMessageType() + " is not yet applied automatically.");
+                "ACKNOWLEDGE is not yet applied automatically.");
             return false;
         }
 
@@ -83,6 +89,36 @@ public class InboxProcessor {
             return false;
         }
 
+        // A cancellation is emphatically NOT a creation — sending it down the ingestion
+        // path would create a booking from a cancellation, the exact inversion the
+        // ordering rules exist to prevent. It goes to its own endpoint, addressed by the
+        // channel's own reference.
+        if (entry.getMessageType() == ReservationInboxEntry.MessageType.CANCEL) {
+            return applyCancellation(entry, bingeId);
+        }
+
+        // OCTO's confirmation step turns a hold into a sale and carries no reservation
+        // detail — POST /bookings/{uuid}/confirm has an optional body, and resellers
+        // routinely send none. Sent down the ingestion path it would be refused as "no
+        // live listing matches product 'null'", so every confirmed sale would leave a
+        // REJECTED row next to the booking it successfully confirmed. Nothing more is
+        // needed in the PMS: the CREATE already produced the reservation.
+        if (entry.getMessageType() == ReservationInboxEntry.MessageType.MODIFY
+                && !describesAReservation(payload)) {
+            String bookingRef = appliedBookingRefFor(entry);
+            if (bookingRef == null) {
+                // A confirmation whose CREATE we never applied. Refused rather than
+                // guessed: confirming a reservation that does not exist here would tell
+                // the reseller a traveller has a booking nobody is expecting.
+                inboxService.markRejected(entry.getId(),
+                    "No applied reservation for " + entry.getExternalRef() + " to confirm.");
+                return false;
+            }
+            inboxService.markApplied(entry.getId(), bookingRef, bingeId, null, 0L);
+            log.info("Inbox {} confirmed existing booking {}", entry.getId(), bookingRef);
+            return true;
+        }
+
         // The reseller names a product; only a LIVE listing may be sold. Resolving the
         // event type through the mapping — rather than trusting an id in the payload —
         // is what stops a reseller booking inventory it was never offered.
@@ -93,25 +129,57 @@ public class InboxProcessor {
             return false;
         }
 
-        LocalDate date = parseDate(text(payload, "localDate"));
-        LocalTime start = parseTime(text(payload, "startTime"));
-        if (date == null || start == null) {
+        Window window = resolveWindow(payload);
+        if (window == null) {
             inboxService.markRejected(entry.getId(),
                 "Reservation is missing a usable date or start time.");
             return false;
         }
 
-        BookingIngestClient.Result result = bookingIngestClient.ingest(
-            entry.getDestinationCode().toLowerCase(java.util.Locale.ROOT),
-            entry.getExternalRef(), bingeId, eventTypeId, date, start,
-            intOrNull(payload, "durationMinutes"),
-            payload.hasNonNull("guests") ? payload.get("guests").asInt() : 1,
-            text(payload, "guestName"), text(payload, "guestEmail"));
+        String guestName = guestName(payload);
+        if (guestName == null || guestName.isBlank()) {
+            // The venue has to know who is arriving. Refusing here, with a reason a human
+            // can act on, beats creating a booking attributed to nobody — and
+            // booking-service would reject the blank name anyway, one service hop later
+            // and with a far less useful message.
+            inboxService.markRejected(entry.getId(),
+                "Reservation carries no guest name.");
+            return false;
+        }
 
+        BookingIngestClient.Result result = bookingIngestClient.ingest(
+            externalSource(entry),
+            entry.getExternalRef(), bingeId, eventTypeId,
+            window.date(), window.start(), window.durationMinutes(),
+            guestCount(payload), guestName, guestEmail(payload));
+
+        return record(entry, bingeId, payload, result);
+    }
+
+    /**
+     * CANCEL. booking-service resolves the booking from
+     * {@code (externalSource, externalRef)} and is idempotent, so a redelivered cancel
+     * answers 200 rather than an error — which matters, because at-least-once delivery
+     * guarantees the redelivery.
+     */
+    private boolean applyCancellation(ReservationInboxEntry entry, Long bingeId) {
+        BookingIngestClient.Result result = bookingIngestClient.cancel(
+            externalSource(entry), entry.getExternalRef(),
+            "Cancelled by " + entry.getDestinationCode());
+        // No payload, deliberately: a cancellation must never create a receivable. Today
+        // an OCTO cancel carries no pricing anyway, but a future provider adapter that
+        // echoed the original price would otherwise book the sale a second time on the
+        // way out. The original sale's settlement is untouched either way.
+        return record(entry, bingeId, null, result);
+    }
+
+    /** One place where a client Result becomes an inbox status, so the two cannot drift. */
+    private boolean record(ReservationInboxEntry entry, Long bingeId,
+                           JsonNode payload, BookingIngestClient.Result result) {
         if (result instanceof BookingIngestClient.Result.Accepted accepted) {
             // The settlement is created inside markApplied, from the connection's terms.
             inboxService.markApplied(entry.getId(), accepted.bookingRef(), bingeId,
-                text(payload, "currency"), longOrZero(payload, "grossMinor"));
+                currency(payload), grossMinor(payload));
             log.info("Inbox {} APPLIED -> booking {} ({})", entry.getId(),
                 accepted.bookingRef(), accepted.created() ? "created" : "already recorded");
             return true;
@@ -121,13 +189,30 @@ public class InboxProcessor {
             return false;
         }
 
-        // FAILED stays retryable and keeps its RECEIVED status so the next sweep picks
-        // it up; the recovery console can also requeue it by hand.
+        // FAILED stays retryable; the recovery console can requeue it by hand. Written
+        // through the service rather than inline so the reason is truncated to the
+        // column width — a verbose transport error was long enough to throw on save,
+        // inside a sweep loop that would have abandoned every message behind it.
         BookingIngestClient.Result.Failed failed = (BookingIngestClient.Result.Failed) result;
-        entry.setStatus(ReservationInboxEntry.Status.FAILED);
-        entry.setRejectReason(failed.reason());
-        inboxRepository.save(entry);
+        ReservationInboxEntry saved = inboxService.markFailed(entry.getId(), failed.reason());
+        // Keep the caller's instance in step: the existing tests assert on the entry
+        // they passed in, and a status that only moved in the database is a status the
+        // console would show correctly and every in-process reader would not.
+        entry.setStatus(saved.getStatus());
+        entry.setRejectReason(saved.getRejectReason());
         return false;
+    }
+
+    /**
+     * The provider-neutral slug booking-service stores.
+     *
+     * <p>Lower-cased because {@code ChannelReservationRequest} canonicalises the same
+     * way. If both {@code "SIMULATOR"} and {@code "simulator"} could be stored, the
+     * unique index on {@code (external_source, external_ref)} would hold two rows and a
+     * redelivery would double-book the venue.
+     */
+    private static String externalSource(ReservationInboxEntry entry) {
+        return entry.getDestinationCode().toLowerCase(java.util.Locale.ROOT);
     }
 
     private Long resolveEventType(Long bingeId, String productId) {
@@ -139,6 +224,132 @@ public class InboxProcessor {
             .map(ListingMapping::getEventTypeId)
             .findFirst()
             .orElse(null);
+    }
+
+    // ── Reading the message ──────────────────────────────────────────────────
+    //
+    // Two payload dialects reach this class, and it must read both.
+    //
+    // The OCTO endpoints store the reseller's own vocabulary: an `availabilityId` naming
+    // the window, a `contact` object, `unitItems`, `pricing`. Everything below used to
+    // read a FLAT shape instead — localDate, startTime, guestName, grossMinor — that no
+    // endpoint in this service has ever written. The result was not a crash: every OCTO
+    // reservation was faithfully recorded and then REJECTED as "missing a usable date or
+    // start time", so the inbox filled with refusals while the worker, the scheduler and
+    // the console all reported themselves healthy.
+    //
+    // The flat form is kept as a fallback rather than deleted. It is the shape a
+    // non-OCTO provider adapter naturally produces, and dropping it would trade one
+    // silent dialect mismatch for another the first time a second provider is added.
+
+    /** A bookable window, however the message chose to express it. */
+    private record Window(LocalDate date, LocalTime start, Integer durationMinutes) {}
+
+    /**
+     * Does this message actually describe a reservation, or is it a bare lifecycle
+     * signal? Both a product and a window are required — a message with one and not the
+     * other is incomplete rather than minimal, and must be refused with a reason rather
+     * than treated as a confirmation.
+     */
+    private static boolean describesAReservation(JsonNode payload) {
+        return text(payload, "productId") != null && resolveWindow(payload) != null;
+    }
+
+    /**
+     * The booking an earlier message for this same external reference produced.
+     *
+     * <p>Scoped to the connection, so one reseller's reference can never resolve to a
+     * booking another reseller's message created.
+     */
+    private String appliedBookingRefFor(ReservationInboxEntry entry) {
+        return inboxRepository
+            .findByConnectionIdAndExternalRefOrderByIdAsc(
+                entry.getConnectionId(), entry.getExternalRef())
+            .stream()
+            .filter(e -> e.getStatus() == ReservationInboxEntry.Status.APPLIED)
+            .map(ReservationInboxEntry::getBookingRef)
+            .filter(java.util.Objects::nonNull)
+            .reduce((first, second) -> second)   // the most recent one
+            .orElse(null);
+    }
+
+    private static Window resolveWindow(JsonNode payload) {
+        // OCTO first: the supplier issued this token, so it is the more trustworthy of
+        // the two — it cannot disagree with itself the way three separate fields can.
+        var decoded = AvailabilityIdCodec.decode(text(payload, "availabilityId"));
+        if (decoded.isPresent()) {
+            return new Window(decoded.get().start().toLocalDate(),
+                              decoded.get().start().toLocalTime(),
+                              decoded.get().durationMinutes());
+        }
+        LocalDate date = parseDate(text(payload, "localDate"));
+        LocalTime start = parseTime(text(payload, "startTime"));
+        if (date == null || start == null) return null;
+        return new Window(date, start, intOrNull(payload, "durationMinutes"));
+    }
+
+    /** OCTO sends {@code contact.fullName}, or the name in parts, or neither. */
+    private static String guestName(JsonNode payload) {
+        JsonNode contact = payload.get("contact");
+        if (contact != null && !contact.isNull()) {
+            String full = text(contact, "fullName");
+            if (full != null && !full.isBlank()) return full.trim();
+            String joined = ((orEmpty(text(contact, "firstName"))) + " "
+                           + (orEmpty(text(contact, "lastName")))).trim();
+            if (!joined.isEmpty()) return joined;
+        }
+        return text(payload, "guestName");
+    }
+
+    private static String guestEmail(JsonNode payload) {
+        JsonNode contact = payload.get("contact");
+        if (contact != null && !contact.isNull()) {
+            String email = text(contact, "emailAddress");
+            if (email != null && !email.isBlank()) return email;
+        }
+        return text(payload, "guestEmail");
+    }
+
+    /**
+     * Whole-space private hire is priced per booking, so OCTO's unit breakdown carries no
+     * pricing meaning — but the venue still needs a head count for capacity. One guest
+     * when the message says nothing: a booking for zero people is not a thing.
+     */
+    private static int guestCount(JsonNode payload) {
+        JsonNode units = payload.get("unitItems");
+        if (units != null && units.isArray() && !units.isEmpty()) {
+            return Math.max(1, Math.min(units.size(), 100));
+        }
+        return payload.hasNonNull("guests") ? Math.max(1, payload.get("guests").asInt()) : 1;
+    }
+
+    /**
+     * What the CHANNEL charged, which is not necessarily what SK Binge would have —
+     * the destination sets its own retail price, so this comes from the message rather
+     * than from our pricing engine.
+     */
+    private static String currency(JsonNode payload) {
+        // Null on a cancellation, which has no price to record.
+        if (payload == null) return null;
+        JsonNode pricing = payload.get("pricing");
+        if (pricing != null && !pricing.isNull()) {
+            String c = text(pricing, "currency");
+            if (c != null && !c.isBlank()) return c;
+        }
+        return text(payload, "currency");
+    }
+
+    private static long grossMinor(JsonNode payload) {
+        if (payload == null) return 0L;
+        JsonNode pricing = payload.get("pricing");
+        if (pricing != null && pricing.hasNonNull("retail")) {
+            return pricing.get("retail").asLong();
+        }
+        return longOrZero(payload, "grossMinor");
+    }
+
+    private static String orEmpty(String s) {
+        return s == null ? "" : s;
     }
 
     private static String text(JsonNode node, String field) {

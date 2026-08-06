@@ -1,6 +1,7 @@
 package com.skbingegalaxy.distribution.scheduler;
 
 import com.skbingegalaxy.distribution.service.InboxProcessor;
+import com.skbingegalaxy.distribution.service.InboxRetentionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
@@ -26,6 +27,7 @@ import org.springframework.stereotype.Component;
 public class InboxProcessingScheduler {
 
     private final InboxProcessor inboxProcessor;
+    private final InboxRetentionService inboxRetentionService;
 
     @Scheduled(fixedRate = 30_000L)
     @SchedulerLock(name = "distributionInboxDrain", lockAtMostFor = "5m", lockAtLeastFor = "20s")
@@ -33,6 +35,23 @@ public class InboxProcessingScheduler {
         int applied = inboxProcessor.processOutstanding();
         if (applied > 0) {
             log.info("Inbox drain applied {} reservation(s)", applied);
+        }
+    }
+
+    /**
+     * Redacts traveller details from messages that can no longer be acted on.
+     *
+     * <p>Daily rather than per-drain: this is a retention obligation measured in weeks,
+     * and running it beside the 30-second drain would spend a table scan every half
+     * minute to find nothing. Offset from the drain so the two never contend for the
+     * same rows.
+     */
+    @Scheduled(fixedRate = 24 * 60 * 60_000L, initialDelay = 5 * 60_000L)
+    @SchedulerLock(name = "distributionInboxRetention", lockAtMostFor = "30m", lockAtLeastFor = "1m")
+    public void redactExpiredPayloads() {
+        int redacted = inboxRetentionService.redactExpiredPayloads();
+        if (redacted > 0) {
+            log.info("Inbox retention redacted {} payload(s)", redacted);
         }
     }
 }

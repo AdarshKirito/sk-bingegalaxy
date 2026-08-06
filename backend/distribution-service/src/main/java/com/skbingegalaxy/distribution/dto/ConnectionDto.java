@@ -38,6 +38,17 @@ public class ConnectionDto {
     private boolean credentialConfigured;
 
     private LocalDateTime credentialExpiresAt;
+    /**
+     * Masked tail of the reseller key, or null when none has been issued (V3).
+     *
+     * <p>A hint, never the key — only its digest is stored, so the key cannot be
+     * re-shown even by a caller entitled to see it. Its presence is what tells the
+     * console whether the connection can be activated at all.
+     */
+    private String resellerKeyHint;
+
+    private LocalDateTime resellerKeyIssuedAt;
+
     private LocalDateTime lastVerifiedAt;
     private LocalDateTime pausedAt;
     private String pausedReason;

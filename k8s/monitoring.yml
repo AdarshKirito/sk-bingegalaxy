@@ -19,6 +19,7 @@ spec:
           - payment-service
           - notification-service
           - api-gateway
+          - distribution-service
   namespaceSelector:
     matchNames:
       - sk-binge-galaxy

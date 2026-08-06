@@ -93,6 +93,19 @@ distribution:
     # verbatim for audit, so without a bound one hostile caller could fill the disk.
     max-payload-bytes: ${DISTRIBUTION_INBOX_MAX_PAYLOAD_BYTES:262144}
 
+  # ── Services this context reads from and writes to ───────────────────────
+  # Written out rather than left to the code defaults, so the two service hops this
+  # context depends on are visible in configuration instead of only in a @Value.
+  availability:
+    # Read at request time for the OCTO calendar/availability endpoints. Never
+    # cached here: a stored copy would be a second inventory truth.
+    base-url: ${DISTRIBUTION_AVAILABILITY_BASE_URL:http://availability-service:8082}
+  booking:
+    # Where the inbox processor applies channel reservations. booking-service
+    # remains the only booking truth; this context records what arrived and what
+    # became of it.
+    base-url: ${DISTRIBUTION_BOOKING_BASE_URL:http://booking-service:8083}
+
 springdoc:
   api-docs:
     enabled: ${SPRINGDOC_ENABLED:true}

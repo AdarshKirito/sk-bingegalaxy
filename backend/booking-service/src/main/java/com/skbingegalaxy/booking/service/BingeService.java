@@ -573,8 +573,11 @@ public class BingeService {
     @org.springframework.cache.annotation.CacheEvict(value = "activeBinges", allEntries = true)
     public int enforceGracePeriod() {
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
-        List<Binge> candidates = bingeRepository.findByStatusOrderByCreatedAtDesc(BingeApprovalStatus.APPROVED)
-            .stream()
+        // Read once and reuse: the bookability check below looks at the same population,
+        // and a second identical query per sweep buys nothing.
+        List<Binge> approved =
+            bingeRepository.findByStatusOrderByCreatedAtDesc(BingeApprovalStatus.APPROVED);
+        List<Binge> candidates = approved.stream()
             .filter(b -> b.getFirstEventCreatedAt() == null)
             .filter(b -> b.getApprovalDecidedAt() != null)
             .toList();
@@ -645,7 +648,68 @@ public class BingeService {
                     "/admin/platform");
             }
         }
+
+        warnVenuesWithNothingBookable(approved, now);
         return deactivated;
+    }
+
+    /**
+     * The other way a venue goes silently invisible (V89).
+     *
+     * <p>The grace period corroborates against the EXISTENCE of event types, which is
+     * the right test for onboarding. Customer discovery asks a different question:
+     * {@code findCustomerVisibleBinges()} requires at least one <em>active</em> event
+     * type. A venue holding thirteen switched-off event types therefore passes the grace
+     * period, shows as active in the admin console, and cannot be found by a single
+     * customer — the same failure as the V87 incident, reached through a different flag,
+     * and reported by nothing.
+     *
+     * <p><b>It warns; it never pauses.</b> Turning every event type off is a legitimate
+     * operator action — a seasonal closure, a catalogue rebuild — and auto-pausing on
+     * top of it would be the platform overriding a deliberate choice. That is precisely
+     * the behaviour the V87 incident made everyone rightly wary of, and repeating it in
+     * a new place would be a worse bug than the one being fixed.
+     *
+     * <p>Warned once per episode: the stamp is cleared as soon as the venue has
+     * something bookable again, so a recurrence is reported afresh rather than
+     * swallowed.
+     */
+    private void warnVenuesWithNothingBookable(List<Binge> approved, LocalDateTime now) {
+        for (Binge b : approved) {
+            if (!b.isActive()) continue;                       // already visibly paused
+            if (b.getFirstEventCreatedAt() == null) continue;  // still onboarding — the grace period owns it
+
+            boolean bookable = eventTypeRepository.existsByBingeIdAndActiveTrue(b.getId());
+
+            if (bookable) {
+                // Recovered. Clearing the stamp is what makes the next episode audible.
+                if (b.getNoActiveEventsWarnedAt() != null) {
+                    b.setNoActiveEventsWarnedAt(null);
+                    bingeRepository.save(b);
+                    log.info("Binge {} ('{}') has bookable event types again", b.getId(), b.getName());
+                }
+                continue;
+            }
+
+            if (b.getNoActiveEventsWarnedAt() != null) continue;  // already told them
+
+            b.setNoActiveEventsWarnedAt(now);
+            bingeRepository.save(b);
+            log.warn("Binge {} ('{}') is approved and active but has NO active event type — "
+                + "it cannot appear in customer discovery", b.getId(), b.getName());
+
+            adminNotificationService.notifyUser(
+                b.getAdminId(),
+                "ADMIN",
+                "BINGE_NOT_BOOKABLE",
+                "WARNING",
+                "Your venue cannot be booked",
+                String.format("'%s' has no active event type, so customers cannot find or book it. "
+                        + "Re-activate an event type to make it visible again. The venue has NOT "
+                        + "been paused.", b.getName()),
+                b.getId(),
+                "/admin/event-types");
+        }
     }
 
     @Transactional

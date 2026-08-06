@@ -73,6 +73,9 @@ class BingeGracePeriodTest {
         binge.setFirstEventCreatedAt(null);          // the flag the seeder never stamped
         givenApproved(binge);
         when(eventTypeRepository.existsByBingeId(42L)).thenReturn(true);   // but events exist
+        // The incident's venues held 13 ACTIVE event types, so they were bookable —
+        // which is why nothing about the catalogue explained their disappearance.
+        when(eventTypeRepository.existsByBingeIdAndActiveTrue(42L)).thenReturn(true);
 
         int deactivated = bingeService.enforceGracePeriod();
 
@@ -144,6 +147,94 @@ class BingeGracePeriodTest {
         assertThat(binge.isActive()).isTrue();
         verifyNoInteractions(adminNotificationService);
         verify(eventTypeRepository, never()).existsByBingeId(any());
+    }
+
+    /**
+     * The other way a venue disappears (V89).
+     *
+     * <p>The grace period asks whether event types EXIST. Customer discovery asks
+     * whether any is ACTIVE. A venue holding thirteen switched-off event types satisfies
+     * the first and fails the second: exempt from the grace period, shown as active in
+     * the console, and unfindable by any customer — the V87 failure again, through a
+     * different flag.
+     */
+    @org.junit.jupiter.api.Nested
+    @DisplayName("an operational venue with nothing bookable")
+    class NothingBookable {
+
+        private Binge operational() {
+            Binge binge = approvedHoursAgo(720);                       // long past onboarding
+            binge.setFirstEventCreatedAt(LocalDateTime.now(ZoneOffset.UTC).minusDays(30));
+            return binge;
+        }
+
+        @Test
+        @DisplayName("is warned, and explicitly NOT paused")
+        void warnsButNeverPauses() {
+            Binge binge = operational();
+            givenApproved(binge);
+            when(eventTypeRepository.existsByBingeIdAndActiveTrue(42L)).thenReturn(false);
+
+            int deactivated = bingeService.enforceGracePeriod();
+
+            assertThat(deactivated).isZero();
+            // Turning every event type off is a legitimate operator action — a seasonal
+            // closure, a catalogue rebuild. Pausing on top of it would repeat the exact
+            // overreach the V87 incident was about.
+            assertThat(binge.isActive()).isTrue();
+            assertThat(binge.getAutoDeactivatedAt()).isNull();
+            assertThat(binge.getNoActiveEventsWarnedAt()).isNotNull();
+            verify(adminNotificationService).notifyUser(
+                anyLong(), anyString(), org.mockito.ArgumentMatchers.eq("BINGE_NOT_BOOKABLE"),
+                anyString(), anyString(), anyString(), anyLong(), anyString());
+        }
+
+        @Test
+        @DisplayName("is not warned twice for the same episode")
+        void warnsOncePerEpisode() {
+            Binge binge = operational();
+            givenApproved(binge);
+            when(eventTypeRepository.existsByBingeIdAndActiveTrue(42L)).thenReturn(false);
+
+            bingeService.enforceGracePeriod();
+            bingeService.enforceGracePeriod();
+
+            verify(adminNotificationService, org.mockito.Mockito.times(1)).notifyUser(
+                anyLong(), anyString(), anyString(), anyString(), anyString(), anyString(),
+                anyLong(), anyString());
+        }
+
+        @Test
+        @DisplayName("clears its warning once something is bookable again, so a relapse is heard")
+        void recoveryClearsTheStamp() {
+            Binge binge = operational();
+            binge.setNoActiveEventsWarnedAt(LocalDateTime.now(ZoneOffset.UTC).minusDays(2));
+            givenApproved(binge);
+            when(eventTypeRepository.existsByBingeIdAndActiveTrue(42L)).thenReturn(true);
+
+            bingeService.enforceGracePeriod();
+
+            // A stamp left behind would silence the NEXT time this happens, which is the
+            // failure mode of every "notify once" flag that is never reset.
+            assertThat(binge.getNoActiveEventsWarnedAt()).isNull();
+            verifyNoInteractions(adminNotificationService);
+        }
+
+        @Test
+        @DisplayName("a venue still inside its grace period is left to the grace period")
+        void onboardingVenuesAreNotDoubleReported() {
+            Binge binge = approvedHoursAgo(2);
+            binge.setFirstEventCreatedAt(null);          // never had an event type
+            givenApproved(binge);
+            when(eventTypeRepository.existsByBingeId(42L)).thenReturn(false);
+
+            bingeService.enforceGracePeriod();
+
+            // Two notifications about the same fact, from two different rules, is how an
+            // alert channel becomes one people stop reading.
+            verifyNoInteractions(adminNotificationService);
+            verify(eventTypeRepository, never()).existsByBingeIdAndActiveTrue(anyLong());
+        }
     }
 
     @Test

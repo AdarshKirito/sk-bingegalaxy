@@ -153,12 +153,68 @@ spec:
     matchExpressions:
       - key: app
         operator: In
-        values: [auth-service, availability-service, booking-service, payment-service, notification-service]
+        # distribution-service serves both the venue console (/api/v1/distribution/**)
+        # and the OCTO supplier surface, all of it routed through the gateway. Without
+        # it here, default-deny-ingress silently black-holed every distribution route.
+        values: [auth-service, availability-service, booking-service, payment-service, notification-service, distribution-service]
   ingress:
     - from:
         - podSelector:
             matchLabels:
               app: api-gateway
+---
+# Allow egress BETWEEN backend services.
+#
+# default-deny-egress selects every pod, and allow-backends-to-infra permits egress
+# only to infrastructure. Ingress rules alone do not open a path when egress is also
+# denied, so with only the rules below this file used to have:
+#   • api-gateway unable to reach any service it routes to,
+#   • booking-service unable to reach availability-service despite the matching
+#     ingress rule two blocks down,
+#   • distribution-service unable to reach either service it reads from.
+# Every one of those failures presents as a timeout inside a healthy-looking pod.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-backend-to-backend-egress
+  namespace: sk-binge-galaxy
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [api-gateway, auth-service, availability-service, booking-service, payment-service, notification-service, distribution-service]
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values: [api-gateway, auth-service, availability-service, booking-service, payment-service, notification-service, distribution-service]
+---
+# Allow distribution-service → availability-service and booking-service.
+#
+# It reads availability for the OCTO calendar/availability endpoints and posts
+# channel reservations into booking-service's internal ingestion seam. Both calls
+# carry X-Internal-Secret and never leave the cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-distribution-to-upstreams
+  namespace: sk-binge-galaxy
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [availability-service, booking-service]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: distribution-service
 ---
 # Allow booking-service → availability-service (Feign)
 apiVersion: networking.k8s.io/v1
@@ -236,6 +292,9 @@ spec:
         - port: 8083
         - port: 8084
         - port: 8085
+        # distribution-service (see k8s/services.yml). Omitted, its actuator metrics
+        # were unreachable and every distribution alert would have stayed silent.
+        - port: 8086
 ---
 # Allow all pods → discovery-server & config-server (service registration)
 apiVersion: networking.k8s.io/v1
