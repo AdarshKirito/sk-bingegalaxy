@@ -530,11 +530,11 @@ G-A moved to the front: everything renders from the schema and the capability ro
 |---|---|---|
 | **1** | **Schema + provider capability model** + seeded provider catalogue — **DONE** | Every screen and every connector reads it |
 | **2** | **Attribution capture (G-B)** — **DONE** | Independent of connectors; makes Google measurable **before** any connector exists, so the channel can be justified on data |
-| 3 | Connections + connector-specific auth | Nothing is reachable without one |
-| 4 | Listings + per-destination readiness | Surfaces `Blocked` to whoever can fix it |
-| 5 | Reservation inbox + ordering (G-C) | Trust screen; must precede the first real reservation |
-| 6 | Settlements (G-E) | Correct from the first channel-collected booking |
-| 7 | Overview · Health · Governance | Composed from 1–6 |
+| **3** | **Connections + connector-specific auth** — **DONE** | Nothing is reachable without one |
+| **4** | **Listings + per-destination readiness** — **DONE** | Surfaces `Blocked` to whoever can fix it |
+| **5** | **Reservation inbox + ordering (G-C)** — **DONE** (service + recovery console) | Trust screen; must precede the first real reservation |
+| **6** | **Settlements (G-E)** — **SERVICE DONE, NO UI YET** | Correct from the first channel-collected booking |
+| **7** | **Overview · Health** — **DONE**; governance not built | Composed from 1–6 |
 
 **Slice 2 before slice 3 is deliberate.** Attribution needs no provider approval, no
 credentials and no certification — it is the one piece of real distribution value
