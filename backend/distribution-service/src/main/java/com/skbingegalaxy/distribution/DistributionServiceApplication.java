@@ -4,6 +4,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 import org.springframework.cloud.openfeign.EnableFeignClients;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * Distribution bounded context.
@@ -34,29 +35,13 @@ import org.springframework.cloud.openfeign.EnableFeignClients;
  * <p>See {@code docs/distribution/05-DISTRIBUTION-CONSOLE-DESIGN-V2.md}.
  */
 /*
- * NOTE — scheduling is deliberately NOT enabled yet.
- *
- * This service will need it (feed staleness sweeps, credential-expiry warnings), but
- * `@EnableScheduling` on its own is a trap here: every replica would run every
- * `@Scheduled` method, so a staleness sweep would send duplicate warnings and a feed
- * publish would run concurrently with itself. booking-service solves this with ShedLock
- * (`@SchedulerLock`, backed by the `shedlock` table). Enable scheduling in the SAME
- * change that adds ShedLock and the first job — not before, so the annotation cannot
- * sit here inviting an unguarded `@Scheduled`.
+ * Scheduling is enabled HERE and not before, because the note that used to sit in its
+ * place set a condition: enable it in the SAME change that adds ShedLock and the first
+ * job. Both landed together (V2 + ShedLockConfig + CredentialExpiryScheduler), so the
+ * trap that comment guarded against — an unguarded @Scheduled running on every replica
+ * — cannot open.
  */
-/*
- * scanBasePackages, not a bare @SpringBootApplication.
- *
- * Spring scans only the application's own package by default, so common-lib's
- * @RestControllerAdvice GlobalExceptionHandler was never registered here. Every
- * BusinessException escaped to the servlet container: "This venue already has a sandbox
- * connection" — a perfectly good 400 — came back as a bare 403 with no body, telling an
- * operator they lacked permission when the truth was that the thing already existed.
- *
- * Nothing catches this in a unit test, because unit tests call the service directly and
- * never cross the MVC boundary. Every other service in this repo carries the same list;
- * this one was the exception.
- */
+@EnableScheduling
 @SpringBootApplication(scanBasePackages = {
     "com.skbingegalaxy.distribution",
     "com.skbingegalaxy.common.exception",
