@@ -129,3 +129,17 @@ spec:
   selector:
     matchLabels:
       app: redis
+---
+# Distribution service. Without a PDB a node drain can evict both replicas at once;
+# nothing else depends on this service, but an operator mid-reconciliation would lose
+# the console with no warning.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: distribution-service-pdb
+  namespace: sk-binge-galaxy
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: distribution-service

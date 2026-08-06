@@ -587,3 +587,136 @@ spec:
   ports:
     - port: 8085
       targetPort: 8085
+---
+# ── Distribution service ──────────────────────────────────────────────────────
+# Third-party channel distribution. Added late: the service existed in
+# docker-compose.yml and in the reactor for several iterations with NO Kubernetes
+# manifest at all, so a cluster deploy simply did not include it while compose did.
+# Two deployment descriptions of one system had silently diverged.
+#
+# An outage here must degrade third-party distribution ONLY, never direct booking —
+# nothing else in the stack depends on this service, and that isolation is the reason
+# it is a separate deployment rather than a package inside booking-service.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: distribution-service
+  namespace: sk-binge-galaxy
+  annotations:
+    reloader.stakater.com/auto: "true"
+spec:
+  # 2 replicas is safe because every scheduled job is ShedLock-guarded (V2 gives this
+  # database its own shedlock table). Without that, a second replica would double every
+  # credential-expiry warning.
+  replicas: 2
+  selector:
+    matchLabels:
+      app: distribution-service
+  template:
+    metadata:
+      labels:
+        app: distribution-service
+    spec:
+      serviceAccountName: spring-cloud-kubernetes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: distribution-service
+                topologyKey: kubernetes.io/hostname
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: distribution-service
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          image: skbingegalaxy/distribution-service:IMAGE_TAG  # Set by CI/CD
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8086
+              name: http
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secrets
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://postgres:5432/distribution_db
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: distribution-db-creds
+                  key: username
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: distribution-db-creds
+                  key: password
+            # Provider secrets are resolved by reference at call time and are NEVER
+            # stored in distribution_db. Each is mounted as DIST_CRED_<REF> from its own
+            # secret, so adding a provider does not widen what this pod can read.
+            - name: JAVA_TOOL_OPTIONS
+              value: "-XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=8m -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/heapdump.hprof -Duser.timezone=UTC"
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8086
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            failureThreshold: 20
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8086
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8086
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh","-c","sleep 10"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        # readOnlyRootFilesystem is on, so the JVM needs a writable /tmp for the heap
+        # dump path configured above.
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: distribution-service
+  namespace: sk-binge-galaxy
+spec:
+  selector:
+    app: distribution-service
+  ports:
+    - port: 8086
+      targetPort: 8086

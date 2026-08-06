@@ -57,7 +57,10 @@ spec:
     matchExpressions:
       - key: app
         operator: In
-        values: [auth-service, availability-service, booking-service, payment-service, notification-service, api-gateway]
+        # distribution-service added: default-deny-egress selects ALL pods, so without an
+        # entry here it would start and be unable to reach Postgres, config-server or
+        # Eureka — healthy-looking and completely isolated.
+        values: [auth-service, availability-service, booking-service, payment-service, notification-service, api-gateway, distribution-service]
   policyTypes:
     - Egress
   egress:
@@ -211,7 +214,7 @@ spec:
             matchExpressions:
               - key: app
                 operator: In
-                values: [auth-service, booking-service, payment-service, notification-service, availability-service]
+                values: [auth-service, booking-service, payment-service, notification-service, availability-service, distribution-service]
 ---
 # Allow Prometheus scraping on all pods (/actuator/prometheus)
 apiVersion: networking.k8s.io/v1
