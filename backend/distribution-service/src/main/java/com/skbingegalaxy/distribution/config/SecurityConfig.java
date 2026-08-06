@@ -67,7 +67,8 @@ public class SecurityConfig {
                                  "/api/v1/distribution/listings/**",
                                  "/api/v1/distribution/listings",
                                  "/api/v1/distribution/inbox/**",
-                                 "/api/v1/distribution/inbox")
+                                 "/api/v1/distribution/inbox",
+                                 "/api/v1/distribution/health")
                     .hasAnyRole("ADMIN", "SUPER_ADMIN")
                 .requestMatchers("/swagger-ui/**", "/v3/api-docs/**")
                     .hasAnyRole("ADMIN", "SUPER_ADMIN")

@@ -26,6 +26,7 @@ import java.util.List;
 public class InboxController {
 
     private final ReservationInboxService inboxService;
+    private final com.skbingegalaxy.distribution.service.DistributionHealthService healthService;
 
     private Long requireBinge(Long bingeId) {
         if (bingeId == null) {
@@ -33,6 +34,12 @@ public class InboxController {
                 HttpStatus.BAD_REQUEST);
         }
         return bingeId;
+    }
+
+    @GetMapping("/health")
+    public ResponseEntity<ApiResponse<com.skbingegalaxy.distribution.dto.DistributionHealthDto>> health(
+            @RequestHeader(value = "X-Binge-Id", required = false) Long bingeId) {
+        return ResponseEntity.ok(ApiResponse.ok(healthService.forBinge(requireBinge(bingeId))));
     }
 
     @GetMapping("/inbox")

@@ -357,6 +357,9 @@ export const adminService = {
   // own connections — inbox rows key on connection_id, not binge_id.
   getDistributionInbox: (limit = 50) => api.get('/distribution/inbox', { params: { limit } }),
   retryDistributionInboxEntry: (id) => api.post(`/distribution/inbox/${id}/retry`),
+  // Distribution health (slice 7). Derived on demand, never cached — an operator
+  // deciding whether sales are flowing must not be shown a minutes-stale state.
+  getDistributionHealth: () => api.get('/distribution/health'),
   getAllBookings: (page, size) => api.get('/bookings/admin', { params: { page, size } }),
   getTodayBookings: (page, size) => api.get('/bookings/admin/today', { params: { page, size, clientDate: clientDate() } }),
   getUpcomingBookings: (page, size) => api.get('/bookings/admin/upcoming', { params: { page, size, clientDate: clientDate() } }),
