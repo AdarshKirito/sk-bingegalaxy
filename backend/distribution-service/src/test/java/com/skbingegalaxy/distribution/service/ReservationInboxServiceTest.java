@@ -25,6 +25,7 @@ class ReservationInboxServiceTest {
     @Mock private ConnectionRepository connectionRepository;
     @Mock private ConnectionDestinationRepository connectionDestinationRepository;
     @Mock private DestinationRepository destinationRepository;
+    @Mock private SettlementService settlementService;
 
     @InjectMocks private ReservationInboxService service;
 
@@ -158,7 +159,7 @@ class ReservationInboxServiceTest {
 
         // This context stores a reference, never booking detail. A second booking truth
         // is the failure mode the whole distribution design avoids.
-        ReservationInboxEntry applied = service.markApplied(4L, "SKBG26ABC");
+        ReservationInboxEntry applied = service.markApplied(4L, "SKBG26ABC", 1L, "INR", 300000L);
 
         assertThat(applied.getStatus()).isEqualTo(ReservationInboxEntry.Status.APPLIED);
         assertThat(applied.getBookingRef()).isEqualTo("SKBG26ABC");

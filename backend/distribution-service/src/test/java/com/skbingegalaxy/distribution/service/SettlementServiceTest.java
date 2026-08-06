@@ -1,6 +1,7 @@
 package com.skbingegalaxy.distribution.service;
 
 import com.skbingegalaxy.common.exception.BusinessException;
+import com.skbingegalaxy.distribution.entity.ConnectionDestination;
 import com.skbingegalaxy.distribution.entity.SettlementRecord;
 import com.skbingegalaxy.distribution.repository.SettlementRecordRepository;
 import org.junit.jupiter.api.DisplayName;
@@ -17,7 +18,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("Settlements (slice 6, G-E)")
@@ -25,6 +26,14 @@ class SettlementServiceTest {
 
     @Mock private SettlementRecordRepository settlementRepository;
     @InjectMocks private SettlementService service;
+
+    private static ConnectionDestination terms(int bps) {
+        return ConnectionDestination.builder().id(3L).connectionId(7L)
+            .destinationCode("VIATOR").commissionBps(bps)
+            .paymentResponsibility(ConnectionDestination.PaymentResponsibility.CHANNEL_COLLECTS)
+            .settlementModel(ConnectionDestination.SettlementModel.COMMISSION_SETTLEMENT)
+            .build();
+    }
 
     private static SettlementRecord record(String currency, long outstanding) {
         return SettlementRecord.builder()
@@ -48,6 +57,59 @@ class SettlementServiceTest {
         assertThat(totals).containsExactly(
             java.util.Map.entry("INR", 400000L),
             java.util.Map.entry("USD", 5000L));
+    }
+
+    @Test
+    @DisplayName("a receivable is created for a CHANNEL-collected booking, net of commission")
+    void createsReceivableNetOfCommission() {
+        when(settlementRepository.findByBookingRefAndDestinationCode("SKBG26A", "VIATOR"))
+            .thenReturn(Optional.empty());
+        when(settlementRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        var r = service.createForChannelBooking(1L, 7L, "SKBG26A", terms(2000), "INR", 300000L);
+
+        assertThat(r).isPresent();
+        assertThat(r.get().getCommissionMinor()).isEqualTo(60000);
+        // Outstanding is the NET. Counting the gross would overstate every total by the
+        // channel cut, which is never coming to the venue.
+        assertThat(r.get().getOutstandingMinor()).isEqualTo(240000);
+        assertThat(r.get().getSettlementStatus())
+            .isEqualTo(SettlementRecord.SettlementStatus.EXPECTED);
+    }
+
+    @Test
+    @DisplayName("NO receivable when the venue collects — that is a payable, not a receivable")
+    void noReceivableWhenVenueCollects() {
+        ConnectionDestination t = terms(2000);
+        t.setPaymentResponsibility(ConnectionDestination.PaymentResponsibility.VENUE_COLLECTS);
+
+        // The venue OWES commission here. Recording it as money owed TO the venue would
+        // invert the direction and inflate every outstanding total.
+        assertThat(service.createForChannelBooking(1L, 7L, "SKBG26A", t, "INR", 300000L))
+            .isEmpty();
+        verify(settlementRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("a redelivered message does not create a second receivable")
+    void idempotentOnRedelivery() {
+        when(settlementRepository.findByBookingRefAndDestinationCode("SKBG26A", "VIATOR"))
+            .thenReturn(Optional.of(record("INR", 240000)));
+
+        // At-least-once delivery is normal; a duplicate is not a second sale.
+        assertThat(service.createForChannelBooking(1L, 7L, "SKBG26A", terms(2000), "INR", 300000L))
+            .isPresent();
+        verify(settlementRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("commission rounds HALF-UP, not toward the venue")
+    void commissionRoundsHalfUp() {
+        // 333 * 15% = 49.95 minor units. Truncation would systematically favour the
+        // venue by up to a unit per booking and compound across reconciliations.
+        assertThat(SettlementService.commissionOf(333L, 1500)).isEqualTo(50L);
+        assertThat(SettlementService.commissionOf(1000L, null)).isZero();
+        assertThat(SettlementService.commissionOf(1000L, 0)).isZero();
     }
 
     @Test

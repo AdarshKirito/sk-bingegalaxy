@@ -40,6 +40,7 @@ public class ReservationInboxService {
     private final ConnectionRepository connectionRepository;
     private final ConnectionDestinationRepository connectionDestinationRepository;
     private final DestinationRepository destinationRepository;
+    private final SettlementService settlementService;
 
     /** Ceiling on a stored payload; mirrors {@code distribution.inbox.max-payload-bytes}. */
     public static final int MAX_PAYLOAD_BYTES = 262_144;
@@ -138,15 +139,37 @@ public class ReservationInboxService {
         }
     }
 
-    /** Mark a message applied once booking-service has the canonical reservation. */
+    /**
+     * Mark a message applied once booking-service has the canonical reservation, and
+     * create the receivable it implies.
+     *
+     * <p>The settlement is created HERE because this is the only point that holds the
+     * connection, the destination's commercial terms and the booking reference together.
+     * Without it {@code settlement_records} had no writer at all: the settlements
+     * service, endpoints and console were all correct and permanently empty.
+     *
+     * <p>{@code grossMinor} is what the CHANNEL charged the traveller, which is not
+     * necessarily what SK Binge would have charged — the destination sets its own retail
+     * price. It therefore comes from the provider message, not from our pricing engine.
+     */
     @Transactional
-    public ReservationInboxEntry markApplied(Long entryId, String bookingRef) {
+    public ReservationInboxEntry markApplied(Long entryId, String bookingRef,
+                                             Long bingeId, String currency, long grossMinor) {
         ReservationInboxEntry entry = inboxRepository.findById(entryId)
             .orElseThrow(() -> new BusinessException("Unknown inbox entry: " + entryId));
         entry.setStatus(ReservationInboxEntry.Status.APPLIED);
         entry.setBookingRef(bookingRef);
         entry.setProcessedAt(LocalDateTime.now(ZoneOffset.UTC));
-        return inboxRepository.save(entry);
+        ReservationInboxEntry saved = inboxRepository.save(entry);
+
+        // Terms come from the connection/destination pairing, never from the message —
+        // a provider must not be able to declare its own commission by sending a number.
+        connectionDestinationRepository
+            .findByConnectionIdAndDestinationCode(entry.getConnectionId(), entry.getDestinationCode())
+            .ifPresent(terms -> settlementService.createForChannelBooking(
+                bingeId, entry.getConnectionId(), bookingRef, terms, currency, grossMinor));
+
+        return saved;
     }
 
     /**

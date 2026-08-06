@@ -1,6 +1,7 @@
 package com.skbingegalaxy.distribution.service;
 
 import com.skbingegalaxy.common.exception.BusinessException;
+import com.skbingegalaxy.distribution.entity.ConnectionDestination;
 import com.skbingegalaxy.distribution.entity.SettlementRecord;
 import com.skbingegalaxy.distribution.repository.SettlementRecordRepository;
 import lombok.RequiredArgsConstructor;
@@ -11,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TreeMap;
 
 /**
@@ -44,6 +46,88 @@ public class SettlementService {
 
     public List<SettlementRecord> outstandingForBinge(Long bingeId) {
         return settlementRepository.findByBingeIdAndSettlementStatusIn(bingeId, OUTSTANDING);
+    }
+
+    /**
+     * Create the receivable for a channel reservation that has just become a booking.
+     *
+     * <p><b>Why this lives in distribution-service and not booking-service.</b> The
+     * commercial terms — commission rate, who collects, settlement model — belong to the
+     * {@code ConnectionDestination}, which booking-service knows nothing about and
+     * should not. Putting the calculation there would mean either duplicating the terms
+     * across a service boundary or calling back for them on every booking. The inbox
+     * already holds the connection, the destination and the booking reference at the
+     * moment a reservation is applied, so this is the one place with everything needed.
+     *
+     * <p><b>A receivable is only created when the CHANNEL collects.</b> If the venue
+     * takes the money at the door, nothing is owed TO the venue — the venue owes
+     * commission, which is a payable and a different object with different chasing
+     * behaviour. Recording it here as a receivable would invert the direction of the
+     * money and inflate every "outstanding" total by the commission the venue owes.
+     *
+     * <p>Idempotent by {@code uk_settlement_booking_dest}: a redelivered provider message
+     * must not create a second receivable for the same booking.
+     */
+    @Transactional
+    public Optional<SettlementRecord> createForChannelBooking(
+            Long bingeId, Long connectionId, String bookingRef,
+            ConnectionDestination terms, String currency, long grossMinor) {
+
+        if (terms.getPaymentResponsibility()
+                != ConnectionDestination.PaymentResponsibility.CHANNEL_COLLECTS) {
+            log.debug("No receivable for {}: {} collects, not the channel",
+                bookingRef, terms.getPaymentResponsibility());
+            return Optional.empty();
+        }
+        if (grossMinor < 0) {
+            throw new BusinessException("Gross amount cannot be negative.");
+        }
+
+        // Already recorded — a redelivered message, not a second sale.
+        Optional<SettlementRecord> existing = settlementRepository
+            .findByBookingRefAndDestinationCode(bookingRef, terms.getDestinationCode());
+        if (existing.isPresent()) return existing;
+
+        long commission = commissionOf(grossMinor, terms.getCommissionBps());
+        long venueNet = grossMinor - commission;
+
+        SettlementRecord record = SettlementRecord.builder()
+            .bookingRef(bookingRef)
+            .bingeId(bingeId)
+            .connectionId(connectionId)
+            .destinationCode(terms.getDestinationCode())
+            .settlementCurrency(currency)
+            .grossMinor(grossMinor)
+            .commissionMinor(commission)
+            .venueNetMinor(venueNet)
+            // Outstanding is the NET, not the gross: the commission is never coming to
+            // the venue, so counting it as owed would overstate every total by the
+            // channel's cut.
+            .outstandingMinor(venueNet)
+            .collectedBy(SettlementRecord.CollectedBy.CHANNEL)
+            // EXPECTED, not PENDING: the terms are known and the money is genuinely
+            // anticipated. PENDING is for a receivable whose amount is not yet settled.
+            .settlementStatus(SettlementRecord.SettlementStatus.EXPECTED)
+            .reconciliationStatus(SettlementRecord.ReconciliationStatus.UNMATCHED)
+            .build();
+
+        log.info("Receivable created for {} on {}: gross {} commission {} net {} {}",
+            bookingRef, terms.getDestinationCode(), grossMinor, commission, venueNet, currency);
+        return Optional.of(settlementRepository.save(record));
+    }
+
+    /**
+     * Commission in minor units, rounded HALF-UP on integer arithmetic.
+     *
+     * <p>Computed from the gross rather than derived by subtracting a net, so the
+     * rounding happens once and in a known direction. Half-up rather than truncation
+     * because truncating systematically favours the venue by up to a unit per booking —
+     * small, but it is a discrepancy that compounds across every reconciliation and
+     * costs more to explain to a channel than it is worth.
+     */
+    static long commissionOf(long grossMinor, Integer commissionBps) {
+        if (commissionBps == null || commissionBps <= 0) return 0L;
+        return (grossMinor * commissionBps + 5_000L) / 10_000L;
     }
 
     /**
