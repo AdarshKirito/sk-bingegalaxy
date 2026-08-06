@@ -232,6 +232,80 @@ public class ConnectionService {
         return toDto(connectionRepository.save(c));
     }
 
+    /**
+     * Point a connection at a destination, on stated commercial terms.
+     *
+     * <p><b>The step that was missing.</b> A venue could create a connection but never
+     * attach a destination to it, and a listing requires a
+     * {@code connectionDestinationId} — so the entire publish chain dead-ended at the
+     * first hop. Everything downstream (listings, readiness, publish) was unreachable.
+     */
+    @Transactional
+    public ConnectionDestinationDto enableDestination(Long bingeId, Long connectionId,
+                                                      EnableDestinationRequest request) {
+        Connection connection = ownedConnection(bingeId, connectionId);
+        if (connection.getStatus() == Connection.ConnectionStatus.REVOKED) {
+            throw new BusinessException("A revoked connection cannot reach new destinations.");
+        }
+
+        Destination destination = destinationRepository.findById(request.getDestinationCode())
+            .orElseThrow(() -> new ResourceNotFoundException(
+                "Destination", "code", request.getDestinationCode()));
+
+        // The check that had nowhere to live until this endpoint existed. Every real
+        // destination is seeded inactive; without this a venue could publish to a
+        // marketplace the platform has not turned on, which is the same class of bug as
+        // publishing to a destination the venue never enabled.
+        if (!destination.isActive()) {
+            throw new BusinessException(
+                destination.getDisplayName() + " is not yet available as a destination.");
+        }
+
+        // A destination must be operated by the provider this connection authenticates
+        // against, or the credential is for the wrong system entirely. A Bokun
+        // connection reaching Viator is legitimate and handled by the provider's
+        // capability rows; a Viator connection reaching GetYourGuide is not.
+        if (!destination.getOperatedByProviderCode().equals(connection.getProviderCode())) {
+            throw new BusinessException(destination.getDisplayName()
+                + " is not reachable through a " + connection.getProviderCode() + " connection.");
+        }
+
+        connectionDestinationRepository
+            .findByConnectionIdAndDestinationCode(connectionId, destination.getCode())
+            .ifPresent(existing -> {
+                throw new BusinessException(
+                    "This connection already reaches " + destination.getDisplayName() + ".");
+            });
+
+        ConnectionDestination saved = connectionDestinationRepository.save(
+            ConnectionDestination.builder()
+                .connectionId(connectionId)
+                .destinationCode(destination.getCode())
+                .enabled(request.isEnabled())
+                .commissionBps(request.getCommissionBps())
+                .paymentResponsibility(request.getPaymentResponsibility())
+                .settlementModel(request.getSettlementModel())
+                .safetyInventory(request.getSafetyInventory())
+                .build());
+
+        log.info("Binge {} pointed connection {} at destination {} (enabled={})",
+            bingeId, connectionId, destination.getCode(), request.isEnabled());
+
+        return ConnectionDestinationDto.builder()
+            .id(saved.getId())
+            .destinationCode(saved.getDestinationCode())
+            .destinationName(destination.getDisplayName())
+            .enabled(saved.isEnabled())
+            .commissionBps(saved.getCommissionBps())
+            .paymentResponsibility(saved.getPaymentResponsibility())
+            .settlementModel(saved.getSettlementModel())
+            .safetyInventory(saved.getSafetyInventory())
+            .stopSell(saved.isStopSell())
+            .stopSellReason(saved.getStopSellReason())
+            .deliversReservations(destination.isDeliversReservations())
+            .build();
+    }
+
     private Connection ownedConnection(Long bingeId, Long connectionId) {
         return connectionRepository.findByIdAndBingeId(connectionId, bingeId)
             .orElseThrow(() -> new ResourceNotFoundException("Connection", "id", connectionId));

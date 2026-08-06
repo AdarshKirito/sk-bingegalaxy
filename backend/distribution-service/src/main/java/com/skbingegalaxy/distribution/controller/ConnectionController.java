@@ -59,6 +59,20 @@ public class ConnectionController {
             .body(ApiResponse.ok("Connection created", created));
     }
 
+    /**
+     * Point a connection at a destination. Covered by the existing
+     * {@code /connections/**} security matcher, so no new allow-list entry is needed —
+     * and therefore no chance of the matcher mismatch this codebase has hit before.
+     */
+    @PostMapping("/connections/{id}/destinations")
+    public ResponseEntity<ApiResponse<ConnectionDestinationDto>> enableDestination(
+            @RequestHeader(value = "X-Binge-Id", required = false) Long bingeId,
+            @PathVariable Long id,
+            @Valid @RequestBody EnableDestinationRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(
+            "Destination added", connectionService.enableDestination(requireBinge(bingeId), id, request)));
+    }
+
     @PostMapping("/connections/{id}/pause")
     public ResponseEntity<ApiResponse<ConnectionDto>> pause(
             @RequestHeader(value = "X-Binge-Id", required = false) Long bingeId,

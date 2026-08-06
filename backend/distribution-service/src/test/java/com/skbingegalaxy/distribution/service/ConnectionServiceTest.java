@@ -4,6 +4,9 @@ import com.skbingegalaxy.common.exception.BusinessException;
 import com.skbingegalaxy.common.exception.ResourceNotFoundException;
 import com.skbingegalaxy.distribution.credential.CredentialStore;
 import com.skbingegalaxy.distribution.dto.ConnectionDto;
+import com.skbingegalaxy.distribution.dto.EnableDestinationRequest;
+import com.skbingegalaxy.distribution.entity.ConnectionDestination;
+import com.skbingegalaxy.distribution.entity.Destination;
 import com.skbingegalaxy.distribution.dto.CreateConnectionRequest;
 import com.skbingegalaxy.distribution.entity.Connection;
 import com.skbingegalaxy.distribution.entity.Provider;
@@ -196,6 +199,102 @@ class ConnectionServiceTest {
             assertThat(dto.getStatus()).isEqualTo(Connection.ConnectionStatus.REVOKED);
             assertThat(live.getCredentialRef()).isNull();
             assertThat(dto.getCredentialHint()).isNull();
+        }
+    }
+
+    @Nested
+    @DisplayName("Pointing a connection at a destination")
+    class Destinations {
+
+        private void givenConnection(Connection.ConnectionStatus status) {
+            when(connectionRepository.findByIdAndBingeId(5L, 1L)).thenReturn(Optional.of(
+                Connection.builder().id(5L).bingeId(1L).providerCode("VIATOR")
+                    .status(status).build()));
+        }
+
+        private EnableDestinationRequest request(String code) {
+            EnableDestinationRequest r = new EnableDestinationRequest();
+            r.setDestinationCode(code);
+            return r;
+        }
+
+        private Destination destination(String code, String operatedBy, boolean active) {
+            return Destination.builder().code(code).displayName(code)
+                .operatedByProviderCode(operatedBy).active(active)
+                .deliversReservations(true).build();
+        }
+
+        @Test
+        @DisplayName("an INACTIVE destination is refused")
+        void inactiveDestinationRefused() {
+            givenConnection(Connection.ConnectionStatus.ACTIVE);
+            when(destinationRepository.findById("VIATOR"))
+                .thenReturn(Optional.of(destination("VIATOR", "VIATOR", false)));
+
+            // Every real destination ships inactive. Without this a venue could publish
+            // to a marketplace the platform has not turned on.
+            assertThatThrownBy(() -> service.enableDestination(1L, 5L, request("VIATOR")))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("not yet available");
+            verify(connectionDestinationRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("a destination operated by a DIFFERENT provider is refused")
+        void wrongProviderRefused() {
+            givenConnection(Connection.ConnectionStatus.ACTIVE);
+            when(destinationRepository.findById("GETYOURGUIDE"))
+                .thenReturn(Optional.of(destination("GETYOURGUIDE", "GETYOURGUIDE", true)));
+
+            // The credential authenticates against VIATOR; reaching GetYourGuide with it
+            // would be using a key for the wrong system entirely.
+            assertThatThrownBy(() -> service.enableDestination(1L, 5L, request("GETYOURGUIDE")))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("not reachable through");
+        }
+
+        @Test
+        @DisplayName("a revoked connection cannot reach new destinations")
+        void revokedRefused() {
+            givenConnection(Connection.ConnectionStatus.REVOKED);
+
+            assertThatThrownBy(() -> service.enableDestination(1L, 5L, request("VIATOR")))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("revoked");
+        }
+
+        @Test
+        @DisplayName("a valid destination is attached, DISABLED by default")
+        void attachedDisabledByDefault() {
+            givenConnection(Connection.ConnectionStatus.ACTIVE);
+            when(destinationRepository.findById("VIATOR"))
+                .thenReturn(Optional.of(destination("VIATOR", "VIATOR", true)));
+            when(connectionDestinationRepository
+                .findByConnectionIdAndDestinationCode(5L, "VIATOR")).thenReturn(Optional.empty());
+            when(connectionDestinationRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+            var dto = service.enableDestination(1L, 5L, request("VIATOR"));
+
+            // Configuring terms and going on sale are two decisions. Collapsing them
+            // would publish the moment a venue saved terms it was still negotiating.
+            assertThat(dto.isEnabled()).isFalse();
+            // Merchant-of-record default: telling a venue it collects at checkout would
+            // misstate its cash flow.
+            assertThat(dto.getPaymentResponsibility())
+                .isEqualTo(ConnectionDestination.PaymentResponsibility.CHANNEL_COLLECTS);
+        }
+
+        @Test
+        @DisplayName("the same destination cannot be attached twice")
+        void duplicateRefused() {
+            givenConnection(Connection.ConnectionStatus.ACTIVE);
+            when(destinationRepository.findById("VIATOR"))
+                .thenReturn(Optional.of(destination("VIATOR", "VIATOR", true)));
+            when(connectionDestinationRepository
+                .findByConnectionIdAndDestinationCode(5L, "VIATOR"))
+                .thenReturn(Optional.of(ConnectionDestination.builder().id(9L).build()));
+
+            assertThatThrownBy(() -> service.enableDestination(1L, 5L, request("VIATOR")))
+                .isInstanceOf(BusinessException.class).hasMessageContaining("already reaches");
         }
     }
 
