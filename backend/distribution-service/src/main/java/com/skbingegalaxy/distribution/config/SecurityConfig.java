@@ -57,6 +57,13 @@ public class SecurityConfig {
                 // Listed BEFORE the venue rules below so a path like
                 // /api/v1/distribution/internal/... can never be matched by them first.
                 .requestMatchers("/api/v1/distribution/internal/**").hasRole("SYSTEM")
+                // OCTO supplier seam. The caller is another company's system, not a
+                // logged-in human, so it authenticates with a per-reseller Bearer token
+                // that ResellerAuthenticator resolves to a connection — not with a
+                // gateway JWT. Left permitAll at the chain deliberately so that check is
+                // the ONLY one that matters and cannot be accidentally satisfied by a
+                // stray admin session. Rejecting is the controller's first action.
+                .requestMatchers("/api/v1/distribution/octo/**").permitAll()
                 // Slice 3 — venue-facing connection management. A connection is a
                 // venue's commercial relationship with a provider, so ADMIN of that
                 // venue is the right level; the per-venue boundary itself is enforced in

@@ -99,6 +99,27 @@ public class CsrfProtectionFilter implements GlobalFilter, Ordered {
     );
 
     /**
+     * Machine-to-machine namespaces matched by PREFIX rather than exactly.
+     *
+     * <p>The set above is deliberately exact: a webhook is one known URL, and prefix
+     * matching there would exempt anything a future path happened to sit under. OCTO
+     * cannot use it — its lifecycle paths carry the reseller's booking uuid
+     * ({@code /octo/bookings/{uuid}/confirm}), so no fixed string can cover them.
+     *
+     * <p>A prefix is safe HERE because the ENTIRE namespace is machine-to-machine and
+     * self-authenticating: every path under it is rejected by ResellerAuthenticator
+     * unless it presents a valid per-reseller Bearer token, and distribution-service
+     * leaves it permitAll at the filter chain precisely so that check is the only one
+     * that can satisfy it. Verified: an admin session gets 401 here, not access.
+     *
+     * <p>Without this entry CSRF rejects every reseller call before it reaches the
+     * service, and the channel fails in a way that looks like the reseller's fault.
+     */
+    private static final List<String> MACHINE_TO_MACHINE_PREFIXES = List.of(
+        "/api/v1/distribution/octo/"
+    );
+
+    /**
      * Public POST endpoints that are intentionally callable by anonymous
      * clients (incl. {@code navigator.sendBeacon} / {@code credentials: 'omit'}
      * fetches that cannot carry the {@code XSRF-TOKEN} cookie).
@@ -161,6 +182,12 @@ public class CsrfProtectionFilter implements GlobalFilter, Ordered {
         // External webhook calls (Razorpay, etc.) have no browser origin — bypass CSRF.
         // Each webhook endpoint enforces its own authentication (HMAC-SHA256 signatures).
         if (WEBHOOK_PATHS.contains(path)) {
+            return chain.filter(exchange);
+        }
+
+        // Machine-to-machine namespaces (OCTO). Prefix-matched because the paths carry a
+        // reseller-supplied uuid; each still enforces its own Bearer-token check.
+        if (MACHINE_TO_MACHINE_PREFIXES.stream().anyMatch(path::startsWith)) {
             return chain.filter(exchange);
         }
 
