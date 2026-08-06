@@ -32,12 +32,20 @@ public final class PermissionModules {
     public static final String SUPPORT_CONSOLE  = "SUPPORT_CONSOLE";
     public static final String DISPUTES         = "DISPUTES";
     public static final String FAILED_REFUNDS   = "FAILED_REFUNDS";
+    /**
+     * Third-party distribution. Its own module, NOT reused REPORTS: distribution
+     * CONNECTS A VENUE TO EXTERNAL MARKETPLACES, issues reseller credentials and moves
+     * money — nothing like the read-only reporting it was borrowing. Sharing a key meant
+     * granting reports granted the ability to publish inventory and connect providers,
+     * and revoking distribution silently took reports away too.
+     */
+    public static final String DISTRIBUTION    = "DISTRIBUTION";
 
     /** Ordered as the admin menu shows them. */
     public static final List<String> ALL = List.of(
         REPORTS, MESSAGES, VENUE, ROOMS, EVENT_TYPES, RATE_CODES, SURGE_RULES,
         BLOCKED_DATES, SLOT_HOLDS, PEOPLE, USERS, WAITLIST, CUSTOMER_FREEZES,
-        RISK_FLAGS, SUPPORT_CONSOLE, DISPUTES, FAILED_REFUNDS);
+        RISK_FLAGS, SUPPORT_CONSOLE, DISPUTES, FAILED_REFUNDS, DISTRIBUTION);
 
     /**
      * Modules whose misuse has direct financial/abuse blast radius. A future
@@ -45,7 +53,11 @@ public final class PermissionModules {
      * super-admin allowed them (parent-rule), per the access-control spec.
      */
     public static final List<String> SENSITIVE = List.of(
-        RATE_CODES, SURGE_RULES, CUSTOMER_FREEZES, RISK_FLAGS, DISPUTES, FAILED_REFUNDS);
+        RATE_CODES, SURGE_RULES, CUSTOMER_FREEZES, RISK_FLAGS, DISPUTES, FAILED_REFUNDS,
+        // Connecting a provider publishes a venue's inventory to the open market and
+        // issues credentials another company authenticates with. That is a larger blast
+        // radius than any other module here, so it needs both approvals.
+        DISTRIBUTION);
 
     public static boolean isValid(String key) {
         return key != null && ALL.contains(key);
@@ -74,6 +86,11 @@ public final class PermissionModules {
         Map.entry("/admin/freezes", CUSTOMER_FREEZES),
         Map.entry("/admin/risk-flags", RISK_FLAGS),
         Map.entry("/admin/support", SUPPORT_CONSOLE),
+        // Distribution lives in its own service, so booking-service sees no such path.
+        // The mapping is declared anyway: the module must exist in ALL for the matrix
+        // UI to offer it, and a future booking-service distribution path must not
+        // silently fall through to no module at all.
+        Map.entry("/admin/distribution", DISTRIBUTION),
         // NOTE: /admin/notifications is deliberately NOT mapped to MESSAGES.
         // The admin notification bell + inbox is a GLOBAL, identity-scoped
         // surface (every query is filtered by the caller's own X-User-Id) shown

@@ -144,19 +144,18 @@ export default function Navbar() {
     { to: '/admin/failed-refunds', icon: <FiDollarSign />, label: t('nav.failed_refunds', 'Failed Refunds'), module: 'FAILED_REFUNDS' },
     { to: '/admin/users-config', icon: <FiUsers />, label: t('nav.users'), module: 'USERS' },
     { to: '/admin/reports', icon: <FiBarChart2 />, label: t('nav.reports', 'Reports'), module: 'REPORTS' },
-    // Deliberately under the existing REPORTS module rather than a new one: attribution
-    // IS reporting, so a venue with reporting disabled must not see it either. Inventing
-    // a module would also mean seeding the V71 permission matrix, and an unseeded module
-    // fails closed — the link would silently never appear for anyone.
-    { to: '/admin/attribution', icon: <FiTrendingUp />, label: t('nav.attribution', 'Channels'), module: 'REPORTS' },
-    // Distribution connections. Under REPORTS for the same reason as attribution:
-    // a new module would need V71 permission-matrix seeding and fails closed unseeded,
-    // so the link would silently never appear for anyone.
-    { to: '/admin/distribution', icon: <FiLink />, label: t('nav.distribution', 'Distribution'), module: 'REPORTS' },
-    { to: '/admin/listings', icon: <FiUploadCloud />, label: t('nav.listings', 'Listings'), module: 'REPORTS' },
-    { to: '/admin/inbox', icon: <FiInbox />, label: t('nav.reservation_inbox', 'Inbox'), module: 'REPORTS' },
-    { to: '/admin/settlements', icon: <FiDollarSign />, label: t('nav.settlements', 'Settlements'), module: 'REPORTS' },
-    { to: '/admin/channel-health', icon: <FiActivity />, label: t('nav.channel_health', 'Channel Health'), module: 'REPORTS' },
+    // DISTRIBUTION, not REPORTS. These surfaces connect a venue to external
+    // marketplaces, issue reseller credentials and move money — nothing like read-only
+    // reporting. Sharing a key meant granting reports also granted the ability to
+    // publish inventory; revoking distribution silently removed reports.
+    // Safe to add: V71 is a DENY-list, so a module absent from a binge overrides is
+    // permitted, not hidden.
+    { to: '/admin/attribution', icon: <FiTrendingUp />, label: t('nav.attribution', 'Channels'), module: 'DISTRIBUTION' },
+    { to: '/admin/distribution', icon: <FiLink />, label: t('nav.distribution', 'Distribution'), module: 'DISTRIBUTION' },
+    { to: '/admin/listings', icon: <FiUploadCloud />, label: t('nav.listings', 'Listings'), module: 'DISTRIBUTION' },
+    { to: '/admin/inbox', icon: <FiInbox />, label: t('nav.reservation_inbox', 'Inbox'), module: 'DISTRIBUTION' },
+    { to: '/admin/settlements', icon: <FiDollarSign />, label: t('nav.settlements', 'Settlements'), module: 'DISTRIBUTION' },
+    { to: '/admin/channel-health', icon: <FiActivity />, label: t('nav.channel_health', 'Channel Health'), module: 'DISTRIBUTION' },
     { to: '/admin/about-binge', icon: <FiInfo />, label: t('nav.binge_about', 'About') },
   ].filter((l) => can(l.module));
 
