@@ -30,7 +30,6 @@ import java.util.List;
 public class DistributionHealthService {
 
     private final ConnectionRepository connectionRepository;
-    private final ConnectionDestinationRepository connectionDestinationRepository;
     private final ListingMappingRepository listingRepository;
     private final ReservationInboxRepository inboxRepository;
     private final CredentialStore credentialStore;

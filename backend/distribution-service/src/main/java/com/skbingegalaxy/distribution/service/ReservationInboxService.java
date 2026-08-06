@@ -240,15 +240,4 @@ public class ReservationInboxService {
                 "InboxEntry", "id", entryId));
         return entry;
     }
-
-    /** The recovery queue: what still needs a human or a retry, oldest first. */
-    public List<ReservationInboxEntry> outstanding() {
-        return inboxRepository.findByStatusInOrderByReceivedAtAsc(List.of(
-            ReservationInboxEntry.Status.RECEIVED,
-            ReservationInboxEntry.Status.FAILED));
-    }
-
-    public Optional<ReservationInboxEntry> findByBookingRef(String bookingRef) {
-        return inboxRepository.findByBookingRef(bookingRef);
-    }
 }

@@ -111,17 +111,4 @@ class SettlementServiceTest {
         assertThatThrownBy(() -> service.recordPayout(999L, 1L, 1000, LocalDate.now()))
             .isInstanceOf(com.skbingegalaxy.common.exception.ResourceNotFoundException.class);
     }
-
-    @Test
-    @DisplayName("overdue is measured against the destination's expected payout date")
-    void overdueUsesExpectedPayoutDate() {
-        when(settlementRepository
-            .findByBingeIdAndExpectedPayoutAtBeforeAndSettlementStatusIn(any(), any(), any()))
-            .thenReturn(List.of(record("INR", 1000)));
-
-        // Not the booking date. Viator pays only AFTER the experience, so treating a
-        // booking as overdue the next day would flag every healthy settlement — and an
-        // overdue list that is always full is not a list anyone reads.
-        assertThat(service.overdueForBinge(1L, LocalDate.now())).hasSize(1);
-    }
 }

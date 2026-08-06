@@ -47,20 +47,6 @@ public class SettlementService {
     }
 
     /**
-     * Payments a destination should already have made.
-     *
-     * <p>Overdue is measured against {@code expectedPayoutAt}, which is set from the
-     * destination's own terms — not from the booking date. Treating a Viator booking as
-     * overdue the day after the experience would flag every healthy settlement, and an
-     * overdue list that is always full is not a list anyone reads.
-     */
-    public List<SettlementRecord> overdueForBinge(Long bingeId, LocalDate asOf) {
-        if (asOf == null) throw new BusinessException("A date is required");
-        return settlementRepository.findByBingeIdAndExpectedPayoutAtBeforeAndSettlementStatusIn(
-            bingeId, asOf, OUTSTANDING);
-    }
-
-    /**
      * Outstanding minor units per settlement currency.
      *
      * <p>A {@link TreeMap} so the console renders currencies in a stable order rather
