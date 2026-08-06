@@ -49,6 +49,7 @@ const AdminDistribution = lazy(() => import('./pages/AdminDistribution'));
 const AdminListings = lazy(() => import('./pages/AdminListings'));
 const AdminInbox = lazy(() => import('./pages/AdminInbox'));
 const AdminDistributionHealth = lazy(() => import('./pages/AdminDistributionHealth'));
+const AdminSettlements = lazy(() => import('./pages/AdminSettlements'));
 const AdminBookingCreate = lazy(() => import('./pages/AdminBookingCreate'));
 const AdminTermsEditor = lazy(() => import('./pages/AdminTermsEditor'));
 const Terms = lazy(() => import('./pages/Terms'));
@@ -297,6 +298,8 @@ function AppFrame() {
           {/* Reservation inbox recovery console (slice 6). Venue-scoped. */}
           <Route path="/admin/inbox" element={<AdminBingeRequired><AdminInbox /></AdminBingeRequired>} />
           {/* Distribution health overview (slice 7). Venue-scoped. */}
+          {/* Channel settlements (slice 6). Venue-scoped. */}
+          <Route path="/admin/settlements" element={<AdminBingeRequired><AdminSettlements /></AdminBingeRequired>} />
           <Route path="/admin/channel-health" element={<AdminBingeRequired><AdminDistributionHealth /></AdminBingeRequired>} />
           <Route path="/admin/book" element={<AdminBingeRequired><AdminBookingCreate /></AdminBingeRequired>} />
           <Route path="/admin/users-config" element={<AdminBingeRequired><AdminUsersConfig /></AdminBingeRequired>} />

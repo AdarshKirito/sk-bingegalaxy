@@ -360,6 +360,12 @@ export const adminService = {
   // Distribution health (slice 7). Derived on demand, never cached — an operator
   // deciding whether sales are flowing must not be shown a minutes-stale state.
   getDistributionHealth: () => api.get('/distribution/health'),
+  // Settlements (slice 6). Amounts stay in MINOR UNITS end to end — converting on the
+  // wire would add a rounding step to money a venue is owed.
+  getDistributionSettlements: () => api.get('/distribution/settlements'),
+  getDistributionSettlementTotals: () => api.get('/distribution/settlements/totals'),
+  recordDistributionPayout: (id, actualMinor, paidOn) =>
+    api.post(`/distribution/settlements/${id}/payout`, null, { params: { actualMinor, paidOn } }),
   getAllBookings: (page, size) => api.get('/bookings/admin', { params: { page, size } }),
   getTodayBookings: (page, size) => api.get('/bookings/admin/today', { params: { page, size, clientDate: clientDate() } }),
   getUpcomingBookings: (page, size) => api.get('/bookings/admin/upcoming', { params: { page, size, clientDate: clientDate() } }),

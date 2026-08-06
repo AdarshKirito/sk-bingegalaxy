@@ -155,6 +155,7 @@ export default function Navbar() {
     { to: '/admin/distribution', icon: <FiLink />, label: t('nav.distribution', 'Distribution'), module: 'REPORTS' },
     { to: '/admin/listings', icon: <FiUploadCloud />, label: t('nav.listings', 'Listings'), module: 'REPORTS' },
     { to: '/admin/inbox', icon: <FiInbox />, label: t('nav.reservation_inbox', 'Inbox'), module: 'REPORTS' },
+    { to: '/admin/settlements', icon: <FiDollarSign />, label: t('nav.settlements', 'Settlements'), module: 'REPORTS' },
     { to: '/admin/channel-health', icon: <FiActivity />, label: t('nav.channel_health', 'Channel Health'), module: 'REPORTS' },
     { to: '/admin/about-binge', icon: <FiInfo />, label: t('nav.binge_about', 'About') },
   ].filter((l) => can(l.module));
