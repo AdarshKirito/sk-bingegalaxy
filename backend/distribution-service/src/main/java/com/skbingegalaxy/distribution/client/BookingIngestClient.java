@@ -50,17 +50,8 @@ public class BookingIngestClient {
                          Integer durationMinutes, int guests,
                          String guestName, String guestEmail) {
 
-        Map<String, Object> body = new HashMap<>();
-        body.put("externalSource", externalSource);
-        body.put("externalRef", externalRef);
-        body.put("bingeId", bingeId);
-        body.put("eventTypeId", eventTypeId);
-        body.put("bookingDate", String.valueOf(date));
-        body.put("startTime", String.valueOf(startTime));
-        body.put("durationMinutes", durationMinutes);
-        body.put("numberOfGuests", guests);
-        body.put("guestName", guestName);
-        body.put("guestEmail", guestEmail);
+        Map<String, Object> body = reservationBody(externalSource, externalRef, bingeId,
+            eventTypeId, date, startTime, durationMinutes, guests, guestName, guestEmail);
 
         try {
             var response = restClientBuilder.build().post()
@@ -156,6 +147,40 @@ public class BookingIngestClient {
             log.warn("Channel cancellation {} failed: {}", externalRef, e.toString());
             return new Result.Failed(e.getClass().getSimpleName() + ": " + e.getMessage());
         }
+    }
+
+    /**
+     * The wire body, built where a test can see it.
+     *
+     * <p>Extracted for one reason: booking-service binds this with
+     * {@code @JsonIgnoreProperties(ignoreUnknown = false)}, so a key it does not know is
+     * a 400 for every reservation, and a key it expects but never receives is a validation
+     * failure for every reservation. Neither side can detect that alone — the two are in
+     * different modules with no dependency between them, deliberately, so that
+     * booking-service never learns what a channel is.
+     *
+     * <p>{@code BookingIngestClientContractTest} pins this key set; booking-service's
+     * {@code ChannelReservationRequestTest} pins the set it accepts. If either drifts, one
+     * of the two goes red. That pairing is the only thing standing in for a compiler
+     * across this boundary.
+     */
+    static Map<String, Object> reservationBody(String externalSource, String externalRef,
+                                               Long bingeId, Long eventTypeId,
+                                               LocalDate date, LocalTime startTime,
+                                               Integer durationMinutes, int guests,
+                                               String guestName, String guestEmail) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("externalSource", externalSource);
+        body.put("externalRef", externalRef);
+        body.put("bingeId", bingeId);
+        body.put("eventTypeId", eventTypeId);
+        body.put("bookingDate", String.valueOf(date));
+        body.put("startTime", String.valueOf(startTime));
+        body.put("durationMinutes", durationMinutes);
+        body.put("numberOfGuests", guests);
+        body.put("guestName", guestName);
+        body.put("guestEmail", guestEmail);
+        return body;
     }
 
     private static Optional<String> messageOf(Map<?, ?> payload) {
