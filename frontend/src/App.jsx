@@ -48,6 +48,7 @@ const AdminAttribution = lazy(() => import('./pages/AdminAttribution'));
 const AdminDistribution = lazy(() => import('./pages/AdminDistribution'));
 const AdminListings = lazy(() => import('./pages/AdminListings'));
 const AdminInbox = lazy(() => import('./pages/AdminInbox'));
+const AdminChannelSimulator = lazy(() => import('./pages/AdminChannelSimulator'));
 const AdminDistributionHealth = lazy(() => import('./pages/AdminDistributionHealth'));
 const AdminSettlements = lazy(() => import('./pages/AdminSettlements'));
 const AdminBookingCreate = lazy(() => import('./pages/AdminBookingCreate'));
@@ -297,6 +298,10 @@ function AppFrame() {
           <Route path="/admin/listings" element={<AdminBingeRequired><AdminListings /></AdminBingeRequired>} />
           {/* Reservation inbox recovery console (slice 6). Venue-scoped. */}
           <Route path="/admin/inbox" element={<AdminBingeRequired><AdminInbox /></AdminBingeRequired>} />
+          {/* Drives the venue's own OCTO surface as a reseller would. Venue-scoped like
+              the rest — the reseller key it uses is issued per connection, and a
+              connection belongs to exactly one venue. */}
+          <Route path="/admin/simulator" element={<AdminBingeRequired><AdminChannelSimulator /></AdminBingeRequired>} />
           {/* Distribution health overview (slice 7). Venue-scoped. */}
           {/* Channel settlements (slice 6). Venue-scoped. */}
           <Route path="/admin/settlements" element={<AdminBingeRequired><AdminSettlements /></AdminBingeRequired>} />

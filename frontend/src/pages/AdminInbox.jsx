@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { adminService } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import { FiInbox, FiRefreshCw, FiAlertTriangle } from 'react-icons/fi';
@@ -127,8 +128,18 @@ export default function AdminInbox() {
                   <td>{r.destinationName || r.destinationCode}</td>
                   <td>
                     {r.externalRef}
+                    {/* Linked, not just printed. This reference IS the answer to "did
+                        the reservation arrive?", and leaving it as text meant an
+                        operator had to copy it into the bookings search by hand — the
+                        one step where a channel message and the PMS actually meet. */}
                     {r.bookingRef && (
-                      <div className="adm-hint" style={{ fontSize: '0.8em' }}>→ {r.bookingRef}</div>
+                      <div className="adm-hint" style={{ fontSize: '0.8em' }}>
+                        →{' '}
+                        <Link to={`/admin/bookings?ref=${encodeURIComponent(r.bookingRef)}`}
+                              title="Open this booking in the PMS">
+                          {r.bookingRef}
+                        </Link>
+                      </div>
                     )}
                   </td>
                   <td>

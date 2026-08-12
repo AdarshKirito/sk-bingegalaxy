@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import AdminInbox from '../pages/AdminInbox';
 
 const inbox = vi.fn();
@@ -21,6 +22,19 @@ const entry = (over = {}) => ({
   bookingRef: 'SKBG26ABC', rejectReason: null, ...over,
 });
 
+/**
+ * Wrapped in a router because the canonical booking reference is now a LINK into the
+ * PMS, not printed text. That reference is the answer to "did the reservation actually
+ * arrive?", and leaving it inert meant copying it into the bookings search by hand.
+ */
+function renderInbox() {
+  return render(
+    <MemoryRouter initialEntries={['/admin/inbox']}>
+      <AdminInbox />
+    </MemoryRouter>
+  );
+}
+
 describe('AdminInbox', () => {
   beforeEach(() => {
     inbox.mockReset();
@@ -29,7 +43,7 @@ describe('AdminInbox', () => {
   });
 
   it('renders and explains the empty state', async () => {
-    render(<AdminInbox />);
+    renderInbox();
     await waitFor(() => expect(screen.getByText(/No messages yet/i)).toBeInTheDocument());
     // Empty is ambiguous between "no channel live" and "something broken".
     expect(screen.getByText(/Feed-only destinations/i)).toBeInTheDocument();
@@ -37,9 +51,20 @@ describe('AdminInbox', () => {
 
   it('shows an applied message with its canonical booking reference', async () => {
     inbox.mockResolvedValue({ data: { data: [entry()] } });
-    render(<AdminInbox />);
+    renderInbox();
     await waitFor(() => expect(screen.getByText('APPLIED')).toBeInTheDocument());
     expect(screen.getByText(/SKBG26ABC/)).toBeInTheDocument();
+  });
+
+  it('links that reference into the PMS, using the param AdminBookings reads', async () => {
+    inbox.mockResolvedValue({ data: { data: [entry()] } });
+    renderInbox();
+
+    const link = await screen.findByRole('link', { name: /SKBG26ABC/ });
+    // ?ref= specifically: AdminBookings used to read only ?search=, so every existing
+    // ?ref= deep link in the console silently did nothing. Both are accepted now, and
+    // this pins the one the rest of the app already sends.
+    expect(link).toHaveAttribute('href', '/admin/bookings?ref=SKBG26ABC');
   });
 
   it('offers Retry only for FAILED, never for REJECTED or SUPERSEDED', async () => {
@@ -47,7 +72,7 @@ describe('AdminInbox', () => {
       entry({ id: 1, status: 'REJECTED', rejectReason: 'slot taken 40s earlier' }),
       entry({ id: 2, status: 'SUPERSEDED', rejectReason: 'sequence 6 does not exceed applied 7' }),
     ] } });
-    render(<AdminInbox />);
+    renderInbox();
 
     await waitFor(() => expect(screen.getByText('REJECTED')).toBeInTheDocument());
     // Retrying a rejection fails identically or succeeds against a slot since taken;
@@ -58,7 +83,7 @@ describe('AdminInbox', () => {
   it('retries a FAILED message', async () => {
     inbox.mockResolvedValue({ data: { data: [entry({ status: 'FAILED', rejectReason: 'timeout' })] } });
     retry.mockResolvedValue({});
-    render(<AdminInbox />);
+    renderInbox();
 
     await userEvent.click(await screen.findByRole('button', { name: /Retry/i }));
     await waitFor(() => expect(retry).toHaveBeenCalledWith(1));
@@ -68,7 +93,7 @@ describe('AdminInbox', () => {
     inbox.mockResolvedValue({ data: { data: [
       entry({ status: 'SUPERSEDED', rejectReason: 'sequence 6 does not exceed applied 7' }),
     ] } });
-    render(<AdminInbox />);
+    renderInbox();
 
     // Superseded means a newer message won — nothing is wrong. Presenting it as an
     // error would send an operator chasing a non-problem.
@@ -78,7 +103,7 @@ describe('AdminInbox', () => {
 
   it('flags when ordering was receipt order rather than provider-supplied', async () => {
     inbox.mockResolvedValue({ data: { data: [entry({ orderingBasis: 'RECEIPT_ORDER' })] } });
-    render(<AdminInbox />);
+    renderInbox();
     // An operator reconciling a dispute needs to know the sequence was luck.
     await waitFor(() =>
       expect(screen.getByText(/order not provider-supplied/i)).toBeInTheDocument());
@@ -86,7 +111,7 @@ describe('AdminInbox', () => {
 
   it('survives an API failure without taking the page down', async () => {
     inbox.mockRejectedValue({ response: { data: { message: 'boom' } } });
-    render(<AdminInbox />);
+    renderInbox();
     await waitFor(() => expect(inbox).toHaveBeenCalled());
     expect(screen.getByText(/Reservation inbox/i)).toBeInTheDocument();
   });

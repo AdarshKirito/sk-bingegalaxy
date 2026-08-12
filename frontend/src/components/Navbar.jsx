@@ -39,6 +39,7 @@ import {
   FiUploadCloud,
   FiInbox,
   FiActivity,
+  FiPlay,
 } from 'react-icons/fi';
 import ThemeToggle from './ThemeToggle';
 import { useModuleAccess } from '../hooks/useModuleAccess';
@@ -154,6 +155,7 @@ export default function Navbar() {
     { to: '/admin/distribution', icon: <FiLink />, label: t('nav.distribution', 'Distribution'), module: 'DISTRIBUTION' },
     { to: '/admin/listings', icon: <FiUploadCloud />, label: t('nav.listings', 'Listings'), module: 'DISTRIBUTION' },
     { to: '/admin/inbox', icon: <FiInbox />, label: t('nav.reservation_inbox', 'Inbox'), module: 'DISTRIBUTION' },
+    { to: '/admin/simulator', icon: <FiPlay />, label: t('nav.channel_simulator', 'Simulator'), module: 'DISTRIBUTION' },
     { to: '/admin/settlements', icon: <FiDollarSign />, label: t('nav.settlements', 'Settlements'), module: 'DISTRIBUTION' },
     { to: '/admin/channel-health', icon: <FiActivity />, label: t('nav.channel_health', 'Channel Health'), module: 'DISTRIBUTION' },
     { to: '/admin/about-binge', icon: <FiInfo />, label: t('nav.binge_about', 'About') },
@@ -479,6 +481,25 @@ export default function Navbar() {
               {can('SLOT_HOLDS') && <NavLink to="/admin/slot-holds" className={navLinkClass}><FiClock /> <span>{t('nav.slot_holds', 'Slot Holds')}</span></NavLink>}
               <NavLink to="/admin/about-binge" className={navLinkClass}><FiInfo /> <span>{t('nav.binge_about', 'About')}</span></NavLink>
             </div>
+
+            {/* Distribution. These seven screens existed only in the MOBILE menu array
+                above — the desktop venue sidebar, which is the primary admin surface,
+                had no Distribution section at all. Every one of them was shipped,
+                routed and unreachable by anyone using a desktop browser.
+                One `can('DISTRIBUTION')` guards the heading as well as the links, so a
+                venue without the module sees no empty section header. */}
+            {can('DISTRIBUTION') && (
+              <div className="admin-sidebar-section">
+                <div className="admin-sidebar-heading">{t('nav.section_distribution', 'Distribution')}</div>
+                <NavLink to="/admin/attribution" className={navLinkClass}><FiTrendingUp /> <span>{t('nav.attribution', 'Channels')}</span></NavLink>
+                <NavLink to="/admin/distribution" className={navLinkClass}><FiLink /> <span>{t('nav.distribution', 'Connections')}</span></NavLink>
+                <NavLink to="/admin/listings" className={navLinkClass}><FiUploadCloud /> <span>{t('nav.listings', 'Listings')}</span></NavLink>
+                <NavLink to="/admin/inbox" className={navLinkClass}><FiInbox /> <span>{t('nav.reservation_inbox', 'Inbox')}</span></NavLink>
+                <NavLink to="/admin/settlements" className={navLinkClass}><FiDollarSign /> <span>{t('nav.settlements', 'Settlements')}</span></NavLink>
+                <NavLink to="/admin/channel-health" className={navLinkClass}><FiActivity /> <span>{t('nav.channel_health', 'Channel Health')}</span></NavLink>
+                <NavLink to="/admin/simulator" className={navLinkClass}><FiPlay /> <span>{t('nav.channel_simulator', 'Simulator')}</span></NavLink>
+              </div>
+            )}
 
             <div className="admin-sidebar-section">
               <div className="admin-sidebar-heading">{t('nav.section_people', 'People')}</div>

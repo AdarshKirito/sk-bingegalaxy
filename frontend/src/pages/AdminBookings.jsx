@@ -61,7 +61,12 @@ export default function AdminBookings() {
   const initTab = searchParams.get('tab') || 'today';
   const initStatus = searchParams.get('status') || 'PENDING';
   const initSub = searchParams.get('sub') || 'ready';
-  const initSearch = searchParams.get('search') || '';
+  // `ref` is accepted as an alias for `search`, and is not cosmetic: the dashboard,
+  // the disputes queue, the failed-refunds queue and the channel inbox all deep-link
+  // with ?ref=<bookingRef>, while only the user modal used ?search=. Every one of those
+  // ?ref= links silently did nothing — the operator clicked a booking reference and
+  // landed on an unfiltered list, with no error to explain it.
+  const initSearch = searchParams.get('search') || searchParams.get('ref') || '';
 
   const [activeTab, setActiveTab] = useState(initTab);
   const [todaySubTab, setTodaySubTab] = useState(initSub);
@@ -467,7 +472,26 @@ export default function AdminBookings() {
               <tbody>
                 {filteredBookings.map(b => (
                   <tr key={b.bookingRef} onClick={() => openDetailModal(b)}>
-                    <td><span className="ab-ref">{b.bookingRef}</span></td>
+                    <td>
+                      <span className="ab-ref">{b.bookingRef}</span>
+                      {/* Where this booking came from. A channel reservation looks
+                          identical to a direct one in every column of this table, so
+                          a venue calling a traveller who booked through an OTA has no
+                          idea they are not the merchant of record — and support
+                          reconciling with a provider has no reference to quote back.
+                          Only rendered for CHANNEL: labelling the ordinary case adds
+                          noise to every row for no information. */}
+                      {b.origin === 'CHANNEL' && (
+                        <div className="ab-customer-detail" title={
+                          `Arrived from ${b.externalSource || 'a sales channel'}`
+                          + (b.externalRef ? ` — their reference ${b.externalRef}` : '')}>
+                          <span className="badge badge-info" style={{ fontSize: '0.6rem' }}>
+                            {(b.externalSource || 'channel').toUpperCase()}
+                          </span>
+                          {b.externalRef && <> {b.externalRef}</>}
+                        </div>
+                      )}
+                    </td>
                     <td>
                       <span className="ab-customer-name">{b.customerName || b.customerEmail || 'N/A'}</span><br/>
                       <span className="ab-customer-detail">{b.customerEmail}</span>
