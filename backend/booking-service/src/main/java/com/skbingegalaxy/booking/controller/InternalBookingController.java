@@ -2,6 +2,7 @@ package com.skbingegalaxy.booking.controller;
 
 import com.skbingegalaxy.booking.dto.BookingDto;
 import com.skbingegalaxy.booking.dto.ChannelCancellationRequest;
+import com.skbingegalaxy.booking.dto.ChannelConfirmationRequest;
 import com.skbingegalaxy.booking.dto.ChannelReservationRequest;
 import com.skbingegalaxy.booking.dto.InternalBingeDto;
 import com.skbingegalaxy.booking.entity.Binge;
@@ -177,10 +178,37 @@ public class InternalBookingController {
     public ResponseEntity<ApiResponse<Map<String, Object>>> cancelChannelReservation(
             @Valid @RequestBody ChannelCancellationRequest request) {
         BookingService.ChannelCancelResult result = bookingService.cancelChannelReservation(
-            request.getExternalSource(), request.getExternalRef(), request.getReason());
+            request.getBingeId(), request.getExternalSource(),
+            request.getExternalRef(), request.getReason());
         Map<String, Object> body = new java.util.LinkedHashMap<>();
         body.put("bookingRef", result.bookingRef());
         body.put("cancelled", result.cancelled());
+        body.put("detail", result.detail());
+        return ResponseEntity.ok(ApiResponse.ok(result.detail(), body));
+    }
+
+    /**
+     * Confirm a reservation a channel previously delivered — the hold becomes a sale.
+     *
+     * <p><b>The third of three lifecycle messages, and the one that was missing.</b>
+     * Reservations could arrive and could be cancelled; nothing could confirm one. A
+     * channel reservation is created {@code PENDING}, so without this the
+     * pending-timeout sweep auto-cancelled every confirmed channel sale roughly half an
+     * hour after the reseller had told the traveller they were booked — silently, and
+     * with every component involved reporting success.
+     *
+     * <p>Idempotent like its siblings: a redelivered confirmation answers 200 with
+     * {@code confirmed: false} rather than erroring, because at-least-once delivery
+     * guarantees the retry.
+     */
+    @PostMapping("/reservations/confirm")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> confirmChannelReservation(
+            @Valid @RequestBody ChannelConfirmationRequest request) {
+        BookingService.ChannelConfirmResult result = bookingService.confirmChannelReservation(
+            request.getBingeId(), request.getExternalSource(), request.getExternalRef());
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("bookingRef", result.bookingRef());
+        body.put("confirmed", result.confirmed());
         body.put("detail", result.detail());
         return ResponseEntity.ok(ApiResponse.ok(result.detail(), body));
     }

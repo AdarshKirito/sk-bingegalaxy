@@ -1,14 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import AdminDistribution from '../pages/AdminDistribution';
 
 const mockProviders = vi.fn();
 const mockConnections = vi.fn();
+const mockDestinations = vi.fn();
+const mockAttach = vi.fn();
 vi.mock('../services/endpoints', () => ({
   adminService: {
     getDistributionProviders: () => mockProviders(),
     getDistributionConnections: () => mockConnections(),
+    getDistributionDestinations: (...a) => mockDestinations(...a),
+    attachDistributionDestination: (...a) => mockAttach(...a),
     createDistributionConnection: vi.fn(),
+    activateDistributionConnection: vi.fn(),
+    issueResellerKey: vi.fn(),
     pauseDistributionConnection: vi.fn(),
     resumeDistributionConnection: vi.fn(),
     revokeDistributionConnection: vi.fn(),
@@ -33,6 +40,8 @@ describe('AdminDistribution', () => {
   beforeEach(() => {
     mockProviders.mockReset().mockResolvedValue({ data: { data: [] } });
     mockConnections.mockReset().mockResolvedValue({ data: { data: [] } });
+    mockDestinations.mockReset().mockResolvedValue({ data: { data: [] } });
+    mockAttach.mockReset().mockResolvedValue({ data: { data: {} } });
   });
 
   it('explains the empty state instead of showing a bare "no data"', async () => {
@@ -115,5 +124,100 @@ describe('AdminDistribution', () => {
     mockProviders.mockRejectedValue({ response: { data: { message: 'boom' } } });
     render(<AdminDistribution />);
     await waitFor(() => expect(screen.getByText('Channel connections')).toBeInTheDocument());
+  });
+
+  // ── Attaching a destination — the step that had no control at all ─────────
+  //
+  // The API wrapper existed and nothing called it. A connection with no destination
+  // reaches nowhere: Activate refuses it and a listing needs a connectionDestinationId,
+  // so the whole publish chain dead-ended one hop after "Create connection" — while the
+  // page showed a healthy-looking Pending connection and offered no way forward.
+
+  describe('attaching a destination', () => {
+    const pending = () => connection({ id: 5, providerName: 'OCTO Provider Simulator',
+      providerCode: 'SIMULATOR', status: 'PENDING', destinations: [] });
+
+    it('says a connection reaches nowhere rather than showing an empty table', async () => {
+      mockConnections.mockResolvedValue({ data: { data: [pending()] } });
+      render(<AdminDistribution />);
+
+      // This is the reason Activate keeps refusing, and an operator should not have to
+      // infer it from an absent table.
+      await waitFor(() => expect(
+        screen.getByText(/reaches no destination yet/i)).toBeInTheDocument());
+    });
+
+    it('offers the destinations this connection\'s provider actually operates', async () => {
+      mockConnections.mockResolvedValue({ data: { data: [pending()] } });
+      mockDestinations.mockResolvedValue({ data: { data: [
+        { code: 'SIMULATOR', displayName: 'OCTO Simulator Marketplace',
+          operatedByProviderCode: 'SIMULATOR', deliversReservations: true },
+      ] } });
+      render(<AdminDistribution />);
+
+      await userEvent.click(await screen.findByRole('button', { name: /Add destination/i }));
+
+      // Narrowed by provider, matching the server's own rule — offering a choice that
+      // will be refused is worse than offering none, because the refusal lands after
+      // the operator has committed to commercial terms.
+      await waitFor(() => expect(mockDestinations).toHaveBeenCalledWith('SIMULATOR'));
+      expect(await screen.findByRole('option', { name: 'OCTO Simulator Marketplace' }))
+        .toBeInTheDocument();
+    });
+
+    it('attaches with the stated terms, and omits a commission that was left blank', async () => {
+      mockConnections.mockResolvedValue({ data: { data: [pending()] } });
+      mockDestinations.mockResolvedValue({ data: { data: [
+        { code: 'SIMULATOR', displayName: 'OCTO Simulator Marketplace',
+          operatedByProviderCode: 'SIMULATOR', deliversReservations: true },
+      ] } });
+      render(<AdminDistribution />);
+
+      await userEvent.click(await screen.findByRole('button', { name: /Add destination/i }));
+      await screen.findByLabelText('Destination');
+      await userEvent.selectOptions(screen.getByLabelText('Destination'), 'SIMULATOR');
+      await userEvent.click(screen.getByRole('button', { name: /^Add destination$/i }));
+
+      await waitFor(() => expect(mockAttach).toHaveBeenCalled());
+      const [id, payload] = mockAttach.mock.calls[0];
+      expect(id).toBe(5);
+      expect(payload.destinationCode).toBe('SIMULATOR');
+      // Blank means "no rate agreed", which is not zero — zero would silently record
+      // that the channel takes no cut.
+      expect(payload).not.toHaveProperty('commissionBps');
+      // Off by default, matching the server: agreeing terms and going on sale are two
+      // decisions, and collapsing them publishes inventory still being negotiated.
+      expect(payload.enabled).toBe(false);
+      expect(payload.paymentResponsibility).toBe('CHANNEL_COLLECTS');
+    });
+
+    it('warns before attaching a feed-only destination', async () => {
+      mockConnections.mockResolvedValue({ data: { data: [pending()] } });
+      mockDestinations.mockResolvedValue({ data: { data: [
+        { code: 'GOOGLE_TTD', displayName: 'Google Things to Do',
+          operatedByProviderCode: 'SIMULATOR', deliversReservations: false },
+      ] } });
+      render(<AdminDistribution />);
+
+      await userEvent.click(await screen.findByRole('button', { name: /Add destination/i }));
+      await screen.findByLabelText('Destination');
+      await userEvent.selectOptions(screen.getByLabelText('Destination'), 'GOOGLE_TTD');
+
+      // Said at the moment of choosing, not discovered later by an operator watching an
+      // inbox that will never receive anything.
+      await waitFor(() => expect(
+        screen.getByText(/no reservation is ever\s+delivered back/i)).toBeInTheDocument());
+    });
+
+    it('explains an empty destination list instead of showing a bare dropdown', async () => {
+      mockConnections.mockResolvedValue({ data: { data: [pending()] } });
+      mockDestinations.mockResolvedValue({ data: { data: [] } });
+      render(<AdminDistribution />);
+
+      await userEvent.click(await screen.findByRole('button', { name: /Add destination/i }));
+
+      await waitFor(() => expect(
+        screen.getByText(/ships inactive until a super-admin turns it on/i)).toBeInTheDocument());
+    });
   });
 });

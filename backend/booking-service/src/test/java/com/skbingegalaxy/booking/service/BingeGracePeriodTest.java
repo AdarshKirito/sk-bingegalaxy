@@ -252,4 +252,101 @@ class BingeGracePeriodTest {
             .isEqualTo(original);
         verify(bingeRepository, never()).save(any());
     }
+
+    /**
+     * The auto-pause was permanent, and that was the whole defect.
+     *
+     * <p>V87 stopped the sweep pausing a venue that has events, and repaired the rows
+     * already wrong. Neither half ever set {@code active} back to TRUE afterwards, so a
+     * venue paused at the 24-hour mark — correctly, for having no events — stayed out of
+     * customer discovery permanently once it did have them. Its admin sees a full
+     * catalogue and a venue nobody can book, which is indistinguishable from the V87
+     * incident and is what "binges are auto-pausing even though they have events"
+     * actually describes.
+     */
+    @org.junit.jupiter.api.Nested
+    @DisplayName("lifting an auto-pause once the cause is gone")
+    class LiftingTheAutoPause {
+
+        private Binge autoPaused() {
+            Binge binge = approvedHoursAgo(48);
+            binge.setActive(false);
+            binge.setAutoDeactivatedAt(LocalDateTime.now(ZoneOffset.UTC).minusHours(24));
+            binge.setGraceWarningSentAt(LocalDateTime.now(ZoneOffset.UTC).minusHours(36));
+            return binge;
+        }
+
+        @Test
+        @DisplayName("THE BUG: creating an event type puts an auto-paused venue back on sale")
+        void firstEventLiftsThePause() {
+            Binge binge = autoPaused();
+            when(bingeRepository.findById(42L)).thenReturn(java.util.Optional.of(binge));
+
+            bingeService.recordFirstEventIfNeeded(42L);
+
+            assertThat(binge.isActive())
+                .as("the pause existed because there were no events; there are now")
+                .isTrue();
+            assertThat(binge.getAutoDeactivatedAt()).isNull();
+            // Cleared so a venue that goes through the cycle again gets its courtesy
+            // warning again rather than jumping straight to a second pause.
+            assertThat(binge.getGraceWarningSentAt()).isNull();
+            verify(bingeRepository).save(binge);
+            verify(adminNotificationService).notifyUser(
+                anyLong(), anyString(), org.mockito.ArgumentMatchers.eq("BINGE_AUTO_REACTIVATED"),
+                anyString(), anyString(), anyString(), anyLong(), anyString());
+        }
+
+        @Test
+        @DisplayName("a MANUALLY paused venue is never resurrected by adding an event type")
+        void manualPauseIsUntouched() {
+            Binge binge = approvedHoursAgo(720);
+            binge.setActive(false);
+            binge.setAutoDeactivatedAt(null);     // the discriminator: a human paused this
+            when(bingeRepository.findById(42L)).thenReturn(java.util.Optional.of(binge));
+
+            bingeService.recordFirstEventIfNeeded(42L);
+
+            // Putting a venue back on sale that someone deliberately took off it is a
+            // worse failure than the one being fixed here.
+            assertThat(binge.isActive()).isFalse();
+            verifyNoInteractions(adminNotificationService);
+        }
+
+        @Test
+        @DisplayName("the sweep's heal path lifts the pause too, not just the flag")
+        void healingAlsoLiftsThePause() {
+            Binge binge = autoPaused();
+            binge.setFirstEventCreatedAt(null);
+            givenApproved(binge);
+            when(eventTypeRepository.existsByBingeId(42L)).thenReturn(true);
+            when(eventTypeRepository.existsByBingeIdAndActiveTrue(42L)).thenReturn(true);
+
+            bingeService.enforceGracePeriod();
+
+            // Healing the flag alone left the venue exactly as broken, AND removed it
+            // from the candidate set — so nothing would ever look at it again.
+            assertThat(binge.isActive()).isTrue();
+            assertThat(binge.getAutoDeactivatedAt()).isNull();
+            assertThat(binge.getFirstEventCreatedAt()).isNotNull();
+        }
+
+        @Test
+        @DisplayName("a manual toggle clears the marker, so the auto/manual distinction stays true")
+        void manualToggleClearsTheMarker() {
+            Binge binge = autoPaused();
+            when(bingeRepository.findById(42L)).thenReturn(java.util.Optional.of(binge));
+
+            bingeService.toggleBinge(42L, 7L, "SUPER_ADMIN");
+
+            assertThat(binge.isActive()).isTrue();
+            // Without this, a venue that was auto-paused, manually re-activated, and
+            // later deliberately paused still carried the marker — so every repair,
+            // including the one above, would put it back on sale against the operator's
+            // explicit choice. The discriminator has to be maintained by whoever changes
+            // `active`, or it means nothing.
+            assertThat(binge.getAutoDeactivatedAt()).isNull();
+            assertThat(binge.getGraceWarningSentAt()).isNull();
+        }
+    }
 }

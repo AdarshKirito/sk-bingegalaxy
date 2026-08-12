@@ -100,4 +100,64 @@ class MessageOrderingPolicyTest {
             assertThat(d.basis()).isEqualTo(OrderingBasis.RECEIPT_ORDER);
         }
     }
+
+    @Nested
+    @DisplayName("Cancel tombstone — the hole the applied high-water mark left")
+    class Tombstone {
+
+        private static final MessageOrderingPolicy.CancelTombstone NONE =
+            MessageOrderingPolicy.CancelTombstone.none();
+
+        @Test
+        @DisplayName("THE BUG: a CREATE arriving after an unapplied CANCEL is superseded")
+        void createAfterCancelIsSuperseded() {
+            // The sequence the platform actually saw. A CANCEL arrives first, so
+            // booking-service refuses it — there is no such reservation yet — and the row
+            // ends REJECTED, not APPLIED. The applied high-water mark therefore stayed
+            // empty, the later CREATE looked like the first message for a reservation
+            // nobody had cancelled, and the booking was created. The traveller who
+            // cancelled keeps a slot; nobody is expecting them; every row reads healthy.
+            var d = MessageOrderingPolicy.decide(
+                null, null, null, null,
+                new MessageOrderingPolicy.CancelTombstone(true, null));
+
+            assertThat(d.apply()).isFalse();
+            assertThat(d.reason()).contains("cancellation");
+        }
+
+        @Test
+        @DisplayName("a sequenced CREATE that predates the cancellation is superseded")
+        void earlierSequencedCreateIsSuperseded() {
+            var d = MessageOrderingPolicy.decide(
+                1L, null, null, null,
+                new MessageOrderingPolicy.CancelTombstone(true, 5L));
+
+            assertThat(d.apply()).isFalse();
+            assertThat(d.basis()).isEqualTo(OrderingBasis.PROVIDER_SEQUENCE);
+            assertThat(d.reason()).contains("does not exceed the cancellation");
+        }
+
+        @Test
+        @DisplayName("but a message the provider ordered strictly AFTER the cancellation applies")
+        void laterSequencedMessageStillApplies() {
+            // A genuine re-booking of the same reference. The provider has ordered it for
+            // us, so refusing it would strand a real reservation — the tombstone is a
+            // guard against resurrection, not a permanent ban on the reference.
+            var d = MessageOrderingPolicy.decide(
+                9L, null, null, null,
+                new MessageOrderingPolicy.CancelTombstone(true, 5L));
+
+            assertThat(d.apply()).isTrue();
+        }
+
+        @Test
+        @DisplayName("no tombstone leaves the ordinary rules untouched")
+        void withoutATombstoneNothingChanges() {
+            assertThat(MessageOrderingPolicy.decide(6L, 5L, null, null, NONE).apply()).isTrue();
+            assertThat(MessageOrderingPolicy.decide(4L, 5L, null, null, NONE).apply()).isFalse();
+            // A null tombstone is treated as absent rather than throwing: the argument is
+            // evidence, and "we have none" is a legitimate state.
+            assertThat(MessageOrderingPolicy.decide(6L, 5L, null, null, null).apply()).isTrue();
+        }
+    }
 }

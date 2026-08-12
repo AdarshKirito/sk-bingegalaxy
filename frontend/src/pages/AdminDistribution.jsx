@@ -3,6 +3,7 @@ import { adminService } from '../services/endpoints';
 import { toast } from 'react-toastify';
 import {
   FiLink, FiPause, FiPlay, FiSlash, FiAlertTriangle, FiCheckCircle, FiKey, FiCopy, FiX,
+  FiPlus,
 } from 'react-icons/fi';
 import './AdminPages.css';
 
@@ -54,6 +55,12 @@ export default function AdminDistribution() {
   // only its digest is stored — so this is the single moment it is readable anywhere,
   // and it is deliberately not persisted to storage of any kind.
   const [issuedKey, setIssuedKey] = useState(null);
+  // Which connection's "add destination" form is open, plus its draft terms. Scoped to
+  // one connection at a time: commercial terms belong to a connection↔destination
+  // pairing, and a single shared form would make it easy to attach terms to the wrong one.
+  const [attachTo, setAttachTo] = useState(null);
+  const [destinations, setDestinations] = useState([]);
+  const [attachForm, setAttachForm] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -90,6 +97,68 @@ export default function AdminDistribution() {
       await load();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Could not issue a reseller key');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  /**
+   * Open the attach form for one connection and load the destinations its provider
+   * actually operates.
+   *
+   * <p>The step that had no control at all. A connection with no destination reaches
+   * nowhere: Activate refuses it, and a listing needs a connectionDestinationId, so the
+   * entire publish chain dead-ended one hop after "Create connection" — with the page
+   * cheerfully showing the connection as Pending and no way forward.
+   */
+  const openAttach = async (connection) => {
+    setAttachTo(connection.id);
+    setAttachForm({
+      destinationCode: '',
+      commissionBps: '',
+      paymentResponsibility: 'CHANNEL_COLLECTS',
+      settlementModel: 'COMMISSION_SETTLEMENT',
+      safetyInventory: 0,
+      enabled: false,
+    });
+    try {
+      const res = await adminService.getDistributionDestinations(connection.providerCode);
+      setDestinations(res.data?.data || []);
+    } catch (e) {
+      toast.error(e.response?.data?.message || 'Could not load destinations');
+      setDestinations([]);
+    }
+  };
+
+  const closeAttach = () => {
+    setAttachTo(null);
+    setAttachForm(null);
+    setDestinations([]);
+  };
+
+  const submitAttach = async (e, connectionId) => {
+    e.preventDefault();
+    if (!attachForm?.destinationCode) return;
+    setBusyId(connectionId);
+    try {
+      const payload = {
+        destinationCode: attachForm.destinationCode,
+        paymentResponsibility: attachForm.paymentResponsibility,
+        settlementModel: attachForm.settlementModel,
+        safetyInventory: Number(attachForm.safetyInventory) || 0,
+        enabled: attachForm.enabled,
+      };
+      // Sent only when stated. An empty box means "no commission agreed yet", which is
+      // not the same as zero — and zero would silently claim the channel takes no cut.
+      if (String(attachForm.commissionBps).trim() !== '') {
+        payload.commissionBps = Number(attachForm.commissionBps);
+      }
+      await adminService.attachDistributionDestination(connectionId, payload);
+      toast.success('Destination added');
+      closeAttach();
+      await load();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not add the destination');
     } finally {
       setBusyId(null);
     }
@@ -299,6 +368,15 @@ export default function AdminDistribution() {
                   <FiCheckCircle /> Activate
                 </button>
               )}
+              {/* Attach a destination. Without one the connection reaches nowhere:
+                  Activate refuses it and a listing has no connectionDestinationId to
+                  hang off, so this is the hop the whole publish chain dead-ended at. */}
+              {c.status !== 'REVOKED' && (
+                <button className="btn btn-secondary btn-sm" disabled={busyId === c.id}
+                        onClick={() => (attachTo === c.id ? closeAttach() : openAttach(c))}>
+                  <FiPlus /> {attachTo === c.id ? 'Cancel' : 'Add destination'}
+                </button>
+              )}
               {c.status !== 'REVOKED' && (
                 <button className="btn btn-secondary btn-sm" disabled={busyId === c.id}
                         onClick={() => issueKey(c)}>
@@ -328,6 +406,92 @@ export default function AdminDistribution() {
               )}
             </div>
           </div>
+
+          {/* Named rather than left blank. An empty destinations table and a connection
+              that simply has none look identical, and the second is the reason Activate
+              keeps refusing — which is not something an operator should have to infer. */}
+          {c.status !== 'REVOKED' && !(c.destinations?.length > 0) && attachTo !== c.id && (
+            <p className="adm-hint" style={{ margin: '0.75rem 0 0' }}>
+              <FiAlertTriangle aria-hidden="true" /> This connection reaches no destination
+              yet, so it cannot be activated and nothing can be listed against it.
+            </p>
+          )}
+
+          {attachTo === c.id && attachForm && (
+            <form className="adm-form" style={{ marginTop: '0.75rem' }}
+                  onSubmit={(e) => submitAttach(e, c.id)}>
+              <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <div className="input-group" style={{ margin: 0, minWidth: 220 }}>
+                  <label htmlFor={`dest-${c.id}`}>Destination</label>
+                  <select id={`dest-${c.id}`} value={attachForm.destinationCode}
+                          onChange={(e) => setAttachForm({ ...attachForm, destinationCode: e.target.value })}>
+                    <option value="">Select a destination…</option>
+                    {destinations.map((d) => (
+                      <option key={d.code} value={d.code}>{d.displayName}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="input-group" style={{ margin: 0, maxWidth: 160 }}>
+                  <label htmlFor={`comm-${c.id}`}>Commission (bps)</label>
+                  {/* Basis points, matching the platform's existing rate convention —
+                      2000 is 20%. Left blank when no rate has been agreed. */}
+                  <input id={`comm-${c.id}`} type="number" min="0" max="10000"
+                         value={attachForm.commissionBps} placeholder="e.g. 2000"
+                         onChange={(e) => setAttachForm({ ...attachForm, commissionBps: e.target.value })} />
+                </div>
+                <div className="input-group" style={{ margin: 0, minWidth: 190 }}>
+                  <label htmlFor={`pay-${c.id}`}>Who collects</label>
+                  <select id={`pay-${c.id}`} value={attachForm.paymentResponsibility}
+                          onChange={(e) => setAttachForm({
+                            ...attachForm, paymentResponsibility: e.target.value })}>
+                    {/* Channel-collects first and default: Viator and GetYourGuide are
+                        both merchant of record, and defaulting to "the venue collects"
+                        would tell an operator to expect cash that never arrives. */}
+                    <option value="CHANNEL_COLLECTS">The channel collects</option>
+                    <option value="VENUE_COLLECTS">The venue collects</option>
+                  </select>
+                </div>
+                <div className="input-group" style={{ margin: 0, maxWidth: 150 }}>
+                  <label htmlFor={`safety-${c.id}`}>Safety inventory</label>
+                  <input id={`safety-${c.id}`} type="number" min="0"
+                         value={attachForm.safetyInventory}
+                         onChange={(e) => setAttachForm({
+                           ...attachForm, safetyInventory: e.target.value })} />
+                </div>
+                <button className="btn btn-primary" type="submit"
+                        disabled={!attachForm.destinationCode || busyId === c.id}>
+                  Add destination
+                </button>
+              </div>
+
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+                              marginTop: '0.75rem' }}>
+                <input type="checkbox" checked={attachForm.enabled}
+                       onChange={(e) => setAttachForm({ ...attachForm, enabled: e.target.checked })} />
+                {/* Off by default, matching the server. Agreeing terms and putting
+                    inventory on sale are two decisions, and collapsing them would
+                    publish the moment an operator saved terms still being negotiated. */}
+                Enable it now — otherwise it is attached but not selling
+              </label>
+
+              {attachForm.destinationCode
+                && destinations.find((d) => d.code === attachForm.destinationCode)
+                && !destinations.find((d) => d.code === attachForm.destinationCode).deliversReservations && (
+                <p className="adm-hint" style={{ marginTop: '0.5rem' }}>
+                  <FiAlertTriangle aria-hidden="true" /> This destination is a feed plus a
+                  deep link — travellers check out on SK Binge and no reservation is ever
+                  delivered back, so nothing will appear in the channel inbox for it.
+                </p>
+              )}
+
+              {destinations.length === 0 && (
+                <p className="adm-hint" style={{ marginTop: '0.5rem' }}>
+                  No destination is available for {c.providerName}. Every real destination
+                  ships inactive until a super-admin turns it on.
+                </p>
+              )}
+            </form>
+          )}
 
           {c.destinations?.length > 0 && (
             <div className="admin-table-wrap" style={{ marginTop: '0.75rem' }}>

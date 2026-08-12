@@ -105,6 +105,75 @@ class InboxProcessorTest {
     }
 
     @Nested
+    @DisplayName("one bad message must not stop the queue")
+    class PoisonIsolation {
+
+        private org.springframework.data.domain.Page<ReservationInboxEntry> page(
+                ReservationInboxEntry... entries) {
+            return new org.springframework.data.domain.PageImpl<>(List.of(entries));
+        }
+
+        @Test
+        @DisplayName("a row whose processing throws is isolated and the sweep continues")
+        void oneThrowingRowDoesNotAbandonTheSweep() {
+            ReservationInboxEntry poison = entry(ReservationInboxEntry.MessageType.CREATE, FLAT_PAYLOAD);
+            ReservationInboxEntry healthy = ReservationInboxEntry.builder().id(10L).connectionId(7L)
+                .destinationCode("SIMULATOR").externalRef("EXT-2")
+                .messageType(ReservationInboxEntry.MessageType.CREATE)
+                .status(ReservationInboxEntry.Status.RECEIVED).payloadJson(FLAT_PAYLOAD).build();
+
+            when(inboxRepository.findByStatusInOrderByReceivedAtAsc(any(), any()))
+                .thenReturn(page(poison, healthy));
+            when(bookingIngestClient.ingest(any(), any(), any(), any(), any(), any(), any(),
+                    anyInt(), any(), any()))
+                .thenThrow(new IllegalStateException("settlement blew up"))
+                .thenReturn(new BookingIngestClient.Result.Accepted("SKBG26Z", true));
+
+            // The inbox queue is GLOBAL, not per-venue. Before this, the exception
+            // propagated out of the loop, the row stayed RECEIVED at the head of the
+            // queue, and the next sweep 30 seconds later hit it again — one malformed
+            // message from one reseller silently stopped reservations reaching every
+            // venue on the platform.
+            assertThat(processor.processOutstanding()).isEqualTo(1);
+
+            verify(inboxService).markFailed(eq(9L), contains("settlement blew up"));
+            verify(inboxService).markApplied(10L, "SKBG26Z", 1L, "INR", 300000L);
+        }
+
+        @Test
+        @DisplayName("a row that cannot even be marked FAILED still does not abort the sweep")
+        void unmarkableRowDoesNotAbortEither() {
+            ReservationInboxEntry poison = entry(ReservationInboxEntry.MessageType.CREATE, FLAT_PAYLOAD);
+
+            when(inboxRepository.findByStatusInOrderByReceivedAtAsc(any(), any()))
+                .thenReturn(page(poison));
+            when(bookingIngestClient.ingest(any(), any(), any(), any(), any(), any(), any(),
+                    anyInt(), any(), any()))
+                .thenThrow(new IllegalStateException("boom"));
+            when(inboxService.markFailed(anyLong(), any()))
+                .thenThrow(new IllegalStateException("database is the thing that is down"));
+
+            // If the database is what is failing, the isolation write fails too. Letting
+            // that escape would re-create the whole-sweep abort it exists to prevent.
+            assertThat(processor.processOutstanding()).isZero();
+        }
+
+        @Test
+        @DisplayName("a negative price is refused before a booking exists, not after")
+        void negativePriceIsRefusedUpFront() {
+            String negative = FLAT_PAYLOAD.replace("300000", "-300000");
+
+            processor.process(entry(ReservationInboxEntry.MessageType.CREATE, negative));
+
+            // Carried forward, this ingested successfully and then threw in the
+            // settlement calculation on the way out: a real booking with no receivable,
+            // and a row that re-threw on every subsequent sweep.
+            verifyNoInteractions(bookingIngestClient);
+            verify(inboxService).markRejected(eq(9L), contains("negative price"));
+        }
+    }
+
+    @Nested
     @DisplayName("the payload the OCTO endpoints actually write")
     class OctoDialect {
 
@@ -167,21 +236,61 @@ class InboxProcessorTest {
         private static final String BARE_CONFIRM = "{\"uuid\":\"EXT-1\"}";
 
         @Test
-        @DisplayName("confirms the booking the CREATE already made")
+        @DisplayName("confirms the booking the CREATE already made — in the PMS, not just the inbox")
         void confirmsExistingBooking() {
             when(inboxRepository.findByConnectionIdAndExternalRefOrderByIdAsc(7L, "EXT-1"))
                 .thenReturn(List.of(ReservationInboxEntry.builder().id(8L)
                     .status(ReservationInboxEntry.Status.APPLIED)
                     .bookingRef("SKBG26X").build()));
+            when(bookingIngestClient.confirm("simulator", "EXT-1", 1L))
+                .thenReturn(new BookingIngestClient.Result.Accepted("SKBG26X", false));
 
             assertThat(processor.process(
                 entry(ReservationInboxEntry.MessageType.MODIFY, BARE_CONFIRM))).isTrue();
 
-            // Sent down the ingestion path it would be refused as "no live listing
-            // matches product 'null'", leaving a REJECTED row beside the booking it
-            // successfully confirmed.
-            verifyNoInteractions(bookingIngestClient);
+            // This used to mark the row APPLIED and stop. The booking stayed PENDING, so
+            // the pending-timeout sweep auto-cancelled it half an hour after the reseller
+            // had told the traveller they were booked — with the inbox reading APPLIED
+            // the whole time. The confirmation has to reach the booking itself.
+            verify(bookingIngestClient).confirm("simulator", "EXT-1", 1L);
             verify(inboxService).markApplied(9L, "SKBG26X", 1L, null, 0L);
+        }
+
+        @Test
+        @DisplayName("a confirmation is never sent down the creation path")
+        void confirmationIsNotACreation() {
+            when(inboxRepository.findByConnectionIdAndExternalRefOrderByIdAsc(7L, "EXT-1"))
+                .thenReturn(List.of(ReservationInboxEntry.builder().id(8L)
+                    .status(ReservationInboxEntry.Status.APPLIED)
+                    .bookingRef("SKBG26X").build()));
+            when(bookingIngestClient.confirm(any(), any(), any()))
+                .thenReturn(new BookingIngestClient.Result.Accepted("SKBG26X", false));
+
+            processor.process(entry(ReservationInboxEntry.MessageType.MODIFY, BARE_CONFIRM));
+
+            // Ingestion would be refused as "no live listing matches product 'null'",
+            // leaving a REJECTED row beside the booking it successfully confirmed.
+            verify(bookingIngestClient, never())
+                .ingest(any(), any(), any(), any(), any(), any(), any(), anyInt(), any(), any());
+        }
+
+        @Test
+        @DisplayName("an expired hold that booking-service refuses is REJECTED, not retried")
+        void expiredHoldRefusalIsPermanent() {
+            when(inboxRepository.findByConnectionIdAndExternalRefOrderByIdAsc(7L, "EXT-1"))
+                .thenReturn(List.of(ReservationInboxEntry.builder().id(8L)
+                    .status(ReservationInboxEntry.Status.APPLIED)
+                    .bookingRef("SKBG26X").build()));
+            when(bookingIngestClient.confirm(any(), any(), any()))
+                .thenReturn(new BookingIngestClient.Result.Rejected(
+                    "Reservation EXT-1 was cancelled and can no longer be confirmed."));
+
+            assertThat(processor.process(
+                entry(ReservationInboxEntry.MessageType.MODIFY, BARE_CONFIRM))).isFalse();
+
+            // A hold whose slot has since been sold will not become confirmable by
+            // retrying, and forcing it would double-book the venue.
+            verify(inboxService).markRejected(eq(9L), contains("cancelled"));
         }
 
         @Test
@@ -250,7 +359,7 @@ class InboxProcessorTest {
             // Previously answered "CANCEL is not yet applied automatically": the
             // traveller cancelled on the OTA, the venue kept holding the slot, and
             // nothing anywhere reported a problem.
-            when(bookingIngestClient.cancel(eq("simulator"), eq("EXT-1"), any()))
+            when(bookingIngestClient.cancel(eq("simulator"), eq("EXT-1"), eq(1L), any()))
                 .thenReturn(new BookingIngestClient.Result.Accepted("SKBG26X", false));
 
             assertThat(processor.process(
@@ -264,7 +373,7 @@ class InboxProcessorTest {
         void cancelIsNotACreation() {
             // Ingesting a cancellation would create a booking FROM a cancellation, the
             // exact inversion the ordering rules exist to prevent.
-            when(bookingIngestClient.cancel(any(), any(), any()))
+            when(bookingIngestClient.cancel(any(), any(), any(), any()))
                 .thenReturn(new BookingIngestClient.Result.Accepted("SKBG26X", false));
 
             processor.process(entry(ReservationInboxEntry.MessageType.CANCEL, OCTO_PAYLOAD));
@@ -276,7 +385,7 @@ class InboxProcessorTest {
         @Test
         @DisplayName("cancelling something booking-service never saw is REJECTED")
         void unknownCancellationRejected() {
-            when(bookingIngestClient.cancel(any(), any(), any()))
+            when(bookingIngestClient.cancel(any(), any(), any(), any()))
                 .thenReturn(new BookingIngestClient.Result.Rejected("No such reservation"));
 
             processor.process(entry(ReservationInboxEntry.MessageType.CANCEL, OCTO_PAYLOAD));
@@ -290,7 +399,7 @@ class InboxProcessorTest {
     @Test
     @DisplayName("a cancellation never creates a receivable")
     void cancellationCreatesNoReceivable() {
-        when(bookingIngestClient.cancel(any(), any(), any()))
+        when(bookingIngestClient.cancel(any(), any(), any(), any()))
             .thenReturn(new BookingIngestClient.Result.Accepted("SKBG26X", false));
 
         processor.process(entry(ReservationInboxEntry.MessageType.CANCEL, OCTO_PAYLOAD));

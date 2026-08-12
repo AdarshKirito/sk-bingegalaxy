@@ -82,4 +82,45 @@ class BookingIngestClientContractTest {
         assertThat(body).containsEntry("guestEmail", null);
         assertThat(body.get("guestEmail")).isNotEqualTo("null");
     }
+
+    // ── The other two lifecycle messages ─────────────────────────────────────
+    //
+    // Same pairing, same reason. Both bodies bind strictly on the receiving side, so a
+    // key that drifts is a 400 for every cancellation or every confirmation — and the
+    // sending side sees only a refusal it cannot explain.
+
+    /**
+     * {@code bingeId} is in this set deliberately, and its absence was a cross-venue bug
+     * rather than an omission: {@code externalSource} is a destination slug every venue on
+     * that destination shares, and {@code externalRef} is chosen by the reseller, so a
+     * cancellation addressed by the pair alone resolved to whichever venue used that
+     * reference first — and cancelled ITS booking.
+     */
+    private static final Set<String> AGREED_CANCEL_KEYS = Set.of(
+        "externalSource", "externalRef", "bingeId", "reason");
+
+    private static final Set<String> AGREED_CONFIRM_KEYS = Set.of(
+        "externalSource", "externalRef", "bingeId");
+
+    @Test
+    @DisplayName("a cancellation carries the venue, so it cannot cancel another venue's booking")
+    void cancellationKeySetIsExactlyTheAgreedContract() {
+        Map<String, Object> body =
+            BookingIngestClient.cancellationBody("simulator", "EXT-1", 1L, "Cancelled by SIMULATOR");
+
+        assertThat(body.keySet()).isEqualTo(AGREED_CANCEL_KEYS);
+        assertThat(body).containsEntry("bingeId", 1L);
+    }
+
+    @Test
+    @DisplayName("a confirmation carries the venue too, and nothing else")
+    void confirmationKeySetIsExactlyTheAgreedContract() {
+        Map<String, Object> body =
+            BookingIngestClient.confirmationBody("simulator", "EXT-1", 1L);
+
+        // No price and no reason: a confirmation must not be able to restate what the
+        // sale was worth, or a second receivable becomes possible for one booking.
+        assertThat(body.keySet()).isEqualTo(AGREED_CONFIRM_KEYS);
+        assertThat(body).containsEntry("bingeId", 1L);
+    }
 }

@@ -65,10 +65,23 @@ public class SecurityConfig {
                 // stray admin session. Rejecting is the controller's first action.
                 .requestMatchers("/api/v1/distribution/octo/**").permitAll()
                 // Slice 3 — venue-facing connection management. A connection is a
-                // venue's commercial relationship with a provider, so ADMIN of that
-                // venue is the right level; the per-venue boundary itself is enforced in
-                // the service from the gateway's X-Binge-Id, never from the request.
+                // venue's commercial relationship with a provider, so ADMIN is the right
+                // ROLE — but a role is all this chain can check.
+                //
+                // The per-venue boundary is enforced by DistributionAccessInterceptor,
+                // which resolves the venue's owner from booking-service and also applies
+                // the V71 DISTRIBUTION module grant. That matters: this comment used to
+                // claim the boundary was enforced "in the service from the gateway's
+                // X-Binge-Id", and it was not. X-Binge-Id comes from the venue picker in
+                // the browser, so every service method here was scoped by an id the
+                // caller chose — one edited header read another venue's connections and
+                // could pause, revoke or re-key them.
                 .requestMatchers("/api/v1/distribution/providers",
+                                 // Catalogue read. Listed explicitly because this chain
+                                 // ends in denyAll() — a new path that is not named here
+                                 // is a 403 with no clue as to why, and this codebase has
+                                 // lost time to exactly that before.
+                                 "/api/v1/distribution/destinations",
                                  "/api/v1/distribution/connections/**",
                                  "/api/v1/distribution/connections",
                                  "/api/v1/distribution/listings/**",

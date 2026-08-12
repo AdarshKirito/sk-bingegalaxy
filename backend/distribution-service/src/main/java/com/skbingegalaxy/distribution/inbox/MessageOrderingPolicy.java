@@ -40,6 +40,71 @@ public final class MessageOrderingPolicy {
     }
 
     /**
+     * Evidence that this reservation has already been cancelled.
+     *
+     * @param exists   a non-superseded CANCEL for this reservation has been received —
+     *                 whatever became of it afterwards
+     * @param sequence that cancellation's provider sequence, or null when the provider
+     *                 supplies none
+     */
+    public record CancelTombstone(boolean exists, Long sequence) {
+        public static CancelTombstone none() {
+            return new CancelTombstone(false, null);
+        }
+    }
+
+    /**
+     * As {@link #decide(Long, Long, LocalDateTime, LocalDateTime)}, but also refusing a
+     * message that a cancellation has already overtaken.
+     *
+     * <p><b>The hole the applied high-water mark left.</b> A CANCEL that arrives before
+     * its CREATE is passed to booking-service, which correctly refuses it — there is no
+     * such reservation yet — so the row ends REJECTED rather than APPLIED. The high-water
+     * mark counts only APPLIED messages, so it stayed empty, and when the CREATE arrived
+     * it looked like the very first message for a reservation nobody had cancelled. The
+     * booking was created, and the cancellation had been silently undone: the venue holds
+     * a slot for a traveller who cancelled and will not arrive, and every row involved
+     * reads as healthy.
+     *
+     * <p><b>A cancellation is therefore a tombstone, not just a message.</b> Once one has
+     * been received, a CREATE or MODIFY is applied only if the provider's own ordering
+     * puts it strictly after that cancellation. Where either side lacks a sequence there
+     * is no shared ordering to appeal to, and the message is set aside — the asymmetry is
+     * deliberate: wrongly setting aside a message leaves a SUPERSEDED row an operator can
+     * see and requeue, while wrongly applying one resurrects a dead booking that nobody
+     * is looking for.
+     */
+    public static Decision decide(Long incomingSequence,
+                                  Long lastAppliedSequence,
+                                  LocalDateTime incomingTimestamp,
+                                  LocalDateTime lastAppliedTimestamp,
+                                  CancelTombstone cancelled) {
+
+        if (cancelled != null && cancelled.exists()) {
+            boolean bothSequenced = incomingSequence != null && cancelled.sequence() != null;
+            ReservationInboxEntry.OrderingBasis basis = bothSequenced
+                ? ReservationInboxEntry.OrderingBasis.PROVIDER_SEQUENCE
+                : ReservationInboxEntry.OrderingBasis.RECEIPT_ORDER;
+
+            if (!bothSequenced) {
+                return Decision.supersede(basis,
+                    "a cancellation for this reservation has already been received, and "
+                  + "neither message carries a sequence to order them by");
+            }
+            if (incomingSequence <= cancelled.sequence()) {
+                return Decision.supersede(basis,
+                    "sequence " + incomingSequence + " does not exceed the cancellation at "
+                  + cancelled.sequence());
+            }
+            // Strictly later than the cancellation: a genuine re-booking of the same
+            // reference, which the provider has ordered for us. Falls through to the
+            // ordinary rules below.
+        }
+
+        return decide(incomingSequence, lastAppliedSequence, incomingTimestamp, lastAppliedTimestamp);
+    }
+
+    /**
      * @param incomingSequence provider-supplied ordering value, or null when the provider
      *                         supplies none
      * @param lastAppliedSequence highest sequence already applied for this reservation

@@ -4,6 +4,7 @@ import com.skbingegalaxy.common.dto.ApiResponse;
 import com.skbingegalaxy.common.exception.BusinessException;
 import com.skbingegalaxy.distribution.dto.EvaluateListingRequest;
 import com.skbingegalaxy.distribution.dto.ListingDto;
+import com.skbingegalaxy.distribution.listing.ListingReadinessPolicy;
 import com.skbingegalaxy.distribution.service.ListingService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +26,7 @@ import java.util.List;
 public class ListingController {
 
     private final ListingService listingService;
+    private final ListingReadinessPolicy readinessPolicy;
 
     private Long requireBinge(Long bingeId) {
         if (bingeId == null) {
@@ -38,6 +40,26 @@ public class ListingController {
     public ResponseEntity<ApiResponse<List<ListingDto>>> list(
             @RequestHeader(value = "X-Binge-Id", required = false) Long bingeId) {
         return ResponseEntity.ok(ApiResponse.ok(listingService.listForBinge(requireBinge(bingeId))));
+    }
+
+    /**
+     * What a destination requires before a listing may go live there.
+     *
+     * <p><b>Without this the evaluate endpoint was guess-and-check.</b> The requirements
+     * differ per marketplace and existed only inside {@code ListingReadinessPolicy}, so
+     * the console could post content and be told what was missing, but could not ask what
+     * to collect in the first place. An operator would have had to submit an empty
+     * listing to discover the field list.
+     *
+     * <p>Deliberately not binge-scoped: a destination's content requirements are a
+     * property of the marketplace, identical for every venue. It stays behind the same
+     * admin authorization as the rest of the surface.
+     */
+    @GetMapping("/listings/requirements")
+    public ResponseEntity<ApiResponse<List<ListingReadinessPolicy.Requirement>>> requirements(
+            @RequestParam(required = false) String destinationCode) {
+        return ResponseEntity.ok(ApiResponse.ok(
+            readinessPolicy.requirementsFor(destinationCode)));
     }
 
     /** Evaluate content against a destination's requirements and record the verdict. */

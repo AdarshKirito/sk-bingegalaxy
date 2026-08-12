@@ -5,11 +5,22 @@ import AdminListings from '../pages/AdminListings';
 
 const listings = vi.fn();
 const publish = vi.fn();
+const connections = vi.fn();
+const eventTypes = vi.fn();
+const requirements = vi.fn();
+const evaluate = vi.fn();
 vi.mock('../services/endpoints', () => ({
   adminService: {
     getDistributionListings: (...a) => listings(...a),
     publishDistributionListing: (...a) => publish(...a),
-    evaluateDistributionListing: vi.fn(),
+    getDistributionConnections: (...a) => connections(...a),
+    getDistributionListingRequirements: (...a) => requirements(...a),
+    evaluateDistributionListing: (...a) => evaluate(...a),
+  },
+  // The PUBLIC read, deliberately: /admin/event-types is gated on the EVENT_TYPES
+  // module, which the DISTRIBUTION grant does not imply.
+  bookingService: {
+    getEventTypes: (...a) => eventTypes(...a),
   },
 }));
 vi.mock('react-toastify', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
@@ -26,6 +37,10 @@ describe('AdminListings', () => {
     listings.mockReset();
     publish.mockReset();
     listings.mockResolvedValue({ data: { data: [] } });
+    connections.mockReset().mockResolvedValue({ data: { data: [] } });
+    eventTypes.mockReset().mockResolvedValue({ data: { data: [] } });
+    requirements.mockReset().mockResolvedValue({ data: { data: [] } });
+    evaluate.mockReset().mockResolvedValue({ data: { data: { readinessPct: 100 } } });
   });
 
   it('renders and explains the empty state', async () => {
@@ -97,5 +112,88 @@ describe('AdminListings', () => {
     render(<AdminListings />);
     await waitFor(() => expect(listings).toHaveBeenCalled());
     expect(screen.getByText(/Listing readiness/i)).toBeInTheDocument();
+  });
+
+  // ── Creating the first mapping — the action the page described and never offered ──
+  //
+  // The empty state told an operator to "evaluate an event type against a destination".
+  // The endpoint existed, the API wrapper existed, and nothing called it — so a venue's
+  // first listing could not be created from the console at all.
+
+  describe('evaluating an event type', () => {
+    const pairing = { id: 3, destinationCode: 'SIMULATOR',
+      destinationName: 'OCTO Simulator Marketplace', enabled: true };
+
+    const withAPairing = () => {
+      connections.mockResolvedValue({ data: { data: [
+        { id: 5, providerName: 'OCTO Provider Simulator', destinations: [pairing] },
+      ] } });
+      eventTypes.mockResolvedValue({ data: { data: [{ id: 14, name: 'Whole-venue hire' }] } });
+      requirements.mockResolvedValue({ data: { data: [
+        { field: 'title', instruction: 'Add a listing title.' },
+        { field: 'price', instruction: 'Set a price.' },
+      ] } });
+    };
+
+    it('offers the action, not just the instruction to perform it', async () => {
+      render(<AdminListings />);
+      expect(await screen.findByRole('button', { name: /Evaluate an event type/i }))
+        .toBeInTheDocument();
+    });
+
+    it('renders one field per requirement the SERVER declares for that destination', async () => {
+      withAPairing();
+      render(<AdminListings />);
+
+      await userEvent.click(screen.getByRole('button', { name: /Evaluate an event type/i }));
+      await screen.findByLabelText('Destination');
+      await userEvent.selectOptions(screen.getByLabelText('Destination'), '3');
+
+      // Asked for rather than hardcoded: the same policy decides whether the listing may
+      // publish, so a local copy of the field list would drift and an operator would
+      // fill in fields that do not count.
+      await waitFor(() => expect(requirements).toHaveBeenCalledWith('SIMULATOR'));
+      expect(await screen.findByLabelText('title')).toBeInTheDocument();
+      expect(screen.getByLabelText('price')).toBeInTheDocument();
+      // The instruction, not the field name — one is a schema error, the other is
+      // something an operator can act on.
+      expect(screen.getByText('Add a listing title.')).toBeInTheDocument();
+    });
+
+    it('submits the content against the chosen pairing', async () => {
+      withAPairing();
+      render(<AdminListings />);
+
+      await userEvent.click(screen.getByRole('button', { name: /Evaluate an event type/i }));
+      await screen.findByLabelText('Destination');
+      await userEvent.selectOptions(screen.getByLabelText('Destination'), '3');
+      await screen.findByLabelText('title');
+      await userEvent.selectOptions(screen.getByLabelText('Event type'), '14');
+      await userEvent.type(screen.getByLabelText('title'), 'Private hall');
+
+      await userEvent.click(screen.getByRole('button', { name: /^Evaluate$/i }));
+
+      await waitFor(() => expect(evaluate).toHaveBeenCalled());
+      // A listing belongs to a connection↔destination PAIRING: the same destination
+      // reached through two providers is two routes with their own commercial terms.
+      expect(evaluate).toHaveBeenCalledWith(expect.objectContaining({
+        connectionDestinationId: 3,
+        eventTypeId: 14,
+        content: expect.objectContaining({ title: 'Private hall' }),
+      }));
+    });
+
+    it('says when there is no pairing to evaluate against', async () => {
+      connections.mockResolvedValue({ data: { data: [
+        { id: 5, providerName: 'OCTO Provider Simulator', destinations: [] },
+      ] } });
+      render(<AdminListings />);
+
+      await userEvent.click(screen.getByRole('button', { name: /Evaluate an event type/i }));
+
+      // Names the missing prerequisite instead of presenting an empty dropdown.
+      await waitFor(() => expect(
+        screen.getByText(/no connection pointed at\s+a destination yet/i)).toBeInTheDocument());
+    });
   });
 });

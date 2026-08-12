@@ -52,15 +52,65 @@ public class InboxProcessor {
     private final BookingIngestClient bookingIngestClient;
     private final ObjectMapper objectMapper;
 
-    /** Processed oldest-first: a CREATE must reach booking-service before its MODIFY. */
+    /**
+     * How many messages one sweep will take. The drain runs every 30 seconds, so an
+     * unbounded read was a full scan of every outstanding row on every tick — and on a
+     * backlog it loaded the whole queue into memory to process a handful of it.
+     */
+    static final int MAX_BATCH = 200;
+
+    /**
+     * Processed oldest-first: a CREATE must reach booking-service before its MODIFY.
+     *
+     * <p><b>One bad row must not stop the queue.</b> Every message is processed inside
+     * its own guard. Without it, a single entry whose processing threw — a negative
+     * retail price reaching the settlement calculation was the live example — propagated
+     * out of this loop and abandoned the whole sweep. The row stayed RECEIVED, stayed
+     * first in a queue that is global rather than per-venue, and the next tick 30 seconds
+     * later hit it again: one malformed message from one reseller silently stopped
+     * reservations reaching <em>every</em> venue on the platform, while the scheduler,
+     * the worker and the health endpoint all reported themselves fine.
+     */
     public int processOutstanding() {
         List<ReservationInboxEntry> pending = inboxRepository
-            .findByStatusInOrderByReceivedAtAsc(List.of(ReservationInboxEntry.Status.RECEIVED));
+            .findByStatusInOrderByReceivedAtAsc(
+                List.of(ReservationInboxEntry.Status.RECEIVED),
+                org.springframework.data.domain.PageRequest.of(0, MAX_BATCH))
+            .getContent();
         int applied = 0;
         for (ReservationInboxEntry entry : pending) {
-            if (process(entry)) applied++;
+            try {
+                if (process(entry)) applied++;
+            } catch (RuntimeException e) {
+                isolate(entry, e);
+            }
         }
         return applied;
+    }
+
+    /**
+     * Take a row that threw out of the queue, so the sweep can continue past it.
+     *
+     * <p>FAILED rather than REJECTED: an exception is not a business refusal, and the
+     * cause may well be transient. The row keeps its payload and its reason, stays
+     * visible in the recovery console, and can be requeued by hand once the cause is
+     * understood — which is the whole point of persisting messages before interpreting
+     * them.
+     *
+     * <p>The marking is itself guarded. If the database is what is failing, marking the
+     * row will fail too, and letting that escape would re-create exactly the
+     * whole-sweep abort this method exists to prevent.
+     */
+    private void isolate(ReservationInboxEntry entry, RuntimeException cause) {
+        log.error("Inbox {} threw during processing; isolating it so the sweep continues",
+            entry.getId(), cause);
+        try {
+            inboxService.markFailed(entry.getId(),
+                cause.getClass().getSimpleName() + ": " + cause.getMessage());
+        } catch (RuntimeException marking) {
+            log.error("Inbox {} could not be marked FAILED either: {}",
+                entry.getId(), marking.toString());
+        }
     }
 
     boolean process(ReservationInboxEntry entry) {
@@ -105,18 +155,7 @@ public class InboxProcessor {
         // needed in the PMS: the CREATE already produced the reservation.
         if (entry.getMessageType() == ReservationInboxEntry.MessageType.MODIFY
                 && !describesAReservation(payload)) {
-            String bookingRef = appliedBookingRefFor(entry);
-            if (bookingRef == null) {
-                // A confirmation whose CREATE we never applied. Refused rather than
-                // guessed: confirming a reservation that does not exist here would tell
-                // the reseller a traveller has a booking nobody is expecting.
-                inboxService.markRejected(entry.getId(),
-                    "No applied reservation for " + entry.getExternalRef() + " to confirm.");
-                return false;
-            }
-            inboxService.markApplied(entry.getId(), bookingRef, bingeId, null, 0L);
-            log.info("Inbox {} confirmed existing booking {}", entry.getId(), bookingRef);
-            return true;
+            return applyConfirmation(entry, bingeId);
         }
 
         // The reseller names a product; only a LIVE listing may be sold. Resolving the
@@ -133,6 +172,19 @@ public class InboxProcessor {
         if (window == null) {
             inboxService.markRejected(entry.getId(),
                 "Reservation is missing a usable date or start time.");
+            return false;
+        }
+
+        // A price that cannot be a price is refused HERE, before a booking exists.
+        // Carrying it forward meant the reservation was ingested successfully and then
+        // threw in the settlement calculation on the way out — leaving a real booking
+        // with no receivable, and an inbox row that re-threw on every subsequent sweep.
+        // Refusing up front is the same treatment the other malformed-payload cases get,
+        // and it gives the reseller something it can correct and resend.
+        long retailMinor = grossMinor(payload);
+        if (retailMinor < 0) {
+            inboxService.markRejected(entry.getId(),
+                "Reservation carries a negative price (" + retailMinor + ").");
             return false;
         }
 
@@ -164,13 +216,50 @@ public class InboxProcessor {
      */
     private boolean applyCancellation(ReservationInboxEntry entry, Long bingeId) {
         BookingIngestClient.Result result = bookingIngestClient.cancel(
-            externalSource(entry), entry.getExternalRef(),
+            externalSource(entry), entry.getExternalRef(), bingeId,
             "Cancelled by " + entry.getDestinationCode());
         // No payload, deliberately: a cancellation must never create a receivable. Today
         // an OCTO cancel carries no pricing anyway, but a future provider adapter that
         // echoed the original price would otherwise book the sale a second time on the
         // way out. The original sale's settlement is untouched either way.
         return record(entry, bingeId, null, result);
+    }
+
+    /**
+     * CONFIRM — OCTO's confirmation step, which turns a hold into a sale.
+     *
+     * <p><b>This used to be a bookkeeping entry and nothing more.</b> The row was marked
+     * APPLIED against the booking the CREATE had produced, and the booking itself was
+     * never touched. It stayed PENDING, and booking-service's pending-timeout sweep
+     * auto-cancelled it about half an hour later — after the reseller had told the
+     * traveller they were booked. The inbox said APPLIED, the reseller had a
+     * confirmation, and the venue's calendar was empty. Nothing anywhere reported a
+     * problem, which is what made it expensive.
+     *
+     * <p>A confirmation carries no reservation detail — {@code POST /bookings/{uuid}/
+     * confirm} has an optional body and resellers routinely send none — so the booking is
+     * addressed by the channel's own reference, exactly as a cancellation is.
+     */
+    private boolean applyConfirmation(ReservationInboxEntry entry, Long bingeId) {
+        String bookingRef = appliedBookingRefFor(entry);
+        if (bookingRef == null) {
+            // A confirmation whose CREATE we never applied. Refused rather than guessed:
+            // confirming a reservation that does not exist here would tell the reseller a
+            // traveller has a booking nobody is expecting.
+            inboxService.markRejected(entry.getId(),
+                "No applied reservation for " + entry.getExternalRef() + " to confirm.");
+            return false;
+        }
+
+        BookingIngestClient.Result result = bookingIngestClient.confirm(
+            externalSource(entry), entry.getExternalRef(), bingeId);
+        // No payload: a confirmation carries no price and must not create a second
+        // receivable. The CREATE's settlement is the record of this sale.
+        boolean ok = record(entry, bingeId, null, result);
+        if (ok) {
+            log.info("Inbox {} CONFIRMED booking {}", entry.getId(), bookingRef);
+        }
+        return ok;
     }
 
     /** One place where a client Result becomes an inbox status, so the two cannot drift. */

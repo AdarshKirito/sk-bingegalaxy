@@ -71,6 +71,7 @@ rather than returning a value.
 | `V82_01_full_chain_assertions.sql` | `duration_minutes` NOT NULL + CHECK, trigger alive at head, entity/schema parity (8) |
 | `V85_01_window_and_origin_assertions.sql` | V83 defaults, V84 booking window + permitted durations, V85 origin/external-ref pairing and uniqueness (14) |
 | `V86_01_canonical_source_assertions.sql` | Channel slug canonicalisation — uppercase and untrimmed sources rejected, case-sensitive refs stay distinct (5) |
+| `V90_01_venue_scoped_external_ref_assertions.sql` | Channel reference uniqueness is per VENUE — two venues may share a reseller's reference, a redelivery within one venue still collides (6) |
 
 **`V86` is the commercially important one.** The redelivery guard is a unique index
 on `(external_source, external_ref)`, which compares bytes. If `ACME-Channel` and

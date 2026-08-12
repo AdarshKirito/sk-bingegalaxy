@@ -215,13 +215,16 @@ class OctoSupplierContractTest {
 
         // Step 3: drain the inbox through the real production entry point, reading the
         // exact bytes the booking controller wrote.
+        // Paged: the drain reads a bounded batch, so that one backlog cannot be loaded
+        // into memory in full on a sweep that runs every 30 seconds.
         when(inboxRepository.findByStatusInOrderByReceivedAtAsc(
-                List.of(ReservationInboxEntry.Status.RECEIVED)))
-            .thenReturn(List.of(ReservationInboxEntry.builder()
-                .id(9L).connectionId(CONNECTION_ID).destinationCode("SIMULATOR")
-                .externalRef("EXT-1").messageType(ReservationInboxEntry.MessageType.CREATE)
-                .status(ReservationInboxEntry.Status.RECEIVED)
-                .payloadJson(storedPayload).build()));
+                eq(List.of(ReservationInboxEntry.Status.RECEIVED)), any()))
+            .thenReturn(new org.springframework.data.domain.PageImpl<>(
+                List.of(ReservationInboxEntry.builder()
+                    .id(9L).connectionId(CONNECTION_ID).destinationCode("SIMULATOR")
+                    .externalRef("EXT-1").messageType(ReservationInboxEntry.MessageType.CREATE)
+                    .status(ReservationInboxEntry.Status.RECEIVED)
+                    .payloadJson(storedPayload).build())));
         when(listingRepository.findByBingeId(BINGE_ID)).thenReturn(List.of(liveListing()));
         when(bookingIngestClient.ingest(any(), any(), any(), any(), any(), any(), any(),
             anyInt(), any(), any())).thenReturn(new BookingIngestClient.Result.Accepted("SKBG26X", true));

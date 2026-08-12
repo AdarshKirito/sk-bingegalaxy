@@ -2,6 +2,7 @@ package com.skbingegalaxy.booking.dto;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.*;
@@ -9,11 +10,11 @@ import lombok.*;
 /**
  * A cancellation delivered by an external sales channel (V85, gap G2).
  *
- * <p><b>Addressed by {@code (externalSource, externalRef)}</b>, the same pair that
- * identifies the reservation in {@link ChannelReservationRequest}. A channel has never
- * seen an SK {@code bookingRef}; requiring one would force the distribution context to
- * keep its own booking↔channel mapping, which is precisely the second booking truth the
- * design refuses to create.
+ * <p><b>Addressed by {@code (bingeId, externalSource, externalRef)}</b>, the same triple
+ * that identifies the reservation in {@link ChannelReservationRequest}. A channel has
+ * never seen an SK {@code bookingRef}; requiring one would force the distribution context
+ * to keep its own booking↔channel mapping, which is precisely the second booking truth
+ * the design refuses to create.
  *
  * <p>Provider-neutral like its sibling: booking-service still never learns which channel
  * is which.
@@ -24,6 +25,20 @@ import lombok.*;
 @AllArgsConstructor
 @Builder
 public class ChannelCancellationRequest {
+
+    /**
+     * Venue whose reservation is being cancelled (V90).
+     *
+     * <p><b>Required, because the reference alone does not identify a booking.</b>
+     * {@code externalSource} is a destination slug every venue on that destination
+     * shares and {@code externalRef} is chosen by the reseller, so the pair resolved to
+     * whichever venue used the reference first — meaning one venue's cancellation could
+     * cancel another venue's booking while both sides reported success. The caller
+     * always knows the venue: it comes from the connection the message authenticated
+     * against, never from the provider's payload.
+     */
+    @NotNull(message = "bingeId is required for a channel cancellation")
+    private Long bingeId;
 
     /**
      * Canonicalised on the way in, exactly as {@link ChannelReservationRequest} does.

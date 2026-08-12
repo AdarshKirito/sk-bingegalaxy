@@ -91,6 +91,113 @@ class ReservationInboxServiceTest {
     }
 
     @Test
+    @DisplayName("THE RESURRECTION BUG: a CREATE arriving after a rejected CANCEL is superseded")
+    void createAfterUnappliedCancelIsSuperseded() {
+        givenUsableChannel(true);
+        // The cancel arrived first, so booking-service refused it — there was no such
+        // reservation yet — and the row is REJECTED, never APPLIED. The applied
+        // high-water mark is therefore empty, which is exactly why the CREATE used to
+        // sail through and re-create a booking the traveller had cancelled.
+        when(inboxRepository.findHighestAppliedSequence(7L, "EXT-1")).thenReturn(Optional.empty());
+        when(inboxRepository.existsByConnectionIdAndExternalRefAndMessageTypeAndStatusNot(
+                7L, "EXT-1", ReservationInboxEntry.MessageType.CANCEL,
+                ReservationInboxEntry.Status.SUPERSEDED)).thenReturn(true);
+        when(inboxRepository.findHighestSequenceForType(
+                7L, "EXT-1", ReservationInboxEntry.MessageType.CANCEL,
+                ReservationInboxEntry.Status.SUPERSEDED)).thenReturn(Optional.of(9L));
+        when(inboxWriter.insert(any())).thenAnswer(i -> i.getArgument(0));
+
+        ReservationInboxEntry entry = service.receive(7L, "VIATOR", "EXT-1",
+            ReservationInboxEntry.MessageType.CREATE, 2L, null, "{}");
+
+        assertThat(entry.getStatus()).isEqualTo(ReservationInboxEntry.Status.SUPERSEDED);
+        assertThat(entry.getRejectReason()).contains("cancellation");
+    }
+
+    @Test
+    @DisplayName("a CANCEL is never blocked by an earlier CANCEL")
+    void cancelIsNotBlockedByItsOwnTombstone() {
+        givenUsableChannel(true);
+        when(inboxRepository.findHighestAppliedSequence(7L, "EXT-1")).thenReturn(Optional.empty());
+        when(inboxWriter.insert(any())).thenAnswer(i -> i.getArgument(0));
+
+        ReservationInboxEntry entry = service.receive(7L, "VIATOR", "EXT-1",
+            ReservationInboxEntry.MessageType.CANCEL, 3L, null, "{}");
+
+        // A repeated cancellation is either a redelivery (the unique index handles it) or
+        // a later one, and booking-service's cancel is idempotent either way. Blocking it
+        // would turn at-least-once delivery into a source of stuck messages — so the
+        // tombstone is not even consulted.
+        assertThat(entry.getStatus()).isEqualTo(ReservationInboxEntry.Status.RECEIVED);
+        verify(inboxRepository, never()).existsByConnectionIdAndExternalRefAndMessageTypeAndStatusNot(
+            any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("the reseller can learn what actually happened to its reservation")
+    void outcomeIsAnswerable() {
+        // Every OCTO write is answered PENDING because the booking is created by a later
+        // sweep. Without this there was no way to ever learn the outcome: a reservation
+        // refused because the slot was taken looked exactly like one that succeeded.
+        when(inboxRepository.findByConnectionIdAndExternalRefOrderByIdAsc(7L, "EXT-1"))
+            .thenReturn(java.util.List.of(
+                ReservationInboxEntry.builder().id(1L)
+                    .messageType(ReservationInboxEntry.MessageType.CREATE)
+                    .status(ReservationInboxEntry.Status.APPLIED).bookingRef("SKBG26X").build(),
+                ReservationInboxEntry.builder().id(2L)
+                    .messageType(ReservationInboxEntry.MessageType.MODIFY)
+                    .status(ReservationInboxEntry.Status.APPLIED).bookingRef("SKBG26X").build()));
+
+        assertThat(service.outcomeFor(7L, "EXT-1")).hasValueSatisfying(outcome -> {
+            assertThat(outcome.status()).isEqualTo("CONFIRMED");
+            assertThat(outcome.supplierReference()).isEqualTo("SKBG26X");
+            assertThat(outcome.pending()).isFalse();
+        });
+    }
+
+    @Test
+    @DisplayName("a refusal is reported as terminal, so a retry loop can stop")
+    void refusalIsTerminal() {
+        when(inboxRepository.findByConnectionIdAndExternalRefOrderByIdAsc(7L, "EXT-9"))
+            .thenReturn(java.util.List.of(ReservationInboxEntry.builder().id(1L)
+                .messageType(ReservationInboxEntry.MessageType.CREATE)
+                .status(ReservationInboxEntry.Status.REJECTED)
+                .rejectReason("the 18:00 slot was taken 40 seconds earlier").build()));
+
+        assertThat(service.outcomeFor(7L, "EXT-9")).hasValueSatisfying(outcome -> {
+            assertThat(outcome.status()).isEqualTo("REJECTED");
+            assertThat(outcome.reason()).contains("40 seconds earlier");
+            // The difference that matters: asking again cannot change this answer.
+            assertThat(outcome.pending()).isFalse();
+        });
+    }
+
+    @Test
+    @DisplayName("a cancellation outranks an applied reservation in the reported status")
+    void cancellationWins() {
+        when(inboxRepository.findByConnectionIdAndExternalRefOrderByIdAsc(7L, "EXT-1"))
+            .thenReturn(java.util.List.of(
+                ReservationInboxEntry.builder().id(1L)
+                    .messageType(ReservationInboxEntry.MessageType.CREATE)
+                    .status(ReservationInboxEntry.Status.APPLIED).bookingRef("SKBG26X").build(),
+                ReservationInboxEntry.builder().id(2L)
+                    .messageType(ReservationInboxEntry.MessageType.CANCEL)
+                    .status(ReservationInboxEntry.Status.APPLIED).bookingRef("SKBG26X").build()));
+
+        assertThat(service.outcomeFor(7L, "EXT-1"))
+            .hasValueSatisfying(o -> assertThat(o.status()).isEqualTo("CANCELLED"));
+    }
+
+    @Test
+    @DisplayName("an unknown reference has no outcome, rather than a reassuring default")
+    void unknownReferenceHasNoOutcome() {
+        when(inboxRepository.findByConnectionIdAndExternalRefOrderByIdAsc(7L, "NOPE"))
+            .thenReturn(java.util.List.of());
+
+        assertThat(service.outcomeFor(7L, "NOPE")).isEmpty();
+    }
+
+    @Test
     @DisplayName("a feed-only destination cannot deliver reservations")
     void feedOnlyDestinationRefused() {
         givenUsableChannel(false);

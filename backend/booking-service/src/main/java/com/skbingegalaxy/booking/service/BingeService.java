@@ -539,16 +539,71 @@ public class BingeService {
      * themselves), but a correct flag is what keeps the warning honest.
      */
     @Transactional
+    @org.springframework.cache.annotation.CacheEvict(value = "activeBinges", allEntries = true)
     public void recordFirstEventIfNeeded(Long bingeId) {
         if (bingeId == null) return;
         bingeRepository.findById(bingeId).ifPresent(b -> {
+            boolean changed = false;
             if (b.getFirstEventCreatedAt() == null) {
                 b.setFirstEventCreatedAt(LocalDateTime.now(ZoneOffset.UTC));
-                bingeRepository.save(b);
+                changed = true;
                 log.info("Binge {} ('{}') marked operational (first event created)",
                     bingeId, b.getName());
             }
+            // The half that was missing. An auto-pause is a consequence of "this venue
+            // has no events"; the moment that stops being true the consequence has to be
+            // lifted, or the venue stays out of customer discovery forever while its
+            // admin looks at a full catalogue and a paused venue.
+            changed |= liftAutoPause(b, "an event type was created");
+            if (changed) bingeRepository.save(b);
         });
+    }
+
+    /**
+     * Undo an auto-pause whose cause has gone away.
+     *
+     * <p><b>Only ever an AUTOMATIC pause.</b> {@code autoDeactivatedAt} is the
+     * discriminator: the grace sweep is the only writer of it, so a venue an operator
+     * paused on purpose carries NULL and is never touched here. Resurrecting a
+     * deliberately hidden venue would be a worse failure than the one this repairs —
+     * it puts a venue back on sale that someone decided to take off it.
+     *
+     * <p>That discriminator is only trustworthy because {@link #toggleBinge} now clears
+     * the timestamp on every manual transition. Before that it survived a manual
+     * re-activate, so a venue later paused by hand still looked auto-paused and this
+     * method would have re-published it.
+     *
+     * <p>Clears {@code graceWarningSentAt} too, so a venue that goes through the cycle
+     * again gets its courtesy warning again rather than jumping straight to a pause.
+     *
+     * @return whether anything changed, so callers can avoid a pointless write
+     */
+    private boolean liftAutoPause(Binge b, String why) {
+        if (b.getAutoDeactivatedAt() == null) return false;
+
+        boolean wasPaused = !b.isActive();
+        b.setAutoDeactivatedAt(null);
+        b.setGraceWarningSentAt(null);
+        if (!wasPaused) {
+            // Already re-activated by hand; just drop the stale marker so the venue
+            // stops looking auto-paused to anything that reads it.
+            return true;
+        }
+
+        b.setActive(true);
+        log.warn("Binge {} ('{}') auto-pause LIFTED — {}", b.getId(), b.getName(), why);
+        adminNotificationService.notifyUser(
+            b.getAdminId(),
+            "ADMIN",
+            "BINGE_AUTO_REACTIVATED",
+            "INFO",
+            "Venue is live again",
+            String.format("'%s' was auto-paused for having no event types. It now has one, "
+                    + "so the pause has been lifted and customers can find it again.",
+                b.getName()),
+            b.getId(),
+            "/admin/platform");
+        return true;
     }
 
     /**
@@ -588,6 +643,12 @@ public class BingeService {
             // matter what the flag says; heal the flag and leave it alone.
             if (eventTypeRepository.existsByBingeId(b.getId())) {
                 b.setFirstEventCreatedAt(now);
+                // Heal the flag AND undo the damage a stale flag already did. Healing
+                // alone left the venue exactly as broken as before: it stopped being a
+                // candidate on the next sweep, so nothing would ever look at it again,
+                // and it sat inactive with a full catalogue. V87 repaired the rows that
+                // existed when it ran; this is what keeps the repair true afterwards.
+                liftAutoPause(b, "it has event types after all");
                 bingeRepository.save(b);
                 log.warn("Binge {} ('{}') had event types but no first_event_created_at — "
                         + "flag healed, grace period not enforced", b.getId(), b.getName());
@@ -1400,8 +1461,20 @@ public class BingeService {
         Binge binge = getManagedBinge(id, adminId, role);
 
         binge.setActive(!binge.isActive());
+        // A human decision supersedes the automatic one, in BOTH directions, so the
+        // marker is cleared either way.
+        //
+        // This is load-bearing, not tidiness. `autoDeactivatedAt` is the only thing that
+        // distinguishes "the sweep paused this" from "an operator paused this", and V87's
+        // repair and liftAutoPause both act on that distinction. Leaving it set meant a
+        // venue that was auto-paused, manually re-activated, and later deliberately
+        // paused still looked auto-paused — so a repair would put it back on sale against
+        // the operator's explicit choice.
+        binge.setAutoDeactivatedAt(null);
+        binge.setGraceWarningSentAt(null);
         bingeRepository.save(binge);
-        log.info("Binge toggled: '{}' active={}", binge.getName(), binge.isActive());
+        log.info("Binge toggled: '{}' active={} (manual — auto-pause marker cleared)",
+            binge.getName(), binge.isActive());
     }
 
     @Transactional

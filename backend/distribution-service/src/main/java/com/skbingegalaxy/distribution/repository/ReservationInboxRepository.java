@@ -84,6 +84,50 @@ public interface ReservationInboxRepository extends JpaRepository<ReservationInb
     List<ReservationInboxEntry> findByStatusInOrderByReceivedAtAsc(
             Collection<ReservationInboxEntry.Status> statuses);
 
+    /**
+     * The drain's batch. Bounded because the sweep runs every 30 seconds: the unpaged
+     * form above reads every outstanding row on every tick, which on a backlog means
+     * loading the whole queue into memory to act on a fraction of it.
+     */
+    Page<ReservationInboxEntry> findByStatusInOrderByReceivedAtAsc(
+            Collection<ReservationInboxEntry.Status> statuses, Pageable pageable);
+
+    /**
+     * Has a cancellation for this reservation already been received?
+     *
+     * <p><b>Received — not applied.</b> A CANCEL that arrives before the CREATE it
+     * cancels is REJECTED by booking-service ("no such reservation"), which is correct;
+     * what was wrong is that the ordering high-water mark only looked at APPLIED
+     * messages, so the rejected cancel left no trace the later CREATE could see. The
+     * CREATE then looked like the first message for a reservation nobody had cancelled,
+     * and a cancelled booking was created — a traveller who cancelled keeps a slot the
+     * venue believes is sold, and nobody is expecting them.
+     *
+     * <p>SUPERSEDED is excluded: such a cancel was itself overtaken and is not evidence
+     * of anything.
+     */
+    boolean existsByConnectionIdAndExternalRefAndMessageTypeAndStatusNot(
+            Long connectionId, String externalRef,
+            ReservationInboxEntry.MessageType messageType,
+            ReservationInboxEntry.Status excludedStatus);
+
+    /**
+     * Highest sequence carried by a non-superseded message of this type — the cancel
+     * tombstone's position in the provider's own ordering, so a genuinely later message
+     * can still be applied over it.
+     */
+    @Query("""
+           SELECT MAX(e.externalSequence) FROM ReservationInboxEntry e
+           WHERE e.connectionId = :connectionId
+             AND e.externalRef = :externalRef
+             AND e.messageType = :messageType
+             AND e.status <> :excludedStatus
+           """)
+    Optional<Long> findHighestSequenceForType(@Param("connectionId") Long connectionId,
+                                              @Param("externalRef") String externalRef,
+                                              @Param("messageType") ReservationInboxEntry.MessageType messageType,
+                                              @Param("excludedStatus") ReservationInboxEntry.Status excludedStatus);
+
     Page<ReservationInboxEntry> findByConnectionIdInOrderByReceivedAtDesc(
             Collection<Long> connectionIds, Pageable pageable);
 

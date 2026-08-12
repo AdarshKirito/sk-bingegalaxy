@@ -97,6 +97,74 @@ class ChannelReservationWireContractTest {
             .hasMessageContaining("guest_name");
     }
 
+    // ── The other two lifecycle messages ─────────────────────────────────────
+
+    /** Byte-for-byte what {@code BookingIngestClient.cancellationBody} produces. */
+    private static final String CANCEL_WIRE_BODY = """
+        {"externalSource":"simulator","externalRef":"EXT-1","bingeId":1,
+         "reason":"Cancelled by SIMULATOR"}""";
+
+    /** Byte-for-byte what {@code BookingIngestClient.confirmationBody} produces. */
+    private static final String CONFIRM_WIRE_BODY = """
+        {"externalSource":"simulator","externalRef":"EXT-1","bingeId":1}""";
+
+    @Test
+    @DisplayName("a cancellation binds, and its venue is required")
+    void theCancellationBodyBinds() throws Exception {
+        ChannelCancellationRequest request =
+            MAPPER.readValue(CANCEL_WIRE_BODY, ChannelCancellationRequest.class);
+
+        assertThat(request.getBingeId()).isEqualTo(1L);
+        assertThat(request.getExternalSource()).isEqualTo("simulator");
+        assertThat(request.getExternalRef()).isEqualTo("EXT-1");
+
+        try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
+            assertThat(factory.getValidator().validate(request)).isEmpty();
+
+            // The venue is what stops a cancellation resolving to whichever venue used
+            // this reference first. A body without it must be refused, not defaulted —
+            // a null bingeId reaching the lookup is the cross-venue cancel itself.
+            ChannelCancellationRequest venueless = MAPPER.readValue(
+                CANCEL_WIRE_BODY.replace("\"bingeId\":1,", ""), ChannelCancellationRequest.class);
+            assertThat(factory.getValidator().validate(venueless)).isNotEmpty();
+        }
+    }
+
+    @Test
+    @DisplayName("a confirmation binds, and its venue is required too")
+    void theConfirmationBodyBinds() throws Exception {
+        ChannelConfirmationRequest request =
+            MAPPER.readValue(CONFIRM_WIRE_BODY, ChannelConfirmationRequest.class);
+
+        assertThat(request.getBingeId()).isEqualTo(1L);
+        assertThat(request.getExternalSource()).isEqualTo("simulator");
+        assertThat(request.getExternalRef()).isEqualTo("EXT-1");
+
+        try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
+            assertThat(factory.getValidator().validate(request)).isEmpty();
+
+            ChannelConfirmationRequest venueless = MAPPER.readValue(
+                CONFIRM_WIRE_BODY.replace(",\"bingeId\":1", ""), ChannelConfirmationRequest.class);
+            assertThat(factory.getValidator().validate(venueless)).isNotEmpty();
+        }
+    }
+
+    @Test
+    @DisplayName("both also refuse an unknown key, so their pairings have teeth as well")
+    void theOtherTwoAreStrictToo() {
+        assertThatThrownBy(() -> MAPPER.readValue(
+                CANCEL_WIRE_BODY.replace("\"reason\"", "\"why\""), ChannelCancellationRequest.class))
+            .isInstanceOf(UnrecognizedPropertyException.class)
+            .hasMessageContaining("why");
+
+        // A confirmation that arrived carrying a price would be a second chance to state
+        // what the sale was worth. It is refused rather than ignored.
+        assertThatThrownBy(() -> MAPPER.readValue(
+                CONFIRM_WIRE_BODY.replace("}", ",\"grossMinor\":9900}"), ChannelConfirmationRequest.class))
+            .isInstanceOf(UnrecognizedPropertyException.class)
+            .hasMessageContaining("grossMinor");
+    }
+
     @Test
     @DisplayName("a null guest email is accepted; the string \"null\" is not")
     void nullEmailIsAcceptedButTheWordIsNot() throws Exception {

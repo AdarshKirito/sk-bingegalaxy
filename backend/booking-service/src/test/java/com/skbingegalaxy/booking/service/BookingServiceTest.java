@@ -491,7 +491,7 @@ class BookingServiceTest {
         /** Stubs the happy path shared by the ingestion tests below. */
         private void stubChannelHappyPath(String source, String ref) {
                 when(eventTypeRepository.findByIdAndBingeId(1L, 11L)).thenReturn(Optional.of(eventType));
-                when(bookingRepository.findByExternalSourceAndExternalRef(source, ref))
+                when(bookingRepository.findByBingeIdAndExternalSourceAndExternalRef(11L, source, ref))
                         .thenReturn(Optional.empty());
                 when(bookingRepository.findActiveBookingsByBingeAndDate(eq(11L), any(java.time.LocalDate.class)))
                         .thenReturn(List.of());
@@ -562,7 +562,7 @@ class BookingServiceTest {
                 // store both and the duplicate check would miss.
                 testBooking.setExternalSource("acme-channel");
                 testBooking.setExternalRef("ACME-3");
-                when(bookingRepository.findByExternalSourceAndExternalRef("acme-channel", "ACME-3"))
+                when(bookingRepository.findByBingeIdAndExternalSourceAndExternalRef(11L, "acme-channel", "ACME-3"))
                         .thenReturn(Optional.of(testBooking));
 
                 BookingDto result = bookingService.ingestChannelReservation(
@@ -579,7 +579,7 @@ class BookingServiceTest {
                 BingeContext.setBingeId(777L);
                 testBooking.setExternalSource("acme-channel");
                 testBooking.setExternalRef("ACME-4");
-                when(bookingRepository.findByExternalSourceAndExternalRef(anyString(), anyString()))
+                when(bookingRepository.findByBingeIdAndExternalSourceAndExternalRef(anyLong(), anyString(), anyString()))
                         .thenReturn(Optional.of(testBooking));
 
                 bookingService.ingestChannelReservation(channelRequest("acme-channel", "ACME-4"));
@@ -587,6 +587,97 @@ class BookingServiceTest {
                 assertThat(BingeContext.getBingeId())
                         .as("the caller's binge context must survive ingestion")
                         .isEqualTo(777L);
+        }
+
+        // ── V90: the venue is part of a channel reservation's identity ─────
+
+        @Test
+        void cancelChannelReservation_isScopedToTheVenue() {
+                // externalSource is a destination slug every venue on that destination
+                // shares, and externalRef is chosen by the reseller. Looked up on those
+                // two alone, one venue's cancellation resolved to whichever venue had
+                // used the reference first — and cancelled ITS booking, with both sides
+                // reporting success.
+                when(bookingRepository.findByBingeIdAndExternalSourceAndExternalRef(11L, "acme-channel", "ACME-9"))
+                        .thenReturn(Optional.empty());
+
+                assertThatThrownBy(() -> bookingService.cancelChannelReservation(
+                                11L, "acme-channel", "ACME-9", "traveller cancelled"))
+                        .isInstanceOf(com.skbingegalaxy.common.exception.ResourceNotFoundException.class);
+
+                // The venue is in the query, so another venue's row cannot answer it.
+                verify(bookingRepository).findByBingeIdAndExternalSourceAndExternalRef(
+                        11L, "acme-channel", "ACME-9");
+        }
+
+        // ── The confirmation that used to be a no-op ───────────────────────
+
+        private Booking channelBooking(BookingStatus status) {
+                testBooking.setOrigin(com.skbingegalaxy.booking.domain.BookingOrigin.CHANNEL);
+                testBooking.setExternalSource("acme-channel");
+                testBooking.setExternalRef("ACME-5");
+                testBooking.setBingeId(11L);
+                testBooking.setStatus(status);
+                return testBooking;
+        }
+
+        @Test
+        void confirmChannelReservation_confirmsThePendingBooking() {
+                // THE BUG. A channel reservation arrives as an unpaid PENDING booking. The
+                // reseller then confirms, having taken the traveller's money on its own
+                // side — and nothing acted on it. The booking stayed PENDING, so the
+                // pending-timeout sweep auto-cancelled it about half an hour later. The
+                // reseller held a confirmation, the traveller held a receipt, and the
+                // venue's calendar quietly emptied.
+                when(bookingRepository.findByBingeIdAndExternalSourceAndExternalRef(11L, "acme-channel", "ACME-5"))
+                        .thenReturn(Optional.of(channelBooking(BookingStatus.PENDING)));
+                when(bookingRepository.save(any(Booking.class))).thenAnswer(i -> i.getArgument(0));
+
+                BookingService.ChannelConfirmResult result =
+                        bookingService.confirmChannelReservation(11L, "acme-channel", "ACME-5");
+
+                assertThat(result.confirmed()).isTrue();
+                ArgumentCaptor<Booking> saved = ArgumentCaptor.forClass(Booking.class);
+                verify(bookingRepository).save(saved.capture());
+                assertThat(saved.getValue().getStatus()).isEqualTo(BookingStatus.CONFIRMED);
+                assertThat(saved.getValue().getPaymentStatus()).isEqualTo(PaymentStatus.SUCCESS);
+                // SK Binge collected nothing — the money went to the channel. Adding it
+                // here would inflate every revenue report by money that never arrives in
+                // the venue's account; what the channel owes is a receivable and lives in
+                // the distribution context's settlement records.
+                assertThat(saved.getValue().getCollectedAmount())
+                        .satisfiesAnyOf(c -> assertThat(c).isNull(),
+                                        c -> assertThat(c).isEqualByComparingTo(BigDecimal.ZERO));
+        }
+
+        @Test
+        void confirmChannelReservation_isIdempotentAcrossRedelivery() {
+                // At-least-once delivery guarantees the retry, and erroring on it would
+                // trap the message in the channel's own retry loop.
+                when(bookingRepository.findByBingeIdAndExternalSourceAndExternalRef(11L, "acme-channel", "ACME-5"))
+                        .thenReturn(Optional.of(channelBooking(BookingStatus.CONFIRMED)));
+
+                BookingService.ChannelConfirmResult result =
+                        bookingService.confirmChannelReservation(11L, "acme-channel", "ACME-5");
+
+                assertThat(result.confirmed()).isFalse();
+                assertThat(result.detail()).contains("Already");
+                verify(bookingRepository, never()).save(any(Booking.class));
+        }
+
+        @Test
+        void confirmChannelReservation_refusesAnExpiredHold() {
+                when(bookingRepository.findByBingeIdAndExternalSourceAndExternalRef(11L, "acme-channel", "ACME-5"))
+                        .thenReturn(Optional.of(channelBooking(BookingStatus.CANCELLED)));
+
+                // Refused rather than forced: the hold expired and the slot may since have
+                // been sold to someone else, so confirming anyway would double-book the
+                // venue. The reseller gets a reason it can act on.
+                assertThatThrownBy(() -> bookingService.confirmChannelReservation(
+                                11L, "acme-channel", "ACME-5"))
+                        .isInstanceOf(BusinessException.class)
+                        .hasMessageContaining("no longer be confirmed");
+                verify(bookingRepository, never()).save(any(Booking.class));
         }
 
         @Test

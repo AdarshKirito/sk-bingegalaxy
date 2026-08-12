@@ -42,6 +42,20 @@ public class ConnectionController {
         return ResponseEntity.ok(ApiResponse.ok(connectionService.listConnectableProviders()));
     }
 
+    /**
+     * Destinations a connection may be pointed at, optionally narrowed to one provider.
+     *
+     * <p>The catalogue read that was missing: attaching a destination needed a code, and
+     * nothing exposed the codes, so the console could show existing destinations and
+     * never add one.
+     */
+    @GetMapping("/destinations")
+    public ResponseEntity<ApiResponse<List<DestinationDto>>> listDestinations(
+            @RequestParam(required = false) String providerCode) {
+        return ResponseEntity.ok(ApiResponse.ok(
+            connectionService.listReachableDestinations(providerCode)));
+    }
+
     @GetMapping("/connections")
     public ResponseEntity<ApiResponse<List<ConnectionDto>>> list(
             @RequestHeader(value = "X-Binge-Id", required = false) Long bingeId) {

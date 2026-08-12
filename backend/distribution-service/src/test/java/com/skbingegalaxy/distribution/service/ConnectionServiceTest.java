@@ -4,6 +4,7 @@ import com.skbingegalaxy.common.exception.BusinessException;
 import com.skbingegalaxy.common.exception.ResourceNotFoundException;
 import com.skbingegalaxy.distribution.credential.CredentialStore;
 import com.skbingegalaxy.distribution.dto.ConnectionDto;
+import com.skbingegalaxy.distribution.dto.DestinationDto;
 import com.skbingegalaxy.distribution.dto.EnableDestinationRequest;
 import com.skbingegalaxy.distribution.entity.ConnectionDestination;
 import com.skbingegalaxy.distribution.entity.Destination;
@@ -398,6 +399,37 @@ class ConnectionServiceTest {
             return Destination.builder().code(code).displayName(code)
                 .operatedByProviderCode(operatedBy).active(active)
                 .deliversReservations(true).build();
+        }
+
+        @Test
+        @DisplayName("the catalogue offers exactly what attaching would accept")
+        void catalogueMatchesWhatAttachAccepts() {
+            when(destinationRepository.findAll()).thenReturn(List.of(
+                destination("VIATOR", "VIATOR", true),
+                // Inactive: attaching it is refused, so offering it would send an
+                // operator through the commercial-terms form to reach a refusal.
+                destination("GETYOURGUIDE", "GETYOURGUIDE", false),
+                // Active, but operated by a different provider — this connection's
+                // credential is for the wrong system entirely.
+                destination("GOOGLE_TTD", "GOOGLE", true)));
+
+            List<DestinationDto> offered = service.listReachableDestinations("VIATOR");
+
+            // The two filters are the same two enableDestination applies. If they ever
+            // diverge, the console starts offering choices the server refuses — which is
+            // worse than offering none, because the refusal arrives last.
+            assertThat(offered).extracting(DestinationDto::getCode).containsExactly("VIATOR");
+        }
+
+        @Test
+        @DisplayName("with no provider named, the catalogue is every ACTIVE destination")
+        void catalogueUnfilteredStillHidesInactive() {
+            when(destinationRepository.findAll()).thenReturn(List.of(
+                destination("VIATOR", "VIATOR", true),
+                destination("GETYOURGUIDE", "GETYOURGUIDE", false)));
+
+            assertThat(service.listReachableDestinations(null))
+                .extracting(DestinationDto::getCode).containsExactly("VIATOR");
         }
 
         @Test

@@ -110,6 +110,62 @@ public class OctoBookingController {
         private String currency;
     }
 
+    /**
+     * Where a reservation actually ended up.
+     *
+     * <p><b>The half of the contract that was missing.</b> Every write here is accepted
+     * into the inbox and answered {@code PENDING}, because the canonical booking is
+     * created by a sweep that runs afterwards. Nothing then told the reseller what
+     * happened: no status endpoint, no callback, no result event. A reservation refused
+     * because the slot had been taken forty seconds earlier was indistinguishable, from
+     * the reseller's side, from one that succeeded — and the traveller is told they are
+     * booked either way.
+     *
+     * <p>Scoped to the authenticated connection, so a reseller can only ever read the
+     * reservations it submitted. A reference belonging to another connection answers 404
+     * rather than 403: telling a caller that someone else's reference exists is itself
+     * information it should not have.
+     */
+    @GetMapping("/bookings/{uuid}")
+    public ResponseEntity<Map<String, Object>> get(
+            @RequestHeader(value = "Authorization", required = false) String auth,
+            @PathVariable String uuid) {
+
+        Optional<Connection> connection = resellerAuthenticator.authenticate(auth);
+        if (connection.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Map.of("error", "INVALID_TOKEN",
+                             "errorMessage", "The presented token is not valid."));
+        }
+        Connection c = connection.get();
+
+        @SuppressWarnings("unchecked")
+        ResponseEntity<Map<String, Object>> throttled =
+            (ResponseEntity<Map<String, Object>>) (ResponseEntity<?>) rateLimiter.check(c);
+        if (throttled != null) return throttled;
+
+        Optional<ReservationInboxService.ReservationOutcome> outcome =
+            inboxService.outcomeFor(c.getId(), uuid);
+        if (outcome.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Map.of("error", "BOOKING_NOT_FOUND",
+                             "errorMessage", "No reservation with that uuid."));
+        }
+
+        ReservationInboxService.ReservationOutcome o = outcome.get();
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("uuid", uuid);
+        body.put("status", o.status());
+        // Null-tolerant map, unlike Map.of: a pending reservation has no supplier
+        // reference yet and no reason, and both absences are meaningful.
+        body.put("supplierReference", o.supplierReference());
+        body.put("errorMessage", o.reason());
+        // Says plainly whether asking again can change the answer, so a reseller's
+        // retry loop has a termination condition that is not a timeout.
+        body.put("pending", o.pending());
+        return ResponseEntity.ok(body);
+    }
+
     /** Reservation — OCTO's ON_HOLD step. The slot is held, not sold. */
     @PostMapping("/bookings")
     public ResponseEntity<Map<String, Object>> reserve(

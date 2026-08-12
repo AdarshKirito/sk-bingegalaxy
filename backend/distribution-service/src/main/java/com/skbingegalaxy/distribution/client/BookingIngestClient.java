@@ -108,11 +108,8 @@ public class BookingIngestClient {
      * retryable. A 404 is included in the 4xx branch deliberately — a cancel for a
      * reservation booking-service has never seen will not start existing on a retry.
      */
-    public Result cancel(String externalSource, String externalRef, String reason) {
-        Map<String, Object> body = new HashMap<>();
-        body.put("externalSource", externalSource);
-        body.put("externalRef", externalRef);
-        body.put("reason", reason);
+    public Result cancel(String externalSource, String externalRef, Long bingeId, String reason) {
+        Map<String, Object> body = cancellationBody(externalSource, externalRef, bingeId, reason);
 
         try {
             var response = restClientBuilder.build().post()
@@ -150,6 +147,56 @@ public class BookingIngestClient {
     }
 
     /**
+     * Confirm a reservation this channel previously delivered — the hold becomes a sale.
+     *
+     * <p><b>The call that did not exist.</b> An OCTO confirmation was recorded in the
+     * inbox, marked APPLIED against the booking the CREATE had produced, and then did
+     * nothing to that booking. It stayed {@code PENDING}, so booking-service's
+     * pending-timeout sweep auto-cancelled it about half an hour later — after the
+     * reseller had already told the traveller they were booked. The inbox said APPLIED,
+     * the reseller had a confirmation, and the venue's calendar was empty.
+     *
+     * <p>Same classification as its siblings: 4xx is an answer (an expired hold cannot be
+     * confirmed by retrying), everything else is retryable.
+     */
+    public Result confirm(String externalSource, String externalRef, Long bingeId) {
+        Map<String, Object> body = confirmationBody(externalSource, externalRef, bingeId);
+
+        try {
+            var response = restClientBuilder.build().post()
+                .uri(baseUrl + "/api/v1/bookings/internal/reservations/confirm")
+                .header("X-Internal-Secret", internalApiSecret)
+                .header("Content-Type", "application/json")
+                .body(body)
+                .retrieve()
+                .onStatus(HttpStatusCode::is4xxClientError, (req, res) -> { })
+                .toEntity(Map.class);
+
+            int status = response.getStatusCode().value();
+            Map<?, ?> payload = response.getBody();
+
+            if (status >= 400) {
+                String refusal = messageOf(payload).orElse("Refused with status " + status);
+                log.warn("Channel confirmation {} refused by booking-service: {}",
+                    externalRef, refusal);
+                return new Result.Rejected(refusal);
+            }
+
+            String bookingRef = dataField(payload, "bookingRef");
+            if (bookingRef == null) {
+                return new Result.Failed("booking-service returned no bookingRef for the confirmation");
+            }
+            // `created` is false: confirming never creates anything, and reporting true
+            // would make a confirmation read as a second sale in the log.
+            return new Result.Accepted(bookingRef, false);
+
+        } catch (Exception e) {
+            log.warn("Channel confirmation {} failed: {}", externalRef, e.toString());
+            return new Result.Failed(e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
+    /**
      * The wire body, built where a test can see it.
      *
      * <p>Extracted for one reason: booking-service binds this with
@@ -180,6 +227,41 @@ public class BookingIngestClient {
         body.put("numberOfGuests", guests);
         body.put("guestName", guestName);
         body.put("guestEmail", guestEmail);
+        return body;
+    }
+
+    /**
+     * The cancellation wire body.
+     *
+     * <p>{@code bingeId} is not optional (V90). {@code externalSource} is a destination
+     * slug every venue on that destination shares and {@code externalRef} is chosen by
+     * the reseller, so a cancellation addressed by the pair alone resolved to whichever
+     * venue had used that reference first — one venue's cancel silently cancelling
+     * another venue's booking. The venue comes from the CONNECTION the message
+     * authenticated against, never from the provider's payload.
+     *
+     * <p>Extracted alongside {@link #reservationBody} and for the same reason: the
+     * receiving DTO binds with {@code ignoreUnknown = false}, so a key drift on either
+     * side is a 400 for every cancellation. {@code BookingIngestClientContractTest} pins
+     * this key set against booking-service's own DTO test.
+     */
+    static Map<String, Object> cancellationBody(String externalSource, String externalRef,
+                                                Long bingeId, String reason) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("externalSource", externalSource);
+        body.put("externalRef", externalRef);
+        body.put("bingeId", bingeId);
+        body.put("reason", reason);
+        return body;
+    }
+
+    /** The confirmation wire body. Venue-scoped for the same reason as the cancellation. */
+    static Map<String, Object> confirmationBody(String externalSource, String externalRef,
+                                                Long bingeId) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("externalSource", externalSource);
+        body.put("externalRef", externalRef);
+        body.put("bingeId", bingeId);
         return body;
     }
 

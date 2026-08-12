@@ -3156,7 +3156,13 @@ public class BookingService {
         // Idempotent by contract: a redelivered reservation returns the original
         // rather than erroring, so a channel's retry logic converges instead of
         // escalating to a support ticket.
-        var existing = bookingRepository.findByExternalSourceAndExternalRef(source, ref);
+        //
+        // Scoped to the VENUE (V90). Without the binge in the key, a reference that
+        // another venue on the same destination had already used answered "already
+        // recorded" with THAT VENUE'S BOOKING — handing one venue's booking reference
+        // to another venue's reseller while the real sale was never created.
+        var existing = bookingRepository.findByBingeIdAndExternalSourceAndExternalRef(
+            request.getBingeId(), source, ref);
         if (existing.isPresent()) {
             log.info("Channel reservation {}:{} already ingested as {} — returning existing",
                 source, ref, existing.get().getBookingRef());
@@ -3229,13 +3235,19 @@ public class BookingService {
      * SK Binge's own cancellation-fee ladder.
      */
     @Transactional(timeout = 15)
-    public ChannelCancelResult cancelChannelReservation(String externalSource,
+    public ChannelCancelResult cancelChannelReservation(Long bingeId,
+                                                        String externalSource,
                                                         String externalRef,
                                                         String reason) {
         String source = ChannelReservationRequest.canonicalSource(externalSource);
         String ref = externalRef == null ? null : externalRef.trim();
 
-        Booking booking = bookingRepository.findByExternalSourceAndExternalRef(source, ref)
+        // Scoped to the venue (V90). A cancellation addressed by (source, ref) alone
+        // resolved to whichever venue had used that reference first — so one venue's
+        // cancel could cancel a DIFFERENT venue's booking, with both sides reporting
+        // success.
+        Booking booking = bookingRepository
+            .findByBingeIdAndExternalSourceAndExternalRef(bingeId, source, ref)
             .orElseThrow(() -> new com.skbingegalaxy.common.exception.ResourceNotFoundException(
                 "ChannelReservation", "externalRef", String.valueOf(ref)));
 
@@ -3249,6 +3261,80 @@ public class BookingService {
             reason == null || reason.isBlank() ? "Cancelled by sales channel" : reason);
         log.info("Channel cancel {}:{} — cancelled booking {}", source, ref, booking.getBookingRef());
         return new ChannelCancelResult(booking.getBookingRef(), true, "Cancelled");
+    }
+
+    /**
+     * Outcome of a channel confirmation. {@code confirmed} distinguishes "this call
+     * confirmed it" from "it was already confirmed", so a redelivered confirmation is
+     * not reported as a second sale.
+     */
+    public record ChannelConfirmResult(String bookingRef, boolean confirmed, String detail) {}
+
+    /**
+     * Confirm a reservation a channel previously delivered — the step that turns a
+     * hold into a sale.
+     *
+     * <p><b>The half of the lifecycle that had no implementation.</b> A channel
+     * reservation arrives as an unpaid {@code PENDING} booking, exactly like a customer
+     * who has not paid yet. The reseller then confirms, having taken the traveller's
+     * money on its own side — and nothing here acted on that. The booking stayed
+     * PENDING, so {@code PendingBookingTimeoutScheduler} auto-cancelled it roughly half
+     * an hour later. The reseller held a confirmation, the traveller held a receipt, and
+     * the venue's calendar quietly emptied. Every part of that failure reported success.
+     *
+     * <p><b>Why {@code PAYMENT_SUCCEEDED} with a SYSTEM actor.</b> The traveller HAS
+     * paid; the money went to the channel rather than to SK Binge. That is the same
+     * transition a captured payment makes, and routing it through the state machine
+     * keeps one confirmation path — the audit row, the {@code BOOKING_CONFIRMED} event
+     * and the notification all happen because they already happen there. Inventing a
+     * second way to reach CONFIRMED is how two truths start.
+     *
+     * <p><b>{@code collectedAmount} is deliberately left alone.</b> SK Binge collected
+     * nothing, so adding the channel's price would inflate every revenue report by money
+     * that never arrives in the venue's account. What the channel owes is a receivable,
+     * and it lives in the distribution context's settlement records.
+     *
+     * <p>Idempotent: a redelivered confirmation for an already-CONFIRMED booking is a
+     * successful no-op, because at-least-once delivery guarantees the retry.
+     */
+    @Transactional(timeout = 15)
+    public ChannelConfirmResult confirmChannelReservation(Long bingeId,
+                                                          String externalSource,
+                                                          String externalRef) {
+        String source = ChannelReservationRequest.canonicalSource(externalSource);
+        String ref = externalRef == null ? null : externalRef.trim();
+
+        Booking booking = bookingRepository
+            .findByBingeIdAndExternalSourceAndExternalRef(bingeId, source, ref)
+            .orElseThrow(() -> new com.skbingegalaxy.common.exception.ResourceNotFoundException(
+                "ChannelReservation", "externalRef", String.valueOf(ref)));
+
+        if (booking.getStatus() == BookingStatus.CANCELLED) {
+            // Refused, not forced. The usual cause is a hold that expired before the
+            // confirmation arrived, and the slot may since have been sold to someone
+            // else — so confirming it anyway would double-book the venue. The caller
+            // gets a reason it can hand back to the reseller, which can re-reserve.
+            throw new BusinessException(
+                "Reservation " + ref + " was cancelled and can no longer be confirmed.");
+        }
+        if (booking.getStatus() != BookingStatus.PENDING) {
+            // Already CONFIRMED, or further along (CHECKED_IN, COMPLETED). All of those
+            // mean the confirmation has taken effect; saying so is honest and keeps a
+            // redelivery from erroring.
+            return new ChannelConfirmResult(booking.getBookingRef(), false,
+                "Already " + booking.getStatus().name().toLowerCase());
+        }
+
+        booking.setPaymentStatus(PaymentStatus.SUCCESS);
+        Booking confirmed = stateMachine.transition(
+            booking, BookingTransitionEvent.PAYMENT_SUCCEEDED,
+            TransitionActor.system(),
+            "Confirmed by sales channel — paid on the channel's side");
+
+        publishBookingEvent(confirmed, KafkaTopics.BOOKING_CONFIRMED);
+        log.info("Channel confirm {}:{} — confirmed booking {}",
+            source, ref, confirmed.getBookingRef());
+        return new ChannelConfirmResult(confirmed.getBookingRef(), true, "Confirmed");
     }
 
     /**

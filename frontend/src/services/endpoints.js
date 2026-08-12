@@ -349,6 +349,12 @@ export const adminService = {
   // Returns the plaintext key ONCE. Only its digest is stored, so there is no
   // "show key" call and there never can be — show it immediately or it is lost.
   issueResellerKey: (id) => api.post(`/distribution/connections/${id}/reseller-key`),
+  // The catalogue of marketplaces a connection can be pointed at. Without it the
+  // attach call below needed a destinationCode the console had no way to learn.
+  // providerCode narrows it to what this connection's provider actually operates —
+  // the same filter the server applies, so no offered choice can be refused.
+  getDistributionDestinations: (providerCode) =>
+    api.get('/distribution/destinations', { params: { providerCode } }),
   attachDistributionDestination: (id, data) =>
     api.post(`/distribution/connections/${id}/destinations`, data),
   pauseDistributionConnection: (id, reason) =>
@@ -360,6 +366,12 @@ export const adminService = {
   // destination demands different content — a listing that satisfies Viator may be
   // incomplete for GetYourGuide.
   getDistributionListings: () => api.get('/distribution/listings'),
+  // What a given destination demands before a listing may go live there. The
+  // requirements differ per marketplace and used to live only inside the server's
+  // readiness policy, which made evaluate a guess-and-check exercise: you could be
+  // told what was missing, but not what to collect.
+  getDistributionListingRequirements: (destinationCode) =>
+    api.get('/distribution/listings/requirements', { params: { destinationCode } }),
   evaluateDistributionListing: (data) => api.post('/distribution/listings/evaluate', data),
   publishDistributionListing: (id) => api.post(`/distribution/listings/${id}/publish`),
   // Reservation inbox (slice 5/6). Venue-scoped server-side, derived from the venue's

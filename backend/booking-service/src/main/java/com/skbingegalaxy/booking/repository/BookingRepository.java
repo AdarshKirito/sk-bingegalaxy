@@ -30,12 +30,23 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
        Optional<Booking> findByBookingRef(String bookingRef);
 
        /**
-        * V85: look up a reservation by the originating channel's own reference.
-        * Backed by the partial unique index {@code uk_booking_external_ref}, so this
-        * is both the idempotency check for a redelivered reservation and the lookup
-        * a channel cancellation arrives keyed by.
+        * V85/V90: look up a reservation by the originating channel's own reference,
+        * <b>within one venue</b>. Backed by the partial unique index
+        * {@code uk_booking_external_ref_venue}, so this is both the idempotency check
+        * for a redelivered reservation and the lookup a channel cancellation arrives
+        * keyed by.
+        *
+        * <p><b>The venue is part of the key, and deliberately not optional.</b>
+        * {@code externalSource} is the destination slug, shared by every venue
+        * connected to that destination, and {@code externalRef} is chosen by the
+        * reseller. Looking up on those two alone resolves to whichever venue happened
+        * to use the reference first — which returned one venue's booking to another
+        * venue's reseller, and let a cancellation cancel a booking belonging to a
+        * different venue entirely. The two-column finder is not exposed at all, so
+        * that lookup cannot be reintroduced by accident.
         */
-       Optional<Booking> findByExternalSourceAndExternalRef(String externalSource, String externalRef);
+       Optional<Booking> findByBingeIdAndExternalSourceAndExternalRef(
+               Long bingeId, String externalSource, String externalRef);
 
        Optional<Booking> findByBookingRefAndBingeId(String bookingRef, Long bingeId);
 

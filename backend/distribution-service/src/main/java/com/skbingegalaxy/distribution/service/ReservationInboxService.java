@@ -108,7 +108,8 @@ public class ReservationInboxService {
             externalSequence,
             inboxRepository.findHighestAppliedSequence(connectionId, externalRef).orElse(null),
             providerTimestamp,
-            null);
+            null,
+            cancelTombstone(connectionId, externalRef, messageType));
 
         ReservationInboxEntry entry = ReservationInboxEntry.builder()
             .connectionId(connectionId)
@@ -162,6 +163,40 @@ public class ReservationInboxService {
     }
 
     /**
+     * Evidence that this reservation was already cancelled, for the ordering decision.
+     *
+     * <p><b>Only consulted for messages that could resurrect something.</b> A CANCEL is
+     * never blocked by an earlier CANCEL: a repeated cancellation is either a redelivery
+     * (which the unique index handles) or a later one, and booking-service's cancel is
+     * idempotent either way. Blocking it would turn at-least-once delivery into a source
+     * of stuck messages.
+     *
+     * <p>Two narrow queries rather than loading the reservation's message history: an
+     * inbox payload can be a quarter of a megabyte, and this runs on every inbound
+     * message.
+     */
+    private MessageOrderingPolicy.CancelTombstone cancelTombstone(
+            Long connectionId, String externalRef, ReservationInboxEntry.MessageType messageType) {
+
+        if (messageType == ReservationInboxEntry.MessageType.CANCEL) {
+            return MessageOrderingPolicy.CancelTombstone.none();
+        }
+        boolean cancelled = inboxRepository
+            .existsByConnectionIdAndExternalRefAndMessageTypeAndStatusNot(
+                connectionId, externalRef,
+                ReservationInboxEntry.MessageType.CANCEL,
+                ReservationInboxEntry.Status.SUPERSEDED);
+        if (!cancelled) {
+            return MessageOrderingPolicy.CancelTombstone.none();
+        }
+        return new MessageOrderingPolicy.CancelTombstone(true,
+            inboxRepository.findHighestSequenceForType(
+                connectionId, externalRef,
+                ReservationInboxEntry.MessageType.CANCEL,
+                ReservationInboxEntry.Status.SUPERSEDED).orElse(null));
+    }
+
+    /**
      * Mark a message applied once booking-service has the canonical reservation, and
      * create the receivable it implies.
      *
@@ -212,6 +247,90 @@ public class ReservationInboxService {
         }
 
         return saved;
+    }
+
+    /**
+     * Where a reservation actually ended up, in the reseller's own vocabulary.
+     *
+     * @param status           OCTO lifecycle state, or a terminal failure
+     * @param supplierReference the SK booking reference once one exists, else null
+     * @param reason           why, when the answer is a refusal — never null for one
+     * @param pending          true while the outcome is still being decided, so a caller
+     *                          knows whether polling again can change the answer
+     */
+    public record ReservationOutcome(String status, String supplierReference,
+                                     String reason, boolean pending) {}
+
+    /**
+     * The final state of a reservation, for the reseller that submitted it.
+     *
+     * <p><b>Why this endpoint has to exist.</b> Every write on the OCTO surface is
+     * accepted into the inbox and answered {@code PENDING} — the canonical booking is
+     * created by a sweep that runs afterwards. That is the right shape, but it left the
+     * reseller with no way to ever learn the outcome: no status endpoint, no callback, no
+     * result event. A reservation that was refused because the slot had been taken forty
+     * seconds earlier looked, from the reseller's side, exactly like one that succeeded.
+     * The traveller is told they are booked either way.
+     *
+     * <p>Derived from the messages rather than stored: the inbox already holds every
+     * lifecycle step, and a second status field would be a copy that can disagree with
+     * the rows it summarises.
+     */
+    public Optional<ReservationOutcome> outcomeFor(Long connectionId, String externalRef) {
+        List<ReservationInboxEntry> messages =
+            inboxRepository.findByConnectionIdAndExternalRefOrderByIdAsc(connectionId, externalRef);
+        if (messages.isEmpty()) return Optional.empty();
+
+        ReservationInboxEntry latest = messages.get(messages.size() - 1);
+        String bookingRef = messages.stream()
+            .map(ReservationInboxEntry::getBookingRef)
+            .filter(java.util.Objects::nonNull)
+            .reduce((first, second) -> second)
+            .orElse(null);
+
+        // Cancellation wins over everything: a cancelled reservation that also has an
+        // applied CREATE is cancelled, not on hold.
+        boolean cancelled = messages.stream().anyMatch(m ->
+            m.getMessageType() == ReservationInboxEntry.MessageType.CANCEL
+            && m.getStatus() == ReservationInboxEntry.Status.APPLIED);
+        if (cancelled) {
+            return Optional.of(new ReservationOutcome("CANCELLED", bookingRef, null, false));
+        }
+
+        boolean confirmed = messages.stream().anyMatch(m ->
+            m.getMessageType() == ReservationInboxEntry.MessageType.MODIFY
+            && m.getStatus() == ReservationInboxEntry.Status.APPLIED);
+        if (confirmed) {
+            return Optional.of(new ReservationOutcome("CONFIRMED", bookingRef, null, false));
+        }
+
+        boolean held = messages.stream().anyMatch(m ->
+            m.getMessageType() == ReservationInboxEntry.MessageType.CREATE
+            && m.getStatus() == ReservationInboxEntry.Status.APPLIED);
+        if (held) {
+            // OCTO's term for a reservation that exists but has not been paid for.
+            return Optional.of(new ReservationOutcome("ON_HOLD", bookingRef, null, false));
+        }
+
+        // Nothing applied yet. The latest message's own state is the honest answer, and
+        // whether it is still worth asking again is the difference that matters: a
+        // REJECTED reservation will never become a booking, while a RECEIVED one is
+        // waiting on the next sweep.
+        return Optional.of(switch (latest.getStatus()) {
+            case RECEIVED -> new ReservationOutcome("PENDING", null, null, true);
+            case FAILED -> new ReservationOutcome("PENDING", null,
+                reasonOr(latest, "Processing failed; it will be retried."), true);
+            case REJECTED -> new ReservationOutcome("REJECTED", null,
+                reasonOr(latest, "The reservation was refused."), false);
+            case SUPERSEDED -> new ReservationOutcome("SUPERSEDED", null,
+                reasonOr(latest, "A later message overtook this one."), false);
+            case APPLIED -> new ReservationOutcome("PENDING", bookingRef, null, true);
+        });
+    }
+
+    private static String reasonOr(ReservationInboxEntry entry, String fallback) {
+        String reason = entry.getRejectReason();
+        return reason == null || reason.isBlank() ? fallback : reason;
     }
 
     /**

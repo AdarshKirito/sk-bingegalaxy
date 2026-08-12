@@ -78,6 +78,34 @@ public class ConnectionService {
     }
 
     /**
+     * Destinations a connection may actually be pointed at.
+     *
+     * <p><b>The catalogue that had no reader.</b> {@link #enableDestination} takes a
+     * {@code destinationCode}, and nothing exposed the codes — so the step between
+     * creating a connection and having a channel that can sell was reachable only by an
+     * operator who already knew the values and posted them by hand.
+     *
+     * <p>Filtered to exactly what {@link #enableDestination} would accept: active, and
+     * operated by the given provider. Offering a choice the server then refuses is worse
+     * than offering none, because the refusal arrives after the operator has committed to
+     * commercial terms.
+     */
+    public List<DestinationDto> listReachableDestinations(String providerCode) {
+        return destinationRepository.findAll().stream()
+            .filter(Destination::isActive)
+            .filter(d -> providerCode == null
+                      || d.getOperatedByProviderCode().equalsIgnoreCase(providerCode))
+            .sorted(Comparator.comparing(Destination::getDisplayName))
+            .map(d -> DestinationDto.builder()
+                .code(d.getCode())
+                .displayName(d.getDisplayName())
+                .operatedByProviderCode(d.getOperatedByProviderCode())
+                .deliversReservations(d.isDeliversReservations())
+                .build())
+            .toList();
+    }
+
+    /**
      * A PLATFORM_MANAGED provider authenticates with SK Binge's own arrangement, so the
      * venue supplies nothing. Every other auth method needs a provisioned secret —
      * including SFTP_FEED and CONTRACT_ONLY, where the "credential" is a feed account or
