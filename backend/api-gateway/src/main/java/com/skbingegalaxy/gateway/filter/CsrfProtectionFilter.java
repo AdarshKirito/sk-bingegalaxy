@@ -187,7 +187,15 @@ public class CsrfProtectionFilter implements GlobalFilter, Ordered {
 
         // Machine-to-machine namespaces (OCTO). Prefix-matched because the paths carry a
         // reseller-supplied uuid; each still enforces its own Bearer-token check.
-        if (MACHINE_TO_MACHINE_PREFIXES.stream().anyMatch(path::startsWith)) {
+        //
+        // Normalized and boundary-matched via GatewayPathMatching, the same way
+        // JwtAuthenticationFilter treats its allow-list. A raw startsWith here meant
+        // POST /api/v1/distribution/octo/../connections matched this prefix as a string
+        // and skipped CSRF entirely — before the Origin check below ever ran — while the
+        // JWT filter normalized the same path and correctly saw an admin endpoint. Auth
+        // held; CSRF did not, which is exactly the case CSRF exists for.
+        if (MACHINE_TO_MACHINE_PREFIXES.stream()
+                .anyMatch(prefix -> GatewayPathMatching.matchesNormalized(path, prefix))) {
             return chain.filter(exchange);
         }
 

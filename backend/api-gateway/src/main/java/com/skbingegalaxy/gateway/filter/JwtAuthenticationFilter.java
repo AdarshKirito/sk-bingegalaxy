@@ -396,11 +396,10 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
      * every rule as defence-in-depth.
      */
     private static String normalizePath(String path) {
-        try {
-            return java.net.URI.create(path).normalize().getPath();
-        } catch (RuntimeException e) {
-            return path;
-        }
+        // Delegated to GatewayPathMatching so this filter and CsrfProtectionFilter cannot
+        // drift apart again. They already had: this one normalized, that one did not, and
+        // a crafted ../ path was CSRF-exempt while still being correctly authenticated.
+        return GatewayPathMatching.normalizePath(path);
     }
 
     /**
@@ -411,8 +410,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
      * treated as boundaries (e.g. {@code .../webhooks/} matches {@code .../webhooks/razorpay}).
      */
     private static boolean matchesAtBoundary(String path, String prefix) {
-        String base = prefix.endsWith("/") ? prefix.substring(0, prefix.length() - 1) : prefix;
-        return path.equals(base) || path.startsWith(base + "/");
+        return GatewayPathMatching.matchesAtBoundary(path, prefix);
     }
 
     /**
